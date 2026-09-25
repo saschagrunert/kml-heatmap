@@ -87,7 +87,7 @@ def _select_input_files(per_year=PER_YEAR):
 
     Returns the selection and the number of files found per year.
     """
-    by_year = {}
+    by_year: dict[str, list[Path]] = {}
     for path in sorted(DATA_DIR.glob("*.kml"), key=_file_number):
         match = re.search(r"<when>(\d{4})-", path.read_text(encoding="utf-8"))
         if match:
@@ -371,17 +371,15 @@ def _with_real_dates(source_files, destination):
     of day are kept, and so are the intervals between the points).
     """
     destination.mkdir(parents=True, exist_ok=True)
+
+    def shift(m: re.Match[str]) -> str:
+        moment = datetime.fromisoformat(f"{m.group(1)}-01-01T{m.group(2)}")
+        return (moment + timedelta(days=DATE_SHIFT_DAYS)).strftime("%Y-%m-%dT%H:%M:%S")
+
     shifted = []
     for path in source_files:
         text = path.read_text(encoding="utf-8")
-        moved = re.sub(
-            r"(\d{4})-01-01T(\d{2}:\d{2}:\d{2})",
-            lambda m: (
-                datetime.fromisoformat(f"{m.group(1)}-01-01T{m.group(2)}")
-                + timedelta(days=DATE_SHIFT_DAYS)
-            ).strftime("%Y-%m-%dT%H:%M:%S"),
-            text,
-        )
+        moved = re.sub(r"(\d{4})-01-01T(\d{2}:\d{2}:\d{2})", shift, text)
         assert moved != text, f"no timestamp to shift in {path.name}"
         copy = destination / path.name
         copy.write_text(moved, encoding="utf-8")

@@ -122,11 +122,13 @@ class TestObfuscateContent:
 
     def test_strips_name_dates(self):
         result = obfuscate_kml_content(SAMPLE_KML)
+        assert result is not None
         for label in ("Log Start", "Takeoff", "Landing", "Log Stop"):
             assert f"<name>{label}: 2025-01-01</name>" in result
 
     def test_preserves_route_name_document_name_and_coordinates(self):
         result = obfuscate_kml_content(SAMPLE_KML)
+        assert result is not None
         assert "<name>EDAQ Halle-Oppin - EDAQ Halle-Oppin</name>" in result
         assert "<name>SkyDemon Track Log</name>" in result
         assert "12.058459 51.550617 100" in result
@@ -134,6 +136,7 @@ class TestObfuscateContent:
 
     def test_replaces_creator_attribute(self):
         result = obfuscate_kml_content(SAMPLE_KML)
+        assert result is not None
         assert f'creator="{GENERIC_CREATOR}"' in result
         assert "SkyDemon for iPhone" not in result
 
@@ -145,6 +148,7 @@ class TestObfuscateContent:
 
     def test_returns_none_for_already_obfuscated(self):
         result = obfuscate_kml_content(SAMPLE_KML)
+        assert result is not None
         assert obfuscate_kml_content(result) is None
 
     def test_returns_none_for_unparsable_first_timestamp(self):
@@ -157,6 +161,7 @@ class TestObfuscateContent:
             "<when>2025-03-03T08:30:00.0000000Z</when></kml>"
         )
         result = obfuscate_kml_content(kml)
+        assert result is not None
         assert "<when>bad-timestamp</when>" in result
         assert "<when>2025-01-01T08:30:00.0000000Z</when>" in result
 
@@ -212,11 +217,13 @@ class TestTimezoneHandling:
 class TestExtendedPatterns:
     def test_timespan_begin_end_shifted(self):
         result = obfuscate_kml_content(CHARTERWARE_KML)
+        assert result is not None
         assert "<begin>2026-01-01T15:01:00Z</begin>" in result
         assert "<end>2026-01-01T16:11:30Z</end>" in result
 
     def test_description_date_lands_on_jan_1(self):
         result = obfuscate_kml_content(CHARTERWARE_KML)
+        assert result is not None
         assert "Flight Jan 01 2026 03:01PM path of OE-AKI" in result
         assert "Jan 12" not in result
 
@@ -235,10 +242,12 @@ class TestExtendedPatterns:
     def test_description_long_month_name_preserved(self):
         kml = "<kml><description>Flight August 16 2026 12:05AM x</description></kml>"
         result = obfuscate_kml_content(kml)
+        assert result is not None
         assert "Flight January 01 2026 12:05AM x" in result
 
     def test_route_name_date_shifted(self):
         result = obfuscate_kml_content(ROUTE_NAME_KML)
+        assert result is not None
         assert "<name>EDDS to EDDP - 01 Jan 2026</name>" in result
         assert "16 Aug 2026" not in result
 
@@ -249,6 +258,7 @@ class TestExtendedPatterns:
             "<when>2026-08-16T23:30:00Z</when></kml>"
         )
         result = obfuscate_kml_content(kml)
+        assert result is not None
         assert "<name>EDDS to EDDP - 01 Jan 2026</name>" in result
         assert "<when>2026-01-01T23:30:00Z</when>" in result
         assert obfuscate_kml_content(result) is None
@@ -263,6 +273,7 @@ class TestExtendedPatterns:
             "</TimeSpan></kml>"
         )
         result = obfuscate_kml_content(kml)
+        assert result is not None
         assert "Flight Jan 01 2026 12:30AM" in result
         assert "<begin>2026-01-01T23:30:00Z</begin>" in result
 
@@ -276,6 +287,7 @@ class TestExtendedPatterns:
             "</kml:Placemark></kml:kml>"
         )
         result = obfuscate_kml_content(kml)
+        assert result is not None
         assert '<kml:begin id="b">2025-01-01T09:12:00Z</kml:begin>' in result
         assert "<kml:end>2025-01-01T10:12:00Z</kml:end>" in result
         assert "<kml:name>Log Start: 2025-01-01</kml:name>" in result
@@ -291,6 +303,7 @@ class TestExtendedPatterns:
             "<end>2025-03-14T11:30:00Z</end></TimeSpan></Placemark></kml>"
         )
         result = obfuscate_kml_content(kml)
+        assert result is not None
         assert re.findall(r"<(?:begin|end)>([^<]+)<", result) == [
             "2024-01-01T10:00:00Z",
             "2024-01-01T11:00:00Z",
@@ -353,6 +366,7 @@ class TestExtendedPatterns:
             + "</kml>"
         )
         result = obfuscate_kml_content(kml)
+        assert result is not None
         assert _whens(result) == [
             "2025-01-01T14:00:00Z",
             "2025-01-01T15:00:00Z",
@@ -386,6 +400,7 @@ class TestExtendedPatterns:
             "<when>2025-06-17T00:30:00Z</when></gx:Track></Placemark></kml>"
         )
         result = obfuscate_kml_content(kml)
+        assert result is not None
         assert _whens(result) == [
             "2025-01-01T18:00:00Z",
             "2025-01-01T19:00:00Z",
@@ -749,6 +764,10 @@ class TestCheckObfuscated:
             ("02/01/2026", ["02/01/2026"]),
             ("2026/03/10 2026.03.10", ["2026/03/10", "2026.03.10"]),
             ("2026/01/01", []),
+            # A year first with a month or day of one digit
+            ("2026/8/16 2026-8-16", ["2026/8/16", "2026-8-16"]),
+            ("2026/1/1 2026-1-3", []),
+            ("2024.3.1", []),
             ("10 MAR 2026", ["10 MAR 2026"]),
             ("10-Mar-2026", ["10-Mar-2026"]),
             ("SkyDemon for iPhone v4.2.2.429", []),
@@ -778,6 +797,11 @@ class TestCheckObfuscated:
             ("January 2026", []),
             ("N123AB_Mar14_2024.kml", ["Mar14_2024"]),
             ("Cessna 172 2024", []),
+            # German, like the English ones
+            ("Rundflug 16. Mai 2026", ["16. Mai 2026"]),
+            ("16.Mrz.2026 Mai 2026", ["16.Mrz.2026", "Mai 2026"]),
+            ("1. Januar 2026 Jänner 2026", []),
+            ("Flugplatz Mai", []),
             ("Log Start: 2025-01-01", []),
             ("Flight Jan 01 2026 03:01PM", []),
             # Unix time in a data value
@@ -877,6 +901,7 @@ class TestDifferentYearsAndMidnight:
             "03 Mar 2025", "15 Jun 2026"
         )
         result = obfuscate_kml_content(kml_2026)
+        assert result is not None
         assert "2026-01-01T08:25:" in result
         assert "2026-06-15" not in result
 
@@ -888,6 +913,7 @@ class TestDifferentYearsAndMidnight:
             "<Placemark><name>Log Stop: 04 Mar 2025 00:15 Z</name></Placemark></kml>"
         )
         result = obfuscate_kml_content(kml)
+        assert result is not None
         assert "2025-01-01T23:55:00" in result
         assert "2025-01-02T00:15:00" in result
         assert "<name>Log Stop: 2025-01-01</name>" in result
@@ -1042,6 +1068,7 @@ class TestUnparsableDates:
             "<description>Flight Foo 12 2025 03:01PM</description></kml>"
         )
         result = obfuscate_module.obfuscate_kml_content(content)
+        assert result is not None
         assert "Flight Foo 12 2025 03:01PM" in result
         assert "2025-01-01T08:00:00Z" in result
 
@@ -1051,6 +1078,7 @@ class TestUnparsableDates:
             "<description>Flight Feb 31 2025 03:01PM</description></kml>"
         )
         result = obfuscate_module.obfuscate_kml_content(content)
+        assert result is not None
         assert "Flight Feb 31 2025 03:01PM" in result
 
     def test_route_name_with_unknown_month(self):
@@ -1059,6 +1087,7 @@ class TestUnparsableDates:
             "<name>EDDS to EDDP - 16 Foo 2025</name></kml>"
         )
         result = obfuscate_module.obfuscate_kml_content(content)
+        assert result is not None
         assert "16 Foo 2025" in result
 
     def test_route_name_with_invalid_day(self):
@@ -1067,6 +1096,7 @@ class TestUnparsableDates:
             "<name>EDDS to EDDP - 31 Feb 2025</name></kml>"
         )
         result = obfuscate_module.obfuscate_kml_content(content)
+        assert result is not None
         assert "31 Feb 2025" in result
 
     def test_route_only_document(self):
@@ -1277,7 +1307,7 @@ class TestErrorBranches:
 
     def test_directory_fsync_tolerates_errors(self, tmp_path):
         with patch("kml_heatmap.obfuscate.os.fsync") as fsync:
-            assert obfuscate_module._fsync_directory(tmp_path / "missing") is None
+            obfuscate_module._fsync_directory(tmp_path / "missing")
         fsync.assert_not_called()
         closed = []
         real_close = os.close

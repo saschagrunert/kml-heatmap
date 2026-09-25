@@ -6,6 +6,8 @@ import tempfile
 import threading
 import time
 from concurrent.futures import Future
+from pathlib import Path
+from typing import Any, cast
 from unittest.mock import patch
 
 import pytest
@@ -37,8 +39,19 @@ from kml_heatmap.exceptions import KMLHeatmapError
 from kml_heatmap.helpers import parse_timestamp_epoch
 from kml_heatmap.segment_codec import FORMAT_VERSION, decode_ground
 from kml_heatmap.terrain import FlatTiles
-from kml_heatmap.types import TrackPoint
+from kml_heatmap.types import AirportData, PathMetadata, TrackPoint
+from kml_heatmap.validation import protected_directories
 from tests.conftest import decoded_segments
+
+
+def _metadata(entries: list[dict[str, Any]]) -> list[PathMetadata]:
+    """Path metadata built by hand, with only the keys a test is about.
+
+    The exporter reads every key with ``get``, so the keys the parser always
+    sets may be missing here.
+    """
+    return cast("list[PathMetadata]", entries)
+
 
 skip_as_root = pytest.mark.skipif(
     os.geteuid() == 0, reason="root ignores directory permissions"
@@ -89,16 +102,18 @@ def _ids_by_start(output_dir, parse_data):
 
 class TestYearFile:
     def test_writes_d1_shaped_file(self, tmp_path, parse_data):
-        metadata = [
-            {
-                "year": 2025,
-                "airport_name": "EDDF - EDDM",
-                "timestamp": "2025-01-01T10:00:00Z",
-                "end_timestamp": "2025-01-01T10:10:00Z",
-                "aircraft_registration": "D-EXYZ",
-                "aircraft_type": "C172",
-            }
-        ]
+        metadata = _metadata(
+            [
+                {
+                    "year": 2025,
+                    "airport_name": "EDDF - EDDM",
+                    "timestamp": "2025-01-01T10:00:00Z",
+                    "end_timestamp": "2025-01-01T10:10:00Z",
+                    "aircraft_registration": "D-EXYZ",
+                    "aircraft_type": "C172",
+                }
+            ]
+        )
 
         result = _write_year(2025, [_timed_path()], metadata, [7], tmp_path)
 
@@ -180,7 +195,7 @@ class TestYearFile:
             _path((50.0, 8.0, 100.0)),
             _path((50.0, 8.0, 100.0), (50.1, 8.1, 200.0)),
         ]
-        metadata = [{"year": 2025}, {"year": 2025}]
+        metadata = _metadata([{"year": 2025}, {"year": 2025}])
 
         result = _write_year(2025, paths, metadata, [None, 3], tmp_path)
 
@@ -203,13 +218,15 @@ class TestYearFile:
 
     def test_fallback_groundspeed_from_metadata_duration(self, tmp_path, parse_data):
         path = _path((50.0, 8.0, 100.0), (50.1, 8.1, 200.0), (50.2, 8.2, 300.0))
-        metadata = [
-            {
-                "year": 2025,
-                "timestamp": "2025-01-01T10:00:00Z",
-                "end_timestamp": "2025-01-01T10:30:00Z",
-            }
-        ]
+        metadata = _metadata(
+            [
+                {
+                    "year": 2025,
+                    "timestamp": "2025-01-01T10:00:00Z",
+                    "end_timestamp": "2025-01-01T10:30:00Z",
+                }
+            ]
+        )
         _write_year(2025, [path], metadata, [0], tmp_path)
 
         entry = parse_data(tmp_path / "2025" / "data.json")["segments"]["0"]
@@ -350,9 +367,9 @@ class TestPathIds:
 
     def test_removing_a_path_keeps_the_ids_of_the_others(self, tmp_path, parse_data):
         paths = [_timed_path(offset) for offset in range(5)]
-        metadata = [{"year": 2025}, {"year": 2026}, {"year": 2025}] + [
-            {"year": 2026}
-        ] * 2
+        metadata = _metadata(
+            [{"year": 2025}, {"year": 2026}, {"year": 2025}] + [{"year": 2026}] * 2
+        )
         export_all_data(paths, metadata, [], output_dir=str(tmp_path / "all"))
         del paths[2], metadata[2]
         export_all_data(paths, metadata, [], output_dir=str(tmp_path / "fewer"))
@@ -368,15 +385,17 @@ class TestAirportEndpoints:
     def test_ends_without_a_marker_are_not_exported(self, tmp_path, parse_data):
         """An end counts as an airport if and only if it has a marker."""
         paths = [_timed_path()]
-        metadata = [
-            {
-                "year": 2025,
-                "airport_name": "Home - Aunt Martha",
-                "start_airport": "Home",
-                "end_airport": "Aunt Martha",
-            }
-        ]
-        airports = [
+        metadata = _metadata(
+            [
+                {
+                    "year": 2025,
+                    "airport_name": "Home - Aunt Martha",
+                    "start_airport": "Home",
+                    "end_airport": "Aunt Martha",
+                }
+            ]
+        )
+        airports: list[AirportData] = [
             {"name": "Home", "lat": 50.0, "lon": 8.0},
             {"name": "Aunt Martha", "lat": 50.2, "lon": 8.2, "is_at_path_end": True},
         ]
@@ -393,11 +412,13 @@ class TestDropDuplicatePaths:
         self, tmp_path, parse_data, capsys
     ):
         paths = [_timed_path(), _timed_path(1.0), _timed_path()]
-        metadata = [
-            {"year": 2025, "filename": "1_DEAGJ_DA20.kml"},
-            {"year": 2025, "filename": "2_DEAGJ_DA20.kml"},
-            {"year": 2025, "filename": "copy of 1_DEAGJ_DA20.kml"},
-        ]
+        metadata = _metadata(
+            [
+                {"year": 2025, "filename": "1_DEAGJ_DA20.kml"},
+                {"year": 2025, "filename": "2_DEAGJ_DA20.kml"},
+                {"year": 2025, "filename": "copy of 1_DEAGJ_DA20.kml"},
+            ]
+        )
         export_all_data(paths, metadata, [], output_dir=str(tmp_path))
         year = parse_data(tmp_path / "2025" / "data.json")
         assert [info["id"] for info in year["path_info"]] == [
@@ -419,7 +440,9 @@ class TestDropDuplicatePaths:
 
         monkeypatch.setattr(exporter_module, "_path_content", content)
         paths = [_timed_path(), _timed_path(1.0), _timed_path()]
-        export_all_data(paths, [{"year": 2025}] * 3, [], output_dir=str(tmp_path))
+        export_all_data(
+            paths, _metadata([{"year": 2025}] * 3), [], output_dir=str(tmp_path)
+        )
         assert packed == paths
 
     def test_content_is_compared_not_the_hash(self, monkeypatch):
@@ -444,7 +467,7 @@ class TestDropDuplicatePaths:
 class TestProcessYearChunk:
     def test_writes_fragments(self, tmp_path):
         paths = [_two_point_path(0), _path((52.0, 10.0, 1.0)), _two_point_path(1)]
-        metadata = [{"year": 2025}] * 3
+        metadata = _metadata([{"year": 2025}] * 3)
 
         result = process_year_chunk(
             2025, paths, metadata, [5, None, 6], str(tmp_path), index=2
@@ -470,7 +493,9 @@ class TestProcessYearChunk:
 
     def test_paths_keep_the_input_order_whatever_their_ids(self, tmp_path):
         paths = [_two_point_path(0), _two_point_path(1)]
-        process_year_chunk(2025, paths, [{"year": 2025}] * 2, [9, 2], str(tmp_path))
+        process_year_chunk(
+            2025, paths, _metadata([{"year": 2025}] * 2), [9, 2], str(tmp_path)
+        )
         info_part, segments_part = _part_paths(str(tmp_path), 2025, 0)
         assert info_part.read_text().index('"id":9') < info_part.read_text().index(
             '"id":2'
@@ -478,7 +503,7 @@ class TestProcessYearChunk:
         assert segments_part.read_text().startswith('"9":')
 
     def test_empty_chunk_writes_empty_fragments(self, tmp_path):
-        result = process_year_chunk(2025, [], [], [], str(tmp_path))
+        result = process_year_chunk(2025, [], _metadata([]), [], str(tmp_path))
         for part in _part_paths(str(tmp_path), 2025, 0):
             assert part.read_text() == ""
         assert result.path_count == 0
@@ -487,11 +512,21 @@ class TestProcessYearChunk:
 class TestAssembleYearFile:
     def test_concatenates_chunks_in_index_order(self, tmp_path, parse_data):
         second = process_year_chunk(
-            2025, [_two_point_path(1)], [{"year": 2025}], [1], str(tmp_path), index=1
+            2025,
+            [_two_point_path(1)],
+            _metadata([{"year": 2025}]),
+            [1],
+            str(tmp_path),
+            index=1,
         )
-        empty = process_year_chunk(2025, [], [], [], str(tmp_path), index=2)
+        empty = process_year_chunk(2025, [], _metadata([]), [], str(tmp_path), index=2)
         first = process_year_chunk(
-            2025, [_two_point_path(0)], [{"year": 2025}], [0], str(tmp_path), index=0
+            2025,
+            [_two_point_path(0)],
+            _metadata([{"year": 2025}]),
+            [0],
+            str(tmp_path),
+            index=0,
         )
 
         result = _assemble_year_file(2025, [second, empty, first], str(tmp_path))
@@ -512,7 +547,7 @@ class TestAssembleYearFile:
 
     def test_merges_the_groundspeed_ranges_of_the_chunks(self, tmp_path):
         chunks = [
-            process_year_chunk(2025, [], [], [], str(tmp_path), index=index)
+            process_year_chunk(2025, [], _metadata([]), [], str(tmp_path), index=index)
             for index in range(3)
         ]
         chunks[0].groundspeed = GroundspeedRange(35.0, 96.0)
@@ -524,7 +559,7 @@ class TestAssembleYearFile:
 
     def test_chunked_output_equals_unchunked_output(self, tmp_path):
         paths = [_two_point_path(i) for i in range(7)]
-        metadata = [{"year": 2025, "aircraft_registration": "D-EAGJ"}] * 7
+        metadata = _metadata([{"year": 2025, "aircraft_registration": "D-EAGJ"}] * 7)
         ids = list(range(3, 10))
         whole = tmp_path / "whole"
         chunked = tmp_path / "chunked"
@@ -546,7 +581,7 @@ class TestAssembleYearFile:
 
     def test_parts_are_removed_even_when_the_write_fails(self, tmp_path):
         chunk = process_year_chunk(
-            2025, [_two_point_path(0)], [{"year": 2025}], [0], str(tmp_path)
+            2025, [_two_point_path(0)], _metadata([{"year": 2025}]), [0], str(tmp_path)
         )
         with (
             patch("kml_heatmap.cache.os.replace", side_effect=OSError("boom")),
@@ -560,19 +595,21 @@ class TestAssembleYearFile:
 class TestGroupPathsByYear:
     def test_groups_by_year(self):
         paths = [_two_point_path(i) for i in range(3)]
-        metadata = [{"year": 2025}, {"year": 2026}, {"year": 2025}]
+        metadata = _metadata([{"year": 2025}, {"year": 2026}, {"year": 2025}])
         assert _group(paths, metadata) == {2025: [0, 2], 2026: [1]}
 
     def test_paths_without_year_are_skipped(self):
         paths = [_two_point_path(i) for i in range(3)]
-        metadata = [{"year": None}, {"other": "data"}, {"year": 2024}]
+        metadata = _metadata([{"year": None}, {"other": "data"}, {"year": 2024}])
         assert _group(paths, metadata) == {2024: [2]}
 
     def test_a_year_without_exportable_paths_is_not_listed(self):
         """Single point markers (Log Start/Stop) must not make an empty year."""
         marker = _path((51.5, 12.0, 20.0))
         paths = [marker, marker, marker, _timed_path()]
-        metadata = [{"year": 2024}, {"year": 2024}, {"year": 2025}, {"year": 2025}]
+        metadata = _metadata(
+            [{"year": 2024}, {"year": 2024}, {"year": 2025}, {"year": 2025}]
+        )
         assert _group(paths, metadata) == {2025: [2, 3]}
 
     def test_a_path_that_does_not_move_is_not_exported(self):
@@ -583,7 +620,7 @@ class TestGroupPathsByYear:
             (51.499999, 12.000002, 101.0),
         )
         paths = [standing, _timed_path()]
-        metadata = [{"year": 2024}, {"year": 2025}]
+        metadata = _metadata([{"year": 2024}, {"year": 2025}])
         assert _group(paths, metadata) == {2025: [1]}
 
 
@@ -656,7 +693,7 @@ class _RunningChunksPool:
         return False
 
     def submit(self, fn, *args):
-        future = Future()
+        future: Future[ChunkResult] = Future()
         self.submitted += 1
         if self.submitted == 1:
             future.set_exception(OSError(errno.ENOSPC, "No space left on device"))
@@ -687,7 +724,7 @@ class _CountingPool:
         return False
 
     def submit(self, fn, *args):
-        future = Future()
+        future: Future[ChunkResult] = Future()
         with self.lock:
             self.submitted += 1
             self.in_flight += 1
@@ -707,7 +744,7 @@ class _CountingPool:
 class TestExportChunks:
     def test_single_chunk_runs_without_a_pool(self, tmp_path, parse_data):
         paths = [_two_point_path(0), _two_point_path(1)]
-        metadata = [{"year": 2025}, {"year": 2025}]
+        metadata = _metadata([{"year": 2025}, {"year": 2025}])
         plans = _plan_chunks({2025: [0, 1]}, {0: 0, 1: 1}, max_workers=4)
 
         with patch("kml_heatmap.data_exporter.ProcessPoolExecutor") as pool:
@@ -720,7 +757,7 @@ class TestExportChunks:
 
     def test_results_sorted_by_year_with_their_ids(self, tmp_path, parse_data):
         paths = [_two_point_path(0), _two_point_path(1), _two_point_path(2)]
-        metadata = [{"year": 2026}, {"year": 2025}, {"year": 2025}]
+        metadata = _metadata([{"year": 2026}, {"year": 2025}, {"year": 2025}])
         ids = {0: 30, 1: 20, 2: 10}
         plans = _plan_chunks({2026: [0], 2025: [1, 2]}, ids, max_workers=4)
 
@@ -741,7 +778,7 @@ class TestExportChunks:
         self, tmp_path, monkeypatch, parse_data
     ):
         paths = [_two_point_path(i) for i in range(6)]
-        metadata = [{"year": 2025}] * 6
+        metadata = _metadata([{"year": 2025}] * 6)
         ids = {index: 1000 + index for index in range(6)}
         whole = tmp_path / "whole"
         chunked = tmp_path / "chunked"
@@ -774,7 +811,7 @@ class TestExportChunks:
             ),
             pytest.raises(RuntimeError, match="Failed to process year 2025: boom"),
         ):
-            _export_chunks(plans, paths, [{}], str(tmp_path), 4)
+            _export_chunks(plans, paths, _metadata([{}]), str(tmp_path), 4)
         # An unexpected error keeps its traceback for the bug report
         assert "Traceback" in capsys.readouterr().err
 
@@ -788,7 +825,7 @@ class TestExportChunks:
             patch("kml_heatmap.data_exporter.process_year_chunk", _failing_chunk),
             pytest.raises(RuntimeError, match="Failed to process year"),
         ):
-            _export_chunks(plans, paths, [{}, {}], str(tmp_path), 4)
+            _export_chunks(plans, paths, _metadata([{}, {}]), str(tmp_path), 4)
         # Fragments of every planned chunk are removed on failure
         assert _leftover_parts(tmp_path) == []
 
@@ -796,7 +833,7 @@ class TestExportChunks:
         self, tmp_path, capsys
     ):
         paths = [_two_point_path(i) for i in range(4)]
-        metadata = [{"year": 2026}] * 4
+        metadata = _metadata([{"year": 2026}] * 4)
         plans = _plan_chunks(
             {2026: [0], 2027: [1], 2028: [2], 2029: [3]},
             {index: index for index in range(4)},
@@ -815,7 +852,7 @@ class TestExportChunks:
         assert "Traceback" not in capsys.readouterr().err
 
     def test_no_plans(self, tmp_path):
-        assert _export_chunks([], [], [], str(tmp_path), 4) == []
+        assert _export_chunks([], [], _metadata([]), str(tmp_path), 4) == []
 
     def test_chunks_are_handed_to_the_pool_a_few_at_a_time(
         self, tmp_path, monkeypatch, parse_data
@@ -824,7 +861,7 @@ class TestExportChunks:
         the executor's queue while the main process still holds it."""
         years = list(range(2020, 2028))
         paths = [_two_point_path(i) for i in range(len(years))]
-        metadata = [{"year": year} for year in years]
+        metadata = _metadata([{"year": year} for year in years])
         monkeypatch.setattr(exporter_module, "MIN_PATHS_PER_CHUNK", 1)
         plans = _plan_chunks(
             {year: [index] for index, year in enumerate(years)},
@@ -956,34 +993,10 @@ class TestSiteOutput:
         assert _tree(out) == previous
         assert _stages(out) == []
 
-    def test_script_data_of_earlier_versions_is_removed(self, tmp_path):
-        """A site from when the page loaded its data with script tags."""
-        out = tmp_path / "out"
-        _publish_site(out, years=(2019, 2025))
-        data = out / "data"
-        for legacy in ("airports.js", "metadata.js", "2019/data.js", "2025/data.js"):
-            (data / legacy).write_text("window.KML = {};")
-
-        with SiteOutput(out, data) as site:
-            _stage_site(site)
-            site.publish([2025])
-
-        assert _tree(out) == {
-            "data/2025/data.json": "new 2025",
-            "data/airports.json": "new airports",
-            "data/metadata.json": "new metadata",
-            "index.html": "new page",
-            "manifest.json": "new manifest",
-        }
-
     def test_stale_outputs_are_removed_and_foreign_files_kept(self, tmp_path, capsys):
         out = tmp_path / "out"
         _publish_site(out, years=(2019, 2025))
         data = out / "data"
-        (data / "2019" / ".data.0.info.part").write_text("fragment")
-        (data / "2025" / ".data.1.segments.part").write_text("fragment")
-        (data / "unknown").mkdir()
-        (data / "unknown" / "data.json").write_text("old versions")
         (data / "2018").mkdir()
         (data / "2018" / "data.json").write_text("old")
         (data / "2018" / "notes.txt").write_text("keep me")
@@ -1192,13 +1205,22 @@ class TestSiteOutput:
         with pytest.raises(ValueError, match="dangerous"):
             SiteOutput(dangerous, os.path.join(dangerous, "data"))
 
+    def test_home_behind_a_symlink_rejected(self, tmp_path, monkeypatch):
+        home = tmp_path / "real-home"
+        home.mkdir()
+        link = tmp_path / "home-link"
+        link.symlink_to(home)
+        monkeypatch.setenv("HOME", str(link))
+
+        with pytest.raises(ValueError, match="dangerous"):
+            SiteOutput(tmp_path / "out", link)
+        with pytest.raises(ValueError, match="dangerous"):
+            SiteOutput(link, tmp_path / "out" / "data")
+
     def test_protected_directories_without_home(self):
-        with patch.object(
-            exporter_module.Path, "home", side_effect=RuntimeError("no home")
-        ):
-            assert exporter_module.protected_directories() == (
-                exporter_module.Path("/"),
-            )
+        # The exporter's guard is the one of kml_heatmap.validation
+        with patch.object(Path, "home", side_effect=RuntimeError("no home")):
+            assert protected_directories() == (Path("/"),)
 
     def test_runs_unguarded_without_fcntl(self, tmp_path, monkeypatch):
         """Windows has no fcntl; the export works without the lock."""
@@ -1218,17 +1240,19 @@ class TestExportAllData:
             _path((51.0, 9.0, 700.0), (51.1, 9.1, 800.0)),
             _path((52.0, 10.0, 1.0)),
         ]
-        metadata = [
-            {
-                "year": 2026,
-                "airport_name": "EDDF - EDDM",
-                "aircraft_registration": "D-EAGJ",
-                "aircraft_type": "DA20",
-                "filename": "1_DEAGJ_DA20.kml",
-            },
-            {"year": 2025, "airport_name": "EDDK - EDDM"},
-            {"year": 2025, "airport_name": "Log Start: x"},
-        ]
+        metadata = _metadata(
+            [
+                {
+                    "year": 2026,
+                    "airport_name": "EDDF - EDDM",
+                    "aircraft_registration": "D-EAGJ",
+                    "aircraft_type": "DA20",
+                    "filename": "1_DEAGJ_DA20.kml",
+                },
+                {"year": 2025, "airport_name": "EDDK - EDDM"},
+                {"year": 2025, "airport_name": "Log Start: x"},
+            ]
+        )
 
         result = export_all_data(paths, metadata, [], output_dir=str(tmp_path))
 
@@ -1258,12 +1282,14 @@ class TestExportAllData:
 
     def test_aircraft_models_of_the_exported_paths(self, tmp_path, parse_data):
         paths = [_timed_path(), _path((52.0, 10.0, 1.0)), _timed_path(1.0)]
-        metadata = [
-            {"year": 2025, "aircraft_registration": "D-EAGJ"},
-            # A single point is not exported, so neither is its aircraft
-            {"year": 2025, "aircraft_registration": "D-EHYL"},
-            {"year": 2025, "aircraft_registration": "D-ESST"},
-        ]
+        metadata = _metadata(
+            [
+                {"year": 2025, "aircraft_registration": "D-EAGJ"},
+                # A single point is not exported, so neither is its aircraft
+                {"year": 2025, "aircraft_registration": "D-EHYL"},
+                {"year": 2025, "aircraft_registration": "D-ESST"},
+            ]
+        )
 
         export_all_data(
             paths,
@@ -1278,7 +1304,7 @@ class TestExportAllData:
 
     def test_paths_without_year_are_excluded(self, tmp_path, parse_data):
         paths = [_timed_path(), _path((51.0, 9.0, 700.0), (51.1, 9.1, 800.0))]
-        metadata = [{"year": 2025}, {"year": None}]
+        metadata = _metadata([{"year": 2025}, {"year": None}])
 
         export_all_data(paths, metadata, [], output_dir=str(tmp_path))
 
@@ -1293,7 +1319,7 @@ class TestExportAllData:
 
     def test_year_with_only_point_markers_is_not_exported(self, tmp_path, parse_data):
         paths = [_path((51.5, 12.0, 20.0)), _path((51.5, 12.0, 20.0)), _timed_path()]
-        metadata = [{"year": 2024}, {"year": 2024}, {"year": 2025}]
+        metadata = _metadata([{"year": 2024}, {"year": 2024}, {"year": 2025}])
 
         result = export_all_data(paths, metadata, [], output_dir=str(tmp_path))
 
@@ -1302,7 +1328,7 @@ class TestExportAllData:
         assert not (tmp_path / "2024").exists()
 
     def test_no_paths_produces_empty_metadata(self, tmp_path, parse_data):
-        result = export_all_data([], [], [], output_dir=str(tmp_path))
+        result = export_all_data([], _metadata([]), [], output_dir=str(tmp_path))
         assert result.years == []
         assert parse_data(tmp_path / "metadata.json") == {
             "aircraft_models": {},
@@ -1317,10 +1343,12 @@ class TestExportAllData:
         """One worker or several, chunked or not: the files are byte identical."""
         paths = [_timed_path(offset / 10) for offset in range(6)]
         paths.append(_path((52.0, 10.0, 1.0)))
-        metadata = [
-            {"year": 2025 + index % 2, "aircraft_registration": "D-EAGJ"}
-            for index in range(len(paths))
-        ]
+        metadata = _metadata(
+            [
+                {"year": 2025 + index % 2, "aircraft_registration": "D-EAGJ"}
+                for index in range(len(paths))
+            ]
+        )
         monkeypatch.setattr(exporter_module, "MIN_PATHS_PER_CHUNK", 1)
 
         trees = []
@@ -1370,7 +1398,9 @@ class OneTileMissing:
 
 class TestGround:
     def test_no_ground_without_terrain(self, tmp_path, parse_data):
-        export_all_data([_timed_path()], [{"year": 2025}], [], output_dir=tmp_path)
+        export_all_data(
+            [_timed_path()], _metadata([{"year": 2025}]), [], output_dir=tmp_path
+        )
 
         entries = parse_data(tmp_path / "2025" / "data.json")["segments"].values()
         assert all("ground" not in entry for entry in entries)
@@ -1378,7 +1408,7 @@ class TestGround:
     def test_every_row_of_a_path_gets_its_ground(self, tmp_path, parse_data):
         export_all_data(
             [_timed_path()],
-            [{"year": 2025}],
+            _metadata([{"year": 2025}]),
             [],
             output_dir=tmp_path,
             terrain=FlatTiles(100.0),
@@ -1394,7 +1424,7 @@ class TestGround:
 
         export_all_data(
             paths,
-            [{"year": 2025}] * 2,
+            _metadata([{"year": 2025}] * 2),
             [],
             output_dir=tmp_path,
             terrain=OneTileMissing(),
@@ -1406,7 +1436,14 @@ class TestGround:
 
     def test_a_chunk_without_elevations_writes_no_ground(self, tmp_path):
         process_year_chunk(
-            2025, [_timed_path()], [{"year": 2025}], [1], str(tmp_path), 0, None, [None]
+            2025,
+            [_timed_path()],
+            _metadata([{"year": 2025}]),
+            [1],
+            str(tmp_path),
+            0,
+            None,
+            [None],
         )
 
         _, segments_part = _part_paths(str(tmp_path), 2025, 0)

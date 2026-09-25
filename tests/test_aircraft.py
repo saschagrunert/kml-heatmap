@@ -231,6 +231,28 @@ class TestLoadAircraftData:
         path.write_text(json.dumps(["D-EAGJ"]))
         assert load_aircraft_data(path) == {}
 
+    def test_skips_models_that_are_no_text(self, tmp_path, caplog):
+        """null would publish "None", an object its Python repr."""
+        path = tmp_path / "aircraft.json"
+        path.write_text(
+            json.dumps(
+                {
+                    "D-EAGJ": None,
+                    "D-EHYL": {"model": "DA40"},
+                    "D-ESST": 172,
+                    "D-EFGH": "  ",
+                    "": "Nameless",
+                    "D-EABC": "Cessna 172",
+                }
+            )
+        )
+
+        with caplog.at_level("WARNING", logger="kml_heatmap"):
+            aircraft = load_aircraft_data(path)
+
+        assert aircraft == {"D-EABC": "Cessna 172"}
+        assert len(caplog.records) == 5
+
 
 class TestMergeAircraftData:
     def test_first_file_wins_on_conflict(self, tmp_path):

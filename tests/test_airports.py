@@ -1,5 +1,6 @@
 """Tests for airports module."""
 
+from typing import cast
 from unittest.mock import patch
 
 import pytest
@@ -19,7 +20,7 @@ from kml_heatmap.airports import (
 )
 from kml_heatmap.constants import AIRPORT_GRID_SIZE_DEGREES
 from kml_heatmap.geometry import haversine_distance
-from kml_heatmap.types import TrackPoint
+from kml_heatmap.types import PathMetadata, TrackPoint
 
 
 def _path(*points):
@@ -52,7 +53,9 @@ class TestSamplePathAltitudes:
 
     def test_sample_is_capped(self):
         path = _profile(*range(1000))
-        assert sample_path_altitudes(path)["max"] == 49.0
+        sample = sample_path_altitudes(path)
+        assert sample is not None
+        assert sample["max"] == 49.0
 
     def test_no_altitudes_returns_none(self):
         path = [TrackPoint(50.0, 8.0, None, None)] * 100
@@ -194,7 +197,8 @@ class TestExtractAirportName:
 
 class TestRouteAirports:
     def test_structured_airports_win(self):
-        metadata = {
+        metadata: PathMetadata = {
+            "start_point": [50.0, 8.5],
             "airport_name": "EDAQ Halle-Oppin - LFBN Niort - Marais Poitevin",
             "start_airport": "EDAQ Halle-Oppin",
             "end_airport": "LFBN Niort - Marais Poitevin",
@@ -206,7 +210,8 @@ class TestRouteAirports:
 
     def test_parsed_name_that_is_no_route(self):
         """The parser sets both keys to None; the name is not split again."""
-        metadata = {
+        metadata: PathMetadata = {
+            "start_point": [50.0, 8.5],
             "airport_name": "Some Field - Other Field",
             "start_airport": None,
             "end_airport": None,
@@ -214,9 +219,16 @@ class TestRouteAirports:
         assert route_airports(metadata) == (None, None)
 
     def test_metadata_without_the_keys_splits_the_name(self):
-        assert route_airports({"airport_name": "EDDS - EDDP"}) == ("EDDS", "EDDP")
-        assert route_airports({"airport_name": "EDDS"}) == (None, None)
-        assert route_airports({}) == (None, None)
+        def metadata(**fields: str) -> PathMetadata:
+            # Hand-built metadata, which lacks what route_airports never reads
+            return cast("PathMetadata", fields)
+
+        assert route_airports(metadata(airport_name="EDDS - EDDP")) == (
+            "EDDS",
+            "EDDP",
+        )
+        assert route_airports(metadata(airport_name="EDDS")) == (None, None)
+        assert route_airports(metadata()) == (None, None)
 
 
 class TestIsPointMarker:
@@ -259,7 +271,7 @@ class TestDeduplicateAirports:
         assert deduplicate_airports([], []) == []
 
     def test_single_route_creates_departure_and_arrival(self):
-        metadata = [
+        metadata: list[PathMetadata] = [
             {
                 "start_point": [50.0, 8.5, 100],
                 "airport_name": "EDDF Frankfurt - EDDK Cologne",
@@ -276,7 +288,7 @@ class TestDeduplicateAirports:
     def test_departure_is_registered_once(self):
         """The metadata start point is the path's first point; no second pass."""
         path = _path((50.0, 8.5, 100), (50.4, 8.3, 900), (50.86, 7.14, 200))
-        metadata = [
+        metadata: list[PathMetadata] = [
             {
                 "start_point": [path[0].lat, path[0].lon, path[0].alt],
                 "airport_name": "Some Field - Other Field",
@@ -291,7 +303,7 @@ class TestDeduplicateAirports:
         ]
 
     def test_duplicate_locations_merge(self):
-        metadata = [
+        metadata: list[PathMetadata] = [
             {
                 "start_point": [50.0, 8.5, 100],
                 "airport_name": "EDDF",
@@ -311,7 +323,7 @@ class TestDeduplicateAirports:
         assert len(result) == 1
 
     def test_different_locations_are_kept(self):
-        metadata = [
+        metadata: list[PathMetadata] = [
             {
                 "start_point": [50.0, 8.5, 100],
                 "airport_name": "EDDF",
@@ -331,7 +343,7 @@ class TestDeduplicateAirports:
         assert len(result) == 2
 
     def test_mid_flight_start_filtered(self):
-        metadata = [
+        metadata: list[PathMetadata] = [
             {
                 "start_point": [50.0, 8.0, 5000],
                 "airport_name": "Mid-air Somewhere",
@@ -344,7 +356,7 @@ class TestDeduplicateAirports:
         assert result == []
 
     def test_invalid_landing_not_added(self):
-        metadata = [
+        metadata: list[PathMetadata] = [
             {
                 "start_point": [50.0, 8.5, 100],
                 "airport_name": "EDDF Frankfurt - EDDK Cologne",
@@ -358,7 +370,7 @@ class TestDeduplicateAirports:
         assert result[0]["is_at_path_end"] is False
 
     def test_point_marker_skipped(self):
-        metadata = [
+        metadata: list[PathMetadata] = [
             {
                 "start_point": [50.0, 8.5, 100],
                 "airport_name": "Log Start: EDDF",
@@ -373,7 +385,7 @@ class TestDeduplicateAirports:
     def test_single_point_path_registers_nothing(self):
         """A waypoint or a stationary recording is no flight; its position
         would give away where it was although the export holds no path."""
-        metadata = [
+        metadata: list[PathMetadata] = [
             {
                 "start_point": [50.0, 8.5, 100],
                 "airport_name": "Home Strip - EDDK Cologne",
@@ -384,7 +396,9 @@ class TestDeduplicateAirports:
         assert deduplicate_airports(metadata, path_groups) == []
 
     def test_metadata_without_matching_path(self):
-        metadata = [{"start_point": [50.0, 8.5], "airport_name": "EDDF"}]
+        metadata: list[PathMetadata] = [
+            {"start_point": [50.0, 8.5], "airport_name": "EDDF"}
+        ]
 
         assert deduplicate_airports(metadata, []) == []
 
@@ -393,7 +407,7 @@ class TestDeduplicateAirports:
         taxi = [453.0] * 30
         climb = [453.0 + i * 100.0 for i in range(1, 31)]
         path = _profile(*taxi, *climb)
-        metadata = [
+        metadata: list[PathMetadata] = [
             {
                 "start_point": [path[0].lat, path[0].lon, 453.0],
                 "airport_name": "EDDM Munich - EDDK Cologne",
@@ -412,7 +426,7 @@ class TestDeduplicateAirports:
         taxi = [1707.0] * 30
         climb = [1707.0 + i * 100.0 for i in range(1, 31)]
         path = _profile(*taxi, *climb)
-        metadata = [
+        metadata: list[PathMetadata] = [
             {
                 "start_point": [path[0].lat, path[0].lon, 1707.0],
                 "airport_name": "LSZS Samedan - EDDM Munich",
@@ -433,7 +447,7 @@ class TestDeduplicateAirports:
         taxi = [1707.0] * 30
         climb = [1707.0 + i * 100.0 for i in range(1, 31)]
         path = _profile(*taxi, *climb)
-        metadata = [
+        metadata: list[PathMetadata] = [
             {
                 "start_point": [path[0].lat, path[0].lon, 1707.0],
                 "airport_name": "Alpine Strip - Valley Field",
@@ -447,7 +461,7 @@ class TestDeduplicateAirports:
     def test_landing_at_an_alpine_field(self):
         descent = [3500.0 - i * 60.0 for i in range(30)]
         path = _profile(*descent, 1707.0, 1707.0)
-        metadata = [
+        metadata: list[PathMetadata] = [
             {
                 "start_point": [path[0].lat, path[0].lon, 3500.0],
                 "airport_name": "EDDM Munich - LSZS Samedan",
@@ -467,7 +481,7 @@ class TestDeduplicateAirports:
     def test_route_airports_keep_their_own_names(self):
         """A " - " inside an airport name must not merge both names into one."""
         path = _path((51.55, 12.05, 100), (48.9, 6.0, 900), (46.31, -0.39, 60))
-        metadata = [
+        metadata: list[PathMetadata] = [
             {
                 "start_point": [51.55, 12.05, 100],
                 "airport_name": "EDAQ Halle-Oppin - LFBN Niort - Marais Poitevin",
@@ -486,7 +500,8 @@ class TestDeduplicateAirports:
         assert result[0]["lat"] == pytest.approx(51.552223)
         assert result[1]["lat"] == pytest.approx(46.313477)
         assert [
-            extract_airport_name(a["name"], a["is_at_path_end"]) for a in result
+            extract_airport_name(a["name"] or "", a.get("is_at_path_end", False))
+            for a in result
         ] == [
             "EDAQ Halle-Oppin",
             "LFBN Niort - Marais Poitevin",
@@ -494,7 +509,7 @@ class TestDeduplicateAirports:
 
     def test_parsed_non_route_registers_no_arrival(self):
         path = _path((50.0, 8.5, 100), (50.86, 7.14, 200))
-        metadata = [
+        metadata: list[PathMetadata] = [
             {
                 "start_point": [50.0, 8.5, 100],
                 "airport_name": "Some Field - Other Field - Third",
@@ -511,7 +526,7 @@ class TestDeduplicateAirports:
         cruise = [3000.0] * 30
         descent = [3000.0 - i * 290.0 for i in range(1, 11)]
         path = _profile(*cruise, *descent)
-        metadata = [
+        metadata: list[PathMetadata] = [
             {
                 "start_point": [path[0].lat, path[0].lon, 3000],
                 "airport_name": "EDDF Frankfurt - EDDK Cologne",
@@ -697,13 +712,13 @@ class TestIcaoCodesNeverMerge:
     @pytest.mark.parametrize("coded_first", [True, False])
     def test_code_wins_whatever_the_order(self, coded_first):
         """The coded entry must not lose its marker to a nearby plain name."""
-        coded = {
+        coded: PathMetadata = {
             "start_point": [49.2, 9.5, 200.0],
             "airport_name": "ZZTX Field",
             "start_airport": None,
             "end_airport": None,
         }
-        plain = {**coded, "airport_name": "Aunt Martha"}
+        plain: PathMetadata = {**coded, "airport_name": "Aunt Martha"}
         plain["start_point"] = [49.2, 9.501, 200.0]
         path = _path((49.2, 9.5, 200.0), (49.3, 9.6, 200.0))
         metadata = [coded, plain] if coded_first else [plain, coded]

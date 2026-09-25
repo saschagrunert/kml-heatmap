@@ -64,9 +64,13 @@ from .export_writers import (
 from .logger import logger
 from .segment_codec import FORMAT_VERSION, encode_ground, encode_rows, encode_start
 from .site_assets import available_country_flags
-from .terrain import ground_profile_ft, sample_path_elevations
+from .terrain import (
+    elevations_by_coordinate,
+    ground_profile_ft,
+    sample_path_elevations,
+)
 from .types import COORDINATE_DECIMALS
-from .validation import protected_directories
+from .validation import is_protected_directory
 from .workers import init_worker
 
 try:
@@ -79,7 +83,7 @@ except ImportError:  # pragma: no cover - Windows has no fcntl
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping, Sequence
 
-    from .terrain import Coordinate, TileSource
+    from .terrain import PointElevations, TileSource
     from .types import (
         AirportData,
         FlightPath,
@@ -108,12 +112,6 @@ __all__ = [
 YEAR_DIR_PATTERN = re.compile(r"^\d{4}$")
 YEAR_FILE = "data.json"
 TOOL_OWNED_FILES = ("airports.json", "metadata.json")
-# Written by the versions whose page loaded its data with script tags, and
-# removed when such a site is regenerated
-LEGACY_DATA_FILES = ("airports.js", "metadata.js")
-LEGACY_YEAR_FILE = "data.js"
-# Fragments written by the chunk workers, assembled into the year file afterwards
-PART_PATTERN = re.compile(r"^\.data\.\d+\.(info|segments)\.part$")
 # Hidden directories a run writes its files into before publishing them
 STAGING_PREFIX = ".kml-heatmap-staging-"
 # Published last: they reference the other files, so a page loaded while the
@@ -194,7 +192,7 @@ class _ChunkPlan:
     # One entry per path index: its id, or None when it is not exported
     path_ids: list[int | None]
     # One entry per path index: the ground under its points, see terrain
-    elevations: list[Mapping[Coordinate, float] | None]
+    elevations: list[PointElevations | None]
 
 
 def is_exportable_path(path: FlightPath) -> bool:
@@ -345,16 +343,16 @@ def process_year_chunk(
     output_dir: str,
     index: int = 0,
     airport_names: frozenset[str] | None = None,
-    path_elevations: Sequence[Mapping[Coordinate, float] | None] | None = None,
+    path_elevations: Sequence[PointElevations | None] | None = None,
 ) -> ChunkResult:
     """Export a chunk of a year's paths into JSON fragments.
 
     ``path_ids`` holds the id of each path, None for the paths that are not
     exported (see ``assign_path_ids``). ``airport_names`` are the exported
     airport markers (see ``export_pipeline.build_path_info``).
-    ``path_elevations`` holds the ground under the points of each path (see
-    ``terrain.sample_path_elevations``), None for a path without; a path
-    gets a ground column when they cover every row of it. Writes
+    ``path_elevations`` holds the ground under the points of each path, in
+    their order (see ``terrain.sample_path_elevations``), None for a path
+    without; a path gets a ground column when they cover every row of it. Writes
     ``<output_dir>/<year>/.data.<index>.info.part`` (the path_info entries,
     comma separated) and ``.data.<index>.segments.part`` (the
     ``"<id>":{...}`` entries of the segments object, comma separated). The
@@ -392,7 +390,13 @@ def process_year_chunk(
                 "start": encode_start(start),
                 "columns": encode_rows(start, rows),
             }
-            ground = ground_profile_ft(start, rows, elevations) if elevations else None
+            ground = (
+                ground_profile_ft(
+                    start, rows, elevations_by_coordinate(path, elevations)
+                )
+                if elevations is not None
+                else None
+            )
             if ground is not None:
                 segments["ground"] = encode_ground(ground)
             segments_out.write(
@@ -523,7 +527,7 @@ def _plan_chunks(
     paths_by_year: dict[int, list[int]],
     path_ids: Mapping[int, int],
     max_workers: int,
-    elevations: Mapping[int, Mapping[Coordinate, float]] | None = None,
+    elevations: Mapping[int, PointElevations] | None = None,
 ) -> list[_ChunkPlan]:
     """Cut the years into chunks, in input order, and hand each its path ids.
 
@@ -752,26 +756,13 @@ def _remove_stale_data(data_dir: Path, years: set[str]) -> None:
     for child in sorted(data_dir.iterdir()):
         if child.name in TOOL_OWNED_FILES or child.name.startswith(STAGING_PREFIX):
             continue
-        if child.name in LEGACY_DATA_FILES:
-            _remove_stale_file(child)
-            continue
-        # "unknown" is the year-less directory written by older versions
         if (
             child.is_dir()
             and not child.is_symlink()
-            and (YEAR_DIR_PATTERN.match(child.name) or child.name == "unknown")
+            and YEAR_DIR_PATTERN.match(child.name)
         ):
-            stale = child.name not in years
-            for item in sorted(child.iterdir()):
-                # Fragments are left behind by interrupted older versions,
-                # which wrote them into the output directory itself
-                if (
-                    (stale and item.name == YEAR_FILE)
-                    or item.name == LEGACY_YEAR_FILE
-                    or PART_PATTERN.match(item.name)
-                ):
-                    _remove_stale_file(item)
-            if stale:
+            if child.name not in years:
+                _remove_stale_file(child / YEAR_FILE)
                 try:
                     child.rmdir()
                 except OSError:
@@ -858,7 +849,7 @@ class SiteOutput:
             (output_dir, self.output_dir),
             (data_dir, self.data_dir),
         ):
-            if resolved in protected_directories():
+            if is_protected_directory(resolved):
                 raise ValueError(f"Refusing to use dangerous output directory: {given}")
         self.site_files = tuple(site_files)
         self.site_patterns = tuple(site_patterns)

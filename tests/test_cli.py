@@ -406,10 +406,17 @@ class TestInputsAreLeftAloneByDefault:
 class TestObfuscateFlag:
     def test_obfuscate_runs_before_processing(self, workspace):
         _, kml, out = workspace
-        calls = []
-        mock_create = MagicMock(
-            side_effect=lambda *a, **k: calls.append("create") or True
-        )
+        calls: list[object] = []
+
+        def create(*args, **kwargs):
+            calls.append("create")
+            return True
+
+        def obfuscate(paths):
+            calls.append(("obfuscate", list(paths)))
+            return 1
+
+        mock_create = MagicMock(side_effect=create)
         with (
             patch(
                 "sys.argv",
@@ -422,10 +429,7 @@ class TestObfuscateFlag:
                 ],
             ),
             patch("kml_heatmap.renderer.create_progressive_heatmap", mock_create),
-            patch(
-                "kml_heatmap.obfuscate.obfuscate_kml_files",
-                side_effect=lambda paths: calls.append(("obfuscate", list(paths))) or 1,
-            ),
+            patch("kml_heatmap.obfuscate.obfuscate_kml_files", side_effect=obfuscate),
         ):
             main()
         assert calls == [("obfuscate", [kml]), "create"]

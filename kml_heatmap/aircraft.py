@@ -88,7 +88,16 @@ def load_aircraft_data(aircraft_file: Path) -> dict[str, str]:
     # D-EAGJ); the first spelling of a registration wins
     aircraft: dict[str, str] = {}
     for key, value in data.items():
-        aircraft.setdefault(normalize_registration(str(key)), str(value))
+        # A null or an object would reach metadata.json as "None" or as a
+        # Python dict, and the page would show it as the model
+        if not isinstance(value, str) or not value.strip() or not key.strip():
+            logger.warning(
+                "Ignoring %r in %s: the model must be a non-empty string",
+                key,
+                aircraft_file,
+            )
+            continue
+        aircraft.setdefault(normalize_registration(key), value)
     return aircraft
 
 

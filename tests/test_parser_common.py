@@ -28,9 +28,15 @@ from kml_heatmap.parser_common import (
     parse_coordinate_point,
     validate_and_normalize_coordinate,
 )
-from kml_heatmap.types import TrackPoint
+from kml_heatmap.types import PlacemarkMetadata, TrackPoint
 
 NS = {"kml": "http://www.opengis.net/kml/2.2"}
+
+
+def _find(root: etree._Element, path: str) -> etree._Element:
+    found = root.find(path)
+    assert found is not None
+    return found
 
 
 class TestExtractYearFromTimestamp:
@@ -52,6 +58,16 @@ class TestExtractYearFromTimestamp:
             ("Takeoff T", None),
             ("", None),
             (None, None),
+            # Dates without a time of day, of any plausible year
+            ("1998-05-01", 1998),
+            ("1998-05", 1998),
+            ("1998", 1998),
+            ("2026", 2026),
+            ("1998-05-01Z", 1998),
+            ("1998-05-01+02:00", 1998),
+            ("0998-05-01", None),
+            ("2150-05-01", None),
+            ("03 Mar 1998", 1998),
         ],
     )
     def test_extract(self, value, expected):
@@ -77,12 +93,9 @@ class TestValidateAndNormalizeCoordinate:
         assert result == (50.0, 8.5, -100)
 
     def test_altitude_range_boundaries_kept(self):
-        assert (
-            validate_and_normalize_coordinate(50.0, 8.5, ALT_MIN_M, "f")[2] == ALT_MIN_M
-        )
-        assert (
-            validate_and_normalize_coordinate(50.0, 8.5, ALT_MAX_M, "f")[2] == ALT_MAX_M
-        )
+        for altitude in (ALT_MIN_M, ALT_MAX_M):
+            result = validate_and_normalize_coordinate(50.0, 8.5, altitude, "f")
+            assert result == (50.0, 8.5, altitude)
 
     @pytest.mark.parametrize(
         "alt", [999999, -99999, float("nan"), float("inf"), float("-inf")]
@@ -187,11 +200,15 @@ class TestFindXmlElement:
         root = etree.fromstring(
             '<root xmlns:kml="http://www.opengis.net/kml/2.2"><kml:name>T</kml:name></root>'
         )
-        assert find_xml_element(root, "kml:name", "name", self.NS).text == "T"
+        found = find_xml_element(root, "kml:name", "name", self.NS)
+        assert found is not None
+        assert found.text == "T"
 
     def test_fallback_found(self):
         root = etree.fromstring("<root><name>T</name></root>")
-        assert find_xml_element(root, "kml:name", "name", self.NS).text == "T"
+        found = find_xml_element(root, "kml:name", "name", self.NS)
+        assert found is not None
+        assert found.text == "T"
 
     def test_neither_found(self):
         root = etree.fromstring("<root><other>T</other></root>")
@@ -386,9 +403,10 @@ class TestExtractPlacemarkMetadata:
 
 
 class TestBuildPathMetadataDict:
-    def _meta(self, **overrides):
+    def _meta(self, **overrides: str | int | None) -> PlacemarkMetadata:
         meta = empty_placemark_metadata()
-        meta.update(overrides)
+        # The keywords are keys of PlacemarkMetadata, which mypy cannot know
+        meta.update(overrides)  # type: ignore[typeddict-item]
         return meta
 
     @staticmethod
@@ -520,6 +538,26 @@ class TestBuildPathMetadataDict:
         )
         assert extract_placemark_metadata(placemark, NS)["year"] == 2024
 
+    @pytest.mark.parametrize("when", ["1998-05-01", "1998-05", "1998"])
+    def test_date_only_when_of_the_last_century(self, when):
+        """The path would be dropped for a timestamp without a year."""
+        placemark = etree.fromstring(
+            f"<Placemark><name>EDDS - 16 Aug 2026</name>"
+            f"<TimeStamp><when>{when}</when></TimeStamp></Placemark>"
+        )
+        result = extract_placemark_metadata(placemark, NS)
+        assert result["timestamp"] == when
+        assert result["year"] == 1998
+
+    def test_date_only_when_without_a_plausible_year_is_skipped(self):
+        placemark = etree.fromstring(
+            "<Placemark><name>EDDS - 16 Aug 2026</name>"
+            "<TimeStamp><when>0042-05-01</when></TimeStamp></Placemark>"
+        )
+        result = extract_placemark_metadata(placemark, NS)
+        assert result["timestamp"] == "16 Aug 2026"
+        assert result["year"] == 2026
+
     @pytest.mark.parametrize(
         ("container_time", "timestamp", "end_timestamp"),
         [
@@ -542,7 +580,7 @@ class TestBuildPathMetadataDict:
             f"<Document>{container_time}<Folder><name>Trip</name>"
             "<Placemark><name>Home</name></Placemark></Folder></Document>"
         )
-        result = extract_placemark_metadata(root.find(".//Placemark"), NS)
+        result = extract_placemark_metadata(_find(root, ".//Placemark"), NS)
         assert result["timestamp"] == timestamp
         assert result["end_timestamp"] == end_timestamp
         assert result["year"] == 2024
@@ -553,7 +591,9 @@ class TestBuildPathMetadataDict:
             "<Folder><TimeStamp><when>2024</when></TimeStamp>"
             "<Placemark><name>Home</name></Placemark></Folder></Document>"
         )
-        assert extract_placemark_metadata(root.find(".//Placemark"), NS)["year"] == 2024
+        assert (
+            extract_placemark_metadata(_find(root, ".//Placemark"), NS)["year"] == 2024
+        )
 
     def test_time_of_a_sibling_is_not_inherited(self):
         root = etree.fromstring(
@@ -569,7 +609,7 @@ class TestBuildPathMetadataDict:
             "<TimeStamp><when>2024-07-01T10:00:00Z</when></TimeStamp>"
             "</Placemark></Folder>"
         )
-        assert extract_placemark_metadata(root.find("Placemark"), NS)["year"] == 2024
+        assert extract_placemark_metadata(_find(root, "Placemark"), NS)["year"] == 2024
 
 
 class TestNullIsland:

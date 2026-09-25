@@ -1,6 +1,7 @@
 """Tests for airport_lookup module."""
 
 import csv
+import fcntl
 import http.client
 import os
 import time
@@ -561,14 +562,14 @@ class TestLoadAirportDatabase:
             assert load_airport_database() == {}
 
     def test_lock_release_failure_is_handled(self):
-        original_flock = lookup_module.fcntl.flock
+        original_flock = fcntl.flock
 
         def flock_side_effect(fd, op):
-            if op == lookup_module.fcntl.LOCK_UN:
+            if op == fcntl.LOCK_UN:
                 raise OSError("mock unlock failure")
             return original_flock(fd, op)
 
-        with patch.object(lookup_module.fcntl, "flock", side_effect=flock_side_effect):
+        with patch.object(fcntl, "flock", side_effect=flock_side_effect):
             db = load_airport_database()
         assert "EDDP" in db
 

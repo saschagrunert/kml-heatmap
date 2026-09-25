@@ -337,9 +337,14 @@ the cache directory (`KML_HEATMAP_CACHE_DIR`, by default
 `~/.cache/kml-heatmap`) and decoded by a small pure-Python PNG reader in a
 process pool; `data/` needs 389 of them, 44 MB. Offline, or for a tile that
 cannot be fetched, the build goes on and the flights under it get no ground;
-one warning says how many. `--no-terrain` skips the tiles altogether, which
-`scripts/build_visual_site.py` does: its snapshots show no 3D view. The CI
-jobs that build from `data/` restore the tile cache with `actions/cache`.
+one warning says how many. The ground is sampled once in the main process
+and kept as one array of elevations per path, aligned with its points
+(`sample_path_elevations`), which is what the export chunks are handed: a
+million points take tens of megabytes this way, where a mapping of
+coordinates took more than a gigabyte. `--no-terrain` skips the tiles
+altogether, which `scripts/build_visual_site.py` does: its snapshots show no
+3D view. The CI jobs that build from `data/` restore the tile cache with
+`actions/cache`.
 
 No test touches the network: `tests/conftest.py` fails any download of a
 tile loudly, the pipeline tests pass a tile source of their own

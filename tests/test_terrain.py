@@ -9,11 +9,14 @@ import http.client
 import io
 import logging
 import math
+import os
 import re
 import struct
 import urllib.error
 import zlib
+from array import array
 from concurrent.futures.process import BrokenProcessPool
+from email.message import Message
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -21,7 +24,14 @@ import pytest
 
 import kml_heatmap.terrain as terrain_module
 from kml_heatmap.constants import METERS_TO_FEET
-from kml_heatmap.segment_codec import ALTITUDE_STEP, FORMAT_VERSION, GROUND_STEP
+from kml_heatmap.segment_codec import (
+    ALTITUDE_STEP,
+    COORDINATE_SCALE,
+    FORMAT_VERSION,
+    GROUND_STEP,
+    SPEED_SCALE,
+    TIME_SCALE,
+)
 from kml_heatmap.terrain import (
     TERRAIN_ZOOM,
     TILE_SIZE,
@@ -31,6 +41,7 @@ from kml_heatmap.terrain import (
     TileKey,
     decode_png,
     decode_tile_pixels,
+    elevations_by_coordinate,
     ground_profile_ft,
     sample_elevations,
     sample_path_elevations,
@@ -242,6 +253,41 @@ class TestDecodePng:
         with pytest.raises(PngError, match="wrong length"):
             decode_png(data)
 
+    def test_refuses_a_header_too_large_for_a_tile(self):
+        side = terrain_module.MAX_PNG_SIDE + 1
+        data = encode_png(2, 2, bytes(12), header=(side, 1, 8, 2, 0, 0, 0))
+
+        with pytest.raises(PngError, match="too large"):
+            decode_png(data)
+
+    def test_inflates_no_further_than_the_image(self, monkeypatch):
+        """A small bomb of zeros must not inflate beyond the header's size."""
+        bomb = zlib.compress(bytes(64 * 1024 * 1024), 9)
+        data = (
+            b"\x89PNG\r\n\x1a\n"
+            + _chunk(b"IHDR", struct.pack(">IIBBBBB", 2, 2, 8, 2, 0, 0, 0))
+            + _chunk(b"IDAT", bomb)
+            + _chunk(b"IEND", b"")
+        )
+        inflated = []
+        real = zlib.decompressobj
+
+        class Recording:
+            def __init__(self):
+                self.inner = real()
+
+            def decompress(self, data, max_length=0):
+                out = self.inner.decompress(data, max_length)
+                inflated.append(len(out))
+                return out
+
+        monkeypatch.setattr(zlib, "decompressobj", Recording)
+
+        with pytest.raises(PngError, match="wrong length"):
+            decode_png(data)
+        # Two lines of a filter byte and two RGB pixels, and one byte more
+        assert inflated == [2 * (2 * 3 + 1) + 1]
+
     def test_refuses_image_data_that_does_not_inflate(self):
         signature = b"\x89PNG\r\n\x1a\n"
         data = (
@@ -297,9 +343,9 @@ class TestSampleElevations:
 
         elevations, tiles, missing = sample_elevations(points, source)
 
-        for lat, lon in points:
+        for (lat, lon), elevation in zip(points, elevations, strict=True):
             x, y = _global_pixel(lat, lon)
-            assert elevations[(lat, lon)] == pytest.approx(2 * x - 3 * y, abs=1e-6)
+            assert elevation == pytest.approx(2 * x - 3 * y, abs=1e-6)
         assert (tiles, missing) == (len(source.asked[0]), 0)
 
     def test_across_a_tile_edge(self):
@@ -311,7 +357,7 @@ class TestSampleElevations:
 
         elevations, tiles, _ = sample_elevations([(50.0, lon)], source)
 
-        assert elevations[(50.0, lon)] == pytest.approx(edge - 0.5)
+        assert elevations[0] == pytest.approx(edge - 0.5)
         assert {tile.x for tile in source.asked[0]} == {545, 546}
         assert tiles == len(source.asked[0])
 
@@ -322,7 +368,7 @@ class TestSampleElevations:
         elevations, _, _ = sample_elevations([(0.0, 180.0)], source)
 
         # Half way between the last column and the first, which wraps
-        assert elevations[(0.0, 180.0)] == pytest.approx(50.0)
+        assert elevations[0] == pytest.approx(50.0)
         assert {tile.x for tile in source.asked[0]} == {0, (world - 1) // TILE_SIZE}
 
     def test_beyond_the_mercator_square(self):
@@ -332,8 +378,8 @@ class TestSampleElevations:
 
         # The edge rows stand in for the ones beyond
         world = TILE_SIZE << TERRAIN_ZOOM
-        assert elevations[(89.0, 0.0)] == pytest.approx(0.0, abs=0.5)
-        assert elevations[(-89.0, 0.0)] == pytest.approx(world - 1, abs=0.5)
+        assert elevations[0] == pytest.approx(0.0, abs=0.5)
+        assert elevations[1] == pytest.approx(world - 1, abs=0.5)
 
     def test_leaves_out_what_a_missing_tile_covers(self):
         covered = (50.0, 8.0)
@@ -344,7 +390,8 @@ class TestSampleElevations:
 
         elevations, tiles, count = sample_elevations([covered, uncovered], source)
 
-        assert elevations == {covered: 1.0}
+        assert elevations[0] == 1.0
+        assert math.isnan(elevations[1])
         assert count >= 1
         assert tiles == len(source.asked[0])
 
@@ -359,12 +406,12 @@ class TestSampleElevations:
     def test_flat_tiles(self):
         elevations, _, missing = sample_elevations([(50.0, 8.0)], FlatTiles(123.0))
 
-        assert elevations == {(50.0, 8.0): 123.0}
+        assert list(elevations) == [123.0]
         assert missing == 0
 
 
 class TestSamplePathElevations:
-    def test_keys_the_elevations_by_path_and_rounded_coordinate(self):
+    def test_one_elevation_per_point_keyed_by_path(self):
         paths = {
             3: [TrackPoint(50.000001, 8.0, 100.0), TrackPoint(50.1, 8.1, 200.0)],
             7: [TrackPoint(51.0, 9.0, 100.0)],
@@ -372,10 +419,54 @@ class TestSamplePathElevations:
 
         by_path = sample_path_elevations(paths, FlatTiles(42.0))
 
-        assert by_path == {
-            3: {(50.0, 8.0): 42.0, (50.1, 8.1): 42.0},
-            7: {(51.0, 9.0): 42.0},
+        assert {index: list(values) for index, values in by_path.items()} == {
+            3: [42.0, 42.0],
+            7: [42.0],
         }
+
+    def test_by_coordinate_as_the_rows_carry_it(self):
+        path = [
+            TrackPoint(50.000001, 8.0, 100.0),
+            TrackPoint(50.1, 8.1, 200.0),
+            TrackPoint(50.2, 8.2, 200.0),
+        ]
+
+        by_coordinate = elevations_by_coordinate(path, array("d", [1.0, 2.0, math.nan]))
+
+        # Rounded like the rows, and without the point the tiles miss
+        assert by_coordinate == {(50.0, 8.0): 1.0, (50.1, 8.1): 2.0}
+
+    def test_the_same_elevations_as_one_coordinate_at_a_time(self):
+        """Points in one tile, across tile edges and repeated, alike."""
+        source = FunctionTiles(lambda gx, gy: math.sin(gx / 7.0) * 300 + gy % 13)
+        edge = 546 * TILE_SIZE
+        lons = [
+            8.0,
+            8.0,
+            _lon_of_pixel(edge - 1),
+            (_lon_of_pixel(edge - 1) + _lon_of_pixel(edge)) / 2,
+            8.3,
+            180.0,
+            -179.99,
+        ]
+        points = [(50.0 + i * 0.013, lon) for i, lon in enumerate(lons)]
+
+        together, _, _ = sample_elevations(points, source)
+
+        world = TILE_SIZE << TERRAIN_ZOOM
+
+        def at(gx, gy):
+            return source.elevation(gx % world, gy)
+
+        for point, elevation in zip(points, together, strict=True):
+            alone, _, _ = sample_elevations([point], source)
+            assert elevation == alone[0]
+            x, y = _global_pixel(*point)
+            left, top = math.floor(x), math.floor(y)
+            tx, ty = x - left, y - top
+            upper = at(left, top) + (at(left + 1, top) - at(left, top)) * tx
+            lower = at(left, top + 1) + (at(left + 1, top + 1) - at(left, top + 1)) * tx
+            assert elevation == upper + (lower - upper) * ty
 
     def test_warns_once_about_missing_tiles(self, caplog):
         paths = {1: [TrackPoint(50.0, 8.0, 0.0)], 2: [TrackPoint(50.0, 12.0, 0.0)]}
@@ -418,8 +509,8 @@ class TestTerrariumTiles:
         first = tiles.pixels({tile: [0, 65535]})
         second = TerrariumTiles(tmp_path / "terrain").pixels({tile: [7]})
 
-        assert first == {tile: [250.0, 250.0]}
-        assert second == {tile: [250.0]}
+        assert first == {tile: array("d", [250.0, 250.0])}
+        assert second == {tile: array("d", [250.0])}
         fetch.assert_called_once()
         request = fetch.call_args.args[0]
         assert request.full_url.endswith("/terrarium/10/546/341.png")
@@ -431,7 +522,7 @@ class TestTerrariumTiles:
         def fetch(request, **kwargs):
             if request.full_url.endswith("/1/1.png"):
                 raise urllib.error.HTTPError(
-                    request.full_url, 403, "Forbidden", {}, io.BytesIO()
+                    request.full_url, 403, "Forbidden", Message(), io.BytesIO()
                 )
             return _response(_tile_png(10.0))
 
@@ -440,7 +531,7 @@ class TestTerrariumTiles:
 
         answered = TerrariumTiles(tmp_path).pixels(wanted)
 
-        assert answered == {TileKey(10, 2, 1): [10.0]}
+        assert answered == {TileKey(10, 2, 1): array("d", [10.0])}
 
     @pytest.mark.parametrize(
         "error",
@@ -496,9 +587,7 @@ class TestTerrariumTiles:
         monkeypatch.setattr(
             terrain_module, "urlopen", MagicMock(return_value=_response(_tile_png()))
         )
-        monkeypatch.setattr(
-            terrain_module.os, "replace", MagicMock(side_effect=OSError("full"))
-        )
+        monkeypatch.setattr(os, "replace", MagicMock(side_effect=OSError("full")))
 
         assert TerrariumTiles(tmp_path).pixels({TileKey(10, 1, 1): [0]}) == {}
         assert list(tmp_path.iterdir()) == []
@@ -521,7 +610,7 @@ class TestTerrariumTiles:
 
         answered = tiles.pixels(wanted)
 
-        assert answered == {tile: [tile.x, tile.x] for tile in wanted}
+        assert answered == {tile: array("d", [tile.x, tile.x]) for tile in wanted}
 
     @pytest.mark.parametrize(
         "failure",
@@ -730,8 +819,21 @@ def _ts_constant(relative, name):
             "METRES_PER_DEGREE",
             terrain_module.METRES_PER_DEGREE,
         ),
+        ("services/yearDecode.ts", "COORDINATE_SCALE", COORDINATE_SCALE),
+        ("services/yearDecode.ts", "SPEED_SCALE", SPEED_SCALE),
+        ("services/yearDecode.ts", "TIME_SCALE", TIME_SCALE),
+        # The page draws the relief from the tiles the ground was sampled
+        # from, and no finer
+        ("calculations/lift.ts", "TERRAIN_TILE_MAX_ZOOM", TERRAIN_ZOOM),
     ],
 )
 def test_the_frontend_reads_what_the_exporter_writes(relative, name, value):
     """The two sides of the ground column share their numbers."""
     assert _ts_constant(relative, name) == value
+
+
+def test_the_frontend_draws_the_relief_from_the_same_tiles():
+    source = (FRONTEND / "ui" / "terrain.ts").read_text(encoding="utf-8")
+    match = re.search(r'\bconst TERRAIN_TILE_URL =\s*"([^"]+)";', source)
+    assert match, "TERRAIN_TILE_URL not found in ui/terrain.ts"
+    assert match.group(1) == terrain_module.TILE_URL

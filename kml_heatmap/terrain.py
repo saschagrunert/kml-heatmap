@@ -41,9 +41,10 @@ import threading
 import time
 import urllib.error
 import zlib
+from array import array
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
-from itertools import pairwise
+from itertools import compress, pairwise
 from typing import TYPE_CHECKING, NamedTuple, Protocol
 from urllib.request import Request, urlopen
 
@@ -70,6 +71,7 @@ __all__ = [
     "TileKey",
     "TileSource",
     "decode_png",
+    "elevations_by_coordinate",
     "ground_profile_ft",
     "sample_path_elevations",
     "terrarium_elevation",
@@ -123,12 +125,14 @@ class TileSource(Protocol):
 
     ``pixels`` answers, for every tile asked for, the elevation in metres of
     each of its pixels given by index (``row * TILE_SIZE + column``), in that
-    order. A tile that is not available is left out of the answer.
+    order. A tile that is not available is left out of the answer. An
+    ``array("d")`` holds a few million of them in a fraction of the memory
+    a list takes.
     """
 
     def pixels(
         self, wanted: Mapping[TileKey, Sequence[int]]
-    ) -> dict[TileKey, list[float]]: ...
+    ) -> dict[TileKey, Sequence[float]]: ...
 
 
 class FlatTiles:
@@ -145,10 +149,11 @@ class FlatTiles:
 
     def pixels(
         self, wanted: Mapping[TileKey, Sequence[int]]
-    ) -> dict[TileKey, list[float]]:
+    ) -> dict[TileKey, Sequence[float]]:
         """Every pixel of every tile at the one elevation."""
         return {
-            tile: [self.elevation_m] * len(indices) for tile, indices in wanted.items()
+            tile: array("d", [self.elevation_m]) * len(indices)
+            for tile, indices in wanted.items()
         }
 
 
@@ -158,6 +163,9 @@ PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 # Colour types this decoder reads, by the channels of a pixel: truecolour
 # and truecolour with alpha, which is what elevation tiles are
 _CHANNELS = {2: 3, 6: 4}
+# The widest and highest PNG this decoder reads: an elevation tile is 256 or
+# 512 pixels a side, and a header that claims more than this is no tile
+MAX_PNG_SIDE = 4096
 
 
 class PngError(ValueError):
@@ -272,9 +280,15 @@ def decode_png(data: bytes) -> tuple[int, int, int, bytearray]:
         raise PngError("interlaced PNGs are not supported")
     if width == 0 or height == 0:
         raise PngError("PNG has no pixels")
+    if width > MAX_PNG_SIDE or height > MAX_PNG_SIDE:
+        raise PngError(f"PNG of {width}x{height} pixels is too large")
     channels = _CHANNELS[colour]
+    # A line is its filter type and its pixels. The image data is inflated
+    # no further than one byte beyond that, which _unfilter refuses: a few
+    # kilobytes of zeros inflate to gigabytes otherwise.
+    expected = height * (width * channels + 1)
     try:
-        raw = zlib.decompress(compressed)
+        raw = zlib.decompressobj().decompress(compressed, expected + 1)
     except zlib.error as e:
         raise PngError(f"PNG image data is corrupt: {e}") from e
     return width, height, channels, _unfilter(raw, width, height, channels)
@@ -300,14 +314,14 @@ def decode_tile_pixels(data: bytes, indices: Sequence[int]) -> list[float]:
     ]
 
 
-def _decode_cached_tile(path: Path, indices: Sequence[int]) -> list[float] | None:
+def _decode_cached_tile(path: Path, indices: Sequence[int]) -> array[float] | None:
     """``decode_tile_pixels`` of a cached tile, None when it is unusable.
 
     A module-level function, so the decoding pool can run it. A file that
     does not decode is removed, so the next build fetches it again.
     """
     try:
-        return decode_tile_pixels(path.read_bytes(), indices)
+        return array("d", decode_tile_pixels(path.read_bytes(), indices))
     except (OSError, PngError) as e:
         logger.debug("Elevation tile %s is unusable: %s", path.name, e)
         with contextlib.suppress(OSError):
@@ -406,7 +420,7 @@ class TerrariumTiles:
 
     def pixels(
         self, wanted: Mapping[TileKey, Sequence[int]]
-    ) -> dict[TileKey, list[float]]:
+    ) -> dict[TileKey, Sequence[float]]:
         """Fetch what is missing, then decode the pixels of every tile."""
         self.fetch(wanted)
         cached = [
@@ -445,18 +459,24 @@ class TerrariumTiles:
 
 # A coordinate as the exporter rounds it (see COORDINATE_DECIMALS)
 Coordinate = tuple[float, float]
+# The ground under the points of a path, in metres: one value per point, in
+# the order of the points, and NaN for a point the tiles do not cover. An
+# array rather than a mapping of coordinates, because a million points in
+# Python objects take a gigabyte and are pickled into every export chunk.
+type PointElevations = array[float]
 # Web Mercator ends here, in a square
 MAX_LATITUDE = 85.0511
+TILE_PIXELS = TILE_SIZE * TILE_SIZE
 
 
-def _corners(lat: float, lon: float, zoom: int) -> tuple[tuple[int, ...], float, float]:
-    """The four pixels whose centres surround a point, and its place among them.
+def _position(lat: float, lon: float, zoom: int) -> tuple[int, int, float, float]:
+    """Where a point is among the pixels around it.
 
-    Pixels are numbered across the whole world at ``zoom``, row by row
-    (``y * world + x``): top left, top right, bottom left, bottom right,
-    then the fractions of the way from the left to the right ones and from
-    the top to the bottom ones. Across the antimeridian the world wraps; at
-    the top and bottom the edge row stands in for the one beyond.
+    Pixels are counted across the whole world at ``zoom``. Returns the
+    column and the row of the pixel whose centre is up and to the left of
+    the point, then the fractions of the way from it to the next column and
+    the next row. The column wraps across the antimeridian; the row is -1
+    above the centre of the top row.
     """
     world = TILE_SIZE << zoom
     lat = max(min(lat, MAX_LATITUDE), -MAX_LATITUDE)
@@ -465,85 +485,169 @@ def _corners(lat: float, lon: float, zoom: int) -> tuple[tuple[int, ...], float,
     y = (0.5 - math.log((1 + sin) / (1 - sin)) / (4 * math.pi)) * world - 0.5
     left = math.floor(x)
     top = math.floor(y)
-    tx = x - left
-    ty = y - top
+    return left % world, top, x - left, y - top
+
+
+def _corner_pixels(left: int, top: int, zoom: int) -> list[tuple[int, int]]:
+    """The four pixels around a point of ``_position``, as tile and index.
+
+    Top left, top right, bottom left, bottom right; a tile is numbered row
+    by row across the world (``y * tiles + x``) and a pixel within it the
+    same way. Across the antimeridian the world wraps; at the top and bottom
+    the edge row stands in for the one beyond.
+    """
+    world = TILE_SIZE << zoom
     right = (left + 1) % world
-    left %= world
-    bottom = min(top + 1, world - 1) * world
-    top = max(top, 0) * world
-    return (top + left, top + right, bottom + left, bottom + right), tx, ty
+    bottom = min(top + 1, world - 1)
+    top = max(top, 0)
+    tiles = 1 << zoom
+    return [
+        (
+            row // TILE_SIZE * tiles + column // TILE_SIZE,
+            row % TILE_SIZE * TILE_SIZE + column % TILE_SIZE,
+        )
+        for row in (top, bottom)
+        for column in (left, right)
+    ]
 
 
 def sample_elevations(
     coordinates: Iterable[Coordinate],
     source: TileSource,
     zoom: int = TERRAIN_ZOOM,
-) -> tuple[dict[Coordinate, float], int, int]:
-    """The ground elevation in metres at every coordinate the tiles cover.
+) -> tuple[PointElevations, int, int]:
+    """The ground elevation in metres at every coordinate, in their order.
 
     Bilinear between the four pixels around a coordinate, which can be in
     up to four tiles: the relief runs on across tile edges. A coordinate
-    with a pixel of a missing tile is left out. Also returns how many tiles
-    were asked for and how many of them were missing.
+    with a pixel of a missing tile is NaN. Also returns how many tiles were
+    asked for and how many of them were missing.
+
+    Every pixel is asked for once. Nothing is kept per coordinate but four
+    numbers in arrays, and the pixels of one tile at a time are looked up
+    in a dense array; only the rare coordinate whose pixels are in several
+    tiles goes through a mapping.
     """
-    world = TILE_SIZE << zoom
-    corners = {coordinate: _corners(*coordinate, zoom) for coordinate in coordinates}
-    by_tile: dict[TileKey, list[int]] = {}
-    for pixel in {pixel for pixels, _, _ in corners.values() for pixel in pixels}:
-        y, x = divmod(pixel, world)
-        by_tile.setdefault(TileKey(zoom, x // TILE_SIZE, y // TILE_SIZE), []).append(
-            pixel
-        )
-    answered = source.pixels(
-        {
-            tile: [
-                (pixel // world % TILE_SIZE) * TILE_SIZE + pixel % TILE_SIZE
-                for pixel in pixels
-            ]
-            for tile, pixels in by_tile.items()
-        }
-    )
-    values: dict[int, float] = {}
-    for tile, elevations in answered.items():
-        values.update(zip(by_tile[tile], elevations, strict=True))
+    tiles_across = 1 << zoom
+    last = TILE_SIZE - 1
+    lefts = array("i")
+    tops = array("i")
+    fractions_x = array("d")
+    fractions_y = array("d")
+    # The pixels each tile is asked for, one byte per pixel
+    wanted_pixels: dict[int, bytearray] = {}
+    # The points whose four pixels are all in one tile, by that tile
+    inner: dict[int, array[int]] = {}
+    # The other points, and the pixels they need of each tile
+    across: list[int] = []
+    across_pixels: dict[int, set[int]] = {}
 
-    result: dict[Coordinate, float] = {}
-    for coordinate, (pixels, tx, ty) in corners.items():
-        try:
-            top_left, top_right, bottom_left, bottom_right = (
-                values[pixel] for pixel in pixels
-            )
-        except KeyError:
+    def tile_pixels(tile: int) -> bytearray:
+        pixels = wanted_pixels.get(tile)
+        if pixels is None:
+            pixels = wanted_pixels[tile] = bytearray(TILE_PIXELS)
+        return pixels
+
+    previous: Coordinate | None = None
+    position = (0, 0, 0.0, 0.0)
+    # The tile of the last point: the next one is mostly in it as well
+    current = -1
+    current_pixels = bytearray()
+    current_points = array("i")
+    for point, coordinate in enumerate(coordinates):
+        # Consecutive points of a slow flight often round to the same place
+        if coordinate != previous:
+            position = _position(coordinate[0], coordinate[1], zoom)
+            previous = coordinate
+        left, top, fraction_x, fraction_y = position
+        lefts.append(left)
+        tops.append(top)
+        fractions_x.append(fraction_x)
+        fractions_y.append(fraction_y)
+        if left & last != last and top >= 0 and top & last != last:
+            tile = top // TILE_SIZE * tiles_across + left // TILE_SIZE
+            if tile != current:
+                current = tile
+                current_pixels = tile_pixels(tile)
+                current_points = inner.setdefault(tile, array("i"))
+            index = (top & last) * TILE_SIZE + (left & last)
+            current_pixels[index] = current_pixels[index + 1] = 1
+            current_pixels[index + TILE_SIZE] = 1
+            current_pixels[index + TILE_SIZE + 1] = 1
+            current_points.append(point)
+        else:
+            across.append(point)
+            for tile, index in _corner_pixels(left, top, zoom):
+                tile_pixels(tile)[index] = 1
+                across_pixels.setdefault(tile, set()).add(index)
+
+    keys = {
+        tile: TileKey(zoom, tile % tiles_across, tile // tiles_across)
+        for tile in wanted_pixels
+    }
+    wanted = {
+        keys[tile]: array("H", compress(range(TILE_PIXELS), wanted_pixels.pop(tile)))
+        for tile in list(wanted_pixels)
+    }
+    answered = source.pixels(wanted)
+
+    elevations = array("d", [math.nan]) * len(lefts)
+    unknown_tile = array("d", [math.nan]) * TILE_PIXELS
+    across_values: dict[tuple[int, int], float] = {}
+    for tile, key in keys.items():
+        values = answered.get(key)
+        if values is None:
             continue
-        top = top_left + (top_right - top_left) * tx
-        bottom = bottom_left + (bottom_right - bottom_left) * tx
-        result[coordinate] = top + (bottom - top) * ty
-    return result, len(by_tile), len(by_tile) - len(answered)
+        dense = array("d", unknown_tile)
+        for index, value in zip(wanted[key], values, strict=True):
+            dense[index] = value
+        for index in across_pixels.get(tile, ()):
+            across_values[tile, index] = dense[index]
+        for point in inner.get(tile, ()):
+            index = (tops[point] & last) * TILE_SIZE + (lefts[point] & last)
+            top_left = dense[index]
+            bottom_left = dense[index + TILE_SIZE]
+            fraction_x = fractions_x[point]
+            upper = top_left + (dense[index + 1] - top_left) * fraction_x
+            lower = (
+                bottom_left + (dense[index + TILE_SIZE + 1] - bottom_left) * fraction_x
+            )
+            elevations[point] = upper + (lower - upper) * fractions_y[point]
+    for point in across:
+        top_left, top_right, bottom_left, bottom_right = (
+            across_values.get(pixel, math.nan)
+            for pixel in _corner_pixels(lefts[point], tops[point], zoom)
+        )
+        upper = top_left + (top_right - top_left) * fractions_x[point]
+        lower = bottom_left + (bottom_right - bottom_left) * fractions_x[point]
+        elevations[point] = upper + (lower - upper) * fractions_y[point]
+    return elevations, len(wanted), len(wanted) - len(answered)
 
 
-def _rounded(path: FlightPath) -> list[Coordinate]:
-    return [
+def _rounded(path: FlightPath) -> Iterable[Coordinate]:
+    return (
         (round(point.lat, COORDINATE_DECIMALS), round(point.lon, COORDINATE_DECIMALS))
         for point in path
-    ]
+    )
 
 
 def sample_path_elevations(
     paths: Mapping[int, FlightPath], source: TileSource
-) -> dict[int, dict[Coordinate, float]]:
+) -> dict[int, PointElevations]:
     """The ground under every point of the given paths, keyed like them.
 
-    Each path gets the elevations in metres of its points, by the
-    coordinate as the exporter rounds it, which is what its segment rows
-    carry. A point the tiles do not cover is left out, and so is a path
-    none of whose points they cover. Logs one summary, and one warning when
-    tiles were missing; never raises for a tile it could not get.
+    Each path gets the elevations in metres of its points, in their order,
+    at the coordinate as the exporter rounds it, which is what its segment
+    rows carry. A point the tiles do not cover is NaN, and a path none of
+    whose points they cover is left out. Logs one summary, and one warning
+    when tiles were missing; never raises for a tile it could not get.
     """
     started = time.monotonic()
-    rounded = {index: _rounded(path) for index, path in paths.items()}
-    everything = {coordinate for points in rounded.values() for coordinate in points}
     try:
-        elevations, tiles, missing = sample_elevations(everything, source)
+        elevations, tiles, missing = sample_elevations(
+            (coordinate for path in paths.values() for coordinate in _rounded(path)),
+            source,
+        )
     except DecodeFailedError as e:
         logger.warning(
             "Terrain: the elevation tiles could not be decoded (%s); every "
@@ -551,17 +655,20 @@ def sample_path_elevations(
             e,
         )
         return {}
-    by_path: dict[int, dict[Coordinate, float]] = {}
+    by_path: dict[int, PointElevations] = {}
     uncovered = 0
-    for index, points in rounded.items():
-        own = {point: elevations[point] for point in points if point in elevations}
-        if len(own) < len(set(points)):
+    offset = 0
+    for index, path in paths.items():
+        own = elevations[offset : offset + len(path)]
+        offset += len(path)
+        gaps = sum(map(math.isnan, own))
+        if gaps:
             uncovered += 1
-        if own:
+        if gaps < len(own):
             by_path[index] = own
     logger.info(
-        "  Sampled the ground under %s position(s) from %d elevation tile(s) in %.1f s",
-        f"{len(everything):,}",
+        "  Sampled the ground under %s point(s) from %d elevation tile(s) in %.1f s",
+        f"{len(elevations):,}",
         tiles,
         time.monotonic() - started,
     )
@@ -574,6 +681,21 @@ def sample_path_elevations(
             uncovered,
         )
     return by_path
+
+
+def elevations_by_coordinate(
+    path: FlightPath, elevations: PointElevations
+) -> dict[Coordinate, float]:
+    """The elevations of ``sample_path_elevations`` by rounded coordinate.
+
+    What ``ground_profile_ft`` looks the rows of the path up in; the points
+    the tiles do not cover are left out.
+    """
+    return {
+        coordinate: elevation
+        for coordinate, elevation in zip(_rounded(path), elevations, strict=True)
+        if not math.isnan(elevation)
+    }
 
 
 # --- The ground of a flight ---------------------------------------------

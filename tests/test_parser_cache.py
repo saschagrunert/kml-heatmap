@@ -24,14 +24,21 @@ from kml_heatmap.parser_cache import (
     prune_stale_cache_entries,
     save_to_cache,
 )
-from kml_heatmap.types import TrackPoint
+from kml_heatmap.types import PathMetadata, TrackPoint
 
 SHARED = TrackPoint(50.0, 8.5, 300.0, 1000.5)
 COORDS = [SHARED, TrackPoint(51.0, 9.5, None, None)]
 # The path point is the very object that sits in the coordinate list, as the
 # parsers build it
 PATHS = [[SHARED]]
-METADATA = [{"filename": "test.kml", "start_point": [50.0, 8.5, 300.0], "year": 2025}]
+METADATA: list[PathMetadata] = [
+    {
+        "filename": "test.kml",
+        "start_point": [50.0, 8.5, 300.0],
+        "airport_name": "",
+        "year": 2025,
+    }
+]
 DAY = 24 * 3600
 
 
@@ -101,6 +108,7 @@ class TestGetCacheKey:
         kml.write_bytes(b"<kml/>")
         cache_dir = tmp_path / "cache"
         cache_path, _ = get_cache_key(str(kml), cache_dir=cache_dir)
+        assert cache_path is not None
         save_to_cache(cache_path, COORDS, PATHS, METADATA)
         assert get_cache_key(str(kml), cache_dir=cache_dir) == (cache_path, True)
 
@@ -160,6 +168,7 @@ class TestGetCacheKey:
             second, _ = get_cache_key(str(kml), cache_dir=cache_dir)
 
         assert second != first
+        assert second is not None
         assert "_0badc0de_" in second.name
 
     def test_airport_database_change_invalidates_key(self, tmp_path):
@@ -176,6 +185,7 @@ class TestGetCacheKey:
             database.write_text("ident,name\nEDDF,Frankfurt\n")
             with_other_db, _ = get_cache_key(str(kml), cache_dir=cache_dir)
 
+        assert without_db is not None
         assert without_db.name.endswith("_nodb.json")
         assert len({without_db, with_db, with_other_db}) == 3
 
@@ -347,6 +357,7 @@ class TestSaveAndLoad:
         raw = json.loads(cache_path.read_text())
         assert raw["path_groups"] == [[0, [52.0, 10.0, 100.0, None]]]
         loaded = load_cached_parse(cache_path)
+        assert loaded is not None
         assert loaded[1] == [[SHARED, extra]]
 
     def test_version_mismatch_is_rejected(self, tmp_path):
@@ -397,7 +408,9 @@ class TestSaveAndLoad:
         cache_path = tmp_path / "cache.json"
         warnings = [(logging.WARNING, "a.kml: 2 line(s) without usable altitudes")]
         save_to_cache(cache_path, COORDS, PATHS, METADATA, warnings)
-        assert load_cached_parse(cache_path).warnings == warnings
+        loaded = load_cached_parse(cache_path)
+        assert loaded is not None
+        assert loaded.warnings == warnings
 
     def test_entry_without_warnings_is_rejected(self, tmp_path):
         cache_path = tmp_path / "cache.json"
