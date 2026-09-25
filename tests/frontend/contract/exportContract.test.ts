@@ -103,10 +103,16 @@ function isPathInfo(value: unknown): value is PathInfo {
   if (!isInteger(value["year"])) return false;
   // The start, the end and the segment count come from the segments
   if (REMOVED_PATH_INFO_KEYS.some((key) => key in value)) return false;
-  // The altitude range is written when at least one point has an altitude
+  // The altitude range and the climb are written together, whenever at
+  // least one point has an altitude: the frontend takes the range and the
+  // gain of the statistics from them and has no fallback of its own
   const minAltitude = value["min_altitude_ft"];
   const maxAltitude = value["max_altitude_ft"];
-  if ((minAltitude === undefined) !== (maxAltitude === undefined)) return false;
+  const gain = value["altitude_gain_ft"];
+  const written = [minAltitude, maxAltitude, gain].filter(
+    (field) => field !== undefined,
+  ).length;
+  if (written !== 0 && written !== 3) return false;
   if (
     !optional(minAltitude, isFiniteNumber) ||
     !optional(maxAltitude, isFiniteNumber) ||
@@ -115,7 +121,6 @@ function isPathInfo(value: unknown): value is PathInfo {
     return false;
   }
   // The climb, from the unrounded altitudes; never negative
-  const gain = value["altitude_gain_ft"];
   if (!optional(gain, isFiniteNumber) || (gain !== undefined && gain < 0)) {
     return false;
   }
@@ -198,11 +203,26 @@ function isRawYearData(value: unknown): value is RawYearData {
   return true;
 }
 
+/**
+ * The ICAO code of an airport's name, which the exporter writes where the
+ * name holds one (airport_icao_code in kml_heatmap/airport_lookup.py): four
+ * letters of a region that has airport codes, standing as a word of the name
+ */
+function isAirportCode(code: unknown, name: string): boolean {
+  return (
+    isString(code) &&
+    /^[ABCDEFGHKLMNOPRSTUVWYZ][A-Z]{3}$/.test(code) &&
+    new RegExp(`\\b${code}\\b`).test(name)
+  );
+}
+
 function isAirport(value: unknown): value is Airport {
   return (
     isRecord(value) &&
     isString(value["name"]) &&
     isCoordinatePair([value["lat"], value["lon"]]) &&
+    (value["code"] === undefined ||
+      isAirportCode(value["code"], value["name"])) &&
     optional(value["country"], isString) &&
     // The frontend derives the count from the active filter, so an exported
     // one would only ever contradict what the panel shows
@@ -324,9 +344,12 @@ const sampleAirports = {
       name: "EDDF Frankfurt",
       lat: 50.03,
       lon: 8.57,
+      code: "EDDF",
       country: "DE",
     },
-    { name: "EDDM Munich", lat: 48.35, lon: 11.79 },
+    { name: "EDDM Munich", lat: 48.35, lon: 11.79, code: "EDDM" },
+    // A name without a code has none
+    { name: "Grass Strip Oppin", lat: 51.5, lon: 12.1 },
   ],
 };
 
@@ -427,6 +450,18 @@ describe("export contract (inline new-format sample)", () => {
     );
   });
 
+  it("takes the code of an airport only from its own name", () => {
+    const [frankfurt] = sampleAirports.airports;
+    for (const code of ["EDDM", "eddf", "EDD", 4, "", "JDDF"]) {
+      expect(
+        isAirportsFile({ airports: [{ ...frankfurt, code }] }),
+        String(code),
+      ).toBe(false);
+    }
+    const { code: _code, ...withoutCode } = frankfurt!;
+    expect(isAirportsFile({ airports: [withoutCode] })).toBe(true);
+  });
+
   it("accepts a valid per-year data.json", () => {
     const parsed = parseDataFile(serialize(sampleYear2025));
     expect(isRawYearData(parsed)).toBe(true);
@@ -515,10 +550,13 @@ describe("export contract (inline new-format sample)", () => {
     expect(isPathInfo({ ...full, min_altitude_ft: null })).toBe(false);
   });
 
-  it("takes the altitude gain as optional, but only as a climb", () => {
+  it("requires the altitude gain with the altitude range, as a climb", () => {
     const [full] = sampleYear2025.path_info;
+    // The frontend has no estimate of its own to fall back on (regression)
     const { altitude_gain_ft: _gain, ...withoutGain } = full!;
-    expect(isPathInfo(withoutGain)).toBe(true);
+    expect(isPathInfo(withoutGain)).toBe(false);
+    const { min_altitude_ft: _min, max_altitude_ft: _max, ...gainOnly } = full!;
+    expect(isPathInfo(gainOnly)).toBe(false);
     expect(isPathInfo({ ...full, altitude_gain_ft: 0 })).toBe(true);
     expect(isPathInfo({ ...full, altitude_gain_ft: -1 })).toBe(false);
     expect(isPathInfo({ ...full, altitude_gain_ft: null })).toBe(false);
@@ -597,6 +635,14 @@ describe("export contract (docs/data)", () => {
       readFileSync(join(DATA_DIR, "airports.json"), "utf8"),
     );
     expect(isAirportsFile(parsed)).toBe(true);
+    // A name that leads with a code has it written out: the page shows the
+    // exported code and has no way of its own to find it
+    for (const airport of (parsed as { airports: Airport[] }).airports) {
+      const leading = /^([ABCDEFGHKLMNOPRSTUVWYZ][A-Z]{3})\b/.exec(
+        airport.name,
+      )?.[1];
+      if (leading) expect(airport.code, airport.name).toBe(leading);
+    }
   });
 
   it.skipIf(!available)(

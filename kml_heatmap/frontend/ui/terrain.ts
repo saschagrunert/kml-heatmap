@@ -19,20 +19,23 @@
 import type { Map as MapLibreMap } from "maplibre-gl";
 import type { MapApp } from "../mapApp";
 import {
-  EXAGGERATION_STATE,
   followsLevel,
   liftExaggeration,
   ribbonId,
   switchesExaggeration,
   TERRAIN_TILE_MAX_ZOOM,
+  TERRAIN_TILE_SIZE_PX,
 } from "../calculations/lift";
-import { MAP_SOURCES } from "../utils/constants";
+import { EXAGGERATION_STATE } from "../calculations/ribbonPaint";
+import { MAP_LAYERS, MAP_SOURCES } from "../utils/constants";
 import {
   cssVar,
+  hasLostContext,
   isReplayCameraMove,
   whenContextRestored,
 } from "../utils/mapHelpers";
 import { aboveGround } from "./satellite";
+import { PATH_RIBBON_SOURCES, RIBBON_SOURCES } from "./reliefState";
 
 const TERRAIN_TILE_URL =
   "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png";
@@ -43,15 +46,6 @@ const TERRAIN_TILE_URL =
  * drawn, and belongs with the base map rather than with the app's layers.
  */
 export const HILLSHADE_LAYER = "terrain-hillshade";
-
-/** The ribbons of the 3D view, which stand on the relief (MAP_LAYERS) */
-const RIBBON_LAYERS = [
-  MAP_SOURCES.pathsAltitudeRibbons,
-  MAP_SOURCES.pathsAirspeedRibbons,
-  MAP_SOURCES.pathsAltitudeSelectedRibbons,
-  MAP_SOURCES.pathsAirspeedSelectedRibbons,
-  MAP_SOURCES.replayTrailRibbons,
-];
 
 /**
  * Switch the relief on and off with terrainActive, its exaggeration with
@@ -83,6 +77,7 @@ export function followTerrain(app: MapApp): void {
     const signal = app.signal;
     if (signal.aborted) return;
     const settle = settleRibbons(app, map, signal);
+    const labels = thinFarLabels(app, map);
     const ribbons = exaggerateRibbons(app, map, signal);
     // Onto or off the relief the ribbons stand on other ground; another
     // level of it they stand on already (see ribbonHeights), and take its
@@ -90,14 +85,15 @@ export function followTerrain(app: MapApp): void {
     // know by an id (see followsLevel), which wait out of sight for their
     // new cut then
     app.store.subscribe("terrainActive", () => {
-      settle();
+      settle.start();
       apply();
     });
     app.store.subscribe("reliefLevel", (level) => {
-      if (!ribbons(level)) settle();
+      if (!ribbons(level)) settle.start();
       apply();
     });
     app.store.subscribe("reliefShaded", apply);
+    app.store.subscribe("terrainActive", labels);
     // MapLibre restores the relief with the style after a lost WebGL
     // context, but some of what it draws onto it stays black until the
     // relief is built anew
@@ -105,6 +101,7 @@ export function followTerrain(app: MapApp): void {
       if (signal.aborted) return;
       map.setTerrain(null);
       ribbons(null);
+      settle.restyle();
       apply();
     });
     // A move ends on ground whose elevation tiles land after it: the map
@@ -118,11 +115,15 @@ export function followTerrain(app: MapApp): void {
     // style.
     const moved = map.on("moveend", (event) => {
       if (map.getTerrain() && !isReplayCameraMove(event)) map.fire("terrain");
+      labels();
     });
     // A new base style drops the shading, which is none of the app's layers
-    // for `withDataLayers` to carry; it goes back where it belongs in it
+    // for `withDataLayers` to carry; it goes back where it belongs in it.
+    // Its labels come with the zoom ranges of the style, which the far
+    // labels of a tilted 3D view are left out of anew.
     const styled = map.on("styledata", () => {
       if (app.reliefShaded && !map.getLayer(HILLSHADE_LAYER)) apply();
+      labels();
     });
     // For as long as the app lives, like its other map events
     signal.addEventListener("abort", () => {
@@ -130,7 +131,7 @@ export function followTerrain(app: MapApp): void {
       styled.unsubscribe();
     });
     // The layer manager may have switched it on already, as it loaded this
-    if (app.terrainActive) settle();
+    if (app.terrainActive) settle.start();
     apply();
   });
 }
@@ -142,7 +143,7 @@ function addSource(map: MapLibreMap): void {
     type: "raster-dem",
     tiles: [TERRAIN_TILE_URL],
     encoding: "terrarium",
-    tileSize: 256,
+    tileSize: TERRAIN_TILE_SIZE_PX,
     maxzoom: TERRAIN_TILE_MAX_ZOOM,
     attribution:
       'Elevation: <a href="https://registry.opendata.aws/terrain-tiles/">Terrain Tiles</a> (Mapzen and others)',
@@ -157,6 +158,15 @@ function addSource(map: MapLibreMap): void {
  * and every layer of the app. Its colours are the stylesheet's
  * (--terrain-*), subtle on the dark map, so the heat and the flights stay
  * what reads.
+ *
+ * It shares its elevation tiles with the relief. MapLibre draws the relief
+ * from tiles it takes for twice as large as the source says (512 px), so
+ * in the 3D view the shading is a level coarser than on the globe, and the
+ * map warns of the shared source in the console once per session. A second
+ * source of the same tiles would shade finer, but asks for other tiles: a
+ * session into the 3D view and two levels in and out loaded 89 elevation
+ * tiles in 130 requests instead of 41 in 67, each decoded in the worker,
+ * for a shading that is meant to stay in the background.
  */
 function shade(map: MapLibreMap, shown: boolean): void {
   if (map.getLayer(HILLSHADE_LAYER)) {
@@ -193,6 +203,19 @@ function loading(map: MapLibreMap, ids: readonly string[]): boolean {
 }
 
 /**
+ * The sources of ribbons whose tiles are waited for: all of them, but the
+ * replay's trail while the replay plays. That writes the trail anew in
+ * every frame, so its tiles are never all loaded: the ribbons stayed out
+ * of sight for the whole SETTLE_MAX_MS at every change of the ground, and
+ * the cuts of the levels before were never let go of (see
+ * exaggerateRibbons). The trail is cut for the new level in the frames
+ * that follow the change anyway.
+ */
+function awaitedRibbons(app: MapApp): readonly string[] {
+  return app.replayState.playing ? PATH_RIBBON_SOURCES : RIBBON_SOURCES;
+}
+
+/**
  * What gives the ribbons cut for another relief level the exaggeration of
  * the level the map is drawn for, as the store moves to the level `level`,
  * and tells whether all the ribbons the map may still draw stay on the
@@ -216,9 +239,7 @@ function exaggerateRibbons(
 ): (level: number | null) => boolean {
   const cutOf = (level: number): { level: number; id: number | null } => ({
     level,
-    id: switchesExaggeration(level)
-      ? ribbonId(level, app.layerManager.ribbonEpoch)
-      : null,
+    id: switchesExaggeration(level) ? ribbonId(level, app.relief.epoch) : null,
   });
   /** The cuts the map may draw: their level, and their id or null */
   let cuts = [cutOf(app.reliefLevel)];
@@ -230,7 +251,7 @@ function exaggerateRibbons(
       if (id === null) continue;
       const own = liftExaggeration(level) === exaggeration;
       if (own ? !given.has(id) : given.get(id) === exaggeration) continue;
-      for (const source of RIBBON_LAYERS) {
+      for (const source of RIBBON_SOURCES) {
         if (!map.getSource(source)) continue;
         if (own) {
           map.removeFeatureState({ source, id }, EXAGGERATION_STATE);
@@ -246,7 +267,7 @@ function exaggerateRibbons(
     }
   };
   const landed = (): void => {
-    if (loading(map, RIBBON_LAYERS)) return;
+    if (loading(map, awaitedRibbons(app))) return;
     map.off("render", landed);
     cuts = [cutOf(app.reliefLevel)];
     given.clear();
@@ -280,36 +301,44 @@ const SETTLE_MAX_MS = 3000;
 /**
  * What hides the ribbons, the replay's trail too, until the map has drawn
  * them cut on their new ground and the relief under them, or for
- * SETTLE_MAX_MS at most: the tiles of a `setData` land one by one, and the
- * elevation tiles after the relief is switched, so for a while some ribbons
- * would stand on the ground of the other view. Asked after every frame,
- * since the relief asks for its tiles as it is drawn; not on `idle`, which
- * waits for the base map and its labels as well.
+ * SETTLE_MAX_MS at most (`start`): the tiles of a `setData` land one by
+ * one, and the elevation tiles after the relief is switched, so for a
+ * while some ribbons would stand on the ground of the other view. Asked
+ * after every frame, since the relief asks for its tiles as it is drawn;
+ * not on `idle`, which waits for the base map and its labels as well.
+ * `restyle` gives the trail the opacity it has now again, to a style the
+ * map has built anew after a lost WebGL context: MapLibre builds it from
+ * the style at the loss, whose trail may have been hidden then.
  */
 function settleRibbons(
   app: MapApp,
   map: MapLibreMap,
   signal: AbortSignal,
-): () => void {
+): { start: () => void; restyle: () => void } {
   const trail = MAP_SOURCES.replayTrailRibbons;
   const trailOpacity = map.getPaintProperty(
     trail,
     "fill-extrusion-opacity",
   ) as number;
-  const show = (shown: number): void => {
-    app.layerManager.ribbonsShown = shown;
-    app.layerManager.restyle();
+  const restyle = (): void => {
+    // Without its context the map has no style to write to; the restore
+    // calls this again
+    if (hasLostContext(map)) return;
     map.setPaintProperty(
       trail,
       "fill-extrusion-opacity",
-      shown ? trailOpacity : 0,
+      app.relief.ribbonsShown ? trailOpacity : 0,
     );
+  };
+  const show = (shown: boolean): void => {
+    app.relief.showRibbons(shown);
+    restyle();
   };
   let timer: ReturnType<typeof setTimeout> | undefined;
   const done = (): void => {
     clearTimeout(timer);
     map.off("render", settled);
-    show(1);
+    show(true);
   };
   // A map the app has let go of is waited on no longer
   signal.addEventListener("abort", () => {
@@ -317,13 +346,65 @@ function settleRibbons(
     map.off("render", settled);
   });
   const settled = (): void => {
-    if (!loading(map, [...RIBBON_LAYERS, MAP_SOURCES.terrain])) done();
+    if (!loading(map, [...awaitedRibbons(app), MAP_SOURCES.terrain])) done();
   };
-  return () => {
-    if (app.layerManager.ribbonsShown) map.on("render", settled);
+  const start = (): void => {
+    if (app.relief.ribbonsShown) map.on("render", settled);
     // Another change of the ground starts the wait anew
     clearTimeout(timer);
     timer = setTimeout(done, SETTLE_MAX_MS);
-    show(0);
+    show(false);
+  };
+  return { start, restyle };
+}
+
+/**
+ * The tilt of the 3D view from which the far labels of the base map are
+ * left out (see thinFarLabels): the view's own is 50 degrees
+ */
+const THIN_LABELS_PITCH = 45;
+
+/**
+ * How many zoom levels coarser than the map's zoom the tiles are whose
+ * labels a tilted 3D view still draws (see thinFarLabels)
+ */
+const LABEL_TILE_LEVELS = 1;
+
+/** The app's own layers, which keep their zoom ranges */
+const APP_LAYERS: ReadonlySet<string> = new Set(Object.values(MAP_LAYERS));
+
+/**
+ * What leaves the labels of the base map out of its far tiles while the
+ * relief is drawn under a tilted map; call it as the map comes to rest or
+ * its style changes. Towards the horizon the map draws ever coarser tiles,
+ * and their labels stood upright at full size over the fog: at zoom 6.5 and
+ * a tilt of 70 degrees over the Alps, the names of Sudan, Chad and Lagos
+ * floated along the top of the view. MapLibre has no expression for the
+ * distance from the middle of the view, and a filter by the distance to a
+ * point would lay every tile out anew at every rest of the map. The zoom of
+ * a tile says the same in a tilted view: every label layer of the base
+ * style starts at most LABEL_TILE_LEVELS levels below the map's zoom, and
+ * MapLibre leaves a layer out of every tile below its start. The ranges
+ * change only as the map's whole zoom level does, which lays the base map's
+ * tiles out once; the ranges of the style come back as the map lies flat
+ * or leaves the relief.
+ */
+function thinFarLabels(app: MapApp, map: MapLibreMap): () => void {
+  /** The start of every label layer as the style has it */
+  const own = new WeakMap<object, number>();
+  return () => {
+    const start =
+      app.terrainActive && map.getPitch() >= THIN_LABELS_PITCH
+        ? Math.floor(map.getZoom()) - LABEL_TILE_LEVELS
+        : null;
+    for (const id of map.getLayersOrder()) {
+      if (APP_LAYERS.has(id)) continue;
+      const layer = map.getLayer(id);
+      if (layer?.type !== "symbol") continue;
+      if (!own.has(layer)) own.set(layer, layer.minzoom ?? 0);
+      const minzoom = Math.max(own.get(layer)!, start ?? 0);
+      if ((layer.minzoom ?? 0) === minzoom) continue;
+      map.setLayerZoomRange(id, minzoom, layer.maxzoom ?? 24);
+    }
   };
 }

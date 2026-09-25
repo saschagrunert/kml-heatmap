@@ -6,7 +6,7 @@ import {
   airportLabelLayer,
   airportLabelSize,
   chipImage,
-  icaoCode,
+  NO_CODE_LABEL,
   setAirportLabelHover,
 } from "../../../../kml_heatmap/frontend/ui/airportLabels";
 import {
@@ -20,18 +20,6 @@ import { createMapLibreMock } from "../../testHelpers";
 describe("airport labels", () => {
   afterEach(() => resetMapLibreMock());
 
-  describe("icaoCode", () => {
-    it("takes the four capitals of the name", () => {
-      expect(icaoCode("Frankfurt EDDF")).toBe("EDDF");
-      expect(icaoCode("EDAQ Halle-Oppin")).toBe("EDAQ");
-    });
-
-    it("falls back to APT for a name without one", () => {
-      expect(icaoCode("Small Airfield 123")).toBe("APT");
-      expect(icaoCode("")).toBe("APT");
-    });
-  });
-
   describe("airportLabelSize", () => {
     /** The size the step expression gives at a zoom */
     function sizeAt(expression: unknown[], zoom: number): number {
@@ -44,12 +32,14 @@ describe("airport labels", () => {
       return size;
     }
 
-    it("grows with the markers, from 10 to 13 pixels", () => {
+    it("grows with the markers, from 11 to 13 pixels", () => {
       const size = airportLabelSize() as unknown[];
 
       expect(size.slice(0, 2)).toEqual(["step", ["zoom"]]);
-      expect(sizeAt(size, 4)).toBe(10);
-      expect(sizeAt(size, 5)).toBe(10.5);
+      // Never under the page's smallest text (--text-xs), where 10 and
+      // 10.5 px were off its type scale (regression)
+      expect(sizeAt(size, 4)).toBe(11);
+      expect(sizeAt(size, 5)).toBe(11);
       expect(sizeAt(size, 7)).toBe(11);
       expect(sizeAt(size, 9)).toBe(12);
       expect(sizeAt(size, 13)).toBe(13);
@@ -100,8 +90,8 @@ describe("airport labels", () => {
 
   describe("airportLabelFeatures", () => {
     const airports = [
-      { name: "EDDF Frankfurt", lat: 50.1, lon: 8.67 },
-      { name: "EDDM Munich", lat: 48.35, lon: 11.78 },
+      { name: "EDDF Frankfurt", lat: 50.1, lon: 8.67, code: "EDDF" },
+      { name: "EDDM Munich", lat: 48.35, lon: 11.78, code: "EDDM" },
     ];
 
     it("makes a point per airport, longitude first, with what places it", () => {
@@ -134,6 +124,28 @@ describe("airport labels", () => {
           geometry: { type: "Point", coordinates: [11.78, 48.35] },
         },
       ]);
+    });
+
+    it("draws the code the export wrote, not one read from the name (regression)", () => {
+      // Four capitals in the name used to be taken for the code; the export
+      // knows better (airport_icao_code in kml_heatmap/airport_lookup.py)
+      const labels = airportLabelFeatures(
+        [
+          { name: "Flugplatz EDAQ Halle", lat: 51.5, lon: 12.1, code: "EDAQ" },
+          { name: "JUNE Fly-in Meadow", lat: 51.6, lon: 12.2 },
+          { name: "Grass Strip Oppin", lat: 51.7, lon: 12.3 },
+        ],
+        {},
+        null,
+        null,
+      );
+
+      expect(labels.features.map((f) => f.properties.icao)).toEqual([
+        "EDAQ",
+        NO_CODE_LABEL,
+        NO_CODE_LABEL,
+      ]);
+      expect(NO_CODE_LABEL).toBe("APT");
     });
 
     it("leaves out the airports that are not shown", () => {

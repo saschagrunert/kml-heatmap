@@ -122,7 +122,7 @@ function ribbonsSettled(page: Page): Promise<boolean> {
     const app = window.mapApp!;
     const map = app.map!;
     return (
-      app.layerManager.ribbonsShown === 1 &&
+      app.relief.ribbonsShown === 1 &&
       Object.keys(map.getStyle().sources)
         .filter((id) => id.endsWith("-3d"))
         .every((id) => map.isSourceLoaded(id))
@@ -286,8 +286,11 @@ test.describe("Map orientation", () => {
     // One after the other in one worker, not side by side: a frame of the
     // relief takes seconds in software WebGL, and with two of them drawn
     // at once besides the other specs of the run, a step took as long as
-    // their waits allow
-    test.describe.configure({ mode: "default" });
+    // their waits allow. No retry: a test that passes only on its retry
+    // fails the run anyway (failOnFlakyTests in playwright.config.ts), so a
+    // retry would only tell a flaky failure from a steady one, and here an
+    // attempt takes minutes.
+    test.describe.configure({ mode: "default", retries: 0 });
 
     test("the 3D view draws the relief, the flights on it stay under the pointer, and the globe only shades it", async ({
       page,
@@ -384,6 +387,43 @@ test.describe("Map orientation", () => {
       expect(
         await page.evaluate(() => window.mapApp!.store.get("terrainActive")),
       ).toBe(false);
+    });
+
+    test.describe("with motion", () => {
+      // Before the page loads, as in replay.spec.ts: the chase view is off
+      // with reduced motion, which the suite asks for
+      test.use({ reducedMotion: "no-preference" });
+
+      test("a chase over the relief draws the trail up to the airplane", async ({
+        page,
+      }) => {
+        test.setTimeout(RELIEF_TEST_TIMEOUT_MS);
+        const at = await findSegmentFarFromAirports(page);
+        expect(at).not.toBeNull();
+        await enterRelief(page, [at!.coord[0]!, at!.coord[1]!] as const);
+        await activateReplay(page);
+        await page.evaluate(() => {
+          const state = window.mapApp!.replayState;
+          window.mapApp!.seekReplay(String(Math.floor(state.maxTime / 2)));
+        });
+        const chase = page.locator("#replay-chase-btn");
+        await chase.click();
+        await reliefExpect(chase).toHaveAttribute("aria-pressed", "true");
+        // The camera looks at the airplane up in the air, above the highest
+        // point of the relief: MapLibre left the tiles of the trail under
+        // it out of the view, and no trail was drawn near the airplane
+        // (see VENDOR_PATCHES in scripts/vendor.js)
+        await reliefExpect
+          .poll(() =>
+            page.evaluate(
+              () =>
+                window.mapApp!.map!.queryRenderedFeatures({
+                  layers: ["replay-trail-3d"],
+                }).length,
+            ),
+          )
+          .toBeGreaterThan(0);
+      });
     });
 
     test.describe("on a slope", () => {

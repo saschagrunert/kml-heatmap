@@ -2,28 +2,21 @@ import { describe, it, expect } from "vitest";
 import {
   filterPaths,
   groundLevelsFt,
-  collectAirports,
   aggregateAircraft,
+  altitudeRangeFt,
   filterSegmentsByPaths,
   calculateTotalDistance,
-  calculateAltitudeStats,
-  calculateSpeedStats,
-  calculateLongestFlight,
-  calculateFilteredStatistics,
   buildSegmentRanges,
   perPathSeconds,
   segmentRangesFor,
   segmentsForPathIds,
 } from "../../../../kml_heatmap/frontend/calculations/statistics";
-import {
-  FEET_TO_METERS,
-  METERS_TO_FEET,
-} from "../../../../kml_heatmap/frontend/utils/constants";
+import { METERS_TO_FEET } from "../../../../kml_heatmap/frontend/utils/constants";
 import type {
   PathInfo,
   PathSegment,
 } from "../../../../kml_heatmap/frontend/types";
-import { createSegment } from "../../testHelpers";
+import { createSegment, segmentOf } from "../../testHelpers";
 
 const FT = (meters: number): number => meters * METERS_TO_FEET;
 
@@ -159,31 +152,6 @@ describe("statistics calculations", () => {
     });
   });
 
-  describe("collectAirports", () => {
-    it("collects unique airports", () => {
-      const airports = collectAirports(mockPathInfo);
-      expect([...airports].sort()).toEqual(["EDAV", "EDDF", "EDDK", "EDDM"]);
-    });
-
-    it("handles paths without airports and partial airports", () => {
-      expect(collectAirports([{ id: 1 }, { id: 2 }]).size).toBe(0);
-      expect([...collectAirports([{ id: 1, start_airport: "EDAV" }])]).toEqual([
-        "EDAV",
-      ]);
-      expect([...collectAirports([{ id: 1, end_airport: "EDDF" }])]).toEqual([
-        "EDDF",
-      ]);
-    });
-
-    it("deduplicates airports", () => {
-      const airports = collectAirports([
-        { id: 1, start_airport: "EDAV", end_airport: "EDDF" },
-        { id: 2, start_airport: "EDAV", end_airport: "EDDF" },
-      ]);
-      expect(airports.size).toBe(2);
-    });
-  });
-
   describe("aggregateAircraft", () => {
     it("aggregates aircraft with flight counts", () => {
       const aircraft = aggregateAircraft(mockPathInfo);
@@ -287,20 +255,20 @@ describe("statistics calculations", () => {
     });
 
     it("ignores segments without or with malformed coords", () => {
-      const good: PathSegment = {
+      const good = segmentOf({
         path_id: 2,
         coords: [
           [50.0, 8.0],
           [51.0, 9.0],
         ],
-      };
+      });
       const expected = calculateTotalDistance([good]);
       const segments: PathSegment[] = [
-        { path_id: 1, altitude_ft: 1000 },
-        {
+        segmentOf({ path_id: 1, altitude_ft: 1000 }),
+        segmentOf({
           path_id: 1,
           coords: [[50.0, 8.0]] as unknown as PathSegment["coords"],
-        },
+        }),
         good,
       ];
       expect(calculateTotalDistance(segments)).toBe(expected);
@@ -308,165 +276,51 @@ describe("statistics calculations", () => {
     });
   });
 
-  describe("calculateAltitudeStats", () => {
-    it("calculates altitude statistics in meters from altitude_ft", () => {
-      const stats = calculateAltitudeStats(mockSegments);
-
-      expect(stats.min).toBeCloseTo(1000, 6);
-      expect(stats.max).toBeCloseTo(2000, 6);
-      expect(stats.gain).toBeGreaterThan(0);
-    });
-
-    it("returns zeros for empty segments", () => {
-      expect(calculateAltitudeStats([])).toEqual({ min: 0, max: 0, gain: 0 });
-    });
-
-    it("calculates altitude gain correctly", () => {
-      const segments: PathSegment[] = [
-        { path_id: 1, altitude_ft: FT(1000) },
-        { path_id: 1, altitude_ft: FT(1500) }, // +500
-        { path_id: 1, altitude_ft: FT(1200) }, // descent, no gain
-        { path_id: 1, altitude_ft: FT(2000) }, // +800
-      ];
-      expect(calculateAltitudeStats(segments).gain).toBeCloseTo(1300, 6);
-    });
-
-    it("skips segments with undefined altitude", () => {
-      const segments: PathSegment[] = [
-        { path_id: 1, altitude_ft: FT(1000) },
-        { path_id: 1 },
-        { path_id: 1, altitude_ft: FT(1500) },
-      ];
-      const stats = calculateAltitudeStats(segments);
-      expect(stats.min).toBeCloseTo(1000, 6);
-      expect(stats.max).toBeCloseTo(1500, 6);
-      expect(stats.gain).toBeCloseTo(500, 6);
-    });
-
-    it("resets the altitude gain at path boundaries", () => {
-      const segments: PathSegment[] = [
-        { path_id: 1, altitude_ft: FT(1000) },
-        { path_id: 1, altitude_ft: FT(1200) }, // +200
-        { path_id: 2, altitude_ft: FT(1500) }, // new path: no carry-over
-        { path_id: 2, altitude_ft: FT(1600) }, // +100
-      ];
-      expect(calculateAltitudeStats(segments).gain).toBeCloseTo(300, 6);
-    });
-
-    it("counts no gain for a level flight on a rounding boundary (regression)", () => {
-      // Cruising at about 2,550 ft, rounded to 100 ft either way
-      const segments: PathSegment[] = Array.from({ length: 200 }, (_, i) => ({
-        path_id: 1,
-        altitude_ft: i % 2 ? 2600 : 2500,
-      }));
-      expect(calculateAltitudeStats(segments).gain).toBe(0);
-    });
-
-    it("counts a climb in full, and a descent of 200 ft as its end", () => {
-      const segments: PathSegment[] = [
-        1000, 1100, 1200, 1300, 3000, 2900, 3000, 2900, 2700, 2800, 2700, 3500,
-      ].map((altitude_ft) => ({ path_id: 1, altitude_ft }));
-      // 1,000 to 3,000 ft, then 2,700 to 3,500 ft; the flicker at the top
-      // and on the way down is noise
-      expect(
-        calculateAltitudeStats(segments).gain * METERS_TO_FEET,
-      ).toBeCloseTo(2800, 6);
-    });
-
-    it("takes the exact gain of a path over its segments", () => {
-      const stats = calculateAltitudeStats(
+  describe("altitudeRangeFt", () => {
+    it("takes the exact range of every path that has a segment", () => {
+      const range = altitudeRangeFt(
         [
-          { path_id: 1, altitude_ft: 1000 },
-          { path_id: 1, altitude_ft: 3000 },
-          { path_id: 2, altitude_ft: 1000 },
-          { path_id: 2, altitude_ft: 2000 },
+          segmentOf({ path_id: 1, altitude_ft: -1400 }),
+          segmentOf({ path_id: 1, altitude_ft: 1300 }),
+          segmentOf({ path_id: 2, altitude_ft: 3000 }),
         ],
         [
-          { id: 1, altitude_gain_ft: 2140.5 },
-          // No exact gain: counted from its segments
-          { id: 2 },
-          // No segments here: not part of the sum
-          { id: 3, altitude_gain_ft: 50000 },
-        ],
-      );
-      expect(stats.gain * METERS_TO_FEET).toBeCloseTo(3140.5, 6);
-    });
-
-    it("takes the exact gain alone for a path of several climbs (regression)", () => {
-      // Two climbs in the segments: the first one ended by the descent must
-      // not be added next to the exact gain
-      const segments: PathSegment[] = [1000, 3000, 2000, 3500].map(
-        (altitude_ft) => ({ path_id: 1, altitude_ft }),
-      );
-      const stats = calculateAltitudeStats(segments, [
-        { id: 1, altitude_gain_ft: 3400 },
-      ]);
-      expect(stats.gain * METERS_TO_FEET).toBeCloseTo(3400, 6);
-    });
-
-    it("sums the exact gain over the paths of the filter only", () => {
-      const stats = calculateFilteredStatistics({
-        pathInfo: [
-          { id: 1, year: 2024, altitude_gain_ft: 1500 },
-          { id: 2, year: 2025, altitude_gain_ft: 4000 },
-        ],
-        segments: [
-          createSegment({ path_id: 1, altitude_ft: 1000 }),
-          createSegment({ path_id: 2, altitude_ft: 1000 }),
-        ],
-        year: "2025",
-      });
-      expect(stats.total_altitude_gain_ft).toBeCloseTo(4000, 6);
-    });
-
-    it("keeps negative altitudes", () => {
-      const segments: PathSegment[] = [
-        { path_id: 1, altitude_ft: FT(-420) },
-        { path_id: 1, altitude_ft: FT(100) },
-      ];
-      const stats = calculateAltitudeStats(segments);
-      expect(stats.min).toBeCloseTo(-420, 6);
-      expect(stats.gain).toBeCloseTo(520, 6);
-    });
-
-    it("replaces a rounded extreme with the exact one on either side (regression)", () => {
-      // Rounding put the segments at 1,300 ft and -1,400 ft, past the exact
-      // 1,291.1 ft and -1,379.4 ft; keeping the wider of the two drifted
-      const stats = calculateAltitudeStats(
-        [
-          { path_id: 1, altitude_ft: -1400 },
-          { path_id: 1, altitude_ft: 1300 },
-        ],
-        [{ id: 1, min_altitude_ft: -1379.4, max_altitude_ft: 1291.1 }],
-      );
-      expect(stats.max * METERS_TO_FEET).toBeCloseTo(1291.1, 6);
-      expect(stats.min * METERS_TO_FEET).toBeCloseTo(-1379.4, 6);
-    });
-
-    it("uses the exact range only for paths that have segments", () => {
-      const stats = calculateAltitudeStats(
-        [
-          { path_id: 1, altitude_ft: 3000 },
-          { path_id: 2, altitude_ft: 900 },
-        ],
-        [
-          { id: 1, min_altitude_ft: 2950, max_altitude_ft: 3040 },
-          // Path 2 has no exact range, path 3 no segments
-          { id: 2 },
+          { id: 1, min_altitude_ft: -1379.4, max_altitude_ft: 1291.1 },
+          { id: 2, min_altitude_ft: 2950, max_altitude_ft: 3040 },
+          // No segment here: not part of the range
           { id: 3, min_altitude_ft: -500, max_altitude_ft: 41000 },
         ],
       );
-      expect(stats.max * METERS_TO_FEET).toBeCloseTo(3040, 6);
-      expect(stats.min * METERS_TO_FEET).toBeCloseTo(900, 6);
+      expect(range).toEqual({ min: -1379.4, max: 3040 });
     });
 
-    it("ignores exact ranges without any altitude to go with them", () => {
+    it("has no rounded fallback for a path without an exact range (regression)", () => {
+      // The exporter writes the range of every path with an altitude, so
+      // the segments of a path without one add nothing
       expect(
-        calculateAltitudeStats(
-          [{ path_id: 1 }],
+        altitudeRangeFt(
+          [
+            segmentOf({ path_id: 1, altitude_ft: 900 }),
+            segmentOf({ path_id: 2, altitude_ft: 3000 }),
+          ],
+          [{ id: 1 }, { id: 2, min_altitude_ft: 2950, max_altitude_ft: 3040 }],
+        ),
+      ).toEqual({ min: 2950, max: 3040 });
+      expect(
+        altitudeRangeFt(
+          [segmentOf({ path_id: 1, altitude_ft: 900 })],
+          [{ id: 1 }],
+        ),
+      ).toBeNull();
+    });
+
+    it("is null without segments", () => {
+      expect(
+        altitudeRangeFt(
+          [],
           [{ id: 1, min_altitude_ft: 1, max_altitude_ft: 2 }],
         ),
-      ).toEqual({ min: 0, max: 0, gain: 0 });
+      ).toBeNull();
     });
   });
 
@@ -474,15 +328,15 @@ describe("statistics calculations", () => {
     it("takes the first percentile of each path's altitudes", () => {
       // 200 samples: index floor(199 * 0.01) = 1, the second lowest
       const segments: PathSegment[] = [
-        { path_id: 1, altitude_ft: -1400 },
-        ...Array.from({ length: 150 }, () => ({
-          path_id: 1,
-          altitude_ft: 3000,
-        })),
-        ...Array.from({ length: 49 }, () => ({ path_id: 1, altitude_ft: 0 })),
-        { path_id: 2, altitude_ft: 500 },
-        { path_id: 2, altitude_ft: 400 },
-        { path_id: 2 },
+        segmentOf({ path_id: 1, altitude_ft: -1400 }),
+        ...Array.from({ length: 150 }, () =>
+          segmentOf({ path_id: 1, altitude_ft: 3000 }),
+        ),
+        ...Array.from({ length: 49 }, () =>
+          segmentOf({ path_id: 1, altitude_ft: 0 }),
+        ),
+        segmentOf({ path_id: 2, altitude_ft: 500 }),
+        segmentOf({ path_id: 2, altitude_ft: 400 }),
       ];
 
       expect(groundLevelsFt(segments)).toEqual(
@@ -496,387 +350,22 @@ describe("statistics calculations", () => {
 
     it("joins the samples of a path that comes back later", () => {
       const levels = groundLevelsFt([
-        { path_id: 1, altitude_ft: 900 },
-        { path_id: 2, altitude_ft: 100 },
-        { path_id: 1, altitude_ft: 700 },
+        segmentOf({ path_id: 1, altitude_ft: 900 }),
+        segmentOf({ path_id: 2, altitude_ft: 100 }),
+        segmentOf({ path_id: 1, altitude_ft: 700 }),
       ]);
       expect(levels.get(1)).toBe(700);
     });
   });
 
-  describe("calculateSpeedStats", () => {
-    it("calculates speed statistics", () => {
-      const stats = calculateSpeedStats(mockSegments);
-
-      expect(stats.max).toBe(140);
-      expect(stats.avg).toBe(130); // (120+130+125+140+135)/5
-    });
-
-    it("returns zeros for empty segments", () => {
-      expect(calculateSpeedStats([])).toEqual({ max: 0, avg: 0 });
-    });
-
-    it("filters out zero, negative and undefined speeds", () => {
-      const segments: PathSegment[] = [
-        { path_id: 1, groundspeed_knots: 0 },
-        { path_id: 1, groundspeed_knots: -10 },
-        { path_id: 1 },
-        { path_id: 1, groundspeed_knots: 100 },
-        { path_id: 1, groundspeed_knots: 200 },
-      ];
-      expect(calculateSpeedStats(segments)).toEqual({ max: 200, avg: 150 });
-    });
-  });
-
-  describe("calculateLongestFlight", () => {
-    it("returns 0 for empty segments", () => {
-      expect(calculateLongestFlight([])).toBe(0);
-    });
-
-    it("identifies the longest flight by summing its segments", () => {
-      const segments: PathSegment[] = [
-        {
-          path_id: 1,
-          coords: [
-            [50.0, 8.0],
-            [50.1, 8.1],
-          ],
-        },
-        {
-          path_id: 2,
-          coords: [
-            [50.0, 8.0],
-            [55.0, 13.0],
-          ],
-        },
-        {
-          path_id: 2,
-          coords: [
-            [55.0, 13.0],
-            [55.5, 13.5],
-          ],
-        },
-      ];
-      const path2 = calculateTotalDistance(segments.slice(1));
-      expect(calculateLongestFlight(segments)).toBeCloseTo(path2, 6);
-      expect(path2).toBeGreaterThan(100);
-    });
-  });
-
-  describe("calculateFilteredStatistics", () => {
-    it("calculates comprehensive statistics", () => {
-      const stats = calculateFilteredStatistics({
-        pathInfo: mockPathInfo,
-        segments: mockSegments,
-        year: "all",
-        aircraft: "all",
-      });
-
-      expect(stats.num_paths).toBe(4);
-      expect(stats.num_airports).toBe(4);
-      expect(stats.num_aircraft).toBe(2);
-      expect(stats.total_distance_km).toBeGreaterThan(0);
-      expect(stats.total_distance_nm).toBeCloseTo(
-        stats.total_distance_km * 0.539957,
-        2,
-      );
-      expect(stats.max_altitude_m).toBeCloseTo(2000, 6);
-      expect(stats.min_altitude_m).toBeCloseTo(1000, 6);
-      expect(stats.max_altitude_ft).toBeCloseTo(FT(2000), 6);
-      expect(stats.max_groundspeed_knots).toBe(140);
-      expect(stats.avg_groundspeed_knots).toBe(130);
-      expect(stats.total_flight_time_seconds).toBe(100);
-      expect(stats.total_flight_time_str).toBe("0h 1m");
-      // 5 segments plus the end point of each of the 4 paths they belong to
-      expect(stats.total_points).toBe(9);
-    });
-
-    it("reports a sea-level flight at 0 ft and no altitude without data", () => {
-      const pathInfo = [{ id: 1, year: 2025 }];
-      const atSeaLevel = calculateFilteredStatistics({
-        pathInfo,
-        segments: [
-          createSegment({ path_id: 1, altitude_ft: 0 }),
-          createSegment({ path_id: 1, altitude_ft: 0 }),
-        ],
-      });
-      expect(atSeaLevel.max_altitude_ft).toBe(0);
-      expect(atSeaLevel.total_altitude_gain_ft).toBe(0);
-
-      const withoutAltitude = calculateFilteredStatistics({
-        pathInfo,
-        segments: [createSegment({ path_id: 1, altitude_ft: undefined })],
-      });
-      expect(withoutAltitude.max_altitude_ft).toBeUndefined();
-      expect(withoutAltitude.total_altitude_gain_ft).toBeUndefined();
-    });
-
-    it("counts the track points behind the filtered segments", () => {
-      const stats = calculateFilteredStatistics({
-        pathInfo: [
-          { id: 1, year: 2025 },
-          { id: 2, year: 2025 },
-        ],
-        segments: [
-          { path_id: 1, altitude_ft: 1000, groundspeed_knots: 100 },
-          { path_id: 1, altitude_ft: 1000, groundspeed_knots: 100 },
-          { path_id: 2, altitude_ft: 1000, groundspeed_knots: 100 },
-        ],
-      });
-      // 3 segments plus one closing point for each of the 2 paths
-      expect(stats.total_points).toBe(5);
-    });
-
-    it("applies year filter", () => {
-      const stats = calculateFilteredStatistics({
-        pathInfo: mockPathInfo,
-        segments: mockSegments,
-        year: "2025",
-        aircraft: "all",
-      });
-
-      expect(stats.num_paths).toBe(3);
-      expect(stats.aircraft_list).toHaveLength(2);
-    });
-
-    it("applies aircraft filter", () => {
-      const stats = calculateFilteredStatistics({
-        pathInfo: mockPathInfo,
-        segments: mockSegments,
-        year: "all",
-        aircraft: "D-EAGJ",
-      });
-
-      expect(stats.num_paths).toBe(2);
-      expect(stats.num_aircraft).toBe(1);
-      expect(stats.aircraft_list[0]!.registration).toBe("D-EAGJ");
-    });
-
-    it("applies both filters", () => {
-      const stats = calculateFilteredStatistics({
-        pathInfo: mockPathInfo,
-        segments: mockSegments,
-        year: "2025",
-        aircraft: "D-EXYZ",
-      });
-
-      expect(stats.num_paths).toBe(1);
-      expect(stats.num_aircraft).toBe(1);
-    });
-
-    it("uses pre-filtered paths and segments when provided", () => {
-      const stats = calculateFilteredStatistics({
-        pathInfo: mockPathInfo,
-        segments: mockSegments,
-        year: "2023", // would match nothing
-        preFiltered: {
-          paths: [mockPathInfo[2]!],
-          segments: [mockSegments[3]!],
-        },
-      });
-
-      expect(stats.num_paths).toBe(1);
-      expect(stats.max_groundspeed_knots).toBe(140);
-    });
-
-    it("returns empty stats when no paths match", () => {
-      const stats = calculateFilteredStatistics({
-        pathInfo: mockPathInfo,
-        segments: mockSegments,
-        year: "2023",
-        aircraft: "all",
-      });
-
-      expect(stats).toEqual({
-        total_points: 0,
-        num_paths: 0,
-        num_airports: 0,
-        airport_names: [],
-        num_aircraft: 0,
-        aircraft_list: [],
-        total_distance_nm: 0,
-        total_distance_km: 0,
-      });
-    });
-
-    it("handles missing pathInfo or segments", () => {
-      const noPaths = calculateFilteredStatistics({
-        pathInfo: null as unknown as PathInfo[],
-        segments: mockSegments,
-      });
-      expect(noPaths.num_paths).toBe(0);
-
-      const noSegments = calculateFilteredStatistics({
-        pathInfo: mockPathInfo,
-        segments: null as unknown as PathSegment[],
-      });
-      expect(noSegments.total_distance_km).toBe(0);
-    });
-
-    it("computes cruise speed and most common cruise altitude above 1000 ft AGL", () => {
-      const segments: PathSegment[] = [
-        // ground level 500 ft
-        {
-          path_id: 1,
-          coords: [
-            [50.0, 8.0],
-            [50.01, 8.0],
-          ],
-          altitude_ft: 500,
-          groundspeed_knots: 30,
-          time: 0,
-        },
-        // 1400 ft AGL -> cruise
-        {
-          path_id: 1,
-          coords: [
-            [50.01, 8.0],
-            [50.1, 8.0],
-          ],
-          altitude_ft: 1900,
-          groundspeed_knots: 100,
-          time: 100,
-        },
-        // 1450 ft AGL -> cruise, same 100 ft bucket
-        {
-          path_id: 1,
-          coords: [
-            [50.1, 8.0],
-            [50.2, 8.0],
-          ],
-          altitude_ft: 1950,
-          groundspeed_knots: 100,
-          time: 200,
-        },
-      ];
-      const stats = calculateFilteredStatistics({
-        pathInfo: [{ id: 1 }],
-        segments,
-      });
-
-      expect(stats.cruise_speed_knots).toBeCloseTo(100, 6);
-      expect(stats.most_common_cruise_altitude_ft).toBe(1400);
-      expect(stats.most_common_cruise_altitude_m).toBeCloseTo(
-        1400 * FEET_TO_METERS,
-        6,
-      );
-    });
-
-    it("does not let a single altitude glitch turn the taxi into cruise (regression)", () => {
-      const seg = (altitudeFt: number, index: number): PathSegment => ({
-        path_id: 1,
-        coords: [
-          [50 + index * 0.001, 8.0],
-          [50 + (index + 1) * 0.001, 8.0],
-        ],
-        altitude_ft: altitudeFt,
-        groundspeed_knots: altitudeFt > 0 ? 110 : 15,
-      });
-      // Taxi at 0 ft, a one-sample glitch to -1,400 ft, cruise at 3,000 ft
-      const segments = [
-        ...Array.from({ length: 60 }, (_, i) => seg(0, i)),
-        seg(-1400, 60),
-        ...Array.from({ length: 60 }, (_, i) => seg(3000, 61 + i)),
-      ];
-
-      const stats = calculateFilteredStatistics({
-        pathInfo: [{ id: 1 }],
-        segments,
-      });
-
-      // Measured from the lowest sample the taxi at 15 kt was 1,400 ft AGL
-      expect(stats.cruise_speed_knots).toBeCloseTo(110, 6);
-      expect(stats.most_common_cruise_altitude_ft).toBe(3000);
-    });
-
-    it("resolves ties for the most common cruise altitude to the lowest bin", () => {
-      const seg = (altitudeFt: number, lat: number): PathSegment => ({
-        path_id: 1,
-        coords: [
-          [lat, 8.0],
-          [lat + 0.1, 8.0],
-        ],
-        altitude_ft: altitudeFt,
-        groundspeed_knots: 100,
-      });
-      const stats = calculateFilteredStatistics({
-        pathInfo: [{ id: 1 }],
-        segments: [seg(0, 50), seg(3000, 50.1), seg(2000, 50.2)],
-      });
-
-      expect(stats.most_common_cruise_altitude_ft).toBe(2000);
-    });
-
-    it("leaves cruise fields undefined without cruise segments", () => {
-      const stats = calculateFilteredStatistics({
-        pathInfo: [{ id: 1 }],
-        segments: [
-          {
-            path_id: 1,
-            coords: [
-              [50.0, 8.0],
-              [50.1, 8.0],
-            ],
-            altitude_ft: 500,
-            groundspeed_knots: 100,
-          },
-        ],
-      });
-
-      expect(stats.cruise_speed_knots).toBeUndefined();
-      expect(stats.most_common_cruise_altitude_ft).toBeUndefined();
-      expect(stats.total_flight_time_str).toBeUndefined();
-    });
-
-    it("handles large datasets without stack overflow (10k segments)", () => {
-      const largeSegments: PathSegment[] = [];
-      const largePathInfo: PathInfo[] = [];
-
-      for (let i = 0; i < 10000; i++) {
-        largeSegments.push({
-          path_id: Math.floor(i / 10),
-          coords: [
-            [50.0 + i * 0.001, 8.0 + i * 0.001],
-            [50.1 + i * 0.001, 8.1 + i * 0.001],
-          ],
-          altitude_ft: 1000 + i,
-          groundspeed_knots: 100 + (i % 50),
-          time: 1000 + i * 10,
-        });
-
-        if (i % 10 === 0) {
-          largePathInfo.push({
-            id: Math.floor(i / 10),
-            year: 2026,
-            aircraft_registration: `D-TEST${i}`,
-            start_airport: "EDDF",
-            end_airport: "EDDM",
-          });
-        }
-      }
-
-      const stats = calculateFilteredStatistics({
-        pathInfo: largePathInfo,
-        segments: largeSegments,
-        year: "all",
-        aircraft: "all",
-      });
-      expect(stats.num_paths).toBe(1000);
-      expect(stats.total_distance_km).toBeGreaterThan(0);
-      expect(stats.max_altitude_ft).toBeCloseTo(10999, 6);
-      expect(stats.max_groundspeed_knots).toBe(149);
-      expect(stats.total_flight_time_seconds).toBe(1000 * 90);
-    });
-  });
-
   describe("segment index", () => {
     const grouped: PathSegment[] = [
-      { path_id: 1, time: 0 },
-      { path_id: 1, time: 10 },
-      { path_id: 2, time: 0 },
-      { path_id: 3, time: 0 },
-      { path_id: 3, time: 5 },
-      { path_id: 3, time: 9 },
+      segmentOf({ path_id: 1, time: 0 }),
+      segmentOf({ path_id: 1, time: 10 }),
+      segmentOf({ path_id: 2, time: 0 }),
+      segmentOf({ path_id: 3, time: 0 }),
+      segmentOf({ path_id: 3, time: 5 }),
+      segmentOf({ path_id: 3, time: 9 }),
     ];
 
     it("locates every path as a slice of a grouped array", () => {
@@ -892,7 +381,11 @@ describe("statistics calculations", () => {
 
     it("refuses an array where a path comes back after another one", () => {
       expect(
-        buildSegmentRanges([{ path_id: 1 }, { path_id: 2 }, { path_id: 1 }]),
+        buildSegmentRanges([
+          segmentOf({ path_id: 1 }),
+          segmentOf({ path_id: 2 }),
+          segmentOf({ path_id: 1 }),
+        ]),
       ).toBeNull();
     });
 
@@ -919,9 +412,9 @@ describe("statistics calculations", () => {
 
     it("falls back to a filter for an array that is not grouped", () => {
       const interleaved: PathSegment[] = [
-        { path_id: 1, time: 0 },
-        { path_id: 2, time: 0 },
-        { path_id: 1, time: 10 },
+        segmentOf({ path_id: 1, time: 0 }),
+        segmentOf({ path_id: 2, time: 0 }),
+        segmentOf({ path_id: 1, time: 10 }),
       ];
 
       expect(segmentsForPathIds(interleaved, [1])).toEqual([
@@ -937,11 +430,11 @@ describe("statistics calculations", () => {
   describe("perPathSeconds", () => {
     it("measures each path from its first to its last timestamp", () => {
       const seconds = perPathSeconds([
-        { path_id: 1, time: 30 },
-        { path_id: 1, time: 0 },
-        { path_id: 1, time: 90 },
-        { path_id: 2, time: 5 },
-        { path_id: 3 },
+        segmentOf({ path_id: 1, time: 30 }),
+        segmentOf({ path_id: 1, time: 0 }),
+        segmentOf({ path_id: 1, time: 90 }),
+        segmentOf({ path_id: 2, time: 5 }),
+        segmentOf({ path_id: 3 }),
       ]);
 
       expect(seconds).toEqual(
@@ -955,10 +448,10 @@ describe("statistics calculations", () => {
     it("restricts the paths when a set is given", () => {
       const seconds = perPathSeconds(
         [
-          { path_id: 1, time: 0 },
-          { path_id: 1, time: 60 },
-          { path_id: 2, time: 0 },
-          { path_id: 2, time: 10 },
+          segmentOf({ path_id: 1, time: 0 }),
+          segmentOf({ path_id: 1, time: 60 }),
+          segmentOf({ path_id: 2, time: 0 }),
+          segmentOf({ path_id: 2, time: 10 }),
         ],
         new Set([2]),
       );

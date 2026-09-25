@@ -13,7 +13,7 @@
  */
 import type { PathSegment } from "../types";
 import { toLngLatAfter, type LngLatTuple } from "../utils/mapHelpers";
-import { smoothFlights, type SmoothedFlights } from "./lift";
+import { smoothFlights, type SmoothedFlights } from "./smoothing";
 
 /**
  * Degrees of turn per point of the curve. The ribbons of the 3D view take

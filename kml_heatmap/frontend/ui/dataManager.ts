@@ -14,6 +14,7 @@ import type {
 import type { Coordinate } from "../utils/geometry";
 import { DataLoader } from "../services/dataLoader";
 import { datasetIndex } from "../calculations/datasetIndex";
+import { segmentsForPathIds } from "../calculations/statistics";
 import { calculateAltitudeRange } from "../features/layers";
 import { heatLineFeatures } from "../calculations/heatLines";
 import { HEAT_LINES, MAP_LAYERS, MAP_SOURCES } from "../utils/constants";
@@ -30,6 +31,13 @@ import {
   heatLinesPaint,
   heatmapPaint,
 } from "./heatmapPaint";
+
+/** The points of a heat source, and the flights its heat lines are of */
+interface Heat {
+  points: readonly Coordinate[];
+  segments: PathSegment[];
+  keep: (pathId: number) => boolean;
+}
 
 /** Stand-in for `--heatmap-dimmed-opacity` when the stylesheet has none */
 const HEATMAP_DIMMED_OPACITY_FALLBACK = 0.35;
@@ -84,13 +92,30 @@ export class DataManager {
    * source, or a lost WebGL context), and for the heat lines, which are
    * worked out only once they can show (see writeHeatLines).
    */
-  private heat: {
-    points: readonly Coordinate[];
-    segments: PathSegment[];
-    keep: (pathId: number) => boolean;
+  private heat: Heat | null = null;
+  /**
+   * What the source of an isolated selection is to show, null while none
+   * is: the heatmap draws that instead of the heat source, which keeps its
+   * points (see applyHeatmapEmphasis)
+   */
+  private isolated: Heat | null = null;
+  /**
+   * The last isolated selection's heat, and what it was worked out for:
+   * isolated again, the source still holds its points
+   */
+  private isolatedFor: {
+    data: KMLDataset;
+    filter: string;
+    ids: Set<number>;
+    heat: Heat;
   } | null = null;
-  /** The points the heat source holds, to not send them a second time */
+  /**
+   * The points each heat source holds, to not send them a second time. A
+   * feature per fix is costly to hand to the worker, about 60 ms of main
+   * thread for 135000 of them on a desktop and 800 ms on a phone.
+   */
   private heatmapPoints: readonly Coordinate[] | null = null;
+  private isolatedPoints: readonly Coordinate[] | null = null;
   /** The points the heat lines source was last worked out for, if any */
   private heatLinesPoints: readonly Coordinate[] | null = null;
   /** Come to rest near the hand-over, the heat lines are worked out */
@@ -257,11 +282,19 @@ export class DataManager {
     const opacity = dimsHeatmap(this.app)
       ? dimmedHeatmapOpacity()
       : HEATMAP_OPACITY;
-    map.setPaintProperty(
-      MAP_LAYERS.heat,
-      "heatmap-opacity",
-      fadeOutToLines(opacity),
-    );
+    // One of the two heatmaps is drawn, the one of an isolated selection
+    // while there is one; at no opacity the map leaves the other out
+    const isolated = !!this.isolated;
+    for (const [id, drawn] of [
+      [MAP_LAYERS.heat, !isolated],
+      [MAP_LAYERS.heatIsolated, isolated],
+    ] as const) {
+      map.setPaintProperty(
+        id,
+        "heatmap-opacity",
+        drawn ? fadeOutToLines(opacity) : 0,
+      );
+    }
     // The lines it hands over to step back as far
     const lines = heatLineOpacities(opacity / HEATMAP_OPACITY);
     for (const [id, lineOpacity] of [
@@ -284,6 +317,7 @@ export class DataManager {
     const paint = heatmapPaint();
     for (const name of Object.keys(paint) as (keyof typeof paint)[]) {
       map.setPaintProperty(MAP_LAYERS.heat, name, paint[name]);
+      map.setPaintProperty(MAP_LAYERS.heatIsolated, name, paint[name]);
     }
     for (const [id, linePaint] of Object.entries(heatLinesPaint())) {
       if (!map.getLayer(id)) continue;
@@ -297,42 +331,49 @@ export class DataManager {
   }
 
   /**
-   * Hand the heat source its points. A hidden layer takes them as well as a
+   * Hand the heat source its points, and the source of an isolated
+   * selection its own, or none. A hidden layer takes them as well as a
    * visible one, so nothing has to wait for the layer to be shown.
    *
-   * Not every redraw changes them: a selection without isolation, or an
-   * aircraft that flew every path of the year, leaves the same points. A
-   * feature per fix is costly to hand to the worker (about 60 ms of main
-   * thread for 135000 of them), so the same points are not sent again. The
+   * Not every redraw changes them: a selection, isolated or not, or an
+   * aircraft that flew every path of the year, leaves the heat source's
+   * points as they are, and the same points are not sent again. The
    * coordinates are the dataset's own arrays, never copies, so comparing
    * them one by one by identity is both exact and cheap.
    */
-  private setHeatmapPoints(
-    points: readonly Coordinate[],
-    segments: PathSegment[],
-    keep: (pathId: number) => boolean,
-  ): void {
+  private setHeatmapPoints(heat: Heat, isolated: Heat | null): void {
     const held = this.heat?.points;
+    const points = heat.points;
     if (
       held?.length !== points.length ||
       !held.every((point, index) => point === points[index])
     ) {
-      this.heat = { points, segments, keep };
+      this.heat = heat;
     }
+    this.isolated = isolated;
+    this.applyHeatmapEmphasis();
     this.writeHeat();
   }
 
-  /** Write what the heat source is to show and does not hold yet */
+  /** Write what the heat sources are to show and do not hold yet */
   private writeHeat(): void {
+    const map = this.app.map;
     const heat = this.heat;
-    const source = this.app.map?.getSource<GeoJSONSource>(MAP_SOURCES.heat);
+    const source = map?.getSource<GeoJSONSource>(MAP_SOURCES.heat);
     if (!heat || !source || this.destroyed) return;
     this.paintHeatmap();
+    // The promise is for the worker having taken the data. It does not
+    // reject: a failure arrives as an `error` event of the map
     if (this.heatmapPoints !== heat.points) {
       this.heatmapPoints = heat.points;
-      // The promise is for the worker having taken the data. It does not
-      // reject: a failure arrives as an `error` event of the map
       void source.setData(heatmapFeatures(heat.points.map(toLngLat)));
+    }
+    const isolated = this.isolated?.points;
+    if (isolated && this.isolatedPoints !== isolated) {
+      this.isolatedPoints = isolated;
+      void map
+        ?.getSource<GeoJSONSource>(MAP_SOURCES.heatIsolated)
+        ?.setData(heatmapFeatures(isolated.map(toLngLat)));
     }
     this.writeHeatLines();
   }
@@ -350,7 +391,7 @@ export class DataManager {
    */
   private writeHeatLines(): void {
     const map = this.app.map;
-    const heat = this.heat;
+    const heat = this.isolated ?? this.heat;
     const source = map?.getSource<GeoJSONSource>(MAP_SOURCES.heatLines);
     if (!map || !source || !heat || this.heatLinesPoints === heat.points) {
       return;
@@ -395,8 +436,7 @@ export class DataManager {
     const data = await this.dataLoader.loadData(year, signal);
     if (data && !data.incomplete) {
       // The page has a whole dataset again: what failed before is over
-      for (const message of this.failures) dismissToast(message);
-      this.failures.clear();
+      this.dismissFailures();
     } else if (
       !data &&
       !this.loadErrorReported &&
@@ -412,6 +452,12 @@ export class DataManager {
   }
 
   /** Say that a load failed; an error stays until dismissed */
+  /** Take the failure toasts of loads off the screen, and no other error */
+  dismissFailures(): void {
+    for (const message of this.failures) dismissToast(message);
+    this.failures.clear();
+  }
+
   private fail(message: string, retry: ToastAction | undefined): void {
     this.failures.add(message);
     showToast(message, "error", retry);
@@ -483,33 +529,55 @@ export class DataManager {
       isolate: this.app.isolateSelection,
     };
 
-    // Filter coordinates based on active filters and isolate mode
-    let filteredCoordinates = data.coordinates;
     const selected = this.app.selectedPathIds;
-    const hasIsolation = this.app.isolateSelection && selected.size > 0;
-
     // What the year/aircraft filter keeps. A year filter over that year's own
     // file keeps every path, and then data.coordinates already is the answer.
     const view = datasetIndex(data).filter(
       this.app.selectedYear,
       this.app.selectedAircraft,
     );
-
-    // Isolation shows the selected paths the filter keeps, exactly what
-    // the colour layers draw
-    const keep = (pathId: number): boolean =>
-      hasIsolation
-        ? selected.has(pathId) && view.pathIds.has(pathId)
-        : view.pathIds.has(pathId);
-    if (hasIsolation || !view.keepsAll) {
-      filteredCoordinates = heatmapCoordinates(data.path_segments, keep);
-    }
-
+    const segments = data.path_segments;
+    const keep = (pathId: number): boolean => view.pathIds.has(pathId);
     this.setHeatmapPoints(
-      filteredCoordinates,
-      data.path_segments,
-      hasIsolation || !view.keepsAll ? keep : () => true,
+      view.keepsAll
+        ? { points: data.coordinates, segments, keep: () => true }
+        : { points: heatmapCoordinates(segments, keep), segments, keep },
+      this.app.isolateSelection && selected.size > 0
+        ? this.isolatedHeat(data, keep)
+        : null,
     );
+  }
+
+  /**
+   * The heat of the selected paths the filter keeps, exactly what the
+   * colour layers draw of an isolated selection, worked out from their
+   * segments alone; the one of before for the same selection
+   */
+  private isolatedHeat(
+    data: KMLDataset,
+    keep: (pathId: number) => boolean,
+  ): Heat {
+    const ids = new Set(this.app.selectedPathIds);
+    const filter = this.app.selectedYear + "/" + this.app.selectedAircraft;
+    const held = this.isolatedFor;
+    if (
+      held?.data === data &&
+      held.filter === filter &&
+      held.ids.size === ids.size &&
+      [...ids].every((id) => held.ids.has(id))
+    ) {
+      return held.heat;
+    }
+    const isolated = (pathId: number): boolean =>
+      ids.has(pathId) && keep(pathId);
+    const segments = data.path_segments;
+    const heat = {
+      points: heatmapCoordinates(segmentsForPathIds(segments, ids), isolated),
+      segments,
+      keep: isolated,
+    };
+    this.isolatedFor = { data, filter, ids, heat };
+    return heat;
   }
 }
 
@@ -574,7 +642,6 @@ export function heatmapCoordinates(
   for (const segment of segments) {
     if (!keep(segment.path_id)) continue;
     const coords = segment.coords;
-    if (!coords) continue;
 
     if (lastKept && segment.path_id !== lastPathId) {
       coordinates.push(lastKept[1]);

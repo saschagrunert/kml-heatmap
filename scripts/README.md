@@ -15,9 +15,10 @@ European airports.
 - Curved flight paths using quadratic Bezier curves (not straight lines)
 - Random deviations to spread data across Germany for better heatmap visualization
 - Realistic altitude profiles (climb, cruise, descend)
-- SkyDemon-style filenames (`N_REGISTRATION_TYPE.kml`) with one flight date
-  per file (a `<TimeStamp>` element) and no per-point times, so the speed
-  layer falls back to path averages
+- SkyDemon-style filenames (`N_REGISTRATION_TYPE.kml`) with the start and
+  end of the flight in a `<TimeSpan>` element and no per-point times, so the
+  speed layer falls back to path averages: the length of the path over its
+  duration, at a groundspeed of 90 to 150 kt
 
 ### Usage
 

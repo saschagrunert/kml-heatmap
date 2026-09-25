@@ -1,13 +1,19 @@
 /**
  * Stats Manager - Handles statistics panel updates
+ *
+ * Part of the lazily loaded Wrapped bundle (wrapped.ts): the app starts it
+ * the first time the panel opens (see ui/statsPanel.ts), and it follows the
+ * store from then on.
  */
 import type { MapApp } from "../mapApp";
 import type { FilteredStatistics, PathInfo, PathSegment } from "../types";
+import { segmentsForPathIds } from "../calculations/statistics";
 import {
   calculateFilteredStatistics,
-  segmentsForPathIds,
-} from "../calculations/statistics";
+  filterStatistics,
+} from "../calculations/panelStats";
 import {
+  airportCode,
   countryDisplayName,
   countryFlagSrc,
   groupByCountry,
@@ -24,9 +30,7 @@ import { icon, type IconName } from "../utils/icons";
 import { domCache } from "../utils/domCache";
 import { datasetIndex } from "../calculations/datasetIndex";
 import { watchScrollEnd, type ScrollEndWatcher } from "../utils/scrollFade";
-
-/** Panel element the statistics are rendered into */
-const PANEL_ID = "stats-panel";
+import { setStatsTitle, STATS_PANEL_ID as PANEL_ID } from "./statsPanel";
 
 /** Store keys the rendered statistics depend on */
 const STATS_KEYS = [
@@ -227,7 +231,7 @@ function airportGroups(grouped: Map<string, string[]>): string {
       "</div>" +
       '<ul class="kh-stats-list kh-stats-airport-list">';
     for (const name of airports) {
-      const airport = splitAirportName(name);
+      const airport = splitAirportName(name, airportCode(name));
       html +=
         '<li class="kh-stats-airport">' +
         (airport.code
@@ -371,12 +375,24 @@ function distanceMetrics(stats: FilteredStatistics): Metric[] {
   return metrics;
 }
 
+/**
+ * What the cruise figures are measured from: the terrain under the flights,
+ * or for a filter with a flight the export has no terrain for, the flight's
+ * own airfield (see heightsAboveGround in calculations/panelStats.ts)
+ */
+function cruiseReference(stats: FilteredStatistics): string {
+  return stats.cruise_height_above_terrain === false ? "above field" : "AGL";
+}
+
 /** Groundspeed rows, knots first and km/h underneath */
 function speedMetrics(stats: FilteredStatistics): Metric[] {
   const metrics: Metric[] = [];
   const speeds: Array<[string, number | undefined]> = [
     ["Average Groundspeed", stats.avg_groundspeed_knots],
-    ["Cruise Speed (> 1000 ft AGL)", stats.cruise_speed_knots],
+    [
+      "Cruise Speed (> 1000 ft " + cruiseReference(stats) + ")",
+      stats.cruise_speed_knots,
+    ],
     ["Max Groundspeed", stats.max_groundspeed_knots],
   ];
 
@@ -425,7 +441,7 @@ function altitudeMetrics(stats: FilteredStatistics): Metric[] {
     stats.most_common_cruise_altitude_ft > 0
   ) {
     metrics.push({
-      label: "Most Common Cruise Altitude (AGL)",
+      label: "Most Common Cruise Altitude (" + cruiseReference(stats) + ")",
       value: formatNumber(stats.most_common_cruise_altitude_ft),
       unit: "ft",
       alt: formatNumber(stats.most_common_cruise_altitude_m || 0),
@@ -444,6 +460,8 @@ export class StatsManager {
   private scrollWatcher: ScrollEndWatcher | null = null;
   /** What the last statistics were computed from; identical inputs skip it */
   private lastInputs: StatsInputs | null = null;
+  /** Stops following the store (see destroy) */
+  private readonly unsubscribe: (() => void)[];
 
   constructor(app: MapApp) {
     this.app = app;
@@ -452,13 +470,13 @@ export class StatsManager {
     // to call it. The statistics walk every segment of the filter, so they
     // are only computed for an open panel, and once per update however many
     // of the keys it changed.
-    app.store.subscribeKeys(STATS_KEYS, () => {
-      if (app.store.get("statsPanelVisible")) this.updateStatsForSelection();
+    const followData = app.store.subscribeKeys(STATS_KEYS, () => {
+      if (app.statsPanelVisible) this.updateStatsForSelection();
     });
     // The rail on desktop and the Stats tab on mobile both open this panel
     // through the same key. Opening it renders whatever changed while it was
     // closed; lastInputs skips the work when nothing did.
-    app.store.subscribe("statsPanelVisible", (visible) => {
+    const followPanel = app.store.subscribe("statsPanelVisible", (visible) => {
       if (!visible) return;
       this.updateStatsForSelection();
       // A closed rail measures zero, so whatever the panel was told about
@@ -471,6 +489,23 @@ export class StatsManager {
     // it used to end in a row sliced in half wherever the panel stopped
     const panel = domCache.get(PANEL_ID);
     if (panel) this.scrollWatcher = watchScrollEnd(panel);
+    this.unsubscribe = [followData, followPanel];
+
+    // Started by the first opening of the panel, which is over by the time
+    // the bundle has arrived: it shows what it holds straight away
+    if (app.statsPanelVisible) this.updateStatsForSelection();
+  }
+
+  /**
+   * Stop following the store, and the size and scroll of the panel: the
+   * watcher of its fade listens to the window and observes the panel for
+   * as long as it is not stopped. What the panel shows stays.
+   */
+  destroy(): void {
+    for (const stop of this.unsubscribe) stop();
+    this.unsubscribe.length = 0;
+    this.scrollWatcher?.stop();
+    this.scrollWatcher = null;
   }
 
   /** The inputs of the current state, in a shape that compares cheaply */
@@ -521,7 +556,9 @@ export class StatsManager {
       // are kept with the dataset instead of computed again every time
       const data = this.app.currentData;
       const statsToShow = data
-        ? datasetIndex(data).filter(inputs.year, inputs.aircraft).statistics()
+        ? filterStatistics(
+            datasetIndex(data).filter(inputs.year, inputs.aircraft),
+          )
         : calculateFilteredStatistics({ pathInfo, segments });
       this.updateStatsPanel(statsToShow, false);
       return;
@@ -547,14 +584,7 @@ export class StatsManager {
     const panel = domCache.get(PANEL_ID);
     if (!panel) return;
 
-    const titleEl = document.getElementById("stats-rail-title");
-    if (titleEl) {
-      const textEl = titleEl.querySelector(".kh-stats-title-text");
-      if (textEl)
-        textEl.textContent = isSelection
-          ? "Selected Paths Statistics"
-          : "Flight Statistics";
-    }
+    setStatsTitle(isSelection);
 
     let html = '<div class="kh-stats">';
 
@@ -611,19 +641,5 @@ export class StatsManager {
     panel.innerHTML = html;
     // New content, so whether there is more of it below has changed too
     this.scrollWatcher?.update();
-  }
-
-  /**
-   * Show or hide the stats panel. The store key `statsPanelVisible` is the
-   * source of truth: the rail, the triggers and state persistence all
-   * follow it, so this is a store write and nothing else.
-   * @param visible - Target visibility
-   */
-  setStatsPanelVisible(visible: boolean): void {
-    this.app.store.set("statsPanelVisible", visible);
-  }
-
-  toggleStats(): void {
-    this.setStatsPanelVisible(!this.app.store.get("statsPanelVisible"));
   }
 }

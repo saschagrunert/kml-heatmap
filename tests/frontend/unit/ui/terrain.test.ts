@@ -19,7 +19,10 @@ import {
   MAP_LAYERS,
   MAP_SOURCES,
 } from "../../../../kml_heatmap/frontend/utils/constants";
-import { REPLAY_CAMERA_MOVE } from "../../../../kml_heatmap/frontend/utils/mapHelpers";
+import {
+  followContextLoss,
+  REPLAY_CAMERA_MOVE,
+} from "../../../../kml_heatmap/frontend/utils/mapHelpers";
 import { asMapApp, createMockApp, type MockApp } from "../../testHelpers";
 import { resetMapLibreMock } from "../../../mocks/maplibre-gl";
 
@@ -174,20 +177,22 @@ describe("the relief", () => {
       await follow();
       map().isSourceLoaded.mockReturnValue(false);
 
+      const restyle = vi.fn();
+      app.relief.onRibbonsShown(restyle);
       app.terrainActive = true;
 
-      expect(app.layerManager.ribbonsShown).toBe(0);
-      expect(app.layerManager.restyle).toHaveBeenCalledTimes(1);
+      expect(app.relief.ribbonsShown).toBe(0);
+      expect(restyle).toHaveBeenCalledTimes(1);
       expect(trailOpacity()).toBe(0);
 
       // Asked after every frame, until the tiles have landed
       map().emit("render");
-      expect(app.layerManager.ribbonsShown).toBe(0);
+      expect(app.relief.ribbonsShown).toBe(0);
       map().isSourceLoaded.mockReturnValue(true);
       map().emit("render");
 
-      expect(app.layerManager.ribbonsShown).toBe(1);
-      expect(app.layerManager.restyle).toHaveBeenCalledTimes(2);
+      expect(app.relief.ribbonsShown).toBe(1);
+      expect(restyle).toHaveBeenCalledTimes(2);
       expect(trailOpacity()).toBe(TRAIL_OPACITY);
       expect(map().listenerCount("render")).toBe(0);
     });
@@ -201,10 +206,10 @@ describe("the relief", () => {
       vi.advanceTimersByTime(2000);
       app.reliefLevel = 9;
       vi.advanceTimersByTime(2999);
-      expect(app.layerManager.ribbonsShown).toBe(0);
+      expect(app.relief.ribbonsShown).toBe(0);
 
       vi.advanceTimersByTime(1);
-      expect(app.layerManager.ribbonsShown).toBe(1);
+      expect(app.relief.ribbonsShown).toBe(1);
       expect(trailOpacity()).toBe(TRAIL_OPACITY);
       // Only the ribbons' exaggeration waits on, for them to land (see
       // exaggerateRibbons)
@@ -212,6 +217,109 @@ describe("the relief", () => {
       map().isSourceLoaded.mockReturnValue(true);
       map().emit("render");
       expect(map().listenerCount("render")).toBe(0);
+    });
+  });
+
+  describe("while a replay plays", () => {
+    /** The trail, written anew in every frame, never has all its tiles */
+    const trailNeverLoaded = (): void => {
+      map().isSourceLoaded.mockImplementation(
+        (id: string) => id !== MAP_SOURCES.replayTrailRibbons,
+      );
+    };
+
+    it("show as soon as the flights have landed, not after the longest wait", async () => {
+      vi.useFakeTimers();
+      await follow();
+      app.replayState.playing = true;
+      trailNeverLoaded();
+
+      app.reliefLevel = 9;
+      expect(app.relief.ribbonsShown).toBe(0);
+      map().emit("render");
+
+      expect(app.relief.ribbonsShown).toBe(1);
+      expect(trailOpacity()).toBe(TRAIL_OPACITY);
+      // The cuts of the levels before are let go of as well
+      expect(map().listenerCount("render")).toBe(0);
+    });
+
+    it("wait for the trail once the replay is paused, which writes it no more", async () => {
+      vi.useFakeTimers();
+      await follow();
+      app.replayState.playing = false;
+      trailNeverLoaded();
+
+      app.reliefLevel = 9;
+      map().emit("render");
+
+      expect(app.relief.ribbonsShown).toBe(0);
+      map().isSourceLoaded.mockReturnValue(true);
+      map().emit("render");
+      expect(app.relief.ribbonsShown).toBe(1);
+    });
+  });
+
+  it("gives the trail its opacity again after a lost WebGL context", async () => {
+    // Hidden as the context is lost, and shown by the longest wait during
+    // the loss: MapLibre restores the style of the loss, the trail hidden
+    vi.useFakeTimers();
+    // As MapApp does it, before anyone else listens to the map
+    followContextLoss(map() as unknown as MapLibreMap);
+    await follow();
+    map().isSourceLoaded.mockReturnValue(false);
+    app.terrainActive = true;
+    expect(trailOpacity()).toBe(0);
+    map().emit("webglcontextlost");
+    vi.advanceTimersByTime(3000);
+    expect(app.relief.ribbonsShown).toBe(1);
+    // The map had no style to take it
+    expect(trailOpacity()).toBe(0);
+
+    map().emit("webglcontextrestored");
+    map().emit("style.load");
+
+    expect(trailOpacity()).toBe(TRAIL_OPACITY);
+  });
+
+  describe("the far labels of a tilted view", () => {
+    const start = (id: string): unknown => map().getLayer(id)?.minzoom;
+
+    it("leave the coarse tiles towards the horizon, and come back as the map lies flat", async () => {
+      swapBaseStyle(CARTO_LIKE);
+      await follow();
+      app.terrainActive = true;
+      map().jumpTo({ zoom: 6.5, pitch: 70 });
+      map().emit("moveend");
+
+      // Only in tiles at most a level coarser than the map
+      expect(start("place_town")).toBe(5);
+      // The app's own labels keep their range
+      expect(start(MAP_LAYERS.airportLabels)).not.toBe(5);
+
+      map().jumpTo({ zoom: 9.2 });
+      map().emit("moveend");
+      expect(start("place_town")).toBe(8);
+
+      map().jumpTo({ pitch: 30 });
+      map().emit("moveend");
+      expect(start("place_town")).toBe(0);
+    });
+
+    it("are left alone off the relief, and in a new base style too", async () => {
+      await follow();
+      map().jumpTo({ zoom: 6.5, pitch: 70 });
+      swapBaseStyle(CARTO_LIKE);
+      map().emit("moveend");
+      expect(start("place_town")).toBeUndefined();
+
+      app.terrainActive = true;
+      swapBaseStyle(CARTO_LIKE);
+      expect(start("place_town")).toBe(5);
+      // Laid out anew only when the level changes
+      map().setLayerZoomRange.mockClear();
+      map().emit("moveend");
+      expect(map().setLayerZoomRange).not.toHaveBeenCalled();
     });
   });
 
@@ -264,6 +372,6 @@ describe("the relief", () => {
     expect(map().setTerrain).not.toHaveBeenCalled();
     expect(map().listenerCount("render")).toBe(0);
     // Nothing shows the ribbons for a map the app has let go of
-    expect(app.layerManager.ribbonsShown).toBe(0);
+    expect(app.relief.ribbonsShown).toBe(0);
   });
 });

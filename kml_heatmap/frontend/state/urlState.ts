@@ -6,6 +6,12 @@
 import type { AppState } from "../types";
 import { MAX_ZOOM, MIN_ZOOM } from "../utils/constants";
 import { toMapBearing, toMapCenter, toMapPitch } from "../utils/geometry";
+import {
+  initialToggles,
+  TOGGLES,
+  VISIBILITY_SLOTS,
+  type ToggleUrl,
+} from "./toggles";
 
 function roundToTenth(value: number): number {
   return Math.round(value * 10) / 10;
@@ -65,6 +71,62 @@ function parsePathId(text: string, radix: number): number | null {
   return isPathId(id) ? id : null;
 }
 
+/** The link's `v` string of a first visit, which a link leaves out */
+const INITIAL_VISIBILITY = visibilityString(initialToggles());
+
+/**
+ * The `v` string of a state: a "1" or "0" per slot of the toggles that have
+ * one. A toggle the state leaves out is written as off, and so is slot 7,
+ * which the control chrome had before it stopped hiding.
+ */
+function visibilityString(state: AppState): string {
+  const slots: string[] = new Array<string>(VISIBILITY_SLOTS).fill("0");
+  for (const toggle of TOGGLES) {
+    const url: ToggleUrl = toggle.url;
+    if ("slot" in url && state[toggle.key]) slots[url.slot] = "1";
+  }
+  return slots.join("");
+}
+
+/**
+ * Read the toggles off a link. Only a `v` of all nine slots counts: the
+ * shorter ones of the releases before the isolate flag are ignored, and the
+ * layers of such a link open as a first visit's. The toggles with a
+ * parameter of their own are only ever written while on, so a link without
+ * one leaves them as they are.
+ */
+function parseToggles(urlParams: URLSearchParams, state: AppState): void {
+  const vis = urlParams.get("v");
+  const slots = vis?.length === VISIBILITY_SLOTS ? vis : null;
+  for (const toggle of TOGGLES) {
+    const url: ToggleUrl = toggle.url;
+    if ("slot" in url) {
+      if (slots) state[toggle.key] = slots[url.slot] === "1";
+    } else if (urlParams.get(url.param) === "1") {
+      state[toggle.key] = true;
+    }
+  }
+}
+
+/** A value's text in a link, when there is one */
+function paramText(urlParams: URLSearchParams, name: string): string | null {
+  return urlParams.get(name) || null;
+}
+
+/**
+ * Selected paths, only when they were written with an id scheme this build
+ * reads. The radix follows the version: decimal up to 3, base 36 from 4 on.
+ */
+function parsePathIds(urlParams: URLSearchParams): number[] | undefined {
+  const radix = PATH_ID_RADIX.get(parseInt(urlParams.get("sv") ?? "", 10));
+  const pathStr = paramText(urlParams, "p");
+  if (radix === undefined || !pathStr) return undefined;
+  return pathStr
+    .split(",")
+    .map((id) => parsePathId(id.trim(), radix))
+    .filter((id): id is number => id !== null);
+}
+
 /**
  * Parse URL parameters into state object
  * URL parameter schema:
@@ -73,129 +135,57 @@ function parsePathId(text: string, radix: number): number | null {
  *   p - selectedPathIds (comma-separated, base 36 from schema 4 on:
  *       'a5,1x,3kf'; decimal in schema 3)
  *   sv - schema version of p (an unknown one means p is ignored)
- *   v - layer visibility (9-char binary string: '100100000')
+ *   v - toggles with a slot (9-char binary string: '100100000', see
+ *       state/toggles.ts)
  *   lat, lng - map center coordinates
  *   z - zoom level, in state units (one above the map's, see ZOOM_OFFSET)
  *   b - bearing in degrees, clockwise from north (absent: north up)
  *   t - tilt (pitch) in degrees (absent: flat)
- *   g - '1' when the map is drawn as a globe (absent: Mercator)
- *   d - '1' when the flights are lifted in 3D (absent: flat)
- *   s - '1' when the ground is satellite imagery (absent: the dark map)
+ *   g, d, s - toggles with a parameter of their own, '1' when on: the
+ *       globe, 3D and satellite imagery (absent: off)
  * @param params - URLSearchParams object or search string
  * @returns Parsed state or null if no params
  */
 export function parseUrlParams(
   params: URLSearchParams | string,
 ): AppState | null {
-  // Support both URLSearchParams and string input
-  let urlParams: URLSearchParams;
-  if (typeof params === "string") {
-    urlParams = new URLSearchParams(params);
-  } else {
-    urlParams = params;
-  }
-
+  const urlParams =
+    typeof params === "string" ? new URLSearchParams(params) : params;
   if (urlParams.toString() === "") {
     return null;
   }
 
   const state: AppState = {};
-
-  // Year filter
-  if (urlParams.has("y")) {
-    const year = urlParams.get("y");
-    if (year) {
-      state.selectedYear = year;
-    }
-  }
-
-  // Aircraft filter
-  if (urlParams.has("a")) {
-    const aircraft = urlParams.get("a");
-    if (aircraft) {
-      state.selectedAircraft = aircraft;
-    }
-  }
-
-  // Selected paths, only when they were written with an id scheme this
-  // build reads. The radix follows the version: decimal up to 3, base 36
-  // from 4 on.
-  const schemaVersion = parseInt(urlParams.get("sv") ?? "", 10);
-  const radix = PATH_ID_RADIX.get(schemaVersion);
-  if (urlParams.has("p") && radix !== undefined) {
-    const pathStr = urlParams.get("p");
-    if (pathStr) {
-      state.selectedPathIds = pathStr
-        .split(",")
-        .map((id) => parsePathId(id.trim(), radix))
-        .filter((id): id is number => id !== null);
-    }
-  }
-
-  // Layer visibility (9 flags: heatmap, altitude, airspeed, airports,
-  // aviation, stats, wrapped, buttonsHidden, isolateSelection). The 8th flag
-  // is legacy: the control chrome no longer hides, so the parsed value is
-  // dropped by sanitizeSavedState. The slot stays so older links keep the
-  // isolate flag in place.
-  if (urlParams.has("v")) {
-    const vis = urlParams.get("v");
-    // Links from before the 7th, 8th and 9th flags have 6 to 8 of them
-    if (vis && vis.length >= 6 && vis.length <= 9) {
-      state.heatmapVisible = vis[0] === "1";
-      state.altitudeVisible = vis[1] === "1";
-      state.airspeedVisible = vis[2] === "1";
-      state.airportsVisible = vis[3] === "1";
-      state.aviationVisible = vis[4] === "1";
-      state.statsPanelVisible = vis[5] === "1";
-      // Only parse wrapped state if 7th character exists
-      if (vis.length >= 7) {
-        state.wrappedVisible = vis[6] === "1";
-      }
-      // Only parse buttonsHidden state if 8th character exists
-      if (vis.length >= 8) {
-        state.buttonsHidden = vis[7] === "1";
-      }
-      // Only parse isolateSelection state if 9th character exists
-      if (vis.length === 9) {
-        state.isolateSelection = vis[8] === "1";
-      }
-    }
-  }
+  const year = paramText(urlParams, "y");
+  if (year) state.selectedYear = year;
+  const aircraft = paramText(urlParams, "a");
+  if (aircraft) state.selectedAircraft = aircraft;
+  const pathIds = parsePathIds(urlParams);
+  if (pathIds) state.selectedPathIds = pathIds;
+  parseToggles(urlParams, state);
 
   // Map position
-  if (urlParams.has("lat") && urlParams.has("lng")) {
-    const latStr = urlParams.get("lat");
-    const lngStr = urlParams.get("lng");
-    if (latStr && lngStr) {
-      const lat = parseFloat(latStr);
-      const lng = parseFloat(lngStr);
-      const center = toMapCenter({ lat, lng });
-      if (center) state.center = center;
-    }
+  const latStr = paramText(urlParams, "lat");
+  const lngStr = paramText(urlParams, "lng");
+  if (latStr && lngStr) {
+    const center = toMapCenter({
+      lat: parseFloat(latStr),
+      lng: parseFloat(lngStr),
+    });
+    if (center) state.center = center;
   }
 
-  // Zoom level
-  if (urlParams.has("z")) {
-    const zoomStr = urlParams.get("z");
-    if (zoomStr) {
-      const zoom = parseFloat(zoomStr);
-      if (!isNaN(zoom)) {
-        // Clamp zoom to the map's zoom range, in the unit of the link
-        state.zoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, zoom));
-      }
-    }
-  }
+  // Zoom level, clamped to the map's zoom range in the unit of the link
+  const zoom = parseFloat(urlParams.get("z") ?? "");
+  if (!isNaN(zoom)) state.zoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, zoom));
 
-  // Orientation and projection. A link from before the map could turn has
-  // none of the three and opens north up, flat and in Mercator, as it
-  // always did. `parseFloat("")` is NaN, which both checks turn away.
+  // Orientation. A link from before the map could turn has neither and
+  // opens north up and flat, as it always did. `parseFloat("")` is NaN,
+  // which both checks turn away.
   const bearing = toMapBearing(parseFloat(urlParams.get("b") ?? ""));
   if (bearing !== null) state.bearing = bearing;
   const pitch = toMapPitch(parseFloat(urlParams.get("t") ?? ""));
   if (pitch !== null) state.pitch = pitch;
-  if (urlParams.get("g") === "1") state.globeVisible = true;
-  if (urlParams.get("d") === "1") state.threeDVisible = true;
-  if (urlParams.get("s") === "1") state.satelliteVisible = true;
 
   return state;
 }
@@ -210,14 +200,8 @@ export function encodeStateToUrl(state: AppState): string {
   const params = new URLSearchParams();
 
   // Preserve non-state parameters from current URL
-  const currentParams = new URLSearchParams(window.location.search);
-  const preservedParams = ["debug"];
-  for (const param of preservedParams) {
-    const value = currentParams.get(param);
-    if (value !== null) {
-      params.set(param, value);
-    }
-  }
+  const debug = new URLSearchParams(window.location.search).get("debug");
+  if (debug !== null) params.set("debug", debug);
 
   // Always include year parameter (including 'all') because default is current year
   if (state.selectedYear) {
@@ -239,38 +223,14 @@ export function encodeStateToUrl(state: AppState): string {
     params.set("sv", String(STATE_SCHEMA_VERSION));
   }
 
-  // Build visibility string (9 characters: heatmap, altitude, airspeed,
-  // airports, aviation, stats, wrapped, buttonsHidden, isolateSelection).
-  // The 8th is the legacy control-visibility slot and is always written as 0.
-  // Only include if visibility properties are actually defined
-  const hasVisibility =
-    state.heatmapVisible !== undefined ||
-    state.altitudeVisible !== undefined ||
-    state.airspeedVisible !== undefined ||
-    state.airportsVisible !== undefined ||
-    state.aviationVisible !== undefined ||
-    state.statsPanelVisible !== undefined ||
-    state.wrappedVisible !== undefined ||
-    state.buttonsHidden !== undefined ||
-    state.isolateSelection !== undefined;
-
-  if (hasVisibility) {
-    const vis = [
-      state.heatmapVisible ? "1" : "0",
-      state.altitudeVisible ? "1" : "0",
-      state.airspeedVisible ? "1" : "0",
-      state.airportsVisible ? "1" : "0",
-      state.aviationVisible ? "1" : "0",
-      state.statsPanelVisible ? "1" : "0",
-      state.wrappedVisible ? "1" : "0",
-      state.buttonsHidden ? "1" : "0",
-      state.isolateSelection ? "1" : "0",
-    ].join("");
-
-    // Only add if not default (100100000 = heatmap+airports on, rest off)
-    if (vis !== "100100000") {
-      params.set("v", vis);
-    }
+  // The toggles with a slot, unless the state has none of them or they are
+  // as on a first visit
+  const hasVisibility = TOGGLES.some(
+    (toggle) => "slot" in toggle.url && state[toggle.key] !== undefined,
+  );
+  const vis = visibilityString(state);
+  if (hasVisibility && vis !== INITIAL_VISIBILITY) {
+    params.set("v", vis);
   }
 
   // Add map position (always include for complete shareable state)
@@ -290,9 +250,10 @@ export function encodeStateToUrl(state: AppState): string {
   if (bearing !== 0) params.set("b", String(bearing));
   const pitch = roundToTenth(state.pitch ?? 0);
   if (pitch !== 0) params.set("t", String(pitch));
-  if (state.globeVisible) params.set("g", "1");
-  if (state.threeDVisible) params.set("d", "1");
-  if (state.satelliteVisible) params.set("s", "1");
+  for (const toggle of TOGGLES) {
+    const url: ToggleUrl = toggle.url;
+    if ("param" in url && state[toggle.key]) params.set(url.param, "1");
+  }
 
   return params.toString();
 }

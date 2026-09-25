@@ -11,12 +11,14 @@ import {
   selectDiverseFacts,
 } from "../../../../kml_heatmap/frontend/features/wrapped";
 import * as airports from "../../../../kml_heatmap/frontend/features/airports";
+import { calculateFilteredStatistics } from "../../../../kml_heatmap/frontend/calculations/panelStats";
 import type {
   FunFact,
   PathInfo,
   PathSegment,
   YearStats,
 } from "../../../../kml_heatmap/frontend/types";
+import { segmentOf } from "../../testHelpers";
 
 describe("wrapped feature", () => {
   const mockPathInfo: PathInfo[] = [
@@ -55,70 +57,70 @@ describe("wrapped feature", () => {
   ];
 
   const mockSegments: PathSegment[] = [
-    {
+    segmentOf({
       path_id: 1,
       coords: [
         [50.0, 8.0],
         [50.1, 8.1],
       ],
       time: 1000,
-    },
-    {
+    }),
+    segmentOf({
       path_id: 1,
       coords: [
         [50.1, 8.1],
         [50.2, 8.2],
       ],
       time: 1100,
-    },
-    {
+    }),
+    segmentOf({
       path_id: 2,
       coords: [
         [50.2, 8.2],
         [50.3, 8.3],
       ],
       time: 2000,
-    },
-    {
+    }),
+    segmentOf({
       path_id: 2,
       coords: [
         [50.3, 8.3],
         [50.4, 8.4],
       ],
       time: 2100,
-    },
-    {
+    }),
+    segmentOf({
       path_id: 3,
       coords: [
         [51.0, 9.0],
         [51.1, 9.1],
       ],
       time: 3000,
-    },
-    {
+    }),
+    segmentOf({
       path_id: 3,
       coords: [
         [51.1, 9.1],
         [51.2, 9.2],
       ],
       time: 3100,
-    },
-    {
+    }),
+    segmentOf({
       path_id: 4,
       coords: [
         [50.0, 8.0],
         [50.5, 8.5],
       ],
       time: 4000,
-    },
-    {
+    }),
+    segmentOf({
       path_id: 4,
       coords: [
         [50.5, 8.5],
         [51.0, 9.0],
       ],
       time: 4200,
-    },
+    }),
   ];
 
   describe("calculateYearStats", () => {
@@ -152,6 +154,35 @@ describe("wrapped feature", () => {
       const stats = calculateYearStats(mockPathInfo, mockSegments, 2025);
 
       expect(stats.flight_time).toMatch(/^\d+h \d+m$/);
+    });
+
+    it("takes the shared figures from the statistics of the same filter", () => {
+      const models = { "D-EAGJ": "Diamond DA20-A1 Katana" };
+      const direct = calculateYearStats(
+        mockPathInfo,
+        mockSegments,
+        "all",
+        models,
+      );
+      const filtered = calculateFilteredStatistics({
+        pathInfo: mockPathInfo,
+        segments: mockSegments,
+      });
+      const aircraft = structuredClone(filtered.aircraft_list);
+
+      const shared = calculateYearStats(
+        mockPathInfo,
+        mockSegments,
+        "all",
+        models,
+        "all",
+        undefined,
+        filtered,
+      );
+
+      expect(shared).toEqual(direct);
+      // The model goes on copies: the statistics are kept for the panel
+      expect(filtered.aircraft_list).toEqual(aircraft);
     });
 
     it("returns empty stats for non-existent year", () => {
@@ -282,13 +313,13 @@ describe("wrapped feature", () => {
 
     it("handles segments without time data", () => {
       const segmentsNoTime: PathSegment[] = [
-        {
+        segmentOf({
           path_id: 1,
           coords: [
             [50.0, 8.0],
             [50.1, 8.1],
           ],
-        },
+        }),
       ];
 
       const stats = calculateYearStats(mockPathInfo, segmentsNoTime, 2025);

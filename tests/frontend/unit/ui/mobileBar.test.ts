@@ -4,12 +4,14 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import type { MapApp } from "../../../../kml_heatmap/frontend/mapApp";
 import type { KMLDataset } from "../../../../kml_heatmap/frontend/types";
-import { AppStore } from "../../../../kml_heatmap/frontend/state/store";
 import {
-  MobileBar,
-  MOBILE_BAR_BREAKPOINT_PX,
-} from "../../../../kml_heatmap/frontend/ui/mobileBar";
+  AppStore,
+  defineStoreAccessors,
+  type StoreAccessors,
+} from "../../../../kml_heatmap/frontend/state/store";
+import { MobileBar } from "../../../../kml_heatmap/frontend/ui/mobileBar";
 import { MOBILE_BREAKPOINT_PX } from "../../../../kml_heatmap/frontend/utils/constants";
+import { PHONE_LAYOUT_QUERY } from "../../../../kml_heatmap/frontend/utils/device";
 
 const PHONE_WIDTH = 390;
 const DESKTOP_WIDTH = 1200;
@@ -46,7 +48,7 @@ function setWidth(width: number): void {
     configurable: true,
     writable: true,
   });
-  const matches = width < MOBILE_BAR_BREAKPOINT_PX;
+  const matches = width < MOBILE_BREAKPOINT_PX;
   if (matches !== mqlMatches) {
     mqlMatches = matches;
     for (const cb of mqlListeners) {
@@ -59,7 +61,7 @@ function createMockApp() {
   const store = new AppStore({ hasTimingData: true });
   const wrappedManager = { showWrapped: vi.fn() };
   const replayManager = { canReplay: vi.fn(() => true), toggleReplay: vi.fn() };
-  return {
+  const app = {
     store,
     uiToggles: {
       toggleHeatmap: vi.fn(),
@@ -72,7 +74,6 @@ function createMockApp() {
       shareLink: vi.fn(() => Promise.resolve()),
     },
     mapOrientation: { toggleGlobe: vi.fn(), toggleThreeD: vi.fn() },
-    statsManager: { toggleStats: vi.fn() },
     wrappedManager,
     pathSelection: { toggleIsolateSelection: vi.fn() },
     replayManager,
@@ -93,37 +94,10 @@ function createMockApp() {
     canResetView(): boolean {
       return !this.isInitializing && !this.isReset();
     },
-    get heatmapVisible() {
-      return store.get("heatmapVisible");
-    },
-    get altitudeVisible() {
-      return store.get("altitudeVisible");
-    },
-    get airspeedVisible() {
-      return store.get("airspeedVisible");
-    },
-    get airportsVisible() {
-      return store.get("airportsVisible");
-    },
-    get aviationVisible() {
-      return store.get("aviationVisible");
-    },
-    get globeVisible() {
-      return store.get("globeVisible");
-    },
-    get isolateSelection() {
-      return store.get("isolateSelection");
-    },
-    get selectedPathIds() {
-      return store.get("selectedPathIds");
-    },
-    get hasTimingData() {
-      return store.get("hasTimingData");
-    },
-    get replayActive() {
-      return store.get("replayActive");
-    },
   };
+  // The same accessors as the app's, so the bar reads the store through them
+  defineStoreAccessors(app);
+  return app as typeof app & StoreAccessors;
 }
 
 type BarMockApp = ReturnType<typeof createMockApp>;
@@ -223,14 +197,14 @@ describe("MobileBar", () => {
       create();
 
       // Just under it, like the stylesheet's max-width queries
-      expect(MOBILE_BAR_BREAKPOINT_PX).toBe(MOBILE_BREAKPOINT_PX);
-      expect(window.matchMedia).toHaveBeenCalledWith("(max-width: 767.98px)");
+      expect(window.matchMedia).toHaveBeenCalledWith(PHONE_LAYOUT_QUERY);
+      expect(PHONE_LAYOUT_QUERY).toBe("(max-width: 767.98px)");
     });
 
     it("stays out of the document above the breakpoint", () => {
       mqlMatches = false;
       Object.defineProperty(window, "innerWidth", {
-        value: MOBILE_BAR_BREAKPOINT_PX,
+        value: MOBILE_BREAKPOINT_PX,
         configurable: true,
         writable: true,
       });
@@ -386,7 +360,7 @@ describe("MobileBar", () => {
     it("toggles the stats panel instead of opening a sheet", () => {
       tab("stats").click();
 
-      expect(app.statsManager.toggleStats).toHaveBeenCalledTimes(1);
+      expect(app.store.get("statsPanelVisible")).toBe(true);
       expect(document.querySelector<HTMLElement>(".mobile-sheet")!.hidden).toBe(
         true,
       );
@@ -418,7 +392,7 @@ describe("MobileBar", () => {
       // The statistics sheet sits below the scrim and would open underneath
       expect(bar!.sheet.isOpen()).toBe(false);
       expect(tab("filter").classList.contains("active")).toBe(false);
-      expect(app.statsManager.toggleStats).toHaveBeenCalledTimes(1);
+      expect(app.store.get("statsPanelVisible")).toBe(true);
     });
 
     it("closes an open sheet before opening Wrapped", async () => {
@@ -445,7 +419,7 @@ describe("MobileBar", () => {
           focusedOnOpen = document.activeElement;
         };
         app.wrappedManager.showWrapped.mockImplementation(record);
-        app.statsManager.toggleStats.mockImplementation(record);
+        app.store.subscribe("statsPanelVisible", record);
         tab(sheet).focus();
         tab(sheet).click();
 
@@ -773,6 +747,60 @@ describe("MobileBar", () => {
 
       expect(app.uiToggles.exportMap).toHaveBeenCalledTimes(1);
       expect(app.uiToggles.shareLink).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("share row", () => {
+    it("says Share link where the phone's share sheet takes the link", () => {
+      Object.defineProperty(navigator, "share", {
+        value: vi.fn(),
+        configurable: true,
+        writable: true,
+      });
+      try {
+        create();
+        tab("more").click();
+        expect(
+          document.querySelector('[data-row="share"] .sheet-row-label')
+            ?.textContent,
+        ).toBe("Share link");
+      } finally {
+        delete (navigator as { share?: unknown }).share;
+      }
+    });
+
+    it("says Copy link where there is no share sheet", () => {
+      create();
+      tab("more").click();
+      expect(
+        document.querySelector('[data-row="share"] .sheet-row-label')
+          ?.textContent,
+      ).toBe("Copy link");
+    });
+  });
+
+  describe("Wrapped handover", () => {
+    it("goes back ahead of the map once Wrapped gives the map back", () => {
+      // Mounted across the breakpoint while Wrapped held the map, the bar
+      // went to the end of the page, after the map's markers (regression)
+      const map = document.createElement("div");
+      map.id = "map";
+      const dialog = document.createElement("div");
+      dialog.append(map);
+      document.body.append(dialog);
+      setWidth(DESKTOP_WIDTH);
+      const created = create();
+      app.store.set("wrappedVisible", true);
+      setWidth(PHONE_WIDTH);
+      expect(
+        dialog.compareDocumentPosition(created.root) &
+          Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+
+      document.body.append(map);
+      app.store.set("wrappedVisible", false);
+
+      expect(created.root.nextElementSibling).toBe(map);
     });
   });
 

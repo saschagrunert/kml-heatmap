@@ -22,6 +22,7 @@ import {
   unmountReplayDom,
   type MockApp,
 } from "./replayTestSetup";
+import { segmentOf } from "../../testHelpers";
 
 vi.mock("../../../../kml_heatmap/frontend/utils/htmlGenerators", () => ({
   generateSegmentPopupHtml: vi.fn(() => "<div>popup</div>"),
@@ -75,6 +76,18 @@ describe("ReplayManager display", () => {
     });
   }
 
+  /** The colour of an altitude on the flight's own range, spread by rank */
+  function altitudeColor(feet: number): string {
+    const { min, max, ranks } = replayManager.state.colorAltRange;
+    return getColorForAltitude(feet, min, max, ranks);
+  }
+
+  /** The colour of a groundspeed on the flight's own range */
+  function speedColor(knots: number): string {
+    const { min, max, ranks } = replayManager.state.colorSpeedRange;
+    return getColorForAirspeed(knots, min, max, ranks);
+  }
+
   afterEach(() => {
     vi.useRealTimers();
     unmountReplayDom();
@@ -92,36 +105,24 @@ describe("ReplayManager display", () => {
 
       // Segments at t=0 and t=60 are at or before t=100
       expect(replayManager.state.lastDrawnIndex).toBe(1);
-      expect(drawnColors()).toEqual([
-        getColorForAltitude(3000, 3000, 5000),
-        getColorForAltitude(4000, 3000, 5000),
-      ]);
+      expect(drawnColors()).toEqual([altitudeColor(3000), altitudeColor(4000)]);
     });
 
     it("rebuilds the trail with airspeed colors", () => {
       replayManager.redrawReplayPath("airspeed");
 
-      expect(drawnColors()).toEqual([
-        getColorForAirspeed(100, 100, 130),
-        getColorForAirspeed(120, 100, 130),
-      ]);
+      expect(drawnColors()).toEqual([speedColor(100), speedColor(120)]);
     });
 
     it("switches the colours of a trail that is already on the map", () => {
       replayManager.state.lastDrawnIndex = -1;
       replayManager.state.currentTime = 100;
       replayManager.updateReplayDisplay();
-      expect(drawnColors()).toEqual([
-        getColorForAltitude(3000, 3000, 5000),
-        getColorForAltitude(4000, 3000, 5000),
-      ]);
+      expect(drawnColors()).toEqual([altitudeColor(3000), altitudeColor(4000)]);
 
       replayManager.redrawReplayPath("airspeed");
 
-      expect(drawnColors()).toEqual([
-        getColorForAirspeed(100, 100, 130),
-        getColorForAirspeed(120, 100, 130),
-      ]);
+      expect(drawnColors()).toEqual([speedColor(100), speedColor(120)]);
       // One write for the trail as it was flown, one for the new colours
       expect(replaySources(mockApp).trail.setData).toHaveBeenCalledTimes(2);
     });
@@ -146,7 +147,7 @@ describe("ReplayManager display", () => {
 
       expect(replayManager.state.trailRuns).toHaveLength(1);
       expect(replayManager.state.lastDrawnIndex).toBe(0);
-      expect(drawnColors()).toEqual([getColorForAirspeed(100, 100, 130)]);
+      expect(drawnColors()).toEqual([speedColor(100)]);
     });
 
     it("draws zero-groundspeed segments with the altitude colour", () => {
@@ -169,7 +170,7 @@ describe("ReplayManager display", () => {
 
       expect(replayManager.state.lastDrawnIndex).toBe(0);
       expect(replayManager.state.trailRuns).toHaveLength(1);
-      expect(drawnColors()).toEqual([getColorForAltitude(1000, 3000, 5000)]);
+      expect(drawnColors()).toEqual([altitudeColor(1000)]);
     });
 
     it("keeps the runs aligned with lastDrawnIndex when speeds vary", () => {
@@ -363,10 +364,7 @@ describe("ReplayManager display", () => {
 
       replayManager.updateReplayDisplay();
 
-      expect(drawnColors()).toEqual([
-        getColorForAirspeed(100, 100, 130),
-        getColorForAirspeed(120, 100, 130),
-      ]);
+      expect(drawnColors()).toEqual([speedColor(100), speedColor(120)]);
     });
 
     it("updates airplane rotation via element transform", () => {
@@ -457,22 +455,22 @@ describe("ReplayManager display", () => {
 
     it("crosses a gap in the recording over its duration, not at its start", () => {
       replayManager.state.segments = [
-        {
+        segmentOf({
           path_id: 1,
           coords: [
             [48.0, 16.0],
             [49.0, 17.0],
           ],
           time: 0,
-        },
-        {
+        }),
+        segmentOf({
           path_id: 1,
           coords: [
             [49.0, 17.0],
             [49.1, 17.1],
           ],
           time: 600,
-        },
+        }),
       ];
       replayManager.state.currentTime = 1;
       replayManager.updateReplayDisplay(true);
@@ -658,10 +656,14 @@ describe("ReplayManager display", () => {
       expect(generateSegmentPopupHtml).toHaveBeenCalledWith(
         expect.objectContaining({
           segment: replayManager.state.segments[0],
-          altMin: 3000,
-          altMax: 5000,
-          speedMin: 100,
-          speedMax: 130,
+          altRange: expect.objectContaining({
+            min: 3000,
+            max: 5000,
+          }) as unknown,
+          speedRange: expect.objectContaining({
+            min: 100,
+            max: 130,
+          }) as unknown,
           icon: "aircraftTop",
         }),
       );

@@ -9,11 +9,13 @@ import type {
   Map as MapLibreMap,
   StyleSpecification,
 } from "maplibre-gl";
-import { ribbonHeights } from "./calculations/lift";
+import { ribbonHeights } from "./calculations/ribbonPaint";
+import { PATH_RIBBON_SOURCES } from "./ui/reliefState";
 import {
   cssVar,
   firstSymbolLayerId,
   whenContextRestored,
+  withoutValidation,
 } from "./utils/mapHelpers";
 import {
   HEAT_LINES,
@@ -130,7 +132,12 @@ export class AirportLayerHandle extends MapLayerHandle {
  * A source of lifted flights, which the 3D view draws as ribbons at their
  * height (see calculations/lift.ts), and its layer. The source is not
  * simplified: a ribbon is a few pixels across, and its quads would be
- * dropped from the tiles. A ribbon is known to the map by the id of its
+ * dropped from the far tiles of a tilted view, whose walls still show. The
+ * colour layers' quads are 24 px long at most (see QUAD_SPLIT_PX), so
+ * their tiles take a buffer of 32 px rather than 128, which the map's
+ * worker holds a copy of every feature in for every tile it reaches into:
+ * MapLibre lifts a polygon by the relief at its centroid, and a quad cut
+ * at a tile's edge would stand on other relief in either tile. A ribbon is known to the map by the id of its
  * cut where its exaggeration is switched by it (see ribbonId). The layer's
  * opacity is the owner's business: the layer manager dims it for a
  * selection, as it does the lines.
@@ -146,6 +153,7 @@ function addRibbons(
     type: "geojson",
     data: emptyGeoJson(),
     tolerance: 0,
+    ...(id !== MAP_SOURCES.replayTrailRibbons && { buffer: 32 }),
     maxzoom: 14,
     promoteId: "k",
   });
@@ -186,6 +194,10 @@ function emptyGeoJson(): GeoJSON.FeatureCollection {
  * the content only ever call `setData` and set paint properties.
  */
 export function addDataLayers(map: MapLibreMap): void {
+  withoutValidation(map, () => addDataLayersTo(map));
+}
+
+function addDataLayersTo(map: MapLibreMap): void {
   const before = firstSymbolLayerId(map);
   const hidden = { visibility: "none" } as const;
   const round = { "line-cap": "round", "line-join": "round" } as const;
@@ -214,23 +226,18 @@ export function addDataLayers(map: MapLibreMap): void {
   // The look of the heatmap (radius, intensity, colours) belongs to the
   // data manager, which sets it as paint properties. The source merges the
   // fixes into clusters for the zooms at which they are too many to draw
-  // one by one (see HEATMAP_CLUSTER)
-  map.addSource(MAP_SOURCES.heat, {
-    type: "geojson",
-    data: emptyGeoJson(),
-    cluster: true,
-    clusterRadius: HEATMAP_CLUSTER.radius,
-    clusterMaxZoom: HEATMAP_CLUSTER.maxZoom,
-  });
-  map.addLayer(
-    {
-      id: MAP_LAYERS.heat,
-      type: "heatmap",
-      source: MAP_SOURCES.heat,
-      layout: hidden,
-    },
-    before,
-  );
+  // one by one (see HEATMAP_CLUSTER). Isolate draws the selected flights
+  // from a source of their own, so neither is written again for it.
+  for (const id of [MAP_LAYERS.heat, MAP_LAYERS.heatIsolated]) {
+    map.addSource(id, {
+      type: "geojson",
+      data: emptyGeoJson(),
+      cluster: true,
+      clusterRadius: HEATMAP_CLUSTER.radius,
+      clusterMaxZoom: HEATMAP_CLUSTER.maxZoom,
+    });
+    map.addLayer({ id, type: "heatmap", source: id, layout: hidden }, before);
+  }
 
   // What the heatmap hands over to when zoomed in (see HEAT_LINES): the
   // flights as lines with the time spent around them as `heat`, drawn as a
@@ -346,12 +353,7 @@ export function addDataLayers(map: MapLibreMap): void {
       before,
     );
   }
-  for (const id of [
-    MAP_SOURCES.pathsAltitudeRibbons,
-    MAP_SOURCES.pathsAirspeedRibbons,
-    MAP_SOURCES.pathsAltitudeSelectedRibbons,
-    MAP_SOURCES.pathsAirspeedSelectedRibbons,
-  ]) {
+  for (const id of PATH_RIBBON_SOURCES) {
     addRibbons(map, id, hidden, undefined, before);
   }
 
@@ -455,14 +457,18 @@ export function withDataLayers(
  * is on: for all the flights of every year that took a second and 140 MB.
  * Where the map cannot apply the difference it builds the style anew, a
  * frame later, from no style it has loaded, and the sources are made anew
- * from the style: with their data.
+ * from the style: with their data. Neither the style nor the layers the
+ * difference adds are validated (see withoutValidation).
  */
 export function setBaseStyle(
   map: MapLibreMap,
   style: StyleSpecification,
 ): void {
-  map.setStyle(style, {
-    transformStyle: (previous, next) =>
-      withDataLayers(previous, next, !!map.getStyle()),
-  });
+  withoutValidation(map, () =>
+    map.setStyle(style, {
+      validate: false,
+      transformStyle: (previous, next) =>
+        withDataLayers(previous, next, !!map.getStyle()),
+    }),
+  );
 }

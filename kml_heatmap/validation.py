@@ -13,8 +13,17 @@ if TYPE_CHECKING:
 
 MAX_KML_FILE_SIZE = 100 * 1024 * 1024  # 100 MB
 
+# Files that only a site of this tool has, relative to the output directory
+# and to the data directory: where either is, the site is ours to replace
+SITE_MARKERS = ("map_config.js",)
+DATA_MARKERS = ("metadata.json",)
+# The data files a run owns besides its markers
+_OWNED_DATA_FILES = ("airports.json", "metadata.json", "[0-9][0-9][0-9][0-9]/data.json")
+
 __all__ = [
+    "SITE_MARKERS",
     "find_kml_files",
+    "foreign_site_files",
     "is_protected_directory",
     "protected_directories",
     "validate_kml_file",
@@ -110,6 +119,44 @@ def is_protected_directory(resolved: PurePath) -> bool:
     own.
     """
     return resolved.parent == resolved or resolved in protected_directories()
+
+
+def foreign_site_files(
+    output_dir: str | Path,
+    data_dir: str | Path,
+    owned: Iterable[str],
+    owned_patterns: Iterable[str] = (),
+) -> list[Path]:
+    """The files a run would replace in a directory that holds no site of it.
+
+    ``owned`` are the files a run writes into ``output_dir`` (relative to it,
+    with forward slashes), ``owned_patterns`` glob patterns of those whose
+    names are not known in advance. A run replaces them by name, and
+    ``docs``, the default output directory, is where many a project keeps a
+    site of its own: an ``index.html`` there is somebody else's, unless the
+    directory has the marks of an earlier run (``SITE_MARKERS`` in it, or
+    ``DATA_MARKERS`` in ``data_dir``). Empty when there is such a mark or
+    nothing would be replaced.
+    """
+    output = Path(output_dir)
+    data = Path(data_dir)
+    if any((output / name).is_file() for name in SITE_MARKERS) or any(
+        (data / name).is_file() for name in DATA_MARKERS
+    ):
+        return []
+    found = [
+        output / name
+        for name in owned
+        if (output / name).exists() or (output / name).is_symlink()
+    ]
+    for directory, patterns in (
+        (output, owned_patterns),
+        (data, _OWNED_DATA_FILES),
+    ):
+        with contextlib.suppress(OSError):
+            for pattern in patterns:
+                found.extend(sorted(directory.glob(pattern)))
+    return list(dict.fromkeys(found))
 
 
 def validate_output_dir(

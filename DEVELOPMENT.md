@@ -70,8 +70,8 @@ filters, statistics panel, wrapped modal, airport markers and replay. The
 Chromium. The `mobile` project runs `mobile.spec.ts` and the viewport
 independent specs (`core`, `layers`, `state`) on a phone viewport. The
 `webkit` project runs the same specs as `mobile` on an emulated iPhone, and
-`webkit-desktop` runs `orientation` and `replay`, which drive the desktop
-controls, in a desktop Safari viewport. The `visual`
+`webkit-desktop` runs `error-free`, `orientation` and `replay`, which drive
+the desktop controls, in a desktop Safari viewport. The `visual`
 project compares screenshots of a fixture site and only exists inside the
 Playwright image (or with `VISUAL_SNAPSHOTS=1`), so a plain run leaves it out
 (see CONTRIBUTING.md). Every page is scanned for accessibility violations with
@@ -89,12 +89,16 @@ was built with `CARTO_API_KEY` (any value works) and skip otherwise; CI tests
 a site with a dummy key and, for the specs about the base map requests
 (`base-style`, `error-free`, `layers`) on the desktop, one without. It builds
 both once, in the `e2e-sites` job, and runs every e2e job in the Playwright
-image the visual job uses. The `desktop` and `mobile` projects are split into
-two shards each (`--shard`), and the relief tests of the 3D view ("on the
-relief" in `orientation.spec.ts`) of the `desktop` project run in a job of
-their own, with the whole runner to themselves, since software WebGL takes
-seconds per frame of the relief. The `webkit-desktop` project runs them with
-its other specs.
+image the visual job uses. The `desktop` project is split into three shards
+(`--shard`) and the `mobile` project into two, and the relief tests of the
+3D view ("on the relief" in `orientation.spec.ts`) of the `desktop` and
+`webkit-desktop` projects run in jobs of their own, with the whole runner to
+themselves, since software WebGL takes seconds per frame of the relief. The
+desktop one then runs the specs without a key. In CI a failed test of the
+`desktop` project is retried once, which only tells a flaky failure from a
+steady one: `failOnFlakyTests` fails the run either way. The `mobile`,
+`visual`, `webkit` and `webkit-desktop` projects do not retry, and neither
+do the relief tests, where one attempt takes minutes.
 
 The tests run against `docs/` (the `visual` project against `visual-site/`,
 with the same checks), which must be built from the current sources first. A
@@ -124,7 +128,10 @@ npm run test:e2e:mobile
 # and visual jobs of .github/workflows/test.yml run; scripts/check_locks.py
 # keeps the reference here in step with it)
 nix-shell -p chromium python3 --run 'CHROMIUM_PATH=$(which chromium) npm run test:e2e -- --project=desktop --project=mobile'
-podman run --rm --userns=keep-id -v "$PWD:/work" -w /work mcr.microsoft.com/playwright:v1.63.0-noble@sha256:eff16c30e6f3f4af0a03fa4b706120d5e9b0891c344a27d64559aff5900a4a27 npx playwright test --project=webkit --project=webkit-desktop
+podman run --rm --ipc=host --network host --userns=keep-id --user "$(id -u):$(id -g)" \
+  --security-opt label=disable -v "$PWD:/work" -w /work -e HOME=/tmp \
+  mcr.microsoft.com/playwright:v1.63.0-noble@sha256:eff16c30e6f3f4af0a03fa4b706120d5e9b0891c344a27d64559aff5900a4a27 \
+  npx playwright test --project=webkit --project=webkit-desktop
 ```
 
 Tests are located in `tests/e2e/` and configured via `playwright.config.ts`.
@@ -157,9 +164,10 @@ their traces in `test-results/`, and every run writes an HTML report to
   names only, not the TypeScript sources
 
 `npm run build` produces five bundles. `mapApp.bundle.js` starts the map,
-`features.bundle.js` holds Replay, the flight list of the airport popups,
-the relief of the 3D view and the satellite imagery, and `wrapped.bundle.js`
-holds Wrapped; the page
+`features.bundle.js` holds Replay, the relief of the 3D view and the
+satellite imagery, and `wrapped.bundle.js` holds Wrapped and the content of
+the statistics panel (the rail itself is part of the app, and says it is
+loading until the bundle is in; see `ui/statsPanel.ts`); the page
 imports each of the last two the first time one of its features is opened.
 `shared.bundle.js` is the app itself and everything the lazy bundles use of
 it. Their styles are split the same way and travel with them:
@@ -167,8 +175,8 @@ it. Their styles are split the same way and travel with them:
 `wrapped.css` are fetched alongside their bundles (see
 `services/featureLoader.ts`), and each has its own budget in
 `tests/test_asset_budget.py`. A rule belongs in `features.css` when its
-selector names replay and in `wrapped.css` when it names Wrapped; the file
-headers spell out the rest, including the one-way dependency on
+selector names replay and in `wrapped.css` when it names Wrapped or what the
+statistics panel renders; the file headers spell out the rest, including the one-way dependency on
 `styles.css`. The bundler moves the modules the entry points share into a
 chunk that each of them imports, because several of them hold state that
 has to be a single instance. It makes one chunk for every set of entry
@@ -193,7 +201,12 @@ page loads them from (html-to-image with `import()`, on the first export, as
 one module that `scripts/vendor.js` bundles from the package's own), and the
 country flags of `flag-icons` into
 `kml_heatmap/static/flags/` (`scripts/vendor.js`). All of it is gitignored,
-and `make clean` removes it.
+and `make clean` removes it. MapLibre is copied with two fixes of bugs of
+6.10 made to its minified code (`VENDOR_PATCHES`): tiles under a camera
+that looks at a point above the relief (the chase view) were culled, and a
+GeoJSON tile that loads empty kept the raw data of before. Each fix has to
+find its code exactly once, or the build fails: after a bump of MapLibre,
+drop the fix it has made unnecessary, or match its code again.
 
 The flags are the one asset the wheel leaves out: 271 of them are two
 megabytes, and any one export visits a handful, so `site_assets.py` publishes
@@ -207,7 +220,10 @@ none and the statistics rail falls back to the ISO country code.
   - `calculations/` - Statistics and data processing
   - `features/` - Airports, layers, replay, wrapped
   - `services/` - Data loading and caching
-  - `state/` - URL state management
+  - `state/` - The store, the table of toggles (`toggles.ts`, from which
+    the saved state, the link, the buttons, the actions and the phone's
+    sheet rows are derived), the URL encoding and the site data
+    (`airports.json`, `metadata.json`) once loaded
   - `ui/` - UI managers for controls and interactions
   - `utils/` - Formatters, colour scales, geometry helpers and the icon set.
     Every mark in the interface is an inline SVG: an icon font is out (the
@@ -308,7 +324,10 @@ the hashes of its dependencies, and recompiles that lock last.
 **Testing:**
 
 pytest no longer forces coverage or parallel execution, so a plain `pytest` run
-is fast and readable. The flags used by CI and `make test` are:
+is fast and readable. The tests that build a whole site (the renderer and the
+golden pipeline among them) need the frontend bundles, so run `npm run build`
+first; `make test` does, and a run that fails without them says so above its
+summary. The flags used by CI and `make test` are:
 
 ```bash
 pytest                                          # Run all tests
@@ -341,25 +360,71 @@ make check-obfuscation                  # KML files in data/ are obfuscated
 - `lxml` - Fast XML parsing for KML files
 - `rcssmin`, `rjsmin`, `minify-html` - Output minification (HTML/CSS/JS)
 
+**Split tracks and recordings of one flight:**
+
+`_join_split_lines` in `kml_heatmap/parser_standard.py` joins the
+`LineString`s of a file that are one flight in pieces. A line continues the
+one before it (`_continues`) when both have the same name, the one before
+has not landed (`_ends_on_ground`: it came back down to within 30 m of its
+lowest altitude after climbing 150 m above that, or its last three points
+stand within 15 m of each other), and the line starts within 50 m of where
+the one before ended, with the same time span or within 30 minutes of its
+end. Without times, or without a name, only the point of the split written
+twice (the same longitude, latitude and altitude) joins them. A document
+`TimeSpan` over a flight out and one back, or two untimed flights of a
+placemark named after the aircraft, stay two flights. `gx:Track`s are
+never joined.
+
+After `data_exporter.drop_duplicate_paths` has dropped the exact copies,
+`drop_overlapping_paths` in `kml_heatmap/duplicates.py` drops a recording
+of a flight another one of the same year records as well: two timed
+recordings are one flight when they overlap in time by more than half of
+the shorter one and are within 300 m of each other at 20 moments spread
+over the time they share (two of them may be further apart). The recording
+that names the aircraft stays, its registration first and then its type,
+and of two that name as much the one with more points; the warning names
+both files. Recordings without times are not compared.
+
 **Year file format and the ground column:**
 
 The year files are data format 4 (`FORMAT_VERSION` in
 `kml_heatmap/segment_codec.py`, `DATA_FORMAT_VERSION` in
 `services/yearDecode.ts`; bump both together, the page refuses any other).
+The speed column is written in tenths of a knot, but the exporter rounds the
+speeds to whole knots (`exported_knots` in `kml_heatmap/export_pipeline.py`),
+which takes an eighth off the compressed year files: the format and the
+decoder are the same, so the version stayed 4. Times stay at a tenth of a
+second, which the replay needs for fixes less than a second apart.
 Format 4 added a `ground` column per path: the ground under every row in
 steps of 10 ft, as differences like the other columns, left out for a path
 whose ground is not known. `kml_heatmap/terrain.py` computes it at build time
 from the Terrarium elevation tiles of AWS, shifted to meet the altitudes the
 flight recorded taxiing at both ends, so the correction lives in one place
 and the page only reads the result (`groundProfileFt` in
-`calculations/lift.ts` falls back to the line between the fields without it).
+`calculations/groundProfile.ts` falls back to the line between the fields
+without it). The statistics panel measures the cruise above that ground as
+well, and says "above field" instead of AGL when a flight had none and was
+measured above its own lowest altitude.
+
+`airports.json` is not versioned: the site is always built with its data,
+and the page reads it as it is. Its `code` field (the ICAO code in the name,
+`airport_icao_code` in `kml_heatmap/airport_lookup.py`, which also merges the
+airports) came with format 4 of the year files as an addition: the page
+shows the code the export found rather than reading the name again, and an
+airport without a code shows none.
 
 The tiles (zoom 10, about 100 KB each) are cached as PNGs in `terrain/` of
 the cache directory (`KML_HEATMAP_CACHE_DIR`, by default
 `~/.cache/kml-heatmap`) and decoded by a small pure-Python PNG reader in a
-process pool; `data/` needs 389 of them, 44 MB. Offline, or for a tile that
-cannot be fetched, the build goes on and the flights under it get no ground;
-one warning says how many. The ground is sampled once in the main process
+process pool; `data/` needs 389 of them, 44 MB. The decoded pixels of a tile
+are kept next to its PNG (`<tile>.pixels`, a little smaller than the PNG,
+checked against its CRC), so a later build reads them in a fraction of a
+millisecond instead of decoding the PNG again. A failed request or a server
+error is tried again three times, with pauses of 1, 2 and 4 s, before the
+host is given up for the run. Offline, or for a tile that cannot be fetched,
+the build goes on and the flights under it get no ground; one warning says
+how many. `KML_HEATMAP_REQUIRE_TERRAIN=1` fails it instead, which the CI job
+that deploys the site sets. The ground is sampled once in the main process
 and kept as one array of elevations per path, aligned with its points
 (`sample_path_elevations`), which is what the export chunks are handed: a
 million points take tens of megabytes this way, where a mapping of
@@ -370,8 +435,8 @@ altogether, which `scripts/build_visual_site.py` does: its snapshots show no
 
 No test touches the network: `tests/conftest.py` fails any download of a
 tile loudly, the pipeline tests pass a tile source of their own
-(`create_progressive_heatmap(..., terrain=...)`, see `TileSource`), and
-`FlatTiles` stands the flights on a flat model. A decoding pool that dies
+(`create_progressive_heatmap(..., terrain=...)`, see `TileSource`), such as
+the flat model of `FlatTiles` in `tests/conftest.py`. A decoding pool that dies
 leaves the ground out with one warning instead of failing the build.
 
 **The relief of the 3D view:**
@@ -389,7 +454,13 @@ cut for, up to 11. `liftExaggeration` gives one number per level, 10 out to
 level 6 (`z` 7 in the UI), then 7, 4, and 2 from level 9 in.
 `LayerManager.syncTerrain` changes the level only as a zoom ends, and
 `ui/terrain.ts` sets the relief's exaggeration then; the flights are cut
-once for the new level, as wide as it asks, over the cut of before.
+once for the new level, as wide as it asks, over the cut of before. What
+the two share is `ui/reliefState.ts`: it writes the store's relief switches
+in the order the map needs them, counts the visits of a level, holds
+whether the ribbons show and lists their sources. `calculations/lift.ts` is
+the policy of levels and heights; the curve through the fixes, the ground
+of a flight, the ribbons and their paint are `smoothing.ts`,
+`groundProfile.ts`, `ribbons.ts` and `ribbonPaint.ts` beside it.
 
 MapLibre raises a ribbon by the relief of the elevation tiles one level
 coarser than the ribbon's own tile (`getSourceTile`, `deltaZoom` 1), so at
@@ -436,7 +507,7 @@ tile. A feature state needs a feature id, which costs every tile a few bytes
 per feature (about 5 % of the worker's heap with all years), so only the
 levels next to one of another exaggeration have one (`k`, promoted to the
 id; `switchesExaggeration`: 6 to 9). The id is a new one for every visit of
-a level (`ribbonId`, `LayerManager.ribbonEpoch`): MapLibre keeps an entry
+a level (`ribbonId`, `ReliefState.epoch`): MapLibre keeps an entry
 for every id it was given a state for, even one taken away again, and works
 out the paint of every feature of such an id anew, on the main thread, in
 each tile it loads, which for the cut of the map's level took seconds per
@@ -465,14 +536,37 @@ the shading alone (`reliefShaded` in the store, set by `syncTerrain` for the
 6.10 breaks the ribbons up on the relief of the globe: `terrainActive`, and
 with it the ground the ribbons are cut on, stays off there.
 
+The colour layers' ribbons are cut for the pixels of their level, not for
+the data (`screenCut` and `keptPoints` in `calculations/ribbons.ts`): a
+flight's curve keeps a point where its height or its ground has changed
+by a step since the last one kept, where it has turned by 10 degrees after
+1.5 px, and every 16 px, and its pieces are `LIFT_STEP_FT` apart doubled
+as long as a step stays within a pixel, merged where their heights span a
+step. The relief under a quad is the one of its middle (MapLibre lifts
+each polygon by the elevation at its centroid), so the ground criterion
+keeps a quad short over the relief and a strip of quads cannot be one
+polygon. From level 8 (`z` 9) the layer manager writes only the runs
+around the view (`viewBox`: a quarter of the view to each side, and as far
+as the highest flight reaches into a tilted view), and again on `moveend`
+once the view leaves that. For all years of 103 flights this took the
+map's worker from 0.9 to 1.4 GB to 84 to 189 MB, and turning the 3D view
+on from a 5.4 s task to 1.4 s on a phone (CPU 6x slower), most of that the
+smoothing of every flight. Their sources keep a buffer of 32 px, which a
+quad never leaves (a longer one is cut into quads of 24 px at most),
+instead of 128, and no simplification: with
+it, far tiles of a tilted view dropped the ribbons whose walls still
+showed. The replay's trail is cut as the data has it, into a source as
+before; the chase camera looks at it from close up.
+
 The page fetches the tiles from `s3.amazonaws.com`, whose
 `elevation-tiles-prod/` bucket alone the CSP names in `connect-src`
 (MapLibre fetches raster-dem tiles; `img-src` needs no entry).
 `tests/frontend/unit/csp.test.ts` fails when a URL the frontend fetches is
 not allowed there.
 The e2e fixture (`tests/e2e/fixtures.ts`) answers them itself with a flat
-tile 500 m up, so specs and screenshots stay deterministic and a spec can
-tell the flights stand on the relief.
+tile 500 m up, or with a slope of ridges and valleys for a spec that asks
+for one (the `terrain` option), so specs and screenshots stay deterministic
+and a spec can tell the flights stand on the relief.
 
 **The satellite imagery:**
 

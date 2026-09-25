@@ -8,6 +8,7 @@ import {
   createSegment,
   type MockApp,
 } from "../../testHelpers";
+import { siteData } from "../../../../kml_heatmap/frontend/state/siteData";
 
 export { el } from "../../testHelpers";
 
@@ -55,14 +56,36 @@ export function mountWrappedDom(): void {
 
 /** Airports with countries, so the Wrapped sections can group and rank */
 export function installAirports(): void {
-  window.KML_AIRPORTS = {
-    airports: [
-      { name: "EDDF Frankfurt", lat: 50.03, lon: 8.57, country: "DE" },
-      { name: "EDDM Munich", lat: 48.35, lon: 11.79, country: "DE" },
-      { name: "EDDK Cologne", lat: 50.87, lon: 7.14, country: "DE" },
-      { name: "LOWW Vienna", lat: 48.11, lon: 16.57, country: "AT" },
-    ],
-  };
+  siteData.airports = [
+    {
+      name: "EDDF Frankfurt",
+      lat: 50.03,
+      lon: 8.57,
+      code: "EDDF",
+      country: "DE",
+    },
+    {
+      name: "EDDM Munich",
+      lat: 48.35,
+      lon: 11.79,
+      code: "EDDM",
+      country: "DE",
+    },
+    {
+      name: "EDDK Cologne",
+      lat: 50.87,
+      lon: 7.14,
+      code: "EDDK",
+      country: "DE",
+    },
+    {
+      name: "LOWW Vienna",
+      lat: 48.11,
+      lon: 16.57,
+      code: "LOWW",
+      country: "AT",
+    },
+  ];
 }
 
 /** Two timed segments of one path, an hour of flying at 100 then 120 kt */

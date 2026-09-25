@@ -148,7 +148,10 @@ format: ## Run formatters
 	ruff format .
 	npm run format
 
-test: ## Run the JavaScript and Python test suites with coverage
+# The Python tests build whole sites, which carry the frontend bundles, so
+# they are built first
+test: ## Build the frontend bundles, then run the JavaScript and Python test suites with coverage
+	npm run build
 	npm run test:coverage
 	pytest -n auto --cov --cov-branch --cov-report=xml:coverage/coverage.xml --cov-report=term
 
@@ -188,9 +191,10 @@ lock: ## Regenerate the lock files from pyproject.toml and requirements-tools.in
 	    --output-file=requirements-tools.lock requirements-tools.in; \
 	  status=$$?; rm -rf "$$tmp"; exit $$status
 
-clean: ## Remove the container image (when a runtime is available) and local build artifacts, including the frontend build output in kml_heatmap/static/
+clean: ## Remove the container image (when a runtime is available) and local build artifacts, including the frontend build output in kml_heatmap/static/ and the fixture site of the visual snapshots
 	-@test -z "$(CONTAINER_RUNTIME)" || $(CONTAINER_RUNTIME) rmi $(IMAGE_NAME) 2>/dev/null
 	rm -rf htmlcov coverage coverage.xml .coverage .coverage.* test-results playwright-report \
+	  visual-site \
 	  dist build *.egg-info .mypy_cache .ruff_cache .pytest_cache .hypothesis \
 	  kml_heatmap/static/*.bundle.js kml_heatmap/static/*.map \
 	  kml_heatmap/static/vendor kml_heatmap/static/flags

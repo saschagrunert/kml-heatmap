@@ -5,6 +5,7 @@ import {
   selectPathForReplay,
   togglePathSelection,
   waitForAircraftFilter,
+  waitForStatsContent,
   waitForYearFilter,
 } from "./helpers";
 
@@ -155,8 +156,8 @@ test.describe("Filters and Statistics", () => {
     page,
   }) => {
     await page.locator("#stats-btn").click();
-    const panel = page.locator("#stats-panel");
-    await expect(panel).toBeVisible();
+    // Its figures, not the loading line of the first opening
+    const panel = await waitForStatsContent(page);
 
     await expect(page.locator("#stats-rail-title")).toContainText(
       "Flight Statistics",
@@ -178,8 +179,8 @@ test.describe("Filters and Statistics", () => {
 
   test("stats panel shows airports and aircraft", async ({ page }) => {
     await page.locator("#stats-btn").click();
-    const panel = page.locator("#stats-panel");
-    await expect(panel).toBeVisible();
+    // Its figures, not the loading line of the first opening
+    const panel = await waitForStatsContent(page);
 
     await expect(panel).toContainText("Airports");
     await expect(panel).toContainText("Aircraft");
@@ -188,8 +189,8 @@ test.describe("Filters and Statistics", () => {
 
   test("stats update for selected path", async ({ page }) => {
     await page.locator("#stats-btn").click();
-    const panel = page.locator("#stats-panel");
-    await expect(panel).toBeVisible();
+    // Its figures, not the loading line of the first opening
+    const panel = await waitForStatsContent(page);
 
     const globalText = await panel.textContent();
 
@@ -207,8 +208,8 @@ test.describe("Filters and Statistics", () => {
     page,
   }) => {
     await page.locator("#stats-btn").click();
-    const panel = page.locator("#stats-panel");
-    await expect(panel).toBeVisible();
+    // Its figures, not the loading line of the first opening
+    await waitForStatsContent(page);
 
     const pathId = await selectPathForReplay(page);
     const title = page.locator("#stats-rail-title");
@@ -222,8 +223,8 @@ test.describe("Filters and Statistics", () => {
 
   test("year filter updates stats panel content", async ({ page }) => {
     await page.locator("#stats-btn").click();
-    const panel = page.locator("#stats-panel");
-    await expect(panel).toBeVisible();
+    // Its figures, not the loading line of the first opening
+    const panel = await waitForStatsContent(page);
 
     const yearSelect = page.locator("#year-select");
     await yearSelect.selectOption("all");
@@ -239,8 +240,8 @@ test.describe("Filters and Statistics", () => {
 
   test("aircraft filter updates stats and can be reset", async ({ page }) => {
     await page.locator("#stats-btn").click();
-    const panel = page.locator("#stats-panel");
-    await expect(panel).toBeVisible();
+    // Its figures, not the loading line of the first opening
+    const panel = await waitForStatsContent(page);
 
     const allText = await panel.textContent();
 

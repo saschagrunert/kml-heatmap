@@ -114,35 +114,75 @@ export function applyGradientTokens(root: HTMLElement): void {
 }
 
 /**
- * Get RGB color for a given altitude using gradient mapping
- * @param altitude - Altitude value
- * @param minAlt - Minimum altitude in range
- * @param maxAlt - Maximum altitude in range
+ * Where `value` lies on a colour scale from `min` to `max`, from 0 to 1.
+ * With `ranks`, the values of the data at evenly spaced ranks from `min` to
+ * `max` (see rankValues), by its rank in that data: every stretch of the
+ * ramp colours as many segments as any other. A light aircraft spends
+ * three quarters of its flying in the lowest third of its altitudes, and
+ * most of its speeds at a cruise far from its taxiing; spread evenly over
+ * the values, most of the map was in a few neighbouring colours of the
+ * ramp. A value that many segments share (a stretch where ranks repeat)
+ * takes the middle of their ranks. Without `ranks` the scale runs evenly.
+ */
+export function scalePosition(
+  value: number,
+  min: number,
+  max: number,
+  ranks?: readonly number[],
+): number {
+  const last = (ranks?.length ?? 0) - 1;
+  if (!ranks || last < 1) {
+    return Math.max(0, Math.min(1, (value - min) / Math.max(max - min, 1)));
+  }
+  // The first rank that is not below the value, and the last one not above
+  let lo = 0;
+  while (lo <= last && ranks[lo]! < value) lo++;
+  let hi = lo - 1;
+  while (hi < last && ranks[hi + 1]! <= value) hi++;
+  if (hi < 0) return 0;
+  if (lo > last) return 1;
+  if (lo <= hi) return (lo + hi) / 2 / last;
+  // Between two ranks
+  const from = ranks[hi]!;
+  return (hi + (value - from) / (ranks[lo]! - from)) / last;
+}
+
+/** The altitude ramp's colour at `position` (0 to 1) along it */
+export function altitudeColorAt(position: number): string {
+  return interpolateGradient(position, ALTITUDE_STOPS);
+}
+
+/** The groundspeed ramp's colour at `position` (0 to 1) along it */
+export function airspeedColorAt(position: number): string {
+  return interpolateGradient(position, AIRSPEED_STOPS);
+}
+
+/**
+ * The colour of an altitude on the scale from `minAlt` to `maxAlt`, spread
+ * by `ranks` where given (see scalePosition)
  * @returns RGB color string (e.g., "rgb(255, 128, 0)")
  */
 export function getColorForAltitude(
   altitude: number,
   minAlt: number,
   maxAlt: number,
+  ranks?: readonly number[],
 ): string {
-  const normalized = (altitude - minAlt) / Math.max(maxAlt - minAlt, 1);
-  return interpolateGradient(normalized, ALTITUDE_STOPS);
+  return altitudeColorAt(scalePosition(altitude, minAlt, maxAlt, ranks));
 }
 
 /**
- * Get RGB color for a given airspeed using gradient mapping
- * @param speed - Speed value in knots
- * @param minSpeed - Minimum speed in range
- * @param maxSpeed - Maximum speed in range
+ * The colour of a groundspeed in knots on the scale from `minSpeed` to
+ * `maxSpeed`, spread by `ranks` where given (see scalePosition)
  * @returns RGB color string (e.g., "rgb(255, 128, 0)")
  */
 export function getColorForAirspeed(
   speed: number,
   minSpeed: number,
   maxSpeed: number,
+  ranks?: readonly number[],
 ): string {
-  const normalized = (speed - minSpeed) / Math.max(maxSpeed - minSpeed, 1);
-  return interpolateGradient(normalized, AIRSPEED_STOPS);
+  return airspeedColorAt(scalePosition(speed, minSpeed, maxSpeed, ranks));
 }
 
 /**

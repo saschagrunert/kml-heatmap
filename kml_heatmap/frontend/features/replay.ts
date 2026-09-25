@@ -8,7 +8,7 @@ import {
   smoothFlights,
   type SmoothedFlights,
   type SmoothFlightsOptions,
-} from "../calculations/lift";
+} from "../calculations/smoothing";
 import { FLAT_TURN_STEP_DEG } from "../calculations/curves";
 import {
   DEGREES_TO_RADIANS,
@@ -225,7 +225,7 @@ export interface ReplayPoint {
  * (see replayCurve). Its track is the direction of the curve there, which
  * turns evenly from the one at a point of the curve to the one at the
  * next: at a point it is the mean of the two pieces that meet there. Null
- * for a segment without coordinates.
+ * for an index past the curve's segments.
  */
 export function replayPoint(
   curve: ReplayCurve,

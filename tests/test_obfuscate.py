@@ -23,7 +23,6 @@ from kml_heatmap.obfuscate import (
     find_kml_files,
     main,
     obfuscate_kml_content,
-    obfuscate_kml_directory,
     obfuscate_kml_file,
     obfuscate_kml_files,
     rename_charterware_files,
@@ -93,6 +92,11 @@ ROUTE_NAME_KML = """\
   </Document>
 </kml>
 """
+
+
+def obfuscate_kml_directory(directory):
+    """Obfuscate every KML file of a directory, as the command line does."""
+    return obfuscate_module._obfuscate_listed_files(find_kml_files(directory))
 
 
 def _whens(content):
@@ -346,6 +350,31 @@ class TestExtendedPatterns:
         kml_file = tmp_path / "paused.kml"
         kml_file.write_text(result, encoding="utf-8")
         assert check_kml_obfuscated(kml_file)
+
+    def test_a_clock_wrong_at_the_start_does_not_hold_the_flight(self, tmp_path):
+        """A logger's clock sits at its default date until the GPS fix.
+
+        Those stamps are clock errors, as the parser has them, and the
+        flight moves to January 1st without them.
+        """
+        kml = (
+            "<kml><Placemark><gx:Track>"
+            "<when>2000-01-01T00:00:00Z</when><when>2000-01-01T00:00:01Z</when>"
+            "<when>2026-08-16T10:00:00Z</when><when>2026-08-16T10:01:00Z</when>"
+            "<when>2026-08-16T10:02:00Z</when>"
+            "</gx:Track></Placemark></kml>"
+        )
+        result = obfuscate_kml_content(kml)
+        assert _whens(result) == [
+            "2000-01-01T00:00:00Z",
+            "2000-01-01T00:00:01Z",
+            "2026-01-01T10:00:00Z",
+            "2026-01-01T10:01:00Z",
+            "2026-01-01T10:02:00Z",
+        ]
+        kml_file = tmp_path / "clock.kml"
+        kml_file.write_text(result, encoding="utf-8")
+        assert check_kml_obfuscated(kml_file) == []
 
     def test_a_flight_on_new_years_day_stays_in_its_year(self, tmp_path):
         """Eight hours after a flight across midnight it still is 2026's."""

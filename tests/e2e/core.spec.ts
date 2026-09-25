@@ -81,19 +81,23 @@ function airportMarker(page: Page, name: string): Locator {
   return page.getByRole("button", { name, exact: true });
 }
 
+// Outside the describe below, whose beforeEach loads the page: the
+// collectors have to be in place before the only load. Loading the page a
+// second time made WebKit report the tile requests the first page left
+// open as failed ("Map error: AJAXError: Load failed") while it unloaded.
+test("page loads without errors or CSP violations", async ({ page }) => {
+  const errors = await attachErrorCollectors(page);
+
+  await gotoApp(page);
+
+  expect(errors.pageErrors).toEqual([]);
+  expect(errors.cspViolations).toEqual([]);
+  expect(relevantConsoleErrors(errors)).toEqual([]);
+});
+
 test.describe("Core", () => {
   test.beforeEach(async ({ page }) => {
     await gotoApp(page);
-  });
-
-  test("page loads without errors or CSP violations", async ({ page }) => {
-    const errors = await attachErrorCollectors(page);
-
-    await gotoApp(page);
-
-    expect(errors.pageErrors).toEqual([]);
-    expect(errors.cspViolations).toEqual([]);
-    expect(relevantConsoleErrors(errors)).toEqual([]);
   });
 
   test("content security policy is declared", async ({ page }) => {
@@ -335,7 +339,9 @@ test.describe("Core", () => {
   });
 
   test("metadata is loaded", async ({ page }) => {
-    const metadata = await page.evaluate(() => window.KML_METADATA);
+    const metadata = await page.evaluate(
+      () => window.mapApp?.siteData.metadata,
+    );
     expect(metadata).toBeTruthy();
     // The statistics are computed in the browser, not exported
     expect(metadata).not.toHaveProperty("stats");
@@ -352,10 +358,11 @@ test.describe("Core", () => {
   });
 
   test("airports data is loaded", async ({ page }) => {
-    const airports = await page.evaluate(() => window.KML_AIRPORTS);
-    expect(airports).toBeTruthy();
-    expect(Array.isArray(airports!.airports)).toBe(true);
-    expect(airports!.airports.length).toBeGreaterThan(0);
+    const airports = await page.evaluate(
+      () => window.mapApp?.siteData.airports,
+    );
+    expect(Array.isArray(airports)).toBe(true);
+    expect(airports!.length).toBeGreaterThan(0);
   });
 
   test("airport markers are rendered on the map", async ({ page }) => {
@@ -503,6 +510,8 @@ test.describe("Core", () => {
     });
 
     test("open stats panel has no WCAG A/AA violations", async ({ page }) => {
+      // Waits for the figures, so the check covers them rather than the
+      // loading line of the first opening
       await toggleStatsPanel(page);
       await expect(page.locator("#stats-panel")).toBeVisible();
 

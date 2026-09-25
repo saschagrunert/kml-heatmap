@@ -20,10 +20,8 @@ describe("ReplayState", () => {
       expect(state.lastBearing).toBeNull();
       expect(state.animationFrameId).toBeNull();
       expect(state.lastFrameTime).toBeNull();
-      expect(state.colorMinAlt).toBe(0);
-      expect(state.colorMaxAlt).toBe(10000);
-      expect(state.colorMinSpeed).toBe(0);
-      expect(state.colorMaxSpeed).toBe(200);
+      expect(state.colorAltRange).toEqual({ min: 0, max: 10000 });
+      expect(state.colorSpeedRange).toEqual({ min: 0, max: 200 });
       expect(state.autoZoom).toBe(false);
       expect(state.recenterTimestamps).toEqual([]);
       expect(state.recenterPanEndsAt).toBe(0);
@@ -86,8 +84,7 @@ describe("ReplayState", () => {
       state.playing = true;
       state.speed = 100;
       state.maxTime = 500;
-      state.colorMinAlt = 200;
-      state.colorMaxAlt = 8000;
+      state.colorAltRange = { min: 200, max: 8000 };
       state.autoZoom = true;
 
       state.resetDrawState();
@@ -95,8 +92,7 @@ describe("ReplayState", () => {
       expect(state.playing).toBe(true);
       expect(state.speed).toBe(100);
       expect(state.maxTime).toBe(500);
-      expect(state.colorMinAlt).toBe(200);
-      expect(state.colorMaxAlt).toBe(8000);
+      expect(state.colorAltRange).toEqual({ min: 200, max: 8000 });
       expect(state.autoZoom).toBe(true);
     });
 

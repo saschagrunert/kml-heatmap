@@ -7,6 +7,7 @@ import {
 } from "../../../../kml_heatmap/frontend/features/replay";
 import { calculateBearing } from "../../../../kml_heatmap/frontend/utils/geometry";
 import type { PathSegment } from "../../../../kml_heatmap/frontend/types";
+import { segmentOf } from "../../testHelpers";
 
 describe("replay feature", () => {
   const mockSegments: PathSegment[] = [
@@ -62,9 +63,9 @@ describe("replay feature", () => {
 
     it("sorts segments by time", () => {
       const unsorted: PathSegment[] = [
-        { path_id: 1, time: 1200 },
-        { path_id: 1, time: 1000 },
-        { path_id: 1, time: 1100 },
+        segmentOf({ path_id: 1, time: 1200 }),
+        segmentOf({ path_id: 1, time: 1000 }),
+        segmentOf({ path_id: 1, time: 1100 }),
       ];
 
       const prepared = prepareReplaySegments(unsorted, 1);
@@ -74,10 +75,10 @@ describe("replay feature", () => {
 
     it("filters out segments without time", () => {
       const segments: PathSegment[] = [
-        { path_id: 1, time: 1000 },
-        { path_id: 1, time: undefined },
-        { path_id: 1 },
-        { path_id: 1, time: 1100 },
+        segmentOf({ path_id: 1, time: 1000 }),
+        segmentOf({ path_id: 1, time: undefined }),
+        segmentOf({ path_id: 1 }),
+        segmentOf({ path_id: 1, time: 1100 }),
       ];
 
       const prepared = prepareReplaySegments(segments, 1);
@@ -104,6 +105,8 @@ describe("replay feature", () => {
           path_id: 1,
           time,
           coords: [points[i]!, end],
+          altitude_ft: 0,
+          groundspeed_knots: 0,
         };
         time += seconds[i] ?? 0;
         return segment;
@@ -134,11 +137,11 @@ describe("replay feature", () => {
       const curve = replayCurve(segments, () => 0);
 
       segments.forEach((segment, i) => {
-        expect(replayPoint(curve, i, 0)!.position).toEqual(segment.coords![0]);
+        expect(replayPoint(curve, i, 0)!.position).toEqual(segment.coords[0]);
         // The end of one segment is the start of the next
         const end = replayPoint(curve, i, 1)!.position;
-        expect(end[0]).toBeCloseTo(segment.coords![1][0], 12);
-        expect(end[1]).toBeCloseTo(segment.coords![1][1], 12);
+        expect(end[0]).toBeCloseTo(segment.coords[1][0], 12);
+        expect(end[1]).toBeCloseTo(segment.coords[1][1], 12);
       });
     });
 
@@ -352,21 +355,6 @@ describe("replay feature", () => {
           0.5,
         )!.offsetsFt,
       ).toBeUndefined();
-    });
-
-    it("has nothing for a segment without coordinates", () => {
-      const segments: PathSegment[] = [
-        { path_id: 1, time: 0 },
-        { path_id: 1, time: 10 },
-      ];
-
-      expect(
-        replayPoint(
-          replayCurve(segments, () => 0),
-          0,
-          0.5,
-        ),
-      ).toBeNull();
     });
   });
 

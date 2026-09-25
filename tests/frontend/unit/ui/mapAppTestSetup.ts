@@ -15,6 +15,7 @@ import type {
   Metadata,
   SavedState,
 } from "../../../../kml_heatmap/frontend/types";
+import type { Map as MockMap } from "../../../mocks/maplibre-gl";
 
 export const mockDataManagerInstance = {
   loadAirports: vi.fn(),
@@ -36,9 +37,8 @@ export const mockFilterManagerInstance = {
 
 export const mockStatsManagerInstance = {
   updateStatsPanel: vi.fn(),
-  toggleStats: vi.fn(),
   updateStatsForSelection: vi.fn(),
-  setStatsPanelVisible: vi.fn(),
+  destroy: vi.fn(),
 };
 
 export const mockAirportManagerInstance = {
@@ -121,6 +121,20 @@ export const APP_CONFIG = {
   dataDir: "/data",
 };
 
+/**
+ * A MapApp built with APP_CONFIG. The test file hands in the class, which it
+ * imports once its module mocks are in place: this module must not import
+ * the application (see the top).
+ */
+export function createApp(App: typeof MapApp): MapApp {
+  return new App({ ...APP_CONFIG });
+}
+
+/** The mock behind `app.map`, for what the real type does not have */
+export function mockMap(app: MapApp): MockMap {
+  return app.map as unknown as MockMap;
+}
+
 const originalGetContext = HTMLCanvasElement.prototype.getContext;
 
 export function setupDOM(): void {
@@ -202,8 +216,26 @@ export const defaultData: KMLDataset = {
   coordinates: [[50, 8]],
   // Timed, so the one flight can be replayed
   path_segments: [
-    { path_id: 1, altitude_ft: 5000, time: 0 },
-    { path_id: 1, altitude_ft: 5500, time: 60 },
+    {
+      path_id: 1,
+      coords: [
+        [50, 8],
+        [50.1, 8.1],
+      ],
+      altitude_ft: 5000,
+      groundspeed_knots: 100,
+      time: 0,
+    },
+    {
+      path_id: 1,
+      coords: [
+        [50.1, 8.1],
+        [50.2, 8.2],
+      ],
+      altitude_ft: 5500,
+      groundspeed_knots: 100,
+      time: 60,
+    },
   ],
   path_info: [
     {

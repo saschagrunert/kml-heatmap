@@ -13,6 +13,7 @@ import {
   TOAST_STATUS_ID,
 } from "../utils/toast";
 import {
+  airportCode,
   countryDisplayName,
   countryFlagSrc,
   findHomeBase,
@@ -24,8 +25,13 @@ import {
   generateFunFacts,
 } from "../features/wrapped";
 import { segmentBounds, type Coordinate } from "../utils/geometry";
-import { calculateFilteredStatistics } from "../calculations/statistics";
-import { datasetIndex } from "../calculations/datasetIndex";
+import {
+  calculateFilteredStatistics,
+  filterStatistics,
+  filterStatisticsInSlices,
+} from "../calculations/panelStats";
+import { datasetIndex, type FilterView } from "../calculations/datasetIndex";
+import { logError } from "../utils/logger";
 import {
   generateStatsHtml,
   generateFunFactsHtml,
@@ -34,6 +40,7 @@ import {
   generateDestinationsHtml,
 } from "../utils/wrappedHtml";
 import { watchScrollEnd, type ScrollEndWatcher } from "../utils/scrollFade";
+import { siteData } from "../state/siteData";
 
 /**
  * Elements that stay out of the inert set while the dialog is open: the
@@ -78,7 +85,7 @@ const coordinatesByAirports = new WeakMap<Airport[], Map<string, Coordinate>>();
  * with the airports array, which is loaded once.
  */
 function airportCoordinates(): Map<string, Coordinate> {
-  const airports = window.KML_AIRPORTS?.airports;
+  const airports = siteData.airports;
   if (!airports) return new Map();
   let coordinates = coordinatesByAirports.get(airports);
   if (!coordinates) {
@@ -95,8 +102,13 @@ function airportCoordinates(): Map<string, Coordinate> {
 
 export class WrappedManager {
   private app: MapApp;
+  /**
+   * Where the map goes back to on close: its parent, and the element it
+   * stood before. An index into the parent's children went stale once the
+   * mobile bar came or went ahead of the map across the breakpoint.
+   */
   private originalMapParent: HTMLElement | null;
-  private originalMapIndex: number | null;
+  private originalMapNext: Element | null;
   private savedControlDisplays: Map<HTMLElement, string> = new Map();
   private escapeHandler: ((e: KeyboardEvent) => void) | null = null;
   private previouslyFocused: HTMLElement | null = null;
@@ -115,6 +127,9 @@ export class WrappedManager {
    * fitted view for the user's.
    */
   private savedView: UserMapView | null = null;
+  /** An opening that waits for the statistics of its filter */
+  private pendingOpen: Promise<void> | null = null;
+  private destroyed = false;
   private unsubscribeData: () => void;
 
   /**
@@ -131,12 +146,12 @@ export class WrappedManager {
   constructor(app: MapApp) {
     this.app = app;
     this.originalMapParent = null;
-    this.originalMapIndex = null;
+    this.originalMapNext = null;
 
     // A year that finishes loading while the dialog is open replaces the
     // cards, which were computed from the data that was there before
     this.unsubscribeData = app.store.subscribe("currentData", () => {
-      if (app.store.get("wrappedVisible") === true) this.renderContent();
+      if (app.wrappedVisible) this.renderContent();
     });
   }
 
@@ -229,10 +244,31 @@ export class WrappedManager {
   }
 
   showWrapped(): void {
-    if (!this.app.map || this.app.store.get("wrappedVisible") === true) return;
+    if (!this.app.map || this.app.wrappedVisible) return;
     // Replay owns the map while it runs; its control is disabled then, and
     // this covers every other way in (the mobile tab, a restored state)
     if (this.app.replayActive) return;
+
+    // The cards need the statistics of the filter, which walk every flight
+    // it keeps: a third of a second on a phone for all the years, and the
+    // page did nothing else meanwhile. They are worked out in slices, and
+    // the dialog opens once they are in; at once for a filter they are
+    // kept for, or a small one (see filterStatisticsInSlices).
+    if (this.pendingOpen) return;
+    const view = this.filterView();
+    const stats = view ? filterStatisticsInSlices(view) : null;
+    if (stats instanceof Promise) {
+      this.pendingOpen = stats
+        .then(() => {
+          this.pendingOpen = null;
+          if (!this.destroyed) this.showWrapped();
+        })
+        .catch((error: unknown) => {
+          this.pendingOpen = null;
+          logError(error);
+        });
+      return;
+    }
 
     // A close that is still settling must not remeasure a map that is about
     // to move back into the dialog
@@ -246,12 +282,14 @@ export class WrappedManager {
 
     if (!mapContainer || !wrappedMapContainer) return;
 
-    // Store original position if not already stored
-    if (!this.originalMapParent) {
-      this.originalMapParent = mapContainer.parentNode as HTMLElement;
-      this.originalMapIndex = Array.from(
-        this.originalMapParent.children,
-      ).indexOf(mapContainer);
+    // Where the map is now, taken on every opening: the page around it
+    // changes between two of them (the mobile bar goes in ahead of the map
+    // or out again as the window crosses the breakpoint). A map still in
+    // the dialog, from a close whose move has not run, is not where it
+    // belongs.
+    if (mapContainer.parentElement !== wrappedMapContainer) {
+      this.originalMapParent = mapContainer.parentElement;
+      this.originalMapNext = mapContainer.nextElementSibling;
     }
 
     // The dialog fits the map to all the data; closing it puts the user's
@@ -305,7 +343,7 @@ export class WrappedManager {
     // on close so that a quick close cannot move the map into a hidden dialog.
     this.mapMoveTimer = setTimeout(() => {
       this.mapMoveTimer = null;
-      if (!this.app.store.get("wrappedVisible")) return;
+      if (!this.app.wrappedVisible) return;
       // Now move map into wrapped container (which now has dimensions)
       wrappedMapContainer.appendChild(mapContainer);
 
@@ -321,12 +359,23 @@ export class WrappedManager {
       // Now that container has dimensions, have the map measure it
       this.mapResizeTimer = setTimeout(() => {
         this.mapResizeTimer = null;
-        if (!this.app.map || !this.app.store.get("wrappedVisible")) return;
+        if (!this.app.map || !this.app.wrappedVisible) return;
         this.app.map.resize();
         this.app.map.fitBounds(fitTarget, this.fitOptions());
         this.revealMapWhenPainted(wrappedMapContainer);
       }, 100);
     }, 50);
+  }
+
+  /** The selected year and aircraft's view of the data, if there is any */
+  private filterView(): FilterView | null {
+    const data = this.app.currentData;
+    return data
+      ? datasetIndex(data).filter(
+          this.app.selectedYear,
+          this.app.selectedAircraft,
+        )
+      : null;
   }
 
   /**
@@ -343,14 +392,14 @@ export class WrappedManager {
     // The filter view of the dataset is shared with the statistics panel,
     // so a filter it already computed is not walked again here
     const data = this.app.currentData;
-    const view = data ? datasetIndex(data).filter(year, aircraft) : null;
+    const view = this.filterView();
     const preFiltered = {
       paths: view?.paths ?? [],
       segments: view?.segments() ?? [],
     };
 
     const filteredStats = view
-      ? view.statistics()
+      ? filterStatistics(view)
       : calculateFilteredStatistics({ pathInfo: [], segments: [] });
 
     const yearStats = calculateYearStats(
@@ -360,6 +409,7 @@ export class WrappedManager {
       this.app.aircraftModels,
       aircraft,
       preFiltered,
+      filteredStats,
     );
 
     // Update title and year display based on selection
@@ -421,10 +471,10 @@ export class WrappedManager {
       const homeBaseCount = homeBase ? (airportCounts[homeBase] ?? 0) : 0;
 
       if (homeBase) {
-        const homeBaseHtml = generateHomeBaseHtml({
-          name: homeBase,
-          flight_count: homeBaseCount,
-        });
+        const homeBaseHtml = generateHomeBaseHtml(
+          { name: homeBase, flight_count: homeBaseCount },
+          airportCode(homeBase),
+        );
         if (topAirportsEl) topAirportsEl.innerHTML = homeBaseHtml;
 
         // Every airport is listed, the home base included, so the country
@@ -439,6 +489,7 @@ export class WrappedManager {
         const destinationsHtml = generateDestinationsHtml(grouped, {
           countryName: countryDisplayName,
           flagSrc: countryFlagSrc,
+          airportCode,
           homeBase,
           furthest,
         });
@@ -579,6 +630,7 @@ export class WrappedManager {
 
   /** Drop every pending timer and listener; the dialog stays as it is */
   destroy(): void {
+    this.destroyed = true;
     this.unsubscribeData();
     this.cancelPendingMapTimers();
     this.cardsScroll?.stop();
@@ -599,16 +651,14 @@ export class WrappedManager {
     const mapContainer = domCache.get("map");
     if (!mapContainer) return;
 
-    if (this.originalMapParent && this.originalMapIndex !== null) {
-      const children = Array.from(this.originalMapParent.children);
-      if (this.originalMapIndex >= children.length) {
-        this.originalMapParent.appendChild(mapContainer);
-      } else {
-        const refChild = children[this.originalMapIndex];
-        if (refChild) {
-          this.originalMapParent.insertBefore(mapContainer, refChild);
-        }
-      }
+    if (this.originalMapParent) {
+      // Before the element that followed it, or at the end should that one
+      // have left the page since
+      const next =
+        this.originalMapNext?.parentElement === this.originalMapParent
+          ? this.originalMapNext
+          : null;
+      this.originalMapParent.insertBefore(mapContainer, next);
 
       // Restore map styling
       mapContainer.style.width = "";

@@ -157,8 +157,14 @@ describe("ChaseCamera", () => {
   beforeEach(() => {
     map = createMapLibreMock({ center: [12.06, 51.55], zoom: 12 });
     const container = map.getContainer();
-    Object.defineProperty(container, "clientWidth", { value: 800 });
-    Object.defineProperty(container, "clientHeight", { value: 600 });
+    Object.defineProperty(container, "clientWidth", {
+      value: 800,
+      configurable: true,
+    });
+    Object.defineProperty(container, "clientHeight", {
+      value: 600,
+      configurable: true,
+    });
     now = 1000;
   });
 
@@ -287,6 +293,48 @@ describe("ChaseCamera", () => {
     chase.release();
     map.emit("resize");
     expect(onChange).toHaveBeenCalledTimes(1);
+  });
+
+  it("lays the page out in no frame but the first and those after a resize", () => {
+    // Asking the size of the map's container or of the panel lays the page
+    // out, which on a phone took half a second of a frame (see mapSize)
+    panelAt(500);
+    const container = map.getContainer();
+    const reads = vi.fn();
+    const measured = (value: number) => ({
+      get: () => {
+        reads();
+        return value;
+      },
+    });
+    Object.defineProperty(container, "clientWidth", measured(800));
+    Object.defineProperty(container, "clientHeight", measured(600));
+    const boxes = vi.spyOn(Element.prototype, "getBoundingClientRect");
+    const panelBox = vi.spyOn(
+      document.getElementById("replay-controls")!,
+      "getBoundingClientRect",
+    );
+    const chase = camera();
+    const target = heading(0, 2000);
+    run(chase, 1 / 60, () => target);
+    chase.offsetOf(target);
+    expect(reads).toHaveBeenCalled();
+    reads.mockClear();
+    boxes.mockClear();
+    panelBox.mockClear();
+
+    run(chase, 1, () => target);
+    for (let i = 0; i < 10; i++) chase.offsetOf(target);
+    expect(reads).not.toHaveBeenCalled();
+    expect(boxes).not.toHaveBeenCalled();
+    expect(panelBox).not.toHaveBeenCalled();
+
+    // After a resize the next frame measures again, and only that one
+    map.emit("resize");
+    run(chase, 1, () => target);
+    expect(reads).toHaveBeenCalledTimes(2);
+    expect(panelBox).toHaveBeenCalledTimes(1);
+    boxes.mockRestore();
   });
 
   it("measures again when the replay panel changes its height", () => {

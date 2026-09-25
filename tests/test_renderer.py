@@ -820,6 +820,8 @@ class TestCreateProgressiveHeatmap:
         out.mkdir()
         victim = tmp_path / "victim.txt"
         victim.write_text("precious")
+        # A site of an earlier run, or the run stops before the symlink
+        (out / "map_config.js").write_text("")
         (out / "manifest.json").symlink_to(victim)
         kml_file = _write_kml(tmp_path / "input" / "1_DEAGJ_DA20.kml")
 
@@ -834,9 +836,70 @@ class TestCreateProgressiveHeatmap:
         assert not (out / "data" / "metadata.json").exists()
 
     @pytest.mark.usefixtures("bundle")
+    def test_a_site_of_its_own_is_not_replaced(self, tmp_path, capsys):
+        """docs/ is where many a project keeps its own site."""
+        out = tmp_path / "out"
+        out.mkdir()
+        (out / "index.html").write_text("my own page")
+        (out / "README.md").write_text("docs")
+        kml_file = _write_kml(tmp_path / "input" / "1_DEAGJ_DA20.kml")
+
+        ok = create_progressive_heatmap(
+            [kml_file], str(out / "index.html"), str(out / "data")
+        )
+
+        assert ok is False
+        assert "--force" in capsys.readouterr().err
+        assert _tree(out) == {"README.md": b"docs", "index.html": b"my own page"}
+
+        assert create_progressive_heatmap(
+            [kml_file], str(out / "index.html"), str(out / "data"), force=True
+        )
+        assert (out / "index.html").read_text() != "my own page"
+        assert (out / "README.md").read_text() == "docs"
+        # The site is the tool's now, and the next run replaces it as such
+        assert create_progressive_heatmap(
+            [kml_file], str(out / "index.html"), str(out / "data")
+        )
+
+    @pytest.mark.usefixtures("bundle")
+    @pytest.mark.parametrize(
+        "marker", ["map_config.js", "data/metadata.json", "unrelated.txt"]
+    )
+    def test_a_site_of_an_earlier_run_is_replaced(self, tmp_path, marker):
+        out = tmp_path / "out"
+        (out / marker).parent.mkdir(parents=True)
+        (out / marker).write_text("")
+        if marker == "unrelated.txt":
+            # Nothing a run would replace is there
+            (out / "CNAME").write_text("maps.example.org")
+        else:
+            (out / "index.html").write_text("an earlier page")
+        kml_file = _write_kml(tmp_path / "input" / "1_DEAGJ_DA20.kml")
+
+        assert create_progressive_heatmap(
+            [kml_file], str(out / "index.html"), str(out / "data")
+        )
+
+    @pytest.mark.usefixtures("bundle")
+    def test_stable_mtimes_on_request(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("KML_HEATMAP_STABLE_MTIMES", "1")
+        out = tmp_path / "out"
+        kml_file = _write_kml(tmp_path / "input" / "1_DEAGJ_DA20.kml")
+
+        assert create_progressive_heatmap(
+            [kml_file], str(out / "index.html"), str(out / "data")
+        )
+
+        files = [path for path in out.rglob("*") if path.is_file()]
+        assert files
+        assert all(path.stat().st_mtime < 1.3e9 for path in files)
+
+    @pytest.mark.usefixtures("bundle")
     def test_stale_bundle_source_map_is_removed(self, tmp_path):
         out = tmp_path / "out"
         out.mkdir()
+        (out / "map_config.js").write_text("")
         (out / "mapApp.bundle.js.map").write_text("{}")
         (out / "CNAME").write_text("maps.example.org")
         kml_file = _write_kml(tmp_path / "input" / "1_DEAGJ_DA20.kml")

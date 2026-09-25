@@ -13,10 +13,9 @@ import {
   type StyleSpecification,
 } from "maplibre-gl";
 import { DataManager } from "./ui/dataManager";
-import { BOOLEAN_KEYS, StateManager } from "./ui/stateManager";
+import { StateManager } from "./ui/stateManager";
 import { LayerManager } from "./ui/layerManager";
 import { FilterManager } from "./ui/filterManager";
-import { StatsManager } from "./ui/statsManager";
 import { PathSelection } from "./ui/pathSelection";
 import { AirportManager } from "./ui/airportManager";
 import { MapOrientation } from "./ui/mapOrientation";
@@ -27,6 +26,7 @@ import {
   followSatelliteSwitch,
 } from "./ui/layerVisibility";
 import { followSelectionHighlight } from "./ui/selectionHighlight";
+import { followStatsPanel } from "./ui/statsPanel";
 import { MobileBar } from "./ui/mobileBar";
 import { bindActions } from "./ui/actions";
 import { loadInitialData } from "./appInitializer";
@@ -38,10 +38,11 @@ import { applyGradientTokens } from "./utils/colors";
 import { renderControlIcons } from "./utils/icons";
 import {
   createActivationFilter,
+  followContextLoss,
   isOnMarker,
   isReplayCameraMove,
   keepMarkerTapsFromZoom,
-  resizeMapAfterTransition,
+  slideMapBesideRail,
   stateZoomToMap,
   toBounds,
   toLngLat,
@@ -72,6 +73,8 @@ import {
   type Range,
 } from "./state/store";
 import { ReplayState } from "./ui/replayState";
+import { siteData, type SiteData } from "./state/siteData";
+import { ReliefState } from "./ui/reliefState";
 import { watchScrollEnd, type ScrollEndWatcher } from "./utils/scrollFade";
 import { loadFeatures, loadWrapped } from "./services/featureLoader";
 import { updateReplayButtonState } from "./ui/replayButton";
@@ -81,7 +84,14 @@ import {
   type PathIdsByAirport,
 } from "./calculations/datasetIndex";
 import type { StoreAccessors } from "./state/store";
+import {
+  TOGGLE_KEYS,
+  TOGGLES,
+  type Toggle,
+  type ToggleKey,
+} from "./state/toggles";
 import type { ReplayManager } from "./ui/replayManager";
+import type { StatsManager } from "./ui/statsManager";
 import type { WrappedManager } from "./ui/wrappedManager";
 import type {
   AircraftModels,
@@ -89,7 +99,6 @@ import type {
   LayerHandle,
   PathInfo,
   PathSegment,
-  Airport,
   AppState,
 } from "./types";
 
@@ -107,18 +116,6 @@ export interface MapConfig {
   commit?: string | undefined;
   /** The commit's page, "" when the repository it is in is unknown */
   commitUrl?: string | undefined;
-}
-
-/**
- * Airport to paths mapping
- */
-export type AirportToPathsMap = PathIdsByAirport;
-
-/**
- * Airport markers mapping
- */
-export interface AirportMarkersMap {
-  [airportName: string]: AirportMarker;
 }
 
 /**
@@ -184,12 +181,14 @@ export const FALLBACK_STYLE: StyleSpecification = {
   ],
 };
 
-/** The flags of a saved state that `restoreState` leaves to others */
-const RESTORED_LATER: readonly string[] = [
-  "isolateSelection",
-  "statsPanelVisible",
-  "wrappedVisible",
-];
+/**
+ * The toggles `restoreState` sets from a saved state. The panels reopen
+ * once there is data for them (see initialize), and isolating needs a
+ * selection, which `restoreState` sees to on its own.
+ */
+const RESTORED_TOGGLES: readonly ToggleKey[] = TOGGLES.filter(
+  (toggle: Toggle) => !("panel" in toggle) && toggle.key !== "isolateSelection",
+).map((toggle) => toggle.key);
 
 /** Padding around the flights when the view is fitted to all of them */
 const START_VIEW_PADDING = 30;
@@ -215,6 +214,14 @@ export const REPLAY_UNAVAILABLE_MESSAGE =
   "Replay is unavailable: its code could not be loaded";
 export const WRAPPED_UNAVAILABLE_MESSAGE =
   "Wrapped is unavailable: its code could not be loaded";
+export const STATS_UNAVAILABLE_MESSAGE =
+  "The statistics are unavailable: their code could not be loaded";
+
+/** The messages of the one file that carries Wrapped and the statistics */
+const WRAPPED_BUNDLE_MESSAGES = [
+  WRAPPED_UNAVAILABLE_MESSAGE,
+  STATS_UNAVAILABLE_MESSAGE,
+] as const;
 
 /**
  * How long the map may take to draw once the data is in. The map draws
@@ -230,31 +237,16 @@ export const MAP_STALL_MESSAGE =
 /** A failure whose message is for the user, shown in place of the map */
 export class UnsupportedBrowserError extends Error {}
 
+// The store-backed properties of STORE_ACCESSOR_KEYS. The accessors are
+// defined once on the prototype by `defineStoreAccessors` below; this only
+// gives them their types.
+// eslint-disable-next-line @typescript-eslint/no-unsafe-declaration-merging, @typescript-eslint/no-empty-object-type
+export interface MapApp extends StoreAccessors {}
+
+// eslint-disable-next-line @typescript-eslint/no-unsafe-declaration-merging
 export class MapApp {
   // Observable state store
   readonly store: AppStore;
-
-  // Store-backed properties. The accessors are defined once on the
-  // prototype by `defineStoreAccessors` below; these declarations only
-  // give them their types (see STORE_ACCESSOR_KEYS for the list).
-  declare selectedYear: StoreAccessors["selectedYear"];
-  declare selectedAircraft: StoreAccessors["selectedAircraft"];
-  declare selectedPathIds: StoreAccessors["selectedPathIds"];
-  declare isolateSelection: StoreAccessors["isolateSelection"];
-  declare heatmapVisible: StoreAccessors["heatmapVisible"];
-  declare altitudeVisible: StoreAccessors["altitudeVisible"];
-  declare airspeedVisible: StoreAccessors["airspeedVisible"];
-  declare airportsVisible: StoreAccessors["airportsVisible"];
-  declare aviationVisible: StoreAccessors["aviationVisible"];
-  declare globeVisible: StoreAccessors["globeVisible"];
-  declare threeDVisible: StoreAccessors["threeDVisible"];
-  declare satelliteVisible: StoreAccessors["satelliteVisible"];
-  declare terrainActive: StoreAccessors["terrainActive"];
-  declare reliefShaded: StoreAccessors["reliefShaded"];
-  declare reliefLevel: StoreAccessors["reliefLevel"];
-  declare replayActive: StoreAccessors["replayActive"];
-  declare currentData: StoreAccessors["currentData"];
-  declare hasTimingData: StoreAccessors["hasTimingData"];
 
   // Plain values nothing has to follow: they are read where they are used,
   // so the store would only announce changes nobody listens to
@@ -275,7 +267,6 @@ export class MapApp {
   readonly config: MapConfig;
 
   // Non-store state
-  allAirportsData: Airport[];
   isInitializing: boolean;
   /** Set by destroy(), so work that was already in flight can stand down */
   private destroyed = false;
@@ -345,7 +336,7 @@ export class MapApp {
   private readonly layerHandles: MapLayerHandle[];
 
   // Airport markers (non-store)
-  readonly airportMarkers: AirportMarkersMap;
+  readonly airportMarkers: Record<string, AirportMarker>;
 
   /**
    * Replay state. It lives here rather than in the replay manager because
@@ -353,6 +344,9 @@ export class MapApp {
    * depend on whether the feature bundle has been fetched.
    */
   readonly replayState: ReplayState;
+
+  /** What the layer manager and the relief's code share (ui/reliefState.ts) */
+  readonly relief: ReliefState;
 
   // Saved state
   savedState: AppState | null;
@@ -365,16 +359,17 @@ export class MapApp {
   dataManager!: DataManager;
   layerManager!: LayerManager;
   filterManager!: FilterManager;
-  statsManager!: StatsManager;
   pathSelection!: PathSelection;
   airportManager!: AirportManager;
   mapOrientation!: MapOrientation;
   /**
-   * Replay and Wrapped live in lazily loaded bundles, so these are
-   * undefined until the user first opens one. Reach them through
-   * `loadReplay()` / `loadWrapped()`; read them directly only where the
-   * feature must already be open for the code to run at all.
+   * Replay, Wrapped and the statistics panel live in lazily loaded
+   * bundles, so these are undefined until the user first opens one. Reach
+   * them through `loadReplay()` / `loadWrapped()` / `loadStats()`; read
+   * them directly only where the feature must already be open for the code
+   * to run at all.
    */
+  statsManager?: StatsManager | undefined;
   replayManager?: ReplayManager | undefined;
   wrappedManager?: WrappedManager | undefined;
   uiToggles!: UIToggles;
@@ -389,6 +384,14 @@ export class MapApp {
   /** Aborts once the app is destroyed; for listeners that live as long */
   get signal(): AbortSignal {
     return this.lifetime.signal;
+  }
+
+  /**
+   * airports.json and metadata.json, once loaded (state/siteData.ts). The
+   * app reads them there; this is for the e2e tests, off window.mapApp.
+   */
+  get siteData(): Readonly<SiteData> {
+    return siteData;
   }
 
   /** Path info of the loaded dataset (single source of truth: currentData) */
@@ -406,10 +409,10 @@ export class MapApp {
    * click on an airport selects these, so it never picks a flight the map
    * does not show.
    */
-  get airportToPaths(): AirportToPathsMap {
+  get airportToPaths(): PathIdsByAirport {
     const data = this.currentData;
     // No prototype, like the index's own: an airport name is data
-    if (!data) return Object.create(null) as AirportToPathsMap;
+    if (!data) return Object.create(null) as PathIdsByAirport;
     return datasetIndex(data)
       .filter(this.selectedYear, this.selectedAircraft)
       .pathIdsByAirport();
@@ -420,7 +423,6 @@ export class MapApp {
     this.config = config;
 
     // Non-store state
-    this.allAirportsData = [];
     this.isInitializing = true;
 
     // Map and layers
@@ -468,6 +470,7 @@ export class MapApp {
     this.airportMarkers = {};
 
     this.replayState = new ReplayState();
+    this.relief = new ReliefState(this.store);
 
     // Saved state
     this.savedState = null;
@@ -588,6 +591,7 @@ export class MapApp {
     this.stateManager?.cancelSave();
     this.replayManager?.destroy();
     this.wrappedManager?.destroy();
+    this.statsManager?.destroy();
     this.mobileBar?.destroy();
     for (const watcher of this.columnScrollWatchers) watcher.stop();
     this.columnScrollWatchers = [];
@@ -656,14 +660,10 @@ export class MapApp {
         this.store.notifyMutation("selectedPathIds");
       }
 
-      // Restore the layers and how the map is drawn. The panels reopen
-      // once there is data for them (see initialize), and isolating needs
-      // a selection (below).
-      for (const key of BOOLEAN_KEYS) {
+      // Restore the layers and how the map is drawn
+      for (const key of RESTORED_TOGGLES) {
         const value = state[key];
-        if (value !== undefined && !RESTORED_LATER.includes(key)) {
-          this.store.set(key, value);
-        }
+        if (value !== undefined) this.store.set(key, value);
       }
       // Altitude and speed colour the same paths, and the toggles never
       // leave both on (setColorLayer); a link written by hand, or with every
@@ -762,6 +762,9 @@ export class MapApp {
     // Registered before anything can fail. Without a listener MapLibre
     // writes every error to the console itself.
     map.on("error", this.handleMapError);
+    // Before any other listener of the map, which may ask whether it has
+    // its WebGL context (hasLostContext)
+    followContextLoss(map);
 
     // For as long as the app lives, like its other DOM listeners
     const mapCanvas = map.getCanvas();
@@ -782,6 +785,18 @@ export class MapApp {
         // An error stays until dismissed, and this one has put itself right
         dismissToast(interrupted);
         showToast("Map rendering restored", "info");
+      },
+      lifetime,
+    );
+    // The skip link's own jump landed on the map's container, where the
+    // arrow keys and + do nothing, and put #map into the history, where
+    // Back then stopped without changing anything. It hands the focus to
+    // the canvas, which takes them.
+    document.querySelector(".skip-nav")?.addEventListener(
+      "click",
+      (event) => {
+        event.preventDefault();
+        mapCanvas.focus();
       },
       lifetime,
     );
@@ -866,26 +881,24 @@ export class MapApp {
   /**
    * The store drives the toggle buttons and the colour legends: initial
    * state and every change are reflected in aria-pressed, the active class
-   * and the legend visibility. The heatmap's toggle and the altitude scale
-   * also depend on whether a replay runs, so they follow the layers (see
-   * ui/layerVisibility.ts).
+   * and the legend visibility, for the buttons that show their key alone
+   * (`pressed` in state/toggles.ts). The heatmap's toggle and the altitude
+   * scale also depend on whether a replay runs, so they follow the layers
+   * (see ui/layerVisibility.ts).
    */
   private setupButtonSync(): void {
-    syncToggleButton(this.store, "altitudeVisible", "altitude-btn");
-    syncToggleButton(this.store, "airspeedVisible", "airspeed-btn");
-    syncToggleButton(this.store, "airportsVisible", "airports-btn");
-    syncToggleButton(this.store, "aviationVisible", "aviation-btn");
-    syncToggleButton(this.store, "globeVisible", "globe-btn");
-    syncToggleButton(this.store, "threeDVisible", "three-d-btn");
-    syncToggleButton(this.store, "satelliteVisible", "satellite-btn");
+    for (const toggle of TOGGLES) {
+      if ("pressed" in toggle) {
+        syncToggleButton(this.store, toggle.key, toggle.button);
+      }
+    }
     syncLegend(this.store, "airspeedVisible", "airspeed-legend");
-    // The isolate button depends on two keys, so PathSelection owns it
   }
 
   /**
    * Open and close the statistics rail. The rail turns the left column into
    * a single row of icon-only buttons and takes the space beside the map,
-   * so the map is told to remeasure once the layout has changed.
+   * which slides aside for it (see slideMapBesideRail).
    */
   private setupStatsRail(): void {
     const apply = (visible: boolean): void => {
@@ -904,11 +917,17 @@ export class MapApp {
       }
       domCache.get("stats-btn")?.classList.toggle("active", visible);
 
-      document.body.classList.toggle("stats-open", visible);
-      resizeMapAfterTransition(this.map, document.getElementById("map"));
+      slideMapBesideRail(
+        document.getElementById("map"),
+        visible,
+        animate && !prefersReducedMotion(),
+      );
     };
 
-    apply(this.store.get("statsPanelVisible"));
+    // Opened with the page, the rail is simply there
+    let animate = false;
+    apply(this.statsPanelVisible);
+    animate = true;
     this.store.subscribe("statsPanelVisible", apply);
   }
 
@@ -916,7 +935,6 @@ export class MapApp {
     this.dataManager = new DataManager(this);
     this.layerManager = new LayerManager(this);
     this.filterManager = new FilterManager(this);
-    this.statsManager = new StatsManager(this);
     this.pathSelection = new PathSelection(this);
     this.airportManager = new AirportManager(this);
     this.mapOrientation = new MapOrientation(this);
@@ -925,10 +943,11 @@ export class MapApp {
     followLayerVisibility(this);
     followSatelliteSwitch(this);
     followSelectionHighlight(this);
+    followStatsPanel(this);
     this.followReplayAvailability();
     this.store.subscribeKeys(
       [
-        ...BOOLEAN_KEYS,
+        ...TOGGLE_KEYS,
         "selectedYear",
         "selectedAircraft",
         "selectedPathIds",
@@ -960,7 +979,7 @@ export class MapApp {
       this.defaultYear,
       () => {
         // The selection goes with the year switch, as with every filter
-        for (const key of [...BOOLEAN_KEYS, "selectedAircraft"] as const) {
+        for (const key of [...TOGGLE_KEYS, "selectedAircraft"] as const) {
           this.store.set(key, defaults[key]);
         }
       },
@@ -1019,7 +1038,7 @@ export class MapApp {
       this.selectedYear === this.defaultYear &&
       this.selectedAircraft === "all" &&
       this.selectedPathIds.size === 0 &&
-      BOOLEAN_KEYS.every((key) => this.store.get(key) === defaults[key]) &&
+      TOGGLE_KEYS.every((key) => this[key] === defaults[key]) &&
       Math.abs(center.lng - target.lng) + Math.abs(center.lat - target.lat) <
         2e-6 &&
       Math.abs(map.getZoom() - start.zoom!) < 0.01 &&
@@ -1128,18 +1147,24 @@ export class MapApp {
 
   /**
    * A lazy bundle, or null when it could not be fetched. A failure is
-   * reported here rather than at each call site, so every way into Replay
-   * or Wrapped says the same thing instead of doing nothing.
+   * reported here rather than at each call site, so every way into Replay,
+   * Wrapped or the statistics says the same thing instead of doing nothing.
+   * `messages` are those of every part of the app the file carries, which
+   * stand or fall with it: one toast says it failed, the one of the part
+   * that asked last.
    */
   private async loadLazyBundle<T>(
     load: () => Promise<T | null>,
     unavailable: string,
+    messages: readonly string[] = [unavailable],
   ): Promise<T | null> {
     const bundle = await load();
     // The failure of an earlier try stays until dismissed, and would say
     // the code is unavailable over the panel it has just opened
-    if (bundle) dismissToast(unavailable);
-    else showToast(unavailable, "error");
+    for (const message of messages) {
+      if (bundle || message !== unavailable) dismissToast(message);
+    }
+    if (!bundle) showToast(unavailable, "error");
     return bundle;
   }
 
@@ -1170,12 +1195,35 @@ export class MapApp {
       const wrapped = await this.loadLazyBundle(
         loadWrapped,
         WRAPPED_UNAVAILABLE_MESSAGE,
+        WRAPPED_BUNDLE_MESSAGES,
       );
+      // Torn down while it loaded: nothing is left to show it over
+      if (this.destroyed) return undefined;
       this.wrappedManager ??= wrapped
         ? new wrapped.WrappedManager(this)
         : undefined;
     }
     return this.wrappedManager;
+  }
+
+  /**
+   * The statistics panel's manager, fetching the Wrapped bundle, which
+   * carries it, on first use (see ui/statsPanel.ts)
+   */
+  async loadStats(): Promise<StatsManager | undefined> {
+    if (!this.statsManager) {
+      const wrapped = await this.loadLazyBundle(
+        loadWrapped,
+        STATS_UNAVAILABLE_MESSAGE,
+        WRAPPED_BUNDLE_MESSAGES,
+      );
+      // Torn down while it loaded: nothing is left to follow
+      if (this.destroyed) return undefined;
+      this.statsManager ??= wrapped
+        ? new wrapped.StatsManager(this)
+        : undefined;
+    }
+    return this.statsManager;
   }
 
   private setupEventHandlers(): void {
@@ -1216,7 +1264,7 @@ export class MapApp {
     // so it can be moved. A click there is none on the main map: it must
     // not change the selection behind the dialog, nor open the values of a
     // flight, whose popup would be a tab stop outside the dialog.
-    if (this.store.get("wrappedVisible")) return;
+    if (this.wrappedVisible) return;
 
     // An airport's label is drawn by the map, and a click on it is one on
     // its marker (see ui/airportLabels.ts), replay or not

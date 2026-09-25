@@ -8,6 +8,7 @@ import {
 } from "../../../../kml_heatmap/frontend/mapApp";
 import { STORE_ACCESSOR_KEYS } from "../../../../kml_heatmap/frontend/state/store";
 import type { KMLDataset } from "../../../../kml_heatmap/frontend/types";
+import { createSegment } from "../../testHelpers";
 
 const loggerMock = vi.hoisted(() => ({ logDebug: vi.fn(), logError: vi.fn() }));
 vi.mock("../../../../kml_heatmap/frontend/utils/logger", () => loggerMock);
@@ -121,7 +122,7 @@ describe("MapApp", () => {
 
       const data: KMLDataset = {
         coordinates: [],
-        path_segments: [{ path_id: 1 }],
+        path_segments: [createSegment({ path_id: 1 })],
         path_info: [{ id: 1 }],
         original_points: 0,
       };
@@ -231,15 +232,8 @@ describe("MapApp", () => {
       expect(initSpy).toHaveBeenCalledTimes(1);
       expect(btn.querySelector("svg.icon")).not.toBeNull();
 
-      app.statsManager = { toggleStats: vi.fn() } as never;
       btn.click();
-      expect(
-        (
-          app.statsManager as unknown as {
-            toggleStats: ReturnType<typeof vi.fn>;
-          }
-        ).toggleStats,
-      ).toHaveBeenCalledTimes(1);
+      expect(app.store.get("statsPanelVisible")).toBe(true);
     });
   });
 

@@ -5,6 +5,7 @@
 
 import type { Airport, PathInfo } from "../types";
 import { filterPaths } from "../calculations/statistics";
+import { siteData } from "../state/siteData";
 
 /** Class of the element MapLibre positions; the stylesheet resets it */
 export const AIRPORT_MARKER_CLASS = "airport-marker-root";
@@ -63,29 +64,35 @@ export function setAirportElementHome(
     ?.classList.toggle("airport-marker-home", isHomeBase);
 }
 
-let _countryByAirport: Map<string, string> | null = null;
+let _airportsByName: Map<string, Airport> | null = null;
 /** The airport list the map was built from */
-let _countrySource: readonly Airport[] | undefined;
+let _airportsSource: readonly Airport[] | null = null;
 
 /**
- * Country per airport name, from the airport list the page holds. The map
- * follows the list: airports.json may arrive after the first lookup (the
- * loader fetches it while the app starts), and a list loaded later replaces
- * an earlier one.
+ * Airports by name, from the airport list the page holds. The map follows
+ * the list: airports.json may arrive after the first lookup (the loader
+ * fetches it while the app starts), and a list loaded later replaces an
+ * earlier one.
  */
-function getCountryByAirportMap(): Map<string, string> {
-  const kmlAirports = window.KML_AIRPORTS?.airports;
-  if (_countryByAirport && kmlAirports === _countrySource) {
-    return _countryByAirport;
+function getAirportsByName(): Map<string, Airport> {
+  const kmlAirports = siteData.airports;
+  if (_airportsByName && kmlAirports === _airportsSource) {
+    return _airportsByName;
   }
-  _countryByAirport = new Map();
-  _countrySource = kmlAirports;
-  if (kmlAirports) {
-    for (const a of kmlAirports) {
-      if (a.country) _countryByAirport.set(a.name, a.country);
-    }
-  }
-  return _countryByAirport;
+  _airportsByName = new Map(kmlAirports?.map((a) => [a.name, a]));
+  _airportsSource = kmlAirports;
+  return _airportsByName;
+}
+
+/**
+ * The ICAO code of an airport, as the export found it in the name
+ * (airports.json's `code`, from airport_icao_code in
+ * kml_heatmap/airport_lookup.py, which also merges the airports by it);
+ * undefined for a name without one. The names of path_info are those of
+ * the airports, so this answers for either.
+ */
+export function airportCode(name: string): string | undefined {
+  return getAirportsByName().get(name)?.code;
 }
 
 const _displayNames =
@@ -110,28 +117,28 @@ export function countryDisplayName(code: string): string {
  * them out) lists none, which is the caller's cue to fall back to the code.
  */
 export function countryFlagSrc(code: string): string | null {
-  const available = window.KML_METADATA?.available_flags;
+  const available = siteData.metadata?.available_flags;
   const lower = code.toLowerCase();
   return available?.includes(lower) ? `flags/${lower}.svg` : null;
 }
 
 export function countCountries(airportNames: string[]): Set<string> {
   const countries = new Set<string>();
-  const map = getCountryByAirportMap();
+  const map = getAirportsByName();
 
   for (const name of airportNames) {
-    const country = map.get(name);
+    const country = map.get(name)?.country;
     if (country) countries.add(country);
   }
   return countries;
 }
 
 export function groupByCountry(airportNames: string[]): Map<string, string[]> {
-  const map = getCountryByAirportMap();
+  const map = getAirportsByName();
   const groups = new Map<string, string[]>();
 
   for (const name of airportNames) {
-    const key = map.get(name) || "Other";
+    const key = map.get(name)?.country || "Other";
     const list = groups.get(key);
     if (list) {
       list.push(name);

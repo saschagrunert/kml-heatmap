@@ -3,11 +3,11 @@
  *
  * Replay and Wrapped are a quarter of the frontend and most visits open
  * neither, so each is an entry point of its own that is imported the first
- * time it is used: features.ts (features.bundle.js) for replay, the flight
- * list of the airport popups and the relief of the 3D view, wrapped.ts
- * (wrapped.bundle.js) for Wrapped. They are apart because opening one says
- * nothing about the other. Each gets one shared promise, and a failure that
- * resolves rather than throws so the caller can say something useful.
+ * time it is used: features.ts (features.bundle.js) for replay, the relief
+ * of the 3D view and the satellite imagery, wrapped.ts (wrapped.bundle.js)
+ * for Wrapped and the statistics panel. They are apart because opening one
+ * says nothing about the other. Each gets one shared promise, and a failure
+ * that resolves rather than throws so the caller can say something useful.
  *
  * Their styles ride along in features.css and wrapped.css for the same
  * reason (see the header of static/styles.css). A bundle and its stylesheet
@@ -15,7 +15,8 @@
  * failure of either is a failure of the load: a Wrapped panel without its
  * stylesheet is worse than the toast.
  */
-import { loadStylesheet } from "./dataLoader";
+import { importWithRetry } from "./lazyImport";
+import { loadStylesheet } from "./stylesheet";
 import { logError } from "../utils/logger";
 import { withTimeout } from "../utils/withTimeout";
 import type { FeatureModule } from "../features";
@@ -32,32 +33,23 @@ const LAZY_LOAD_TIMEOUT_MS = 30_000;
 type Importer<T> = (failedImports: number) => Promise<T>;
 
 /**
- * The import itself, for an importer. The build resolves the literal
- * specifier of the first attempt to the bundle, which shares its modules
- * with the app through shared.bundle.js rather than carrying copies of them.
- *
- * A browser may remember a failed import for as long as the page is open
- * and answer every later import() of that URL with the same failure,
- * without asking the server again. A retry therefore names the file itself
- * under a URL the page has not tried yet. The bundler leaves a computed
- * specifier alone, and shared.bundle.js is still imported under its one
- * URL, so the retried bundle shares the app's modules like the first would.
+ * The imports of the bundles (see services/lazyImport.ts). shared.bundle.js
+ * is imported under its one URL, so a retried bundle shares the app's
+ * modules like the first attempt would.
  */
-function retryImport<T>(bundle: string, failedImports: number): Promise<T> {
-  return import(
-    new URL(`./${bundle}?retry=${failedImports}`, import.meta.url).href
-  ) as Promise<T>;
-}
-
 const importFeatures: Importer<FeatureModule> = (failedImports) =>
-  failedImports === 0
-    ? import("../features")
-    : retryImport("features.bundle.js", failedImports);
+  importWithRetry(
+    () => import("../features"),
+    "./features.bundle.js",
+    failedImports,
+  );
 
 const importWrapped: Importer<WrappedModule> = (failedImports) =>
-  failedImports === 0
-    ? import("../wrapped")
-    : retryImport("wrapped.bundle.js", failedImports);
+  importWithRetry(
+    () => import("../wrapped"),
+    "./wrapped.bundle.js",
+    failedImports,
+  );
 
 /** One lazy bundle: its loader and what tests use to start it over */
 interface LazyBundle<T> {
@@ -67,8 +59,8 @@ interface LazyBundle<T> {
 
 /**
  * A loader for one bundle and its stylesheet. Concurrent callers share one
- * request. A failure is not cached, here or (see retryImport) by the
- * browser, so the next attempt asks the server again.
+ * request. A failure is not cached, here or (see services/lazyImport.ts)
+ * by the browser, so the next attempt asks the server again.
  */
 function lazyBundle<T>(
   name: string,

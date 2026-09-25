@@ -60,6 +60,7 @@ _PARSER_MODULES = (
     "aircraft",
     "airport_lookup",
     "constants",
+    "date_tokens",
     "geometry",
     "helpers",
     "parser",

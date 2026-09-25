@@ -6,25 +6,18 @@
  * WeakMap beside the dataset: a new dataset starts from an empty index, and
  * no consumer has to compare arrays or lengths to notice that it changed.
  *
- * The per-path segment slices are the one lookup kept elsewhere
+ * The per-path segment slices are one lookup kept elsewhere
  * (`segmentRangesFor` in statistics.ts): their callers hold a bare segment
  * array rather than a dataset, so that index hangs off the array instead.
+ * The statistics of a view are another (`filterStatistics` in
+ * panelStats.ts): only the lazily loaded panels show them.
  */
 import {
   calculateAirportFlightCounts,
   type AirportCounts,
 } from "../features/airports";
-import type {
-  FilteredStatistics,
-  KMLDataset,
-  PathInfo,
-  PathSegment,
-} from "../types";
-import {
-  calculateFilteredStatistics,
-  filterPaths,
-  segmentsForPathIds,
-} from "./statistics";
+import type { KMLDataset, PathInfo, PathSegment } from "../types";
+import { filterPaths, segmentsForPathIds } from "./statistics";
 
 /** Kept path ids per airport, the shape `MapApp.airportToPaths` exposes */
 export type PathIdsByAirport = Record<string, Set<number>>;
@@ -41,12 +34,11 @@ export class FilterView {
   private counts: AirportCounts | null = null;
   private byAirport: PathIdsByAirport | null = null;
   private keptSegments: PathSegment[] | null = null;
-  private stats: FilteredStatistics | null = null;
 
   constructor(
     private readonly data: KMLDataset,
-    private readonly year: string,
-    private readonly aircraft: string,
+    year: string,
+    aircraft: string,
   ) {
     this.paths = filterPaths(data.path_info, year, aircraft);
     this.pathIds = new Set(this.paths.map((path) => path.id));
@@ -86,24 +78,6 @@ export class FilterView {
         : segmentsForPathIds(this.data.path_segments, this.pathIds);
     }
     return this.keptSegments;
-  }
-
-  /**
-   * Statistics of the kept paths. They walk every kept segment, and the
-   * panel needs them again every time a selection is cleared, as does
-   * Wrapped for the same filter.
-   */
-  statistics(): FilteredStatistics {
-    if (!this.stats) {
-      this.stats = calculateFilteredStatistics({
-        pathInfo: this.data.path_info,
-        segments: this.data.path_segments,
-        year: this.year,
-        aircraft: this.aircraft,
-        preFiltered: { paths: this.paths, segments: this.segments() },
-      });
-    }
-    return this.stats;
   }
 }
 

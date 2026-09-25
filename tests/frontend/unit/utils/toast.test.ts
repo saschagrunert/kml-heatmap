@@ -179,6 +179,38 @@ describe("showToast", () => {
       expect(toast().classList.contains("toast-visible")).toBe(false);
     });
 
+    it("stays when its action cannot be done now", () => {
+      const run = vi.fn(() => false);
+      showToast("Failed to load flight data for 2025", "error", {
+        label: "Retry",
+        run,
+      });
+
+      buttons()[0]!.click();
+      vi.advanceTimersByTime(1000);
+
+      // Taking it away lost the only word of the failure (regression)
+      expect(run).toHaveBeenCalledTimes(1);
+      expect(toast().classList.contains("toast-visible")).toBe(true);
+    });
+
+    it("stacks in the container the page carries", () => {
+      const stack = document.createElement("div");
+      stack.id = TOAST_STACK_ID;
+      const map = document.createElement("div");
+      document.body.append(stack, map);
+
+      showToast("Export failed", "error");
+
+      // Ahead of the map in the tab order, not appended after its markers
+      expect(stack.querySelector(".toast-error")).not.toBeNull();
+      expect(document.querySelectorAll(`#${TOAST_STACK_ID}`)).toHaveLength(1);
+      expect(
+        stack.compareDocumentPosition(map) & Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+      map.remove();
+    });
+
     it("replaces the same error rather than stacking a copy", () => {
       showToast("Export failed", "error");
       showToast("Export failed", "error");

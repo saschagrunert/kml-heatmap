@@ -11,6 +11,7 @@ from itertools import pairwise
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from .constants import MAX_TIMESTAMP_DISTANCE_SECONDS
 from .helpers import parse_timestamp_epoch
 from .logger import logger
 from .parser_common import (
@@ -24,12 +25,6 @@ from .parser_common import (
     validate_and_normalize_coordinate,
 )
 from .types import TrackPoint
-
-# How far a <when> may be from the median of its track before it counts as a
-# clock error. Generous for a flight, which is over within a day, and even
-# for a logger left running for days; far below the errors it catches (a
-# clock at its default date, a GPS week rollover of almost 20 years)
-MAX_TIMESTAMP_DISTANCE_SECONDS = 7 * 24 * 3600
 
 if TYPE_CHECKING:
     from collections.abc import Sequence

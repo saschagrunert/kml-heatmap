@@ -2,6 +2,7 @@
  * The layer handles, on the mock app every ported suite builds on.
  */
 import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
+import { validateStyleMin } from "@maplibre/maplibre-gl-style-spec";
 import type {
   Map as MapLibreMap,
   RasterDEMSourceSpecification,
@@ -21,7 +22,8 @@ import {
   MAP_MIN_ZOOM,
   MAP_SOURCES,
 } from "../../../kml_heatmap/frontend/utils/constants";
-import { createMockApp } from "../testHelpers";
+import { FALLBACK_STYLE } from "../../../kml_heatmap/frontend/mapApp";
+import { createMapLibreMock, createMockApp } from "../testHelpers";
 import { resetMapLibreMock } from "../../mocks/maplibre-gl";
 
 describe("layer handles", () => {
@@ -95,7 +97,7 @@ describe("layer handles", () => {
     );
   });
 
-  it("draw the heat source, which clusters the fixes, with one layer below the paths", () => {
+  it("draw the heat source, which clusters the fixes, with one layer below the paths, and the isolated selection's alike", () => {
     const app = createMockApp();
     const map = app.map!;
 
@@ -104,26 +106,30 @@ describe("layer handles", () => {
       MAP_LAYERS.heat,
       MAP_LAYERS.heatLinesGlow,
       MAP_LAYERS.heatLinesCore,
+      MAP_LAYERS.heatIsolated,
     ]);
-    expect(map.source(MAP_SOURCES.heat).spec).toMatchObject({
-      type: "geojson",
-      cluster: true,
-      clusterRadius: HEATMAP_CLUSTER.radius,
-      clusterMaxZoom: HEATMAP_CLUSTER.maxZoom,
-    });
-    const layer = map.layer(MAP_LAYERS.heat);
-    expect(layer.type).toBe("heatmap");
-    expect(layer.source).toBe(MAP_SOURCES.heat);
-    // One layer for every zoom: a second one could not show the tiles of
-    // the level before while its own still load
-    expect(layer.minzoom).toBeUndefined();
-    expect(layer.maxzoom).toBeUndefined();
-    expect(layer.filter).toBeUndefined();
+    for (const id of [MAP_SOURCES.heat, MAP_SOURCES.heatIsolated]) {
+      expect(map.source(id).spec).toMatchObject({
+        type: "geojson",
+        cluster: true,
+        clusterRadius: HEATMAP_CLUSTER.radius,
+        clusterMaxZoom: HEATMAP_CLUSTER.maxZoom,
+      });
+      const layer = map.layer(id);
+      expect(layer.type).toBe("heatmap");
+      expect(layer.source).toBe(id);
+      // One layer for every zoom: a second one could not show the tiles
+      // of the level before while its own still load
+      expect(layer.minzoom).toBeUndefined();
+      expect(layer.maxzoom).toBeUndefined();
+      expect(layer.filter).toBeUndefined();
+    }
 
     const order = map.getLayersOrder();
     const heat = order.indexOf(MAP_LAYERS.heat);
     expect(order[heat - 1]).toBe(MAP_LAYERS.aviation);
-    expect(order[heat + 1]).toBe(MAP_LAYERS.heatLinesGlow);
+    expect(order[heat + 1]).toBe(MAP_LAYERS.heatIsolated);
+    expect(order[heat + 2]).toBe(MAP_LAYERS.heatLinesGlow);
     expect(heat).toBeLessThan(order.indexOf(MAP_LAYERS.pathsAltitude));
   });
 
@@ -538,6 +544,8 @@ describe("setBaseStyle", () => {
     };
 
     setBaseStyle(map as unknown as MapLibreMap, next);
+    // Validated in a test instead (see withoutValidation)
+    expect(map.setStyle.mock.calls[0]![1]).toMatchObject({ validate: false });
     const { transformStyle } = map.setStyle.mock.calls[0]![1] as {
       transformStyle: (
         previous: StyleSpecification,
@@ -557,5 +565,87 @@ describe("setBaseStyle", () => {
       type: "geojson",
       data: fixes,
     });
+  });
+});
+
+describe("the style the app composes", () => {
+  afterEach(() => {
+    resetMapLibreMock();
+  });
+
+  /** The map's style as a plain style, without the fake's own fields */
+  const styleOf = (map: ReturnType<typeof createMockApp>["map"]) => {
+    const style = map!.getStyle() as unknown as StyleSpecification;
+    return {
+      ...style,
+      layers: style.layers.map((layer) => {
+        const { sourceLayer: _, ...plain } = layer as typeof layer & {
+          sourceLayer?: string;
+        };
+        return plain;
+      }),
+    } as StyleSpecification;
+  };
+
+  // The map adds the app's layers and sources without validating them (see
+  // withoutValidation), so a layer the style specification refuses would
+  // only show as a map that draws nothing. This is where they are checked.
+  it("passes the style specification's validation, on the start style and under a base style with labels", () => {
+    const app = createMockApp({
+      map: createMapLibreMock({ style: FALLBACK_STYLE }),
+    });
+    // Every layer the app can show, shown
+    for (const handle of [
+      app.heatmapLayer,
+      app.altitudeLayer,
+      app.airspeedLayer,
+      app.aviationLayer,
+      app.selectionHighlightLayer,
+    ]) {
+      handle.setVisible(true);
+    }
+    const started = { ...FALLBACK_STYLE, ...styleOf(app.map) };
+
+    expect(validateStyleMin(started)).toEqual([]);
+
+    const base: StyleSpecification = {
+      version: 8,
+      glyphs: "https://example.test/{fontstack}/{range}.pbf",
+      sources: {
+        base: { type: "vector", url: "https://example.test/tiles.json" },
+      },
+      layers: [
+        { id: "background", type: "background" },
+        {
+          id: "place-labels",
+          type: "symbol",
+          source: "base",
+          "source-layer": "place",
+          layout: { "text-field": ["get", "name"] },
+        },
+      ],
+    };
+    const composed = withDataLayers(started, base, true);
+
+    expect(composed.layers.length).toBe(started.layers.length + 1);
+    expect(validateStyleMin(composed)).toEqual([]);
+  });
+
+  it("would be refused where a layer breaks the specification", () => {
+    // The check itself: a line with a paint property of a fill
+    const broken: StyleSpecification = {
+      version: 8,
+      sources: { lines: { type: "geojson", data: "lines.json" } },
+      layers: [
+        {
+          id: "lines",
+          type: "line",
+          source: "lines",
+          paint: { "fill-color": "#ffffff" } as never,
+        },
+      ],
+    };
+
+    expect(validateStyleMin(broken)).not.toEqual([]);
   });
 });

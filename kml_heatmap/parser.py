@@ -28,7 +28,6 @@ if TYPE_CHECKING:
 __all__ = [
     "ParseResult",
     "load_cached_kml",
-    "parse_kml_coordinates",
     "parse_kml_file",
 ]
 
@@ -268,14 +267,6 @@ def load_cached_kml(kml_file: str) -> tuple[ParseResult | None, Path | None]:
     for level, message in cached.warnings:
         logger.log(level, "%s", message)
     return (cached.coordinates, cached.path_groups, cached.path_metadata), cache_path
-
-
-def parse_kml_coordinates(kml_file: str) -> ParseResult:
-    """Extract coordinates from a KML file, from the parse cache if it has them."""
-    cached, cache_path = load_cached_kml(kml_file)
-    if cached is not None:
-        return cached
-    return parse_kml_file(kml_file, cache_path)
 
 
 def parse_kml_file(kml_file: str, cache_path: Path | None = None) -> ParseResult:

@@ -3,6 +3,7 @@
  * behind it, the map hand-over and the timers.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { resetSiteData } from "../../../../kml_heatmap/frontend/state/siteData";
 import { WrappedManager } from "../../../../kml_heatmap/frontend/ui/wrappedManager";
 import {
   TOAST_STACK_ID,
@@ -39,7 +40,7 @@ describe("WrappedManager dialog", () => {
     vi.useRealTimers();
     vi.restoreAllMocks();
     document.body.innerHTML = "";
-    delete window.KML_AIRPORTS;
+    resetSiteData();
   });
 
   function openWrapped(): void {
@@ -74,6 +75,34 @@ describe("WrappedManager dialog", () => {
 
       expect(el("wrapped-stats").innerHTML).toBe("rendered once");
       expect(mockApp.map!.fitBounds).toHaveBeenCalledOnce();
+    });
+
+    it("opens once the statistics of a long filter are worked out", async () => {
+      mockApp.currentData = createFlightHistory();
+      // A clock that has run past a slice at every look
+      let now = 0;
+      vi.spyOn(performance, "now").mockImplementation(() => (now += 1000));
+
+      wrappedManager.showWrapped();
+      // A second click while they are worked out opens it no sooner
+      wrappedManager.showWrapped();
+
+      expect(el("wrapped-modal").hidden).toBe(true);
+      await vi.runAllTimersAsync();
+      expect(el("wrapped-modal").hidden).toBe(false);
+      expect(mockApp.map!.fitBounds).toHaveBeenCalledTimes(2);
+    });
+
+    it("does not open for statistics that arrive after the teardown", async () => {
+      mockApp.currentData = createFlightHistory();
+      let now = 0;
+      vi.spyOn(performance, "now").mockImplementation(() => (now += 1000));
+
+      wrappedManager.showWrapped();
+      wrappedManager.destroy();
+      await vi.runAllTimersAsync();
+
+      expect(el("wrapped-modal").hidden).toBe(true);
     });
 
     it("hides the control elements behind the dialog", () => {
@@ -331,6 +360,32 @@ describe("WrappedManager dialog", () => {
       expect(mapEl.style.height).toBe("");
       expect(mapEl.style.borderRadius).toBe("");
       expect(mapEl.style.overflow).toBe("");
+    });
+
+    it("puts the map back before what followed it, after the page changed around it", () => {
+      // The map on the body, with the panel that follows it, as on the page
+      const mapEl = el("map");
+      const empty = document.createElement("div");
+      empty.id = "map-empty";
+      document.body.prepend(mapEl, empty);
+
+      openWrapped();
+      // The mobile bar goes in ahead of where the map was, as it does when
+      // the window crosses the breakpoint
+      const bar = document.createElement("nav");
+      document.body.insertBefore(bar, empty);
+      wrappedManager.closeWrapped();
+
+      // An index taken at the first opening put the map after the bar and
+      // before nothing it followed (regression)
+      expect(mapEl.nextElementSibling).toBe(empty);
+      expect(bar.nextElementSibling).toBe(mapEl);
+
+      // Taken again on the next opening, with the bar gone
+      bar.remove();
+      openWrapped();
+      wrappedManager.closeWrapped();
+      expect(mapEl.nextElementSibling).toBe(empty);
     });
 
     it("restores the control elements to what they were", () => {

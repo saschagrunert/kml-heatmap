@@ -3,7 +3,12 @@
  */
 import type { MapApp } from "../mapApp";
 import { aggregateAircraft, filterPaths } from "../calculations/statistics";
-import { dropUnknownPathIds, publishDataset } from "../appInitializer";
+import {
+  announceDataset,
+  dropUnknownPathIds,
+  publishDataset,
+  showNoYear,
+} from "../appInitializer";
 import { domCache } from "../utils/domCache";
 import { showToast } from "../utils/toast";
 
@@ -13,8 +18,16 @@ export class FilterManager {
   private requestId = 0;
   /** Request id of the latest year change */
   private yearRequestId = 0;
-  /** Aborted by the next year switch: this one has been replaced */
+  /**
+   * The year switch that is loading, aborted by the next one: this one has
+   * been replaced. Null once it is over.
+   */
   private yearLoad: AbortController | null = null;
+  /**
+   * An aircraft picked while a year switch loads, applied with that switch
+   * (see filterByAircraft). Null when there is none.
+   */
+  private pendingAircraft: string | null = null;
 
   constructor(app: MapApp) {
     this.app = app;
@@ -35,6 +48,7 @@ export class FilterManager {
     ++this.requestId;
     this.yearLoad?.abort();
     this.yearLoad = null;
+    this.pendingAircraft = null;
     const yearSelect = domCache.get("year-select", HTMLSelectElement);
     if (yearSelect) this.showLoadedYear(yearSelect);
     const aircraftSelect = domCache.get("aircraft-select", HTMLSelectElement);
@@ -48,7 +62,7 @@ export class FilterManager {
    */
   private showLoadedYear(select: HTMLSelectElement): void {
     if (this.app.currentData) select.value = this.app.selectedYear;
-    else select.selectedIndex = -1;
+    else showNoYear(select);
   }
 
   /**
@@ -144,22 +158,38 @@ export class FilterManager {
     this.yearLoad?.abort();
     const yearLoad = new AbortController();
     this.yearLoad = yearLoad;
+    // Reset view puts the aircraft back to all; one picked before it is
+    // overruled, one picked while it loads is applied after it
+    if (also) this.pendingAircraft = null;
 
     // 1. Load the new year's data first so the aircraft list is based on it
     const data = await this.app.dataManager.loadData(
       requestedYear,
       yearLoad.signal,
       // Reset view is more than this switch, and its button stays there to
-      // be pressed again
-      also
+      // be pressed again. A retry of the first load has the panel on the
+      // map to be tried again from, and a second Retry on the toast next to
+      // it only made two ways of doing one thing.
+      also || keepSelection
         ? undefined
         : {
             label: "Retry",
             run: () => {
-              void this.filterByYear(requestedYear, undefined, keepSelection);
+              // A replay holds the filters (see above); the toast stays,
+              // so the failure is not lost to a press that did nothing
+              if (this.app.replayActive) {
+                showToast(
+                  "Stop the replay to load " + requestedYear + " again",
+                  "info",
+                );
+                return false;
+              }
+              void this.filterByYear(requestedYear);
+              return true;
             },
           },
     );
+    if (this.yearLoad === yearLoad) this.yearLoad = null;
     if (requestId !== this.requestId) {
       // Superseded. A newer year change owns the dropdown; an aircraft
       // change does not touch it, so it would keep showing a year that is
@@ -172,12 +202,16 @@ export class FilterManager {
       }
       return false;
     }
+    const aircraft = this.pendingAircraft;
+    this.pendingAircraft = null;
     if (!data) {
       // The loader has already reported the failure. The Filter sheet
       // mirrors the dropdown, not the store, and the store did not change,
       // so it is told to read the dropdown again.
       this.showLoadedYear(yearSelect);
       this.app.mobileBar?.sheet.refresh();
+      // An aircraft picked meanwhile was one of the year still shown
+      if (aircraft !== null) this.applyAircraft(aircraft);
       return false;
     }
 
@@ -185,14 +219,21 @@ export class FilterManager {
     //    layers, the statistics and the airports see the final combination
     //    once. The dropdown may reset a registration that did not fly in
     //    the new year back to "all".
+    //    An aircraft picked while the year loaded goes in with it, and the
+    //    rebuilt list says so if the year has no flights of it.
     this.app.store.batch(() => {
       this.app.selectedYear = requestedYear;
       publishDataset(this.app, data);
       also?.();
+      if (aircraft !== null) this.app.selectedAircraft = aircraft;
       this.updateAircraftDropdown();
-      if (keepSelection) dropUnknownPathIds(this.app, data);
-      else this.clearSelectionUnlessInitializing();
+      if (keepSelection && aircraft === null) {
+        dropUnknownPathIds(this.app, data);
+      } else {
+        this.clearSelectionUnlessInitializing();
+      }
     });
+    announceDataset(requestedYear);
     return true;
   }
 
@@ -200,11 +241,18 @@ export class FilterManager {
     const aircraftSelect = domCache.get("aircraft-select", HTMLSelectElement);
     if (!aircraftSelect) return;
 
-    // A pending year change must not land on top of this one
-    ++this.requestId;
+    // A year switch that is loading is not thrown away: that silently
+    // lost the year someone had just picked. The aircraft goes in with it.
+    if (this.yearLoad) {
+      this.pendingAircraft = aircraftSelect.value;
+      return;
+    }
+    this.applyAircraft(aircraftSelect.value);
+  }
 
+  private applyAircraft(aircraft: string): void {
     this.app.store.batch(() => {
-      this.app.selectedAircraft = aircraftSelect.value;
+      this.app.selectedAircraft = aircraft;
       this.clearSelectionUnlessInitializing();
     });
   }

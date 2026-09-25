@@ -13,15 +13,19 @@ Features:
 - Configurable number of files
 - LineString coordinates without per-point timestamps (Charterware style)
 - Documented N_REGISTRATION_TYPE.kml filenames (no dates in the filename or
-  the placemark name); the flight date is carried by a <TimeStamp> element
+  the placemark name); the flight's start and end are carried by a
+  <TimeSpan> element
 
 Note: Without per-point timing information the groundspeed visualization
-falls back to path averages. This exercises that code path deliberately.
+falls back to path averages: the length of the path over the time from
+<begin> to <end>. This exercises that code path deliberately.
 """
 
 import argparse
 import datetime
+import math
 import random
+from itertools import pairwise
 from pathlib import Path
 
 Coordinate = tuple[float, float]
@@ -39,6 +43,13 @@ AIRPORTS = {
     "EDDW": (53.0475, 8.7867),  # Bremen
     "EDDN": (49.4987, 11.0669),  # Nuremberg
 }
+
+# The groundspeeds a flight is given, in knots: those of the light aircraft
+# below, so the speed layer shows a plausible spread
+GROUNDSPEED_KNOTS = (90, 150)
+
+EARTH_RADIUS_KM = 6371.0
+KM_PER_NAUTICAL_MILE = 1.852
 
 AIRCRAFT = [
     ("D-ABCD", "DA40"),
@@ -94,6 +105,21 @@ def generate_flight_path(
     return coords
 
 
+def path_length_km(coords: list[tuple[float, float, float]]) -> float:
+    """The length of a path along the great circles between its points."""
+    total = 0.0
+    for (lat1, lon1, _), (lat2, lon2, _) in pairwise(coords):
+        phi1, phi2 = math.radians(lat1), math.radians(lat2)
+        a = (
+            math.sin((phi2 - phi1) / 2) ** 2
+            + math.cos(phi1)
+            * math.cos(phi2)
+            * math.sin(math.radians(lon2 - lon1) / 2) ** 2
+        )
+        total += 2 * EARTH_RADIUS_KM * math.asin(math.sqrt(a))
+    return total
+
+
 def generate_kml_file(
     flight_id: int,
     start_airport: str,
@@ -105,7 +131,9 @@ def generate_kml_file(
     """Generate a single KML file for a flight."""
     coords = generate_flight_path(AIRPORTS[start_airport], AIRPORTS[end_airport])
 
-    # Flight date (2026 only), carried by a TimeStamp element
+    # Flight date (2026 only). The start and the end are carried by a
+    # TimeSpan element; without an end the flight has no duration, and the
+    # speed layer nothing to average.
     start_time = datetime.datetime(
         2026,
         random.randint(1, 12),
@@ -114,7 +142,11 @@ def generate_kml_file(
         random.randint(0, 59),
         tzinfo=datetime.UTC,
     )
-    timestamp = start_time.strftime("%Y-%m-%dT%H:%M:%SZ")
+    groundspeed_knots = random.randint(*GROUNDSPEED_KNOTS)
+    hours = path_length_km(coords) / KM_PER_NAUTICAL_MILE / groundspeed_knots
+    end_time = start_time + datetime.timedelta(hours=hours)
+    begin = start_time.strftime("%Y-%m-%dT%H:%M:%SZ")
+    end = end_time.strftime("%Y-%m-%dT%H:%M:%SZ")
 
     coordinate_lines = "\n".join(
         f"          {lon},{lat},{alt * 0.3048}" for lat, lon, alt in coords
@@ -126,9 +158,10 @@ def generate_kml_file(
     <name>Flight {flight_id}</name>
     <Placemark>
       <name>{start_airport} - {end_airport}</name>
-      <TimeStamp>
-        <when>{timestamp}</when>
-      </TimeStamp>
+      <TimeSpan>
+        <begin>{begin}</begin>
+        <end>{end}</end>
+      </TimeSpan>
       <LineString>
         <extrude>1</extrude>
         <tessellate>1</tessellate>

@@ -7,6 +7,7 @@
  * assembled a piece at a time from conditionals and loops is concatenated,
  * where a literal would need a `${}` around every fragment.
  */
+import type { Range } from "../state/store";
 import type { PathSegment } from "../types";
 import { getColorForAirspeed, getColorForAltitude, rgbToRgba } from "./colors";
 import { FEET_TO_METERS, NAUTICAL_MILES_TO_KM } from "./constants";
@@ -57,18 +58,16 @@ export interface AirportLabel {
 
 /**
  * Split a label such as "EDAQ Halle-Oppin" into its code and its name so the
- * two can be typeset differently. Labels without a leading code keep their
- * full text as the name.
+ * two can be typeset differently. The code is the airport's own, which the
+ * export writes (see airportCode in features/airports.ts) rather than one
+ * guessed from the label here. A label that does not lead with it, or is
+ * nothing else, keeps its full text as the name.
  */
-export function splitAirportName(label: string): AirportLabel {
+export function splitAirportName(label: string, code?: string): AirportLabel {
   const trimmed = label.trim();
-  const spaceIndex = trimmed.indexOf(" ");
-  if (spaceIndex > 0) {
-    const code = trimmed.slice(0, spaceIndex);
-    const name = trimmed.slice(spaceIndex + 1).trim();
-    if (name && /^[A-Z0-9]{3,4}$/.test(code)) {
-      return { code, name };
-    }
+  if (code && trimmed.startsWith(code + " ")) {
+    const name = trimmed.slice(code.length + 1).trim();
+    if (name) return { code, name };
   }
   return { code: "", name: trimmed };
 }
@@ -101,7 +100,7 @@ export function generateAirportPopupHtml(params: AirportPopupParams): string {
 
   return `
     <div class="popup-container kh-popup-airport" tabindex="-1">
-        <div class="popup-header kh-popup-header-airport">
+        <div class="popup-header kh-popup-header-airport${params.isHomeBase ? " kh-popup-header-home" : ""}">
             <span class="popup-header-icon">${icon("airport", 20)}</span>
             <span>${escapeHtml(params.name || "Unknown")}</span>
             ${homeBadge}
@@ -120,7 +119,6 @@ export function generateAirportPopupHtml(params: AirportPopupParams): string {
             <span class="kh-popup-metric-label">Total Flights</span>
             <span class="popup-metric-value kh-popup-accent">${params.flightCount}</span>
         </div>
-        <div class="kh-popup-flights-loading popup-section-label">Loading flights…</div>
     </div>`;
 }
 
@@ -166,10 +164,9 @@ export interface SegmentPopupParams {
   segment: PathSegment;
   /** Position to show; the segment's end point when not given */
   position?: Coordinate;
-  altMin: number;
-  altMax: number;
-  speedMin: number;
-  speedMax: number;
+  /** The colour ranges the segment is coloured on, as on the map */
+  altRange: Range;
+  speedRange: Range;
   title?: string;
   icon?: IconName;
 }
@@ -178,37 +175,27 @@ export interface SegmentPopupParams {
  * Generate path segment popup HTML with position, altitude, and groundspeed.
  * The data-driven altitude/speed colours travel as `data-metric-color`; the
  * CSP allows no style attribute, so applyMetricColors() carries them into
- * the custom properties `.kh-popup-metric-colored` reads.
+ * the custom properties `.kh-popup-metric-colored` reads. A segment without
+ * a speed (0, a log without timing) shows none rather than 0 kt.
  */
 export function generateSegmentPopupHtml(params: SegmentPopupParams): string {
   const { segment } = params;
   const title = params.title || "Segment Data";
   const headerIcon = params.icon ?? "airport";
 
-  const altFt = segment.altitude_ft || 0;
+  const altFt = segment.altitude_ft;
   const altFtRounded = Math.round(altFt / 50) * 50;
   const altMRounded = altFtRounded * FEET_TO_METERS;
-  const altColor = getColorForAltitude(altFt, params.altMin, params.altMax);
+  const alt = params.altRange;
+  const altColor = getColorForAltitude(altFt, alt.min, alt.max, alt.ranks);
 
-  const speedKt = segment.groundspeed_knots || 0;
-  const speedColor = getColorForAirspeed(
-    speedKt,
-    params.speedMin,
-    params.speedMax,
-  );
-
-  const startCoord = segment.coords?.[0];
-  const endCoord = segment.coords?.[1];
+  const [startCoord, endCoord] = segment.coords;
   const shown = params.position ?? endCoord;
-  const lat = shown?.[0] != null ? ddToDms(shown[0], true) : "N/A";
-  const lon = shown?.[1] != null ? ddToDms(shown[1], false) : "N/A";
-
-  let trackStr = "N/A";
-  if (startCoord && endCoord) {
-    trackStr = formatTrack(
-      calculateBearing(startCoord[0], startCoord[1], endCoord[0], endCoord[1]),
-    );
-  }
+  const lat = ddToDms(shown[0], true);
+  const lon = ddToDms(shown[1], false);
+  const trackStr = formatTrack(
+    calculateBearing(startCoord[0], startCoord[1], endCoord[0], endCoord[1]),
+  );
 
   return `
     <div class="popup-container">
@@ -225,15 +212,28 @@ export function generateSegmentPopupHtml(params: SegmentPopupParams): string {
                 <span class="popup-metric-value">${formatNumber(altFtRounded)} ft</span>
                 <span class="popup-metric-unit">(${formatNumber(altMRounded)} m)</span>
             </div>
-        </div>
+        </div>${speedBlock(params)}
+    </div>`;
+}
+
+/** The groundspeed of a segment popup, empty for a segment without one */
+function speedBlock(params: SegmentPopupParams): string {
+  const speedKt = params.segment.groundspeed_knots;
+  if (!(speedKt > 0)) return "";
+  const speedColor = getColorForAirspeed(
+    speedKt,
+    params.speedRange.min,
+    params.speedRange.max,
+    params.speedRange.ranks,
+  );
+  return `
         <div class="kh-popup-block">
             <div class="popup-section-label">Groundspeed</div>
             <div class="popup-metric kh-popup-metric-colored" data-metric-color="${speedColor}">
                 <span class="popup-metric-value">${formatNumber(speedKt)} kt</span>
                 <span class="popup-metric-unit">(${formatNumber(speedKt * NAUTICAL_MILES_TO_KM)} km/h)</span>
             </div>
-        </div>
-    </div>`;
+        </div>`;
 }
 
 /** Colour the segment metrics below `root`; see generateSegmentPopupHtml() */

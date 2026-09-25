@@ -6,9 +6,10 @@ import pytest
 
 from kml_heatmap.exceptions import KMLParseError
 from kml_heatmap.helpers import parse_timestamp_epoch
-from kml_heatmap.parser import _parse_kml_tree, parse_kml_coordinates
+from kml_heatmap.parser import _parse_kml_tree
 from kml_heatmap.parser_cache import get_cache_key
 from kml_heatmap.types import TrackPoint
+from tests.conftest import parse_kml_coordinates
 
 KML_HEADER = (
     '<?xml version="1.0" encoding="UTF-8"?>\n'
@@ -449,13 +450,185 @@ class TestTimeSpanPlacemark:
             "<TimeSpan><begin>2025-06-15T12:00:00Z</begin>"
             "<end>2025-06-15T13:00:00Z</end></TimeSpan>"
         )
+        # Apart from each other: a line that starts where the one before
+        # ended continues it
         line = _line_string("8.0,50.0,300 8.0,50.0,310")
+        other = _line_string("8.5,50.5,300 8.5,50.5,310")
         kml = (
             f"{KML_HEADER}<Document><Placemark><name>A</name>{span}"
-            f"<MultiGeometry>{line}{line}</MultiGeometry></Placemark></Document></kml>"
+            f"<MultiGeometry>{line}{other}</MultiGeometry></Placemark></Document></kml>"
         )
         _, _, metadata = parse_kml_coordinates(_write(tmp_path, "z.kml", kml))
         assert [path_duration(meta) for meta in metadata] == [1800.0, 1800.0]
+
+    @pytest.mark.parametrize("inherited", [False, True], ids=["span", "folder"])
+    def test_a_track_split_into_lines_is_one_flight(self, tmp_path, inherited):
+        """Each piece starts where the one before ended: no airport between."""
+        span = (
+            "<TimeSpan><begin>2025-06-15T10:00:00Z</begin>"
+            "<end>2025-06-15T11:00:00Z</end></TimeSpan>"
+        )
+        pieces = [
+            "8.0,48.5,300 8.1,48.55,500",
+            "8.1,48.55,500 8.2,48.6,700",
+            "8.2,48.6,700 8.3,48.65,300",
+        ]
+        placemarks = "".join(
+            f"<Placemark><name>Track segment</name>{'' if inherited else span}"
+            f"{_line_string(piece)}</Placemark>"
+            for piece in pieces
+        )
+        body = f"<Folder>{span}{placemarks}</Folder>" if inherited else placemarks
+        kml = f"{KML_HEADER}<Document>{body}</Document></kml>"
+
+        _, paths, metadata = parse_kml_coordinates(_write(tmp_path, "t.kml", kml))
+
+        assert len(paths) == 1
+        assert [(p.lon, p.alt) for p in paths[0]] == [
+            (8.0, 300.0),
+            (8.1, 500.0),
+            (8.2, 700.0),
+            (8.3, 300.0),
+        ]
+        assert metadata[0]["timestamp"] == "2025-06-15T10:00:00Z"
+        assert metadata[0]["end_timestamp"] == "2025-06-15T11:00:00Z"
+        assert "span_share" not in metadata[0]
+
+    def test_pieces_of_one_name_in_sequence_span_them_all(self, tmp_path):
+        placemarks = "".join(
+            f"<Placemark><name>EDDS - EDDP</name><TimeSpan>"
+            f"<begin>2025-06-15T{begin}</begin><end>2025-06-15T{end}</end>"
+            f"</TimeSpan>{_line_string(piece)}</Placemark>"
+            for begin, end, piece in [
+                ("10:00:00Z", "10:30:00Z", "9.2,48.7,400 10.0,49.5,2000"),
+                ("10:31:00Z", "11:00:00Z", "10.0,49.5,2000 12.2,51.4,150"),
+            ]
+        )
+        kml = f"{KML_HEADER}<Document>{placemarks}</Document></kml>"
+
+        _, paths, metadata = parse_kml_coordinates(_write(tmp_path, "r.kml", kml))
+
+        assert len(paths) == 1
+        assert metadata[0]["end_timestamp"] == "2025-06-15T11:00:00Z"
+        assert metadata[0]["start_airport"].startswith("EDDS")
+
+    @pytest.mark.parametrize(
+        ("second_name", "second_begin", "start"),
+        [
+            # Another name and another time
+            ("B", "10:31:00Z", "8.1,48.55"),
+            # The same name, but hours later: the next flight from the spot
+            ("A", "14:00:00Z", "8.1,48.55"),
+            # The same name and time, but somewhere else
+            ("A", "10:31:00Z", "8.5,48.9"),
+        ],
+    )
+    def test_other_flights_stay_apart(self, tmp_path, second_name, second_begin, start):
+        placemarks = "".join(
+            f"<Placemark><name>{name}</name><TimeSpan>"
+            f"<begin>2025-06-15T{begin}</begin><end>2025-06-15T{end}</end>"
+            f"</TimeSpan>{_line_string(piece)}</Placemark>"
+            for name, begin, end, piece in [
+                ("A", "10:00:00Z", "10:30:00Z", "8.0,48.5,300 8.1,48.55,300"),
+                (
+                    second_name,
+                    second_begin,
+                    "23:00:00Z",
+                    f"{start},300 8.3,48.65,300",
+                ),
+            ]
+        )
+        kml = f"{KML_HEADER}<Document>{placemarks}</Document></kml>"
+
+        _, paths, _ = parse_kml_coordinates(_write(tmp_path, "o.kml", kml))
+
+        assert len(paths) == 2
+
+    def test_a_return_flight_under_one_timespan_stays_apart(self, tmp_path):
+        """Out and back in a document of one TimeSpan: two routes, two flights."""
+        span = (
+            "<TimeSpan><begin>2026-01-01T08:00:00Z</begin>"
+            "<end>2026-01-01T16:00:00Z</end></TimeSpan>"
+        )
+        placemarks = "".join(
+            f"<Placemark><name>{name}</name>{_line_string(piece)}</Placemark>"
+            for name, piece in [
+                ("EDDS - EDTQ", "9.0,48.0,400 9.1,48.1,1200 9.3,48.3,400"),
+                ("EDTQ - EDDS", "9.3,48.3,400 9.1,48.1,1200 9.0,48.0,400"),
+            ]
+        )
+        kml = f"{KML_HEADER}<Document>{span}{placemarks}</Document></kml>"
+
+        _, paths, metadata = parse_kml_coordinates(_write(tmp_path, "b.kml", kml))
+
+        assert len(paths) == 2
+        assert [meta["start_airport"][:4] for meta in metadata] == ["EDDS", "EDTQ"]
+
+    @pytest.mark.parametrize(
+        ("first", "second", "joined"),
+        [
+            # Named after the aircraft, a second flight from near where the
+            # first one parked
+            (
+                "9.0,48.0,1000 9.1,48.1,1200 9.3,48.3,1100 9.3001,48.3001,1100",
+                "9.3002,48.3002,1100 9.4,48.4,1200",
+                False,
+            ),
+            # Split in flight, the point of the split written twice
+            (
+                "9.0,48.0,400 9.1,48.1,1200 9.3,48.3,1100",
+                "9.3,48.3,1100 9.4,48.4,400",
+                True,
+            ),
+            # The same point, but the first came down to where it started
+            (
+                "9.0,48.0,400 9.1,48.1,1200 9.3,48.3,400",
+                "9.3,48.3,400 9.4,48.4,1200",
+                False,
+            ),
+            # ... or stood still at its end, however high the field
+            (
+                (
+                    "9.0,48.0,400 9.1,48.1,1200 9.3,48.3,900 9.30001,48.3,900 "
+                    "9.30002,48.3,900"
+                ),
+                "9.30002,48.3,900 9.4,48.4,1200",
+                False,
+            ),
+        ],
+        ids=["near", "split", "landed", "standing"],
+    )
+    def test_untimed_lines_join_only_at_a_repeated_point_in_flight(
+        self, tmp_path, first, second, joined
+    ):
+        placemarks = "".join(
+            f"<Placemark><name>D-EABC</name>{_line_string(piece)}</Placemark>"
+            for piece in (first, second)
+        )
+        kml = f"{KML_HEADER}<Document>{placemarks}</Document></kml>"
+
+        _, paths, _ = parse_kml_coordinates(_write(tmp_path, "u.kml", kml))
+
+        assert len(paths) == (1 if joined else 2)
+
+    def test_a_flight_that_landed_is_not_continued_by_the_next(self, tmp_path):
+        """One name and one TimeSpan, but the first line ends on the ground."""
+        span = (
+            "<TimeSpan><begin>2026-01-01T08:00:00Z</begin>"
+            "<end>2026-01-01T16:00:00Z</end></TimeSpan>"
+        )
+        placemarks = "".join(
+            f"<Placemark><name>Local flight</name>{_line_string(piece)}</Placemark>"
+            for piece in (
+                "9.0,48.0,400 9.1,48.1,1200 9.0,48.0,400",
+                "9.0,48.0,400 9.2,48.2,1200 9.0,48.0,400",
+            )
+        )
+        kml = f"{KML_HEADER}<Document>{span}{placemarks}</Document></kml>"
+
+        _, paths, _ = parse_kml_coordinates(_write(tmp_path, "l.kml", kml))
+
+        assert len(paths) == 2
 
     def test_lines_with_their_own_timespans_keep_them(self, tmp_path):
         from kml_heatmap.export_pipeline import path_duration

@@ -13,7 +13,6 @@ from kml_heatmap.constants import (
     SPEED_WINDOW_SECONDS,
 )
 from kml_heatmap.helpers import parse_timestamp_epoch
-from kml_heatmap.parser import parse_kml_coordinates
 from kml_heatmap.segment_calculator import (
     SegmentSpeed,
     SpeedWindow,
@@ -21,6 +20,7 @@ from kml_heatmap.segment_calculator import (
     extract_segment_speeds,
 )
 from kml_heatmap.types import TrackPoint
+from tests.conftest import parse_kml_coordinates
 
 DATA_DIR = Path(__file__).parent.parent / "data"
 

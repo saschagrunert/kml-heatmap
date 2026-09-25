@@ -15,7 +15,6 @@ import {
   type PositionAnchor,
 } from "maplibre-gl";
 import type { MapApp } from "../mapApp";
-import type { ReplayManager } from "./replayManager";
 import type { ReplayAirplane, ReplayState, TrailTip } from "./replayState";
 import type { PathSegment } from "../types";
 import { domCache } from "../utils/domCache";
@@ -37,6 +36,7 @@ import {
   closeWhenBehindGlobe,
   createActivationFilter,
   fromLngLat,
+  hasLostContext,
   panPopupIntoView,
   toLngLat,
   toLngLatAfter,
@@ -47,15 +47,17 @@ import { calculateBearing, turnOf } from "../utils/geometry";
 import {
   isLiftedAt,
   liftExaggeration,
+  ribbonWidthZoom,
+} from "../calculations/lift";
+import {
   ribbonOf,
   ribbonPieces,
   ribbonProperties,
-  ribbonWidthZoom,
   type RibbonPiece,
   type RibbonProperties,
-} from "../calculations/lift";
+} from "../calculations/ribbons";
 import { appendCurve } from "../calculations/curves";
-import { replayPoint } from "../features/replay";
+import { replayPoint, type ReplayPoint } from "../features/replay";
 import { prefersReducedMotion } from "../utils/motion";
 import { ReplayCamera } from "./replayCamera";
 import type { SavedCamera } from "./chaseCamera";
@@ -141,16 +143,20 @@ function replaySegmentColor(
   segment: PathSegment,
   useAirspeedColors: boolean,
 ): string {
-  return useAirspeedColors && (segment.groundspeed_knots ?? 0) > 0
+  const speed = state.colorSpeedRange;
+  const altitude = state.colorAltRange;
+  return useAirspeedColors && segment.groundspeed_knots > 0
     ? getColorForAirspeed(
-        segment.groundspeed_knots ?? 0,
-        state.colorMinSpeed,
-        state.colorMaxSpeed,
+        segment.groundspeed_knots,
+        speed.min,
+        speed.max,
+        speed.ranks,
       )
     : getColorForAltitude(
-        segment.altitude_ft ?? 0,
-        state.colorMinAlt,
-        state.colorMaxAlt,
+        segment.altitude_ft,
+        altitude.min,
+        altitude.max,
+        altitude.ranks,
       );
 }
 
@@ -196,9 +202,7 @@ export function appendTrailSegment(
   if (!segment) return;
   state.lastDrawnIndex = index;
 
-  const from = segment.coords?.[0];
-  const to = segment.coords?.[1];
-  if (!from || !to) return;
+  const [from, to] = segment.coords;
 
   const color = replaySegmentColor(state, segment, useAirspeedColors);
   const start = toLngLat(from);
@@ -636,8 +640,7 @@ export class ReplayRenderer {
    * replay time, and open it. Pass the already known segment index to avoid
    * a second lookup when called from the frame loop.
    */
-  updateAirplanePopup(replayManager: ReplayManager, index?: number): void {
-    const state = replayManager.state;
+  updateAirplanePopup(state: ReplayState, index?: number): void {
     if (!state.airplaneMarker || !this.app.replayActive) return;
 
     const segments = state.segments;
@@ -655,10 +658,8 @@ export class ReplayRenderer {
     const popupContent = generateSegmentPopupHtml({
       segment: currentSegment,
       position,
-      altMin: state.colorMinAlt,
-      altMax: state.colorMaxAlt,
-      speedMin: state.colorMinSpeed,
-      speedMax: state.colorMaxSpeed,
+      altRange: state.colorAltRange,
+      speedRange: state.colorSpeedRange,
       title: "Current Position",
       icon: "aircraftTop",
     });
@@ -688,6 +689,8 @@ export class ReplayRenderer {
   }
 
   private flushTrail(state: ReplayState): void {
+    // Written once the map has its style back (see ReplayManager)
+    if (this.app.map && hasLostContext(this.app.map)) return;
     if (!state.trailDirty) return;
     state.trailDirty = false;
     // A replay that has ended meanwhile has emptied the source itself
@@ -721,7 +724,7 @@ export class ReplayRenderer {
           state,
           widthZoom,
           this.app.reliefLevel,
-          this.app.layerManager.ribbonEpoch,
+          this.app.relief.epoch,
         ),
       );
   }
@@ -755,12 +758,65 @@ export class ReplayRenderer {
     return this.camera.chaseView();
   }
 
-  updateDisplay(
-    replayManager: ReplayManager,
-    isManualSeek: boolean = false,
-  ): void {
-    const state = replayManager.state;
+  /**
+   * Show the replay at its current time: the transport row, the trail up
+   * to it, and the airplane where it is, turned along its track, with the
+   * camera after it
+   */
+  updateDisplay(state: ReplayState, isManualSeek: boolean = false): void {
+    this.updateTransport(state);
+    // Nothing of the map moves while it has lost its WebGL context, and
+    // every frame threw asking it: the frames after the restore catch up,
+    // the trail from the last segment it has drawn
+    if (this.app.map && hasLostContext(this.app.map)) return;
+
+    // Find current position in replay timeline (for airplane positioning)
+    const currentIndex = this.locateCurrentIndex(state, isManualSeek);
+    state.currentIndex = currentIndex;
     const segments = state.segments;
+    const lastSegment =
+      currentIndex >= 0 ? (segments[currentIndex] ?? null) : null;
+
+    this.drawNewSegments(state);
+
+    // Update airplane marker position and rotation
+    const marker = state.airplaneMarker;
+    if (!marker || !this.app.map) return;
+
+    if (!lastSegment) {
+      const startCoords = segments[0]?.coords[0];
+      if (startCoords) marker.setLatLng([startCoords[0], startCoords[1]]);
+      this.updateReadout(null, 0);
+      return;
+    }
+
+    const { position, onCurve } = this.placeAirplane(state, currentIndex);
+    const bearing = this.dampedBearing(
+      state,
+      lastSegment,
+      onCurve,
+      isManualSeek,
+    );
+    this.updateReadout(lastSegment, bearing);
+    marker.setLatLng(position);
+    this.followAirplane(state, marker, position, bearing, isManualSeek);
+
+    // While it plays, the trail is written in the frame the airplane moved
+    // in, not a frame behind it: one frame at 100x is a hundred metres
+    if (state.playing && state.trailDirty) {
+      this.trailFrame.cancel();
+      this.flushTrail(state);
+    }
+
+    // The popup describes a segment, so an open one is rebuilt only once the
+    // airplane has reached another segment, not on every frame
+    if (marker.isPopupOpen() && currentIndex !== this.popupIndex) {
+      this.updateAirplanePopup(state, currentIndex);
+    }
+  }
+
+  /** Write the time and the slider of the transport row */
+  private updateTransport(state: ReplayState): void {
     const currentTime = state.currentTime;
     // In the format of the total, so "0:03:26 / 3:22:57" rather than a
     // minute count beside an hour count
@@ -777,52 +833,39 @@ export class ReplayRenderer {
     }
 
     const slider = domCache.get("replay-slider", HTMLInputElement);
-    if (slider) {
-      const sliderValue = currentTime.toString();
-      if (sliderValue !== this.transport.sliderValue) {
-        this.transport.sliderValue = sliderValue;
-        slider.value = sliderValue;
-      }
-      // Rewriting this every frame would make screen readers announce
-      // continuously, so only do it when the spoken value changes
-      const valueText = currentLabel + " of " + maxLabel;
-      if (slider.getAttribute("aria-valuetext") !== valueText) {
-        slider.setAttribute("aria-valuetext", valueText);
-      }
+    if (!slider) return;
+    const sliderValue = currentTime.toString();
+    if (sliderValue !== this.transport.sliderValue) {
+      this.transport.sliderValue = sliderValue;
+      slider.value = sliderValue;
     }
-
-    // Find current position in replay timeline (for airplane positioning)
-    const currentIndex = this.locateCurrentIndex(state, isManualSeek);
-    state.currentIndex = currentIndex;
-    const lastSegment =
-      currentIndex >= 0 ? (segments[currentIndex] ?? null) : null;
-    const nextSegment =
-      currentIndex >= 0 ? (segments[currentIndex + 1] ?? null) : null;
-
-    this.drawNewSegments(replayManager);
-
-    // Update airplane marker position and rotation
-    const marker = state.airplaneMarker;
-    if (!marker || !this.app.map) return;
-
-    if (!lastSegment) {
-      const startCoords = segments[0]?.coords?.[0];
-      if (startCoords) marker.setLatLng([startCoords[0], startCoords[1]]);
-      this.updateReadout(null, 0);
-      return;
+    // Rewriting this every frame would make screen readers announce
+    // continuously, so only do it when the spoken value changes
+    const valueText = currentLabel + " of " + maxLabel;
+    if (slider.getAttribute("aria-valuetext") !== valueText) {
+      slider.setAttribute("aria-valuetext", valueText);
     }
+  }
 
+  /**
+   * Where the airplane is at the current time on the segment at `index`,
+   * and on the flight's curve: its height there, and the trail up to it
+   */
+  private placeAirplane(
+    state: ReplayState,
+    index: number,
+  ): { position: [number, number]; onCurve: ReplayPoint | null } {
+    const segment = state.segments[index]!;
+    const next = state.segments[index + 1];
+    const currentTime = state.currentTime;
     // A segment's time is when it starts, so until the next segment's time
     // the airplane is on this one, moving from its first point to its
     // second. The last segment has no end time and is shown at its end.
-    const lat1 = lastSegment.coords?.[0]?.[0] ?? 0;
-    const lon1 = lastSegment.coords?.[0]?.[1] ?? 0;
-    const lat2 = lastSegment.coords?.[1]?.[0] ?? 0;
-    const lon2 = lastSegment.coords?.[1]?.[1] ?? 0;
+    const [[lat1, lon1], [lat2, lon2]] = segment.coords;
     let fraction = 1;
-    if (nextSegment) {
-      const start = lastSegment.time ?? 0;
-      const duration = (nextSegment.time ?? 0) - start;
+    if (next) {
+      const start = segment.time ?? 0;
+      const duration = (next.time ?? 0) - start;
       if (duration > 0) {
         fraction = Math.min(Math.max((currentTime - start) / duration, 0), 1);
       }
@@ -832,9 +875,9 @@ export class ReplayRenderer {
     // height there. Known before the camera moves, which follows the
     // airplane up.
     const onCurve = state.smoothed
-      ? replayPoint(state.smoothed, currentIndex, fraction)
+      ? replayPoint(state.smoothed, index, fraction)
       : null;
-    const currentPos: [number, number] = onCurve?.position ?? [
+    const position: [number, number] = onCurve?.position ?? [
       lat1 + (lat2 - lat1) * fraction,
       lon1 + (lon2 - lon1) * fraction,
     ];
@@ -845,23 +888,35 @@ export class ReplayRenderer {
       state,
       onCurve && currentTime > 0 && state.layerActive
         ? {
-            index: currentIndex,
+            index,
             point: onCurve.point,
-            position: currentPos,
+            position,
             heightFt: onCurve.heightFt,
             offsetsFt: onCurve.offsetsFt,
           }
         : null,
     );
+    return { position, onCurve };
+  }
 
-    // The direction of the curve where the airplane is, damped lightly
-    // over the time of the flight. A seek, a jump back or a stop takes it
-    // as it is. A flight standing still keeps the heading it had.
+  /**
+   * The direction of the curve where the airplane is, damped lightly over
+   * the time of the flight. A seek, a jump back or a stop takes it as it
+   * is. A flight standing still keeps the heading it had.
+   */
+  private dampedBearing(
+    state: ReplayState,
+    segment: PathSegment,
+    onCurve: ReplayPoint | null,
+    isManualSeek: boolean,
+  ): number {
+    const [[lat1, lon1], [lat2, lon2]] = segment.coords;
     const track = onCurve
       ? onCurve.track
       : lat1 === lat2 && lon1 === lon2
         ? null
         : calculateBearing(lat1, lon1, lat2, lon2);
+    const currentTime = state.currentTime;
     const last = state.lastBearing;
     const elapsed = currentTime - state.bearingTime;
     let bearing = last ?? track ?? 0;
@@ -875,14 +930,24 @@ export class ReplayRenderer {
     }
     state.lastBearing = bearing;
     state.bearingTime = currentTime;
+    return bearing;
+  }
 
-    this.updateReadout(lastSegment, bearing);
-
-    marker.setLatLng(currentPos);
-
+  /**
+   * Have the camera follow the airplane at `position`: in the chase view,
+   * or keeping it in view while it plays or is sought; then turn and lift
+   * its icon, after the camera, which may have moved the map under it
+   */
+  private followAirplane(
+    state: ReplayState,
+    marker: ReplayAirplane,
+    position: [number, number],
+    bearing: number,
+    isManualSeek: boolean,
+  ): void {
     const heading = {
       marker,
-      position: currentPos,
+      position,
       track: bearing,
       ...state.airplaneHeight(),
       exaggeration: liftExaggeration(this.app.reliefLevel),
@@ -892,24 +957,9 @@ export class ReplayRenderer {
       !this.camera.chaseAirplane(heading, isManualSeek) &&
       (state.playing || isManualSeek)
     ) {
-      this.camera.keepAirplaneInView(state, currentPos, isManualSeek);
+      this.camera.keepAirplaneInView(state, position, isManualSeek);
     }
-
-    // After the camera, which may have moved the map under the airplane
     this.camera.follow(heading);
-
-    // While it plays, the trail is written in the frame the airplane moved
-    // in, not a frame behind it: one frame at 100x is a hundred metres
-    if (state.playing && state.trailDirty) {
-      this.trailFrame.cancel();
-      this.flushTrail(state);
-    }
-
-    // The popup describes a segment, so an open one is rebuilt only once the
-    // airplane has reached another segment, not on every frame
-    if (marker.isPopupOpen() && currentIndex !== this.popupIndex) {
-      this.updateAirplanePopup(replayManager, currentIndex);
-    }
   }
 
   /**
@@ -918,7 +968,7 @@ export class ReplayRenderer {
    * for seeks or when the time moved backwards.
    */
   private locateCurrentIndex(
-    state: ReplayManager["state"],
+    state: ReplayState,
     isManualSeek: boolean,
   ): number {
     const segments = state.segments;
@@ -944,8 +994,7 @@ export class ReplayRenderer {
   }
 
   /** Add the segments flown since the last frame to the trail */
-  private drawNewSegments(replayManager: ReplayManager): void {
-    const state = replayManager.state;
+  private drawNewSegments(state: ReplayState): void {
     if (!state.layerActive) return;
 
     // Whatever emptied or cut the trail before this call is written too
@@ -986,8 +1035,8 @@ export class ReplayRenderer {
   }
 
   /** Take the segments flown after the given time off the trail */
-  removeSegmentsAfter(replayManager: ReplayManager, time: number): void {
-    truncateTrail(replayManager.state, time);
-    this.scheduleTrailFlush(replayManager.state);
+  removeSegmentsAfter(state: ReplayState, time: number): void {
+    truncateTrail(state, time);
+    this.scheduleTrailFlush(state);
   }
 }

@@ -27,22 +27,21 @@
  *   pieces of one height each, and every piece is a feature of the same
  *   run, so the run table, the selection and the tooltip serve all of them
  *   as they do the line. Its width is part of its geometry, so the ribbons
- *   are written again as the map zooms to another whole level. A mode that
+ *   are written again as the map zooms to another whole level, cut for the
+ *   pixels of that level (see screenCut), and from CULL_FROM_ZOOM on only
+ *   those around the view, again as the view leaves that. A mode that
  *   is hidden (the replay hides them without clearing them) is left as it
  *   is until it is drawn again.
- * - Paths are pixels of a layer and have no events of their own. One
- *   `mousemove` handler per map asks what is rendered under the pointer, at
- *   most once per frame, and moves one reused tooltip along.
+ * - Paths are pixels of a layer and have no events of their own: what is
+ *   under the pointer, for a click and for the tooltip, is found in
+ *   ui/pathHover.ts, among the layers and runs this module has drawn.
  */
-import {
-  Point as PointClass,
-  Popup,
-  type ExpressionSpecification,
-  type GeoJSONSource,
-  type LngLat,
-  type Map as MapLibreMap,
-  type MapMouseEvent,
-  type Point,
+import type {
+  ExpressionSpecification,
+  GeoJSONSource,
+  LngLat,
+  Map as MapLibreMap,
+  Point,
 } from "maplibre-gl";
 import type { MapApp } from "../mapApp";
 import type { Range } from "../state/store";
@@ -56,21 +55,20 @@ import type {
   PathRunProperties,
   PathSegment,
 } from "../types";
-import { getColorForAirspeed, getColorForAltitude } from "../utils/colors";
-import { MAP_LAYERS, MAP_SOURCES } from "../utils/constants";
+import {
+  airspeedColorAt,
+  altitudeColorAt,
+  scalePosition,
+} from "../utils/colors";
+import { FEET_TO_METERS, MAP_LAYERS, MAP_SOURCES } from "../utils/constants";
 import { domCache } from "../utils/domCache";
-import { frameCoalescer } from "../utils/frameCoalescer";
 import { generateSegmentPopupHtml } from "../utils/htmlGenerators";
 import { logError } from "../utils/logger";
 import {
-  closeWhenBehindGlobe,
-  isInMarker,
-  isOnMarker,
   isReplayCameraMove,
   toLngLat,
-  unwrapLng,
+  hasLostContext,
   whenContextRestored,
-  type LatLon,
   type LngLatTuple,
 } from "../utils/mapHelpers";
 import { datasetIndex } from "../calculations/datasetIndex";
@@ -81,36 +79,36 @@ import {
 import { loadFeatures } from "../services/featureLoader";
 import {
   followsLevel,
-  groundProfilesFt,
   isLiftedAt,
   liftExaggeration,
-  liftOffsetPx,
   reliefLevel,
-  ribbonHeightFt,
-  ribbonOf,
-  ribbonProperties,
   ribbonWidthZoom,
-  smoothFlights,
-  type SmoothedFlights,
 } from "../calculations/lift";
+import { smoothFlights, type SmoothedFlights } from "../calculations/smoothing";
+import {
+  groundProfilesFt,
+  releaseGroundProfiles,
+} from "../calculations/groundProfile";
+import { ribbonOf, ribbonProperties } from "../calculations/ribbons";
 import { appendCurve, flatCurves } from "../calculations/curves";
 import {
   calculateAirspeedRange,
   calculateAltitudeRange,
   calculateSegmentProperties,
-  findNearestOnCurve,
-  findNearestSegment,
   formatAirspeedLabel,
   formatAltitudeLabel,
+  rangeMiddle,
 } from "../features/layers";
-
-/** The look the hover tooltip and the tapped popup share (styles.css) */
-const SEGMENT_DETAILS_CLASS = "segment-details";
+import { formatNumber } from "../utils/formatters";
+import { DEGREES_TO_RADIANS, METRES_PER_DEGREE } from "../utils/geometry";
+import { PathHover, type DrawnRuns, type RunsOnLayer } from "./pathHover";
 
 export type LayerMode = "altitude" | "airspeed";
 
 /** The two sources of a mode, and the layers drawn from them */
 type RunSet = "main" | "selected";
+
+const RUN_SETS: readonly RunSet[] = ["main", "selected"];
 
 /**
  * What sets the two modes apart, the same for every app. The handle of a
@@ -128,7 +126,8 @@ interface LayerConfig {
    */
   ribbons: Record<RunSet, string>;
   getValue: (seg: PathSegment) => number;
-  getColor: (value: number, min: number, max: number) => string;
+  /** The ramp's colour at a position along it, from 0 to 1 */
+  colorAt: (position: number) => string;
   /** Range of the given segments, `fallback` when they have no value */
   computeRange: (
     segments: PathSegment[],
@@ -137,22 +136,62 @@ interface LayerConfig {
   ) => Range;
   filterSegment?: (seg: PathSegment) => boolean;
   legendMinId: string;
+  /** The label of the middle of the ramp, a number in the unit of the ends */
+  legendMidId: string;
   legendMaxId: string;
   formatLegend: (value: number) => string;
+  /** The middle's, narrower: the ends carry the second unit */
+  formatMiddle: (value: number) => string;
 }
 
 /** Colour steps a range is cut into; the merge key of a run */
 const COLOR_BINS = 32;
 
 /**
- * How far from the pointer a flight still counts as under it, in pixels to
- * each side. A finger covers more of the map than it aims at.
+ * The whole zoom level (see ribbonWidthZoom) from which the 3D view writes
+ * only the ribbons around the view (see viewBox), app zoom 9: at app zoom
+ * 12, 916 of the 205,000 ribbons of all years were in view
  */
-const HIT_PADDING_PX = 5;
-const TOUCH_HIT_PADDING_PX = 12;
+const CULL_FROM_ZOOM = 8;
 
-/** Distance of the tooltip from the pointer, in pixels */
-const TOOLTIP_OFFSET_PX = 10;
+/**
+ * How far around the view the ribbons are written, in spans of the view:
+ * a pan of a quarter of a view or a zoom out of about half a level writes
+ * them again
+ */
+const VIEW_SPARE = 0.25;
+
+/** `[west, south, east, north]`, in degrees */
+type Box = readonly [number, number, number, number];
+
+/**
+ * The part of the map a view of `map` may show ribbons of, and `spare`
+ * spans of it around: the ground in view, which MapLibre draws no further
+ * than the bounds of the view, and as far beyond as a ribbon `topM` metres
+ * up as drawn reaches into view from outside it in a tilted view.
+ */
+function viewBox(map: MapLibreMap, topM: number, spare: number): Box {
+  const bounds = map.getBounds();
+  const { lng: west, lat: south } = bounds.getSouthWest();
+  const { lng: east, lat: north } = bounds.getNorthEast();
+  const reach =
+    (topM * Math.tan(map.getPitch() * DEGREES_TO_RADIANS)) / METRES_PER_DEGREE;
+  const lat = reach + spare * (north - south);
+  const lng =
+    reach /
+      Math.cos(Math.min(Math.max(-south, north), 85) * DEGREES_TO_RADIANS) +
+    spare * (east - west);
+  return [west - lng, south - lat, east + lng, north + lat];
+}
+
+/** Whether two boxes overlap, in any copy of the world */
+function overlaps(a: Box, b: Box): boolean {
+  return (
+    a[1] <= b[3] &&
+    b[1] <= a[3] &&
+    [-360, 0, 360].some((shift) => a[0] <= b[2] + shift && b[0] + shift <= a[2])
+  );
+}
 
 const MODES: readonly LayerMode[] = ["altitude", "airspeed"];
 
@@ -172,12 +211,14 @@ const CONFIGS: Readonly<Record<LayerMode, LayerConfig>> = {
       main: MAP_SOURCES.pathsAltitudeRibbons,
       selected: MAP_SOURCES.pathsAltitudeSelectedRibbons,
     },
-    getValue: (seg) => seg.altitude_ft ?? 0,
-    getColor: getColorForAltitude,
+    getValue: (seg) => seg.altitude_ft,
+    colorAt: altitudeColorAt,
     computeRange: calculateAltitudeRange,
     legendMinId: "legend-min",
+    legendMidId: "legend-mid",
     legendMaxId: "legend-max",
     formatLegend: formatAltitudeLabel,
+    formatMiddle: (value) => `${formatNumber(value)} ft`,
   },
   airspeed: {
     mode: "airspeed",
@@ -193,21 +234,18 @@ const CONFIGS: Readonly<Record<LayerMode, LayerConfig>> = {
       main: MAP_SOURCES.pathsAirspeedRibbons,
       selected: MAP_SOURCES.pathsAirspeedSelectedRibbons,
     },
-    getValue: (seg) => seg.groundspeed_knots ?? 0,
-    getColor: getColorForAirspeed,
+    getValue: (seg) => seg.groundspeed_knots,
+    colorAt: airspeedColorAt,
     computeRange: (segments, fallback) =>
       calculateAirspeedRange(segments, fallback),
-    filterSegment: (seg) => (seg.groundspeed_knots ?? 0) > 0,
+    filterSegment: (seg) => seg.groundspeed_knots > 0,
     legendMinId: "airspeed-legend-min",
+    legendMidId: "airspeed-legend-mid",
     legendMaxId: "airspeed-legend-max",
     formatLegend: formatAirspeedLabel,
+    formatMiddle: (value) => `${formatNumber(value)} kt`,
   },
 };
-
-/** The layers of the ribbons of both modes */
-const RIBBON_LAYERS: ReadonlySet<string> = new Set(
-  MODES.flatMap((mode) => Object.values(CONFIGS[mode].ribbons)),
-);
 
 /** One feature of a source: a run of segments of one path in one colour */
 interface Run {
@@ -215,7 +253,10 @@ interface Run {
   start: number;
   end: number;
   pathId: number;
-  /** The value the run is coloured with: the middle of its colour step */
+  /**
+   * Where the run is coloured on the ramp, from 0 to 1: the middle of its
+   * colour step
+   */
   value: number;
   color: string;
 }
@@ -245,6 +286,16 @@ interface RunTable {
    * ribbonWidthZoom), null outside it
    */
   widthZoom: number | null;
+  /**
+   * The part of the map the ribbons were written for (see viewBox), null
+   * for all of them
+   */
+  box: Box | null;
+  /**
+   * A cut for another zoom or view was left out while isolate mode hid the
+   * runs (see isolatedOut); they are written again as they show
+   */
+  behind: boolean;
 }
 
 /** The selection a mode's layers were last styled for */
@@ -284,6 +335,8 @@ function emptyModeState(): ModeState {
     written: null,
     landing: null,
     widthZoom: null,
+    box: null,
+    behind: false,
   });
   return {
     tables: { main: table(), selected: table() },
@@ -296,30 +349,14 @@ function emptyModeState(): ModeState {
 }
 
 /**
- * Whether the pointer cannot hover, so tooltips need a tap instead. Touch
- * support alone does not say: a laptop with a touchscreen is driven by its
- * mouse most of the time, and lost the hover tooltips for having one.
+ * The middle of the one of COLOR_BINS equal steps of the ramp that `value`
+ * falls in on `range` (see scalePosition), from 0 to 1: the merge key of a
+ * run, and where on the ramp it is coloured
  */
-export function isTouchDevice(): boolean {
-  if (typeof window.matchMedia === "function") {
-    return window.matchMedia("(hover: none)").matches;
-  }
-  return "ontouchstart" in window || navigator.maxTouchPoints > 0;
-}
-
-/**
- * The value in the middle of the one of COLOR_BINS equal steps of `range`
- * that `value` falls in: the merge key of a run, and the value it is
- * coloured with
- */
-function stepValue(value: number, range: Range): number {
-  // The same normalisation as the colour ramps in utils/colors.ts
-  const span = Math.max(range.max - range.min, 1);
-  const step = Math.floor(((value - range.min) / span) * COLOR_BINS);
-  return (
-    range.min +
-    ((Math.min(Math.max(step, 0), COLOR_BINS - 1) + 0.5) / COLOR_BINS) * span
-  );
+function stepPosition(value: number, range: Range): number {
+  const position = scalePosition(value, range.min, range.max, range.ranks);
+  const step = Math.floor(position * COLOR_BINS);
+  return (Math.min(Math.max(step, 0), COLOR_BINS - 1) + 0.5) / COLOR_BINS;
 }
 
 /**
@@ -340,43 +377,6 @@ function runLook(
   return { weight, opacity };
 }
 
-/** A position of the data in the copy of the world nearest to `pointerLng` */
-function nearPointer(latLon: LatLon, pointerLng: number): LngLatTuple {
-  const [lng, lat] = toLngLat(latLon);
-  return [unwrapLng(lng, pointerLng), lat];
-}
-
-/**
- * Distance in pixels between a point of the map and a drawn segment, or a
- * piece of its curve.
- *
- * `project` answers for the longitude it is given and does not wrap it, so
- * a segment lands in the copy of the world its data names, however far from
- * the pointer that is. Each end is projected into the copy nearest to
- * `pointerLng`, the pointer's longitude as the map reports it, unwrapped:
- * that is the one drawn under the pointer, which near the antimeridian need
- * not be the copy the pointer itself is in.
- */
-function pixelDistance(
-  map: MapLibreMap,
-  point: Point,
-  pointerLng: number,
-  coords: readonly [LatLon, LatLon] | undefined,
-): number {
-  if (!coords) return Infinity;
-  const a = map.project(nearPointer(coords[0], pointerLng));
-  const b = map.project(nearPointer(coords[1], pointerLng));
-  const dx = b.x - a.x;
-  const dy = b.y - a.y;
-  const lengthSquared = dx * dx + dy * dy;
-  let t = 0;
-  if (lengthSquared > 0) {
-    t = ((point.x - a.x) * dx + (point.y - a.y) * dy) / lengthSquared;
-    t = Math.max(0, Math.min(1, t));
-  }
-  return Math.hypot(point.x - (a.x + t * dx), point.y - (a.y + t * dy));
-}
-
 export class LayerManager implements PathHitTester {
   private app: MapApp;
   private state: Record<LayerMode, ModeState> = {
@@ -388,18 +388,10 @@ export class LayerManager implements PathHitTester {
   private pendingModes = new Set<LayerMode>();
   private destroyed = false;
 
-  /** The map the pointer handlers are registered on */
+  /** The map the zoom handler is registered on */
   private listeningTo: MapLibreMap | null = null;
-  /** The last move of the pointer over the map; null once it is off it */
-  private lastMove: MapMouseEvent | null = null;
-  private readonly hoverFrame = frameCoalescer<void>(() => this.hover());
-  private rehoverPending = false;
-  /** The one tooltip, created on the first hover and reused from then on */
-  private tooltip: Popup | null = null;
-  /** The segment the tooltip describes, null while it is closed */
-  private hovered: PathSegment | null = null;
-  /** The popup a tap opened; a tap elsewhere replaces it */
-  private touchPopup: Popup | null = null;
+  /** The flight under the pointer, and its values (ui/pathHover.ts) */
+  private readonly pathHover: PathHover;
   /** Every flight of a dataset smoothed at its height, for the 3D view */
   private smoothed: {
     segments: PathSegment[];
@@ -409,34 +401,10 @@ export class LayerManager implements PathHitTester {
   private terrainLoaded = false;
   /** A cut of the flights waits for the relief's code (see syncTerrain) */
   private cutAwaited = false;
-  /**
-   * 0 while the relief's code hides the ribbons, until the map has drawn
-   * them on their new ground (ui/terrain.ts), 1 otherwise
-   */
-  ribbonsShown = 1;
-  /**
-   * How often the relief level has changed, the visit of a level a cut of
-   * the ribbons belongs to, which their id tells apart (see ribbonId)
-   */
-  ribbonEpoch = 0;
-
-  private readonly handleMouseMove = (e: MapMouseEvent): void => {
-    // The overview of the Wrapped dialog is this map, but there to be
-    // looked at: no frame is asked for that would find nothing to do
-    if (this.app.store.get("wrappedVisible")) {
-      this.lastMove = null;
-      return;
-    }
-    this.lastMove = e;
-    // A pointer moves many times per frame, and a query walks the tiles.
-    // What the pointer is on is asked in the frame as well, once.
-    this.hoverFrame.schedule();
-  };
-
-  private readonly handleMouseOut = (): void => {
-    this.lastMove = null;
-    this.hideTooltip();
-  };
+  /** Stops restyling the ribbons as the relief's code shows or hides them */
+  private readonly unfollowRibbons: () => void;
+  /** Modes drawn once the camera comes to rest (see drawAtRest) */
+  private readonly atRest = new Set<LayerMode>();
 
   /**
    * A ribbon is as wide as the zoom level it was written for (see lift.ts).
@@ -458,10 +426,15 @@ export class LayerManager implements PathHitTester {
     for (const mode of MODES) {
       const state = this.state[mode];
       const config = CONFIGS[mode];
-      if (!this.drawsNow(mode)) continue;
-      for (const set of ["main", "selected"] as const) {
+      if (!this.drawsNow(mode) || this.atRest.has(mode)) continue;
+      for (const set of RUN_SETS) {
         const table = state.tables[set];
         if (table.widthZoom === null || table.widthZoom === level) continue;
+        // Out of sight in isolate mode: written as it shows again
+        if (this.isolatedOut(state, set)) {
+          table.behind = true;
+          continue;
+        }
         if (table.written === config.ribbons[set] || isLiftedAt(zoom)) {
           this.setRuns(config, set, table.runs, true);
         } else {
@@ -471,16 +444,64 @@ export class LayerManager implements PathHitTester {
     }
   };
 
+  /**
+   * Ribbons written around the view (see viewBox) are written again, as
+   * they are, around a view that has left that
+   */
+  private readonly handleMoveEnd = (event: object): void => {
+    const map = this.listeningTo;
+    if (
+      !map ||
+      !this.app.threeDVisible ||
+      this.cutAwaited ||
+      isReplayCameraMove(event)
+    ) {
+      return;
+    }
+    for (const mode of MODES) {
+      if (!this.drawsNow(mode) || this.atRest.has(mode)) continue;
+      const state = this.state[mode];
+      for (const set of RUN_SETS) {
+        const table = state.tables[set];
+        const { box, runs } = table;
+        const view = box && viewBox(map, this.topM(), 0);
+        // Written again once the view reaches past one of its edges, or as
+        // they show again when isolate mode hides them
+        if (
+          view?.some((edge, i) => (i < 2 ? edge < box![i]! : edge > box![i]!))
+        ) {
+          if (this.isolatedOut(state, set)) table.behind = true;
+          else this.setRuns(CONFIGS[mode], set, runs, true);
+        }
+      }
+    }
+  };
+
   constructor(app: MapApp) {
     this.app = app;
+    this.pathHover = new PathHover(app, {
+      readyMap: () => this.readyMap(),
+      drawnRuns: (map) => this.drawnRuns(map),
+      describe: (segment) => this.formatSegmentTooltip(segment),
+    });
     // Lifted or flat, the flights are cut and written anew. The smoothed
-    // flights only the 3D view needs are let go with it.
+    // flights and the ground of every level only the 3D view needs are let
+    // go with it.
     app.store.subscribe("threeDVisible", (threeD) => {
-      if (!threeD) this.smoothed = null;
+      if (!threeD) {
+        this.smoothed = null;
+        releaseGroundProfiles();
+      }
       if (this.syncTerrain() !== null) this.redrawVisibleModes();
     });
     app.store.subscribe("globeVisible", () => {
       if (this.syncTerrain()) this.redrawVisibleModes();
+    });
+    // Out of sight while they settle on another ground (ui/terrain.ts)
+    // Without its WebGL context the map has no style to write to: the
+    // restore styles the modes as they are then (see restoreModes)
+    this.unfollowRibbons = app.relief.onRibbonsShown(() => {
+      if (!app.map || !hasLostContext(app.map)) this.restyle();
     });
     if (app.map) {
       this.listen(app.map);
@@ -515,9 +536,9 @@ export class LayerManager implements PathHitTester {
 
   private listen(map: MapLibreMap): void {
     this.listeningTo = map;
-    map.on("mousemove", this.handleMouseMove);
-    map.on("mouseout", this.handleMouseOut);
+    this.pathHover.listen(map);
     map.on("zoomend", this.handleZoomEnd);
+    map.on("moveend", this.handleMoveEnd);
     whenContextRestored(map, () => this.restoreModes());
     // A link or a saved view can open in 3D and close in: the store had
     // its 3D view before this manager subscribed, and a map built at a
@@ -528,15 +549,11 @@ export class LayerManager implements PathHitTester {
   /** Stop following the pointer; the drawn layers stay on the map */
   destroy(): void {
     this.destroyed = true;
-    this.listeningTo?.off("mousemove", this.handleMouseMove);
-    this.listeningTo?.off("mouseout", this.handleMouseOut);
+    this.unfollowRibbons();
+    this.pathHover.destroy();
     this.listeningTo?.off("zoomend", this.handleZoomEnd);
+    this.listeningTo?.off("moveend", this.handleMoveEnd);
     this.listeningTo = null;
-    this.hoverFrame.cancel();
-    this.lastMove = null;
-    this.hideTooltip();
-    this.touchPopup?.remove();
-    this.touchPopup = null;
   }
 
   /** The handle of a mode's layers */
@@ -588,167 +605,78 @@ export class LayerManager implements PathHitTester {
   }
 
   /**
-   * The flight drawn at a point of the map, or null beside every flight.
-   * Until a `setData` has landed the tiles still hold the data before it,
-   * which may have flights where the new data has none, or none where the
-   * new data has one: finding nothing then is "stale", neither a flight nor
-   * the empty map, and a caller should leave things as they are. Part of
+   * The flight drawn at a point of the map, or null beside every flight, or
+   * "stale" while the tiles cannot tell (see PathHover.hitTest). Part of
    * the contract with MapApp's click dispatcher, and what the hover runs on.
    */
   hitTest(point: Point): PathHitResult {
-    return this.look(point).result;
+    return this.pathHover.hitTest(point);
   }
 
-  /** `hitTest`, and whether the tiles had any feature at the point at all */
-  private look(point: Point): { result: PathHitResult; found: boolean } {
-    const map = this.readyMap();
-    if (!map) return { result: null, found: false };
-
-    const tableOfLayer = new Map<string, [ModeState, RunSet]>();
-    // Told by the app's own `setData` calls and not by whether the source
-    // is loaded alone: that is false during every pan and zoom as well,
-    // and a camera move must not make a click on the empty map one to
-    // ignore
+  /**
+   * The layers a look under the pointer searches, with the runs their
+   * features stand for: the lines of every mode that shows, and in the 3D
+   * view its ribbons, unless they are hidden as they settle on another
+   * ground (ui/terrain.ts): a query finds a feature whatever its opacity.
+   * What is found is stale while a `setData` has not landed, told by the
+   * app's own calls and not by whether the source is loaded alone: that is
+   * false during every pan and zoom as well, and a camera move must not
+   * make a click on the empty map one to ignore. While the ribbons settle,
+   * nothing found is no word of the empty map either.
+   */
+  private drawnRuns(map: MapLibreMap): DrawnRuns {
+    const threeD = this.app.threeDVisible;
+    const ribbons = threeD && this.app.relief.ribbonsShown > 0;
+    const layers = new Map<string, RunsOnLayer>();
     let landing = false;
-    // Only the 3D view writes ribbons to look for, and not while they are
-    // hidden as they settle on another ground (ui/terrain.ts): a query
-    // finds a feature whatever its opacity. Nothing found then is no word
-    // of the empty map either.
-    const ribbons = this.app.threeDVisible && this.ribbonsShown > 0;
-    const settling = this.app.threeDVisible && !ribbons;
     for (const mode of MODES) {
       const config = CONFIGS[mode];
       const state = this.state[mode];
       if (!this.handleOf(mode).isVisible() || !state.segments) continue;
-      tableOfLayer.set(config.layers.main, [state, "main"]);
-      tableOfLayer.set(config.layers.selected, [state, "selected"]);
+      const drawn = RUN_SETS.map((set) => this.runsOnLayer(state, set));
+      RUN_SETS.forEach((set, i) => layers.set(config.layers[set], drawn[i]!));
       if (ribbons) {
-        tableOfLayer.set(config.ribbons.main, [state, "main"]);
-        tableOfLayer.set(config.ribbons.selected, [state, "selected"]);
+        RUN_SETS.forEach((set, i) =>
+          layers.set(config.ribbons[set], { ...drawn[i]!, ribbon: true }),
+        );
       }
-      for (const set of ["main", "selected"] as const) {
-        const table = state.tables[set];
-        // Asked here rather than followed through the map's events: the
-        // answer is only needed when someone looks
-        if (
-          table.landing === "tiles" &&
-          map.isSourceLoaded(table.written ?? config.sources[set])
-        ) {
-          table.landing = null;
-        }
-        landing ||= table.landing !== null;
+      for (const set of RUN_SETS) {
+        landing = this.stillLanding(map, config, set) || landing;
       }
     }
-    if (tableOfLayer.size === 0) return { result: null, found: false };
-    const nothing: PathHitResult = landing || settling ? "stale" : null;
+    return { layers, stale: landing || (threeD && !ribbons) };
+  }
 
-    const pad = isTouchDevice() ? TOUCH_HIT_PADDING_PX : HIT_PADDING_PX;
-    const features = map.queryRenderedFeatures(
-      [
-        [point.x - pad, point.y - pad],
-        [point.x + pad, point.y + pad],
-      ],
-      { layers: [...tableOfLayer.keys()] },
-    );
-    if (features.length === 0) return { result: nothing, found: false };
+  /** What the features of a mode's lines of one set stand for */
+  private runsOnLayer(state: ModeState, set: RunSet): RunsOnLayer {
+    const { selected, isolate } = state.shown;
+    return {
+      table: state.tables[set],
+      segments: state.segments ?? [],
+      selected: set === "selected",
+      ribbon: false,
+      only: set === "main" && isolate && selected.size > 0 ? selected : null,
+    };
+  }
 
-    // World copies are drawn, and a point in one of them is 360 degrees
-    // away from the segments, which would all be equally far. Both the
-    // search in degrees and the ranking in pixels take the pointer as the
-    // map reports it, unwrapped, and put each segment into the copy of the
-    // world nearest to it (see findNearestSegment and pixelDistance).
-    const pointer = map.unproject(point);
-    const seen = new Set<Run>();
-    let stale = false;
-    let best: PathHit | null = null;
-    let bestDistance = Infinity;
-    let bestSelected = false;
-
-    for (const feature of features) {
-      const entry = tableOfLayer.get(feature.layer.id);
-      if (!entry) continue;
-      const [state, set] = entry;
-      const table = state.tables[set];
-      const { r, g } = feature.properties as Partial<PathRunProperties>;
-      // Tiles cut from the data before the last `setData` still answer for
-      // a while, with indices into a table that is gone
-      if (g !== table.g) {
-        stale = true;
-        continue;
-      }
-      if (r === undefined) continue;
-      const run = table.runs[r];
-      // A run crossing a tile border comes back once per tile
-      if (!run || seen.has(run)) continue;
-      seen.add(run);
-      // Left out by the isolate filter, but still in tiles cut before it.
-      // A selected path is not skipped: its main runs are the same flight,
-      // and they bridge the moment until the selection's tiles are there.
-      const { selected, isolate } = state.shown;
-      if (
-        set === "main" &&
-        isolate &&
-        selected.size > 0 &&
-        !selected.has(run.pathId)
-      ) {
-        continue;
-      }
-
-      // A ribbon is drawn above the ground it stands on: the pointer is
-      // taken down by as much before the segment and the distance to it
-      // are looked for (see liftOffsetPx, which scales by the centre).
-      // Over the relief that ground is raised too, but `project` and
-      // `unproject` meet the relief themselves, of the level of the map's
-      // zoom, as the ribbon's own height is taken. The exaggeration is the
-      // one the map is drawn for, which every ribbon has (see ribbonHeights)
-      const properties = feature.properties as Partial<PathRunProperties>;
-      const ribbon =
-        properties.h !== undefined && RIBBON_LAYERS.has(feature.layer.id);
-      const lift = ribbon
-        ? liftOffsetPx(
-            map,
-            map.getCenter().lat,
-            ribbonHeightFt(properties, map.getZoom()),
-            liftExaggeration(this.app.reliefLevel),
-          )
-        : 0;
-      const ground = lift ? map.unproject([point.x, point.y + lift]) : pointer;
-      // A line is drawn along its flight's curve, and its points belong to
-      // the segment they lie on (see calculations/curves.ts)
-      const onCurve = ribbon
-        ? null
-        : findNearestOnCurve(
-            flatCurves(state.segments!),
-            run.start,
-            run.end,
-            ground.lat,
-            ground.lng,
-          );
-      const segment = onCurve
-        ? state.segments![onCurve.index]
-        : findNearestSegment(
-            state.segments!.slice(run.start, run.end),
-            ground.lat,
-            ground.lng,
-          );
-      if (!segment) continue;
-      const distance = pixelDistance(
-        map,
-        new PointClass(point.x, point.y + lift),
-        pointer.lng,
-        onCurve?.piece ?? segment.coords,
-      );
-      const isSelected = set === "selected";
-      if (
-        distance < bestDistance ||
-        (distance === bestDistance && isSelected && !bestSelected)
-      ) {
-        best = { pathId: run.pathId, segment };
-        bestDistance = distance;
-        bestSelected = isSelected;
-      }
+  /**
+   * Whether the last `setData` of a mode's set is still on its way to the
+   * map's tiles: asked here rather than followed through the map's events,
+   * since the answer is only needed when someone looks
+   */
+  private stillLanding(
+    map: MapLibreMap,
+    config: LayerConfig,
+    set: RunSet,
+  ): boolean {
+    const table = this.state[config.mode].tables[set];
+    if (
+      table.landing === "tiles" &&
+      map.isSourceLoaded(table.written ?? config.sources[set])
+    ) {
+      table.landing = null;
     }
-    return { result: best ?? (stale ? "stale" : nothing), found: true };
+    return table.landing !== null;
   }
 
   /**
@@ -756,30 +684,7 @@ export class LayerManager implements PathHitTester {
    * the segment's values. Part of the contract with MapApp's click dispatcher.
    */
   onPathClick(hit: PathHit, lngLat: LngLat): void {
-    const map = this.app.map;
-    if (map && isTouchDevice()) {
-      // No pointer to follow: the values stay where the finger was until
-      // the next tap on the map closes them
-      this.touchPopup?.remove();
-      const popup = (this.touchPopup = new Popup({
-        // Not the tooltip's class: that one takes no pointer events, and
-        // this popup has a close button to press
-        className: `${SEGMENT_DETAILS_CLASS} segment-popup`,
-        // MapLibre would close it on every click on the map, also on one
-        // the click dispatcher decides to ignore (a "stale" hit), and the
-        // values would go while nothing else happens. The dispatcher closes
-        // it when the click is one on the empty map.
-        closeOnClick: false,
-        maxWidth: "none",
-        focusAfterOpen: false,
-      }));
-      // Before it opens: that is the moment it starts to follow the map
-      closeWhenBehindGlobe(map, popup);
-      popup
-        .setLngLat(lngLat)
-        .setHTML(this.formatSegmentTooltip(hit.segment))
-        .addTo(map);
-    }
+    this.pathHover.showTapped(hit, lngLat);
     // Selecting rebuilds the runs of the path, the hovered one included;
     // `updateSelectionStyles` hands the tooltip over to its replacement
     this.app.pathSelection.togglePathSelection(hit.pathId);
@@ -792,102 +697,7 @@ export class LayerManager implements PathHitTester {
    * for a click on the empty map, and Replay and Wrapped as they open.
    */
   closeSegmentPopup(): void {
-    this.hideTooltip();
-    this.touchPopup?.remove();
-    this.touchPopup = null;
-  }
-
-  /** Look under the pointer and show, move on or close the tooltip */
-  private hover(mapHasMoved = false): void {
-    const map = this.app.map;
-    const move = this.lastMove;
-    // A marker lies on top of the flights. The map reports `mouseout` as
-    // the pointer comes onto one, and goes on reporting its moves there:
-    // over a marker there is no flight to show, but the point is kept. A
-    // zoom may take the marker from under a pointer that rests, or bring
-    // one there, so after the map has moved the document is asked what is
-    // under the pointer now rather than the event what it was aimed at.
-    const onMarker =
-      !!move &&
-      (mapHasMoved
-        ? isInMarker(
-            document.elementFromPoint?.(
-              move.originalEvent.clientX,
-              move.originalEvent.clientY,
-            ),
-          )
-        : isOnMarker(move));
-    const point = onMarker ? undefined : move?.point;
-    // Not over the overview of the Wrapped dialog either (a pointer that
-    // rested on the map as the dialog opened gets here through the look on
-    // idle): MapApp ignores clicks on it as well
-    const { result: hit, found } =
-      map &&
-      point &&
-      !this.destroyed &&
-      !isTouchDevice() &&
-      !this.app.store.get("wrappedVisible")
-        ? this.look(point)
-        : { result: null, found: false };
-    // A look on idle decides, with tiles that can tell. Asked for from
-    // here: the one a redraw asks for is skipped while the pointer is off
-    // the map. Until then the tooltip stays only where the tiles of before
-    // have a flight, which may well still be there; over nothing at all
-    // there is nothing to go on showing.
-    if (hit === "stale") {
-      this.rehoverOnIdle();
-      if (found) return;
-    }
-    if (!map || !point || !hit || hit === "stale") {
-      this.hideTooltip();
-      return;
-    }
-
-    const tooltip = (this.tooltip ??= new Popup({
-      closeButton: false,
-      closeOnClick: false,
-      focusAfterOpen: false,
-      className: `${SEGMENT_DETAILS_CLASS} segment-tooltip`,
-      maxWidth: "none",
-      offset: TOOLTIP_OFFSET_PX,
-    }));
-    if (hit.segment !== this.hovered) {
-      this.hovered = hit.segment;
-      tooltip.setHTML(this.formatSegmentTooltip(hit.segment));
-    }
-    if (!tooltip.isOpen()) {
-      // A popup that tracks the pointer has no place until the pointer
-      // moves again, and sits in the corner of the map until then. Opened
-      // at a position first, it starts out where the pointer is.
-      tooltip.setLngLat(map.unproject(point)).addTo(map).trackPointer();
-    }
-    map.getCanvas().style.cursor = "pointer";
-  }
-
-  private hideTooltip(): void {
-    this.hovered = null;
-    if (!this.tooltip?.isOpen()) return;
-    this.tooltip.remove();
-    const canvas = this.app.map?.getCanvas();
-    if (canvas) canvas.style.cursor = "";
-  }
-
-  /**
-   * Look under the resting pointer again once the map has drawn what was
-   * just changed. Until then the tiles answer with the features of before,
-   * and the tooltip would close although the flight is still there.
-   */
-  private rehoverOnIdle(): void {
-    const map = this.app.map;
-    if (!map || !this.lastMove || this.rehoverPending) return;
-    this.rehoverPending = true;
-    map.once("idle", () => {
-      this.rehoverPending = false;
-      if (this.destroyed) return;
-      // The colour range may have changed under the same segment
-      this.hovered = null;
-      this.hover(true);
-    });
+    this.pathHover.closeSegmentPopup();
   }
 
   /**
@@ -896,11 +706,20 @@ export class LayerManager implements PathHitTester {
    * again is drawn anew, since it may have missed changes while it was
    * hidden (see drawsNow); one switched off lets go of its runs, which for
    * a large year hold tens of MB. A mode the replay hides keeps them.
+   * In a 3D view whose relief's code is still on its way, a mode that shows
+   * is drawn as it arrives, on the relief (see syncTerrain): cut on the
+   * flat ground first, the flights were cut and written twice in a row as
+   * the 3D view came on, 60,000 ribbons and then 72,000.
    *
    * @param rebuild - The data or the filter changed: draw every mode that
    *   shows, whether it did before or not
    */
   syncModes(rebuild = false): void {
+    const data = this.app.currentData;
+    const awaiting =
+      this.app.threeDVisible &&
+      !this.terrainLoaded &&
+      this.syncTerrain() === null;
     for (const mode of MODES) {
       const handle = this.handleOf(mode);
       const wanted = this.app[`${mode}Visible`];
@@ -910,12 +729,57 @@ export class LayerManager implements PathHitTester {
       if (!wanted) {
         if (rebuild || this.state[mode].segments) this.clearLayer(mode);
       } else if (shown && (rebuild || !showing)) {
-        this.redrawPaths(mode);
+        if (awaiting && data) {
+          // What redrawVisibleModes draws once the code has arrived. The
+          // runs of before index into the segments of before: the features
+          // on the map are stale until then, not flights of this dataset.
+          const state = this.state[mode];
+          state.segments = data.path_segments;
+          state.dirty = false;
+          for (const set of RUN_SETS) {
+            state.tables[set].runs = [];
+            state.tables[set].g++;
+          }
+        } else if (rebuild || !this.drawAtRest(mode)) this.redrawPaths(mode);
       } else if (rebuild) {
         // Hidden by the replay: drawn as it shows again
         this.state[mode].dirty = true;
       }
     }
+  }
+
+  /**
+   * Leave a mode that shows again in the 3D view while the camera moves to
+   * the end of the move, and say whether it was: as a replay closes, the
+   * camera eases back from the chase to the view of before it, and a mode
+   * drawn as it showed was smoothed and cut at the level the chase had left
+   * the camera at, and then again at the one the move ends on. Until then
+   * it shows the cut it had as the replay hid it, whose runs and segments
+   * still belong together.
+   */
+  private drawAtRest(mode: LayerMode): boolean {
+    const map = this.listeningTo;
+    if (
+      !map ||
+      !this.app.threeDVisible ||
+      !this.state[mode].segments ||
+      !map.isMoving()
+    ) {
+      return false;
+    }
+    if (this.atRest.size === 0) {
+      map.once("moveend", () => {
+        const waiting = [...this.atRest];
+        this.atRest.clear();
+        if (this.destroyed) return;
+        for (const other of waiting) {
+          if (this.handleOf(other).isVisible()) this.redrawPaths(other);
+          else this.state[other].dirty = true;
+        }
+      });
+    }
+    this.atRest.add(mode);
+    return true;
   }
 
   /**
@@ -925,6 +789,7 @@ export class LayerManager implements PathHitTester {
   clearLayer(mode: LayerMode): void {
     const config = CONFIGS[mode];
     const state = this.state[mode];
+    this.atRest.delete(mode);
     state.segments = null;
     state.dirty = false;
     this.setRuns(config, "main", []);
@@ -933,7 +798,7 @@ export class LayerManager implements PathHitTester {
     if (MODES.every((other) => !this.state[other].segments)) {
       this.smoothed = null;
     }
-    this.rehoverOnIdle();
+    this.pathHover.rehoverOnIdle();
   }
 
   /**
@@ -1012,7 +877,7 @@ export class LayerManager implements PathHitTester {
         end,
         pathId: runPathId,
         value: runKey,
-        color: config.getColor(runKey, range.min, range.max),
+        color: config.colorAt(runKey),
       });
       runStart = -1;
       runEnd = null;
@@ -1025,7 +890,6 @@ export class LayerManager implements PathHitTester {
         const coords = segment.coords;
 
         if (
-          !coords ||
           (only && !only.has(pathId)) ||
           (visiblePathIds !== null && !visiblePathIds.has(pathId)) ||
           (config.filterSegment && !config.filterSegment(segment))
@@ -1034,7 +898,7 @@ export class LayerManager implements PathHitTester {
           continue;
         }
 
-        const key = stepValue(config.getValue(segment), range);
+        const key = stepPosition(config.getValue(segment), range);
         const contiguous =
           runEnd !== null &&
           pathId === runPathId &&
@@ -1070,6 +934,7 @@ export class LayerManager implements PathHitTester {
     const state = this.state[config.mode];
     const table = state.tables[set];
     table.runs = runs;
+    table.behind = false;
     // Before the map is asked: without a WebGL context it has no sources,
     // and it comes back with the data of before, whose features must not
     // index into these runs (see restoreModes). A source that never had
@@ -1106,6 +971,12 @@ export class LayerManager implements PathHitTester {
     const smoothed = lifted ? this.smoothedFlights(segments) : null;
     const widthZoom = ribbonWidthZoom(map.getZoom());
     table.widthZoom = threeD ? widthZoom : null;
+    // Zoomed in, the ribbons around the view only
+    const box =
+      smoothed && widthZoom >= CULL_FROM_ZOOM
+        ? viewBox(map, this.topM(), VIEW_SPARE)
+        : null;
+    table.box = box;
     const level = this.app.reliefLevel;
     const features: GeoJSON.Feature<
       GeoJSON.LineString | GeoJSON.MultiPolygon,
@@ -1117,7 +988,7 @@ export class LayerManager implements PathHitTester {
       const properties = { r, g, pathId: run.pathId, color: run.color };
       if (!smoothed) {
         const coordinates: LngLatTuple[] = [
-          toLngLat(segments[run.start]!.coords![0]),
+          toLngLat(segments[run.start]!.coords[0]),
         ];
         for (let i = run.start; i < run.end; i++) {
           appendCurve(coordinates, curves!, i);
@@ -1131,13 +1002,20 @@ export class LayerManager implements PathHitTester {
       }
       // In the 3D view the run is a ribbon at its height, at every zoom, cut
       // from its flight's smoothed curve so it meets the runs on either side
-      // without a seam
-      for (const piece of ribbonOf(smoothed, run.start, run.end, widthZoom)) {
+      // without a seam, for the pixels of the zoom
+      if (box && !overlaps(box, this.runBox(run, smoothed))) return;
+      for (const piece of ribbonOf(
+        smoothed,
+        run.start,
+        run.end,
+        widthZoom,
+        true,
+      )) {
         features.push({
           type: "Feature",
           properties: {
             ...properties,
-            ...ribbonProperties(piece, level, this.ribbonEpoch),
+            ...ribbonProperties(piece, level, this.app.relief.epoch),
           },
           geometry: piece.geometry,
         });
@@ -1148,8 +1026,10 @@ export class LayerManager implements PathHitTester {
     if (!source) return;
     // A recut into the source that has the runs changes nothing a click
     // or the pointer could find; into the other one, it has none of them
-    // until its tiles are cut
-    if (recut && !moved) {
+    // until its tiles are cut. Around the view only, what was not written
+    // before is found once they are: nothing found is no word of the
+    // empty map until then.
+    if (recut && !moved && !box) {
       void source.setData({ type: "FeatureCollection", features });
       return;
     }
@@ -1172,6 +1052,7 @@ export class LayerManager implements PathHitTester {
 
     const config = CONFIGS[mode];
     const state = this.state[mode];
+    this.atRest.delete(mode);
     state.segments = data.path_segments;
     state.dirty = false;
     // The flights of another dataset are smoothed anew when they are lifted
@@ -1182,7 +1063,7 @@ export class LayerManager implements PathHitTester {
       this.cutRuns(config, data, this.rangeOf(mode)),
     );
     this.showSelection(config, data);
-    this.rehoverOnIdle();
+    this.pathHover.rehoverOnIdle();
   }
 
   /**
@@ -1200,7 +1081,7 @@ export class LayerManager implements PathHitTester {
       selected.size > 0 ? this.cutRuns(config, data, range, selected) : [],
     );
     this.applyLook(config);
-    this.updateLegend(range.min, range.max, config);
+    this.updateLegend(range, config);
   }
 
   /**
@@ -1234,15 +1115,16 @@ export class LayerManager implements PathHitTester {
     );
     // The ribbons of the 3D view, dimmed for a selection like the lines,
     // and out of sight while they settle on another ground
+    const ribbonsShown = this.app.relief.ribbonsShown;
     map.setPaintProperty(
       config.ribbons.main,
       "fill-extrusion-opacity",
-      mainOpacity * this.ribbonsShown,
+      mainOpacity * ribbonsShown,
     );
     map.setPaintProperty(
       config.ribbons.selected,
       "fill-extrusion-opacity",
-      selectedLook.opacity * this.ribbonsShown,
+      selectedLook.opacity * ribbonsShown,
     );
 
     let filter: ExpressionSpecification | null = null;
@@ -1272,6 +1154,19 @@ export class LayerManager implements PathHitTester {
     if (this.handleOf(mode).isVisible()) return true;
     state.dirty = true;
     return false;
+  }
+
+  /**
+   * Whether the runs of a set are out of sight as isolate mode shows the
+   * selection alone: the main layers are filtered to nothing (see
+   * applyLook). A zoom or a pan that would cut them again for the view, and
+   * in the 3D view smooth every flight for it, leaves them as they are
+   * until they show again (see updateSelectionStyles).
+   */
+  private isolatedOut(state: ModeState, set: RunSet): boolean {
+    return (
+      set === "main" && state.shown.isolate && state.shown.selected.size > 0
+    );
   }
 
   /** Cut and write the visible modes again, as the 3D view comes or goes */
@@ -1315,13 +1210,40 @@ export class LayerManager implements PathHitTester {
       );
       this.smoothed = {
         segments,
-        flights: smoothFlights(segments, (i) => segments[i]!.altitude_ft ?? 0, {
+        flights: smoothFlights(segments, (i) => segments[i]!.altitude_ft, {
           groundOf: (i) => ground[i]!,
           offsets,
         }),
       };
     }
     return this.smoothed.flights;
+  }
+
+  /**
+   * How high the highest flight may be drawn above its ground, in metres,
+   * in the 3D view: no higher than its altitude
+   */
+  private topM(): number {
+    return (
+      this.app.altitudeRange.max *
+      FEET_TO_METERS *
+      liftExaggeration(this.app.reliefLevel)
+    );
+  }
+
+  /** The part of the map the ribbon of a run lies in, along its curve */
+  private runBox(run: Run, smoothed: SmoothedFlights): Box {
+    const { points } = smoothed.chains[smoothed.chainOf[run.start]!]!;
+    let [west, south, east, north] = [540, 90, -540, -90];
+    const last = smoothed.to[run.end - 1]!;
+    for (let j = smoothed.from[run.start]!; j <= last; j++) {
+      const [lat, lng] = points[j]!;
+      west = Math.min(west, lng);
+      east = Math.max(east, lng);
+      south = Math.min(south, lat);
+      north = Math.max(north, lat);
+    }
+    return [west, south, east, north];
   }
 
   /**
@@ -1335,25 +1257,26 @@ export class LayerManager implements PathHitTester {
    * ribbonHeights), so the flights stay on it while the zoom goes on and
    * until they are cut for the new level, as wide as it asks. Returns
    * whether the relief came or went, which the caller answers by cutting
-   * the flights anew on their other ground; a level that moved lets go of
-   * the smoothed flights, for the cut at the end of the zoom, and of the
-   * ribbons that cannot stay on the relief until then (see followsLevel)
-   * or are out of sight. The globe
-   * leaves the relief out (MapLibre 6.10 breaks the ribbons up on it) and
-   * only shades it (reliefShaded), over the flat ground the ribbons stand
-   * on there. Its code comes with the feature bundle, which is fetched the
-   * first time either is wanted: until it has arrived the relief is not
-   * drawn and the cut is left to its arrival (cutAwaited), or to its
-   * failure, after which the flights stay on the flat map. Cut on the flat
-   * ground first, they would be cut twice in a row, and the map's worker
-   * hold both cuts at once.
+   * the flights anew on their other ground; a level that moved on the
+   * relief lets go of the smoothed flights, for the cut at the end of the
+   * zoom, and of the ribbons that cannot stay on the relief until then
+   * (see followsLevel) or are out of sight. The globe leaves the relief out
+   * (MapLibre 6.10 breaks the ribbons up on it) and only shades it
+   * (reliefShaded), over the flat ground the ribbons stand on there. Its
+   * code comes with the feature bundle, which is fetched the first time
+   * either is wanted: until it has arrived the relief is not drawn and the
+   * cut is left to its arrival (cutAwaited), or to its failure, after which
+   * the flights stay on the flat map. Cut on the flat ground first, they
+   * would be cut twice in a row, and the map's worker hold both cuts at
+   * once.
    */
   private syncTerrain(): boolean | null {
     const map = this.listeningTo;
     const shaded = !!map && this.app.threeDVisible;
     const wanted = shaded && !this.app.globeVisible;
     const level = map ? reliefLevel(map.getZoom()) : this.app.reliefLevel;
-    this.app.reliefShaded = shaded;
+    const relief = this.app.relief;
+    relief.shade(shaded);
     if (shaded && !this.terrainLoaded) {
       void loadFeatures().then((features) => {
         if (this.destroyed || this.terrainLoaded) return;
@@ -1369,8 +1292,7 @@ export class LayerManager implements PathHitTester {
       if (wanted) {
         // Nothing follows the level before the code has arrived, but a cut
         // of the flights meanwhile, on the flat map, is lifted by it
-        if (level !== this.app.reliefLevel) this.ribbonEpoch++;
-        this.app.reliefLevel = level;
+        relief.moveTo(level);
         this.cutAwaited = true;
         return null;
       }
@@ -1379,12 +1301,12 @@ export class LayerManager implements PathHitTester {
     const moved = shaded && level !== was;
     const switched = wanted !== this.app.terrainActive;
     if (!switched && !moved) return false;
-    if (level !== was) this.ribbonEpoch++;
-    // The relief goes before it would be built for the new level
-    if (!wanted) this.app.terrainActive = false;
-    this.app.reliefLevel = level;
-    this.app.terrainActive = wanted;
-    this.smoothed = null;
+    relief.moveTo(level, wanted);
+    // Flights on the relief stand on the ground of its level; on the
+    // globe, the line between their fields, the same at every level: there
+    // a zoom that ends on another one smooths every flight again for
+    // nothing, a third of the work of that zoom's end
+    if (switched || wanted) this.smoothed = null;
     if (switched || !followsLevel(was, level)) {
       // Out of sight until the new cut has landed (ui/terrain.ts)
       this.releaseRibbons(false);
@@ -1423,14 +1345,19 @@ export class LayerManager implements PathHitTester {
   }
 
   /** Style the layers of both modes again, for ribbonsShown */
-  restyle(): void {
+  private restyle(): void {
     for (const mode of MODES) this.applyLook(CONFIGS[mode]);
   }
 
   /**
    * Follow a change of the selection on the visible layers: only the
    * selection's source is rebuilt, the main one keeps its runs and is
-   * dimmed and filtered instead.
+   * dimmed and filtered instead. Isolate mode alone changes neither: the
+   * layers are styled again, and the selection keeps the runs it has, and
+   * with them the features the tiles hold. Rewritten under a new
+   * generation, a click on the map would count as stale until they landed.
+   * The main runs a zoom or a pan passed by in isolation are written for
+   * the view as they show again.
    */
   updateSelectionStyles(): void {
     const data = this.app.currentData;
@@ -1445,9 +1372,22 @@ export class LayerManager implements PathHitTester {
       // A mode left behind while it was hidden is drawn again as a whole
       if (state.dirty && this.handleOf(mode).isVisible()) {
         this.redrawPaths(mode);
+        continue;
+      }
+      const { selected } = state.shown;
+      const current = this.app.selectedPathIds;
+      if (
+        selected.size === current.size &&
+        [...current].every((id) => selected.has(id))
+      ) {
+        this.applyLook(config);
       } else this.showSelection(config, data);
+      const main = state.tables.main;
+      if (main.behind && !this.isolatedOut(state, "main")) {
+        this.setRuns(config, "main", main.runs, true);
+      }
     }
-    this.rehoverOnIdle();
+    this.pathHover.rehoverOnIdle();
   }
 
   /** Coloured on the same range as the runs, the selection's if any */
@@ -1456,10 +1396,8 @@ export class LayerManager implements PathHitTester {
     const speed = this.resolveColorRange(CONFIGS.airspeed);
     return generateSegmentPopupHtml({
       segment,
-      altMin: altitude.min,
-      altMax: altitude.max,
-      speedMin: speed.min,
-      speedMax: speed.max,
+      altRange: altitude,
+      speedRange: speed,
     });
   }
 
@@ -1474,22 +1412,35 @@ export class LayerManager implements PathHitTester {
     return datasetIndex(data).filter(year, aircraft).pathIds;
   }
 
+  /**
+   * Label a legend with the ends of `range` and the value in the middle of
+   * its ramp: spread by rank, the colours of the middle are the median's,
+   * not those of the value halfway between the ends (see rangeMiddle)
+   */
   private updateLegend(
-    min: number,
-    max: number,
-    config: Pick<LayerConfig, "legendMinId" | "legendMaxId" | "formatLegend">,
+    range: Range,
+    config: Pick<
+      LayerConfig,
+      | "legendMinId"
+      | "legendMidId"
+      | "legendMaxId"
+      | "formatLegend"
+      | "formatMiddle"
+    >,
   ): void {
     const minEl = domCache.get(config.legendMinId);
+    const midEl = domCache.get(config.legendMidId);
     const maxEl = domCache.get(config.legendMaxId);
-    if (minEl) minEl.textContent = config.formatLegend(min);
-    if (maxEl) maxEl.textContent = config.formatLegend(max);
+    if (minEl) minEl.textContent = config.formatLegend(range.min);
+    if (midEl) midEl.textContent = config.formatMiddle(rangeMiddle(range));
+    if (maxEl) maxEl.textContent = config.formatLegend(range.max);
   }
 
-  updateAltitudeLegend(minAlt: number, maxAlt: number): void {
-    this.updateLegend(minAlt, maxAlt, CONFIGS.altitude);
+  updateAltitudeLegend(range: Range): void {
+    this.updateLegend(range, CONFIGS.altitude);
   }
 
-  updateAirspeedLegend(minSpeed: number, maxSpeed: number): void {
-    this.updateLegend(minSpeed, maxSpeed, CONFIGS.airspeed);
+  updateAirspeedLegend(range: Range): void {
+    this.updateLegend(range, CONFIGS.airspeed);
   }
 }

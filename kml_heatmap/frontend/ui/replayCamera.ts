@@ -4,16 +4,14 @@
  * the user's hand on the map that they give way to, and the turn and the
  * lift of its icon as the map moves under it.
  */
-import type {
-  JumpToOptions,
-  LngLatLike,
-  Map as MapLibreMap,
-} from "maplibre-gl";
+import type { JumpToOptions, Map as MapLibreMap } from "maplibre-gl";
 import type { MapApp } from "../mapApp";
 import type { ReplayAirplane, ReplayState } from "./replayState";
 import { AUTO_ZOOM_MIN } from "../utils/constants";
 import {
+  hasLostContext,
   isBehindGlobe,
+  mapSize,
   REPLAY_CAMERA_MOVE,
   toLngLat,
   unwrapLng,
@@ -26,7 +24,7 @@ import {
   type GroundedHeight,
 } from "../calculations/lift";
 import { prefersReducedMotion } from "../utils/motion";
-import { turnOf } from "../utils/geometry";
+import { DEGREES_TO_RADIANS, TILE_SIZE_PX, turnOf } from "../utils/geometry";
 import { ChaseCamera, dampStep, type SavedCamera } from "./chaseCamera";
 
 /** Minimum interval between map pans triggered by slider drags */
@@ -88,6 +86,29 @@ export const AUTO_ZOOM_DURATION_MS = 250;
  */
 export const AUTO_ZOOM_SETTLE_MS = 300;
 
+/**
+ * The steepest the camera looks down past the point straight below it
+ * (degrees short of that point) to find the ground a jump measures from
+ * (see liftRoomPx)
+ */
+const NADIR_MARGIN_DEG = 5;
+
+/**
+ * How far above the middle of a map `height` pixels high, tilted by
+ * `pitch` with a vertical field of view of `fov` (degrees), a lifted point
+ * can be brought by a jump over the ground (see jumpToAirplane): as far as
+ * the camera then stands short of the point straight above the ground
+ * under it. An airplane lifted higher than that is above the camera, and
+ * drawn above the middle by as much as it is.
+ */
+export function liftRoomPx(pitch: number, fov: number, height: number): number {
+  // The camera's distance from the screen, in pixels
+  const focal = height / 2 / Math.tan((fov * DEGREES_TO_RADIANS) / 2);
+  // How far below the line of sight to the middle the ground may be seen
+  const down = pitch - NADIR_MARGIN_DEG;
+  return down > 0 ? focal * Math.tan(down * DEGREES_TO_RADIANS) : 0;
+}
+
 /** Fraction of the viewport used as the "near edge" margin for auto-panning */
 const EDGE_MARGIN_FRACTION = 0.1;
 
@@ -141,35 +162,61 @@ export function iconHeading(
     // where a direction in the air is drawn as the tilt foreshortens it.
     // Measured on the ground it turned nose down over a slope that falls
     // away faster than the view looks down it.
-    const turn = ((track - map.getBearing()) * Math.PI) / 180;
+    const turn = (track - map.getBearing()) * DEGREES_TO_RADIANS;
     return (
-      (Math.atan2(
+      Math.atan2(
         Math.sin(turn),
-        Math.cos(turn) * Math.cos((map.getPitch() * Math.PI) / 180),
-      ) *
-        180) /
-      Math.PI
+        Math.cos(turn) * Math.cos(map.getPitch() * DEGREES_TO_RADIANS),
+      ) / DEGREES_TO_RADIANS
     );
   }
   const globe = map.getProjection()?.type === "globe";
   if (!globe && map.getBearing() === 0 && map.getPitch() === 0) return track;
 
   const [lat, lon] = position;
-  // Degrees of latitude the probe spans at this zoom (512 px tiles)
-  const step = (HEADING_PROBE_PX * 360) / (512 * 2 ** map.getZoom());
-  const radians = (track * Math.PI) / 180;
+  // Degrees of latitude the probe spans at this zoom
+  const step = (HEADING_PROBE_PX * 360) / (TILE_SIZE_PX * 2 ** map.getZoom());
+  const radians = track * DEGREES_TO_RADIANS;
   // A degree of longitude shrinks with the latitude; held off the poles
-  const shrink = Math.max(Math.cos((lat * Math.PI) / 180), 0.01);
+  const shrink = Math.max(Math.cos(lat * DEGREES_TO_RADIANS), 0.01);
   const from = map.project([lon, lat]);
   const to = map.project([
     lon + (step * Math.sin(radians)) / shrink,
     Math.max(-89, Math.min(89, lat + step * Math.cos(radians))),
   ]);
   const dx = to.x - from.x;
-  const dy = (to.y - from.y) / Math.cos((map.getPitch() * Math.PI) / 180);
+  const dy = (to.y - from.y) / Math.cos(map.getPitch() * DEGREES_TO_RADIANS);
   if (dx === 0 && dy === 0) return track - map.getBearing();
   // Screen y grows downwards
-  return (Math.atan2(dx, -dy) * 180) / Math.PI;
+  return Math.atan2(dx, -dy) / DEGREES_TO_RADIANS;
+}
+
+/** Where the airplane is on the screen, see airplaneOnScreen */
+interface AirplaneOnScreen {
+  mapSize: { x: number; y: number };
+  /** Where the ground under the airplane is */
+  ground: { x: number; y: number };
+  /** Where the airplane is drawn */
+  point: { x: number; y: number };
+  behind: boolean;
+  nearEdge: boolean;
+  outside: boolean;
+}
+
+/**
+ * Count a recenter of the map at `now`, and whether it is a new one: the
+ * frames of a pan are one recenter, until the pan had its time to move the
+ * map. Counted per frame, three frames in a row fired a burst of zoom-outs.
+ */
+function countRecenter(state: ReplayState, now: number): boolean {
+  if (now < state.recenterPanEndsAt) return false;
+  state.recenterPanEndsAt = now + RECENTER_PAN_DURATION_MS;
+  const cutoffTime = now - 30000;
+  state.recenterTimestamps = state.recenterTimestamps.filter(
+    (ts) => ts > cutoffTime,
+  );
+  state.recenterTimestamps.push(now);
+  return true;
 }
 
 /**
@@ -449,8 +496,11 @@ export class ReplayCamera {
     const since = this.unrested?.since ?? -Infinity;
     const moving = this.jumped && performance.now() - since < CAMERA_REST_MS;
     this.jumped = false;
-    // A gesture or an animation of the map ends in a `moveend` of its own
-    if (moving || this.app.map?.isMoving()) {
+    // A gesture or an animation of the map ends in a `moveend` of its own;
+    // a map without its WebGL context has its listeners told once it is
+    // back, which throw asking it now
+    const map = this.app.map;
+    if (moving || map?.isMoving() || (map && hasLostContext(map))) {
       this.restFrame = requestAnimationFrame(this.lookForRest);
     } else this.rest();
   };
@@ -579,7 +629,11 @@ export class ReplayCamera {
     this.chaseFrame = requestAnimationFrame(() => {
       this.chaseFrame = null;
       const last = this.heading;
-      if (last && !last.state.playing) this.chaseAirplane(last, false);
+      if (!last || last.state.playing) return;
+      // A map without its WebGL context is waited out, frame by frame
+      const map = this.app.map;
+      if (map && hasLostContext(map)) this.chaseAgain(false);
+      else this.chaseAirplane(last, false);
     });
   }
 
@@ -648,24 +702,61 @@ export class ReplayCamera {
       return;
     }
 
-    const container = map.getContainer();
-    const mapSize = { x: container.clientWidth, y: container.clientHeight };
-    // Where the airplane is drawn: in the 3D view up at its height, where
-    // the camera has to keep it and not at the ground under it
-    const ground = map.project(toLngLat(currentPos));
-    const lift = airplaneLiftPx(
+    const view = this.airplaneOnScreen(map, state, currentPos);
+    if (!view.nearEdge && !this.following) return;
+
+    const now = Date.now();
+    if (isManualSeek) {
+      this.following = null;
+      if (view.nearEdge) this.jumpOnSeek(map, state, view, currentPos, now);
+      return;
+    }
+
+    this.trackAirplane(
+      map,
+      state,
+      view.point,
+      view.ground,
+      currentPos,
+      view.mapSize,
+      view.behind ? null : view.outside,
+      now,
+    );
+    if (!view.nearEdge) return;
+
+    const newRecenter = countRecenter(state, now);
+    if (state.autoZoom) {
+      this.autoZoomOut(map, state, currentPos, view, newRecenter, now);
+    }
+  }
+
+  /** How far up the screen the airplane is drawn, over its ground */
+  private liftPx(map: MapLibreMap, state: ReplayState): number {
+    return airplaneLiftPx(
       map,
       map.getCenter().lat,
       heightAtZoomFt(state.airplaneHeight(), map.getZoom()),
       liftExaggeration(this.app.reliefLevel),
     );
-    const point = { x: ground.x, y: ground.y - lift };
-    // The centre that brings the airplane itself to the middle of the map
-    const center = lift
-      ? map.unproject([point.x, point.y])
-      : toLngLat(currentPos);
-    const marginX = mapSize.x * EDGE_MARGIN_FRACTION;
-    const marginY = mapSize.y * EDGE_MARGIN_FRACTION;
+  }
+
+  /**
+   * Where the airplane is on the screen: drawn in the 3D view up at its
+   * height, where the camera has to keep it and not at the ground under
+   * it; whether it is near the edge of the map, or off it
+   */
+  private airplaneOnScreen(
+    map: MapLibreMap,
+    state: ReplayState,
+    currentPos: [number, number],
+  ): AirplaneOnScreen {
+    // Every frame, so not of the container, which lays the page out
+    const { width, height } = mapSize(map);
+    const size = { x: width, y: height };
+    const ground = map.project(toLngLat(currentPos));
+    const point = { x: ground.x, y: ground.y - this.liftPx(map, state) };
+    const marginX = size.x * EDGE_MARGIN_FRACTION;
+    const marginY = size.y * EDGE_MARGIN_FRACTION;
 
     // Behind the globe the airplane projects into the disc, never off the
     // map, while the marker is hidden: a long flight would fly over the rim
@@ -677,73 +768,101 @@ export class ReplayCamera {
     const nearEdge =
       behind ||
       point.x < marginX ||
-      point.x > mapSize.x - marginX ||
+      point.x > size.x - marginX ||
       point.y < marginY ||
-      point.y > mapSize.y - marginY;
-    if (!nearEdge && !this.following) return;
-
-    const outsideViewport =
+      point.y > size.y - marginY;
+    const outside =
       behind ||
       point.x < 0 ||
-      point.x > mapSize.x ||
+      point.x > size.x ||
       point.y < 0 ||
-      point.y > mapSize.y;
+      point.y > size.y;
+    return { mapSize: size, ground, point, behind, nearEdge, outside };
+  }
 
-    const now = Date.now();
-    if (isManualSeek) {
-      this.following = null;
-      if (!nearEdge) return;
-      const throttled = now - state.lastSeekPanTime < SEEK_PAN_THROTTLE_MS;
-      if (throttled && !outsideViewport) return;
-      state.lastSeekPanTime = now;
-      this.jump(map, { center });
-      return;
-    }
-
-    this.trackAirplane(
-      map,
-      point,
-      ground,
-      currentPos,
-      mapSize,
-      center,
-      behind ? null : outsideViewport,
-      now,
+  /**
+   * Bring the airplane to the middle of the map in one jump, or as near as
+   * the tilt lets it (see liftRoomPx): first the ground under it to the
+   * middle, then the camera over the ground by as much as brings that
+   * ground its lift below the middle, which is the way from the ground
+   * drawn there to the ground under the airplane. Measured the other way,
+   * from the ground drawn at the lifted point, it came out wrong on a
+   * tilted map, whose far side has more ground to a pixel than its near
+   * one, and above its horizon no ground answers at all: a map zoomed in
+   * on an airplane high up ran off hundreds of kilometres a second.
+   */
+  private jumpToAirplane(
+    map: MapLibreMap,
+    state: ReplayState,
+    position: [lat: number, lon: number],
+  ): void {
+    this.jump(map, { center: toLngLat(position) });
+    const lift = Math.min(
+      this.liftPx(map, state),
+      liftRoomPx(
+        map.getPitch(),
+        map.getVerticalFieldOfView(),
+        mapSize(map).height,
+      ),
     );
-    if (!nearEdge) return;
+    if (!(lift > 0)) return;
+    const ground = map.project(toLngLat(position));
+    const below = map.unproject([ground.x, ground.y + lift]);
+    const middle = map.getCenter();
+    this.jump(map, {
+      center: [
+        middle.lng + unwrapLng(position[1], below.lng) - below.lng,
+        middle.lat + position[0] - below.lat,
+      ],
+    });
+  }
 
-    // Those frames are one recenter, though, until a pan had its time to
-    // move the map. Counted per frame, three frames in a row fired a burst
-    // of zoom-outs.
-    const newRecenter = now >= state.recenterPanEndsAt;
-    if (newRecenter) {
-      state.recenterPanEndsAt = now + RECENTER_PAN_DURATION_MS;
-      const cutoffTime = now - 30000;
-      state.recenterTimestamps = state.recenterTimestamps.filter(
-        (ts) => ts > cutoffTime,
-      );
-      state.recenterTimestamps.push(now);
-    }
-    if (!state.autoZoom) return;
+  /**
+   * During a slider drag the map jumps to the airplane near the edge,
+   * throttled, and at once for one that has left the map
+   */
+  private jumpOnSeek(
+    map: MapLibreMap,
+    state: ReplayState,
+    view: AirplaneOnScreen,
+    position: [lat: number, lon: number],
+    now: number,
+  ): void {
+    const throttled = now - state.lastSeekPanTime < SEEK_PAN_THROTTLE_MS;
+    if (throttled && !view.outside) return;
+    state.lastSeekPanTime = now;
+    this.jumpToAirplane(map, state, position);
+  }
 
-    // Zoom out when the map had to recenter frequently in a short time, or
-    // right away once the airplane has left the map: the pan cannot keep up
-    // at this zoom, and waiting for more recenters kept it off screen for
-    // seconds at 200x
+  /**
+   * Zoom out when the map had to recenter frequently in a short time
+   * (`newRecenter` counts one more), or right away once the airplane has
+   * left the map: the pan cannot keep up at this zoom, and waiting for more
+   * recenters kept it off screen for seconds at 200x
+   */
+  private autoZoomOut(
+    map: MapLibreMap,
+    state: ReplayState,
+    currentPos: [number, number],
+    view: AirplaneOnScreen,
+    newRecenter: boolean,
+    now: number,
+  ): void {
     const fiveSecondsAgo = now - 5000;
     const frequent =
       newRecenter &&
       state.recenterTimestamps.filter((ts) => ts >= fiveSecondsAgo).length > 2;
-    if (!frequent && !outsideViewport) return;
+    if (!frequent && !view.outside) return;
     if (now < this.autoZoomSettlesAt) return;
 
     // From the map's own zoom: a remembered level goes stale as soon as the
     // user zooms, and "zoom out" then zoomed in
     const zoom = map.getZoom();
     if (zoom <= AUTO_ZOOM_MIN) return;
-    const steps = outsideViewport ? zoomOutSteps(point, mapSize) : 1;
+    const steps = view.outside ? zoomOutSteps(view.point, view.mapSize) : 1;
     // Onto the airplane, not around the centre: no pan runs while the map
-    // zooms (see above), and the old centre had lost the airplane by then
+    // zooms (see keepAirplaneInView), and the old centre had lost the
+    // airplane by then
     map.easeTo({
       center: toLngLat(currentPos),
       zoom: Math.max(AUTO_ZOOM_MIN, zoom - steps),
@@ -764,17 +883,17 @@ export class ReplayCamera {
    * the map, whatever the speed; it lets go once the airplane is back in
    * the middle and at rest there. Without motion, with the airplane behind
    * a globe (`outside` null), or off the map (`outside`) further than a
-   * spring could follow or before it followed, it jumps to the airplane's
-   * `center` instead. `point` is where the airplane is drawn, `ground`
-   * where the ground under it `position` is.
+   * spring could follow or before it followed, it jumps to the airplane
+   * instead (see jumpToAirplane). `point` is where the airplane is drawn,
+   * `ground` where the ground under it `position` is.
    */
   private trackAirplane(
     map: MapLibreMap,
+    state: ReplayState,
     point: { x: number; y: number },
     ground: { x: number; y: number },
     position: [lat: number, lon: number],
     mapSize: { x: number; y: number },
-    center: LngLatLike,
     outside: boolean | null,
     now: number,
   ): void {
@@ -794,7 +913,7 @@ export class ReplayCamera {
       prefersReducedMotion()
     ) {
       this.following = null;
-      this.jump(map, { center });
+      this.jumpToAirplane(map, state, position);
       return;
     }
     const velocity = before?.velocity ?? { x: 0, y: 0 };

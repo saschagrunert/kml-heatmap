@@ -7,7 +7,13 @@ antimeridian, so fields on either side of it are neighbors too.
 
 An entry whose name holds an ICAO code only ever merges with entries of the
 same code: EDTX and EDTY are 0.7 km apart and two airports all the same. Only
-entries without a code merge by proximity (see ``AirportDeduplicator``).
+entries without a code merge by proximity, and with the entry of the same
+name (see ``AirportDeduplicator``).
+
+A name only becomes a marker when it holds an ICAO code or is an airport of
+a route ("Home strip - Aunt farm"): the name of any other placemark is free
+text ("Flight with Anna", "Untitled Path"), and its start gets no marker
+(see ``_add_departures``).
 """
 
 import math
@@ -16,6 +22,7 @@ from typing import TYPE_CHECKING, NamedTuple
 
 from .airport_lookup import (
     airport_icao_code,
+    extract_icao_codes_from_name,
     lookup_airport_coordinates,
     lookup_airport_elevation,
     split_route_name,
@@ -234,7 +241,10 @@ class AirportDeduplicator:
 
     An entry named with an ICAO code merges with the earlier entry of the
     same code, wherever that is, and with nothing else. An entry without a
-    code merges with any entry within ``AIRPORT_DISTANCE_THRESHOLD_KM``.
+    code merges with the earlier entry of the same name, wherever that is,
+    or else with any entry within ``AIRPORT_DISTANCE_THRESHOLD_KM``: the
+    page tells its airports apart by name, and two markers of one name
+    would be one airport to it.
     ``deduplicate_airports`` adds the entries with a code first, so an
     entry without one joins the coded airport it belongs to rather than
     the other way round.
@@ -246,6 +256,8 @@ class AirportDeduplicator:
         self.unique_airports: list[AirportData] = []
         self.spatial_grid: dict[tuple[int, int], list[int]] = {}
         self._by_code: dict[str, int] = {}
+        # The airports without a code, by the name their marker shows
+        self._by_name: dict[str, int] = {}
         # Longitude cells around the globe; the last one may be narrower
         self._lon_cell_count = math.ceil(360 / grid_size)
 
@@ -338,8 +350,12 @@ class AirportDeduplicator:
                     lat,
                     lon,
                 )
+            marker_name = None
         else:
-            apt_idx = self._find_nearby_airport(corrected_lat, corrected_lon)
+            marker_name = extract_airport_name(name, is_at_path_end) if name else None
+            apt_idx = self._by_name.get(marker_name) if marker_name else None
+            if apt_idx is None:
+                apt_idx = self._find_nearby_airport(corrected_lat, corrected_lon)
 
         if apt_idx is not None:
             airport = self.unique_airports[apt_idx]
@@ -367,6 +383,8 @@ class AirportDeduplicator:
         self._add_to_grid(corrected_lat, corrected_lon, new_idx)
         if icao_code:
             self._by_code[icao_code] = new_idx
+        elif marker_name:
+            self._by_name[marker_name] = new_idx
         return new_idx
 
     def get_unique_airports(self) -> list[AirportData]:
@@ -401,6 +419,11 @@ def _add_departures(
     A path with fewer than two points is no flight: a lone waypoint or a
     stationary recording gets no entry in the export either, and its airport
     would tell where it was.
+
+    A name that is no route and holds no ICAO code registers nothing: it is
+    free text ("Flight with Anna"), which a marker would publish, and the
+    page names its airports, so a neutral name of many places would make
+    them one airport to it.
     """
     for idx, metadata in enumerate(all_path_metadata):
         start_point = metadata["start_point"]
@@ -418,8 +441,14 @@ def _add_departures(
             logger.debug("Skipping the start of '%s': no flight path", airport_name)
             continue
 
-        # Skip mid-flight starts
         start_airport, _ = route_airports(metadata)
+        if start_airport is None and not extract_icao_codes_from_name(
+            strip_dates(airport_name)
+        ):
+            logger.debug("Skipping the start of '%s': no airport name", airport_name)
+            continue
+
+        # Skip mid-flight starts
         name = start_airport or airport_name
         reference = reference_altitude(path, airport_elevation(name, False))
         if is_mid_flight_start(path, start_alt, reference):

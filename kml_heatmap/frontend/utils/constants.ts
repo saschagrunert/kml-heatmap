@@ -86,6 +86,14 @@ export const AIRPORT_SIZE_ZOOMS = [
 export const AIRPORT_HIDE_LABELS_BELOW_ZOOM = 4;
 
 /**
+ * Below this zoom the airport markers are hidden (size class "hidden"):
+ * the map shows a continent in a few hundred pixels, the flights of a
+ * pilot's years in one bloom of the heat, and their airports in a clump of
+ * dots on top of it. Map units.
+ */
+export const AIRPORT_HIDE_MARKERS_BELOW_ZOOM = 2;
+
+/**
  * Ids of the sources the map is created with. Every one exists, empty, from
  * the moment `mapReady` resolves; modules fill them with `setData` and never
  * add or remove one. All but the elevation tiles of the relief and the
@@ -95,6 +103,7 @@ export const AIRPORT_HIDE_LABELS_BELOW_ZOOM = 4;
 export const MAP_SOURCES = {
   aviation: "aviation",
   heat: "heat",
+  heatIsolated: "heat-isolated",
   heatLines: "heat-lines",
   selectionHighlight: "selection-highlight",
   replayRoute: "replay-route",
@@ -127,6 +136,7 @@ export const MAP_SOURCES = {
 export const MAP_LAYERS = {
   aviation: "aviation",
   heat: "heat",
+  heatIsolated: "heat-isolated",
   heatLinesGlow: "heat-lines-glow",
   heatLinesCore: "heat-lines-core",
   selectionHighlight: "selection-highlight",
@@ -200,12 +210,15 @@ export const HEAT_LINES = {
 
 /**
  * The layers the heatmap toggle shows and hides: the heatmap first (the
- * e2e driver reads it off the front), then the lines it hands over to.
+ * e2e driver reads it off the front), then the lines it hands over to, and
+ * the heatmap of an isolated selection, which only the one of them that
+ * is not isolated draws (see DataManager.applyHeatmapEmphasis)
  */
 export const HEATMAP_LAYER_IDS = [
   MAP_LAYERS.heat,
   MAP_LAYERS.heatLinesGlow,
   MAP_LAYERS.heatLinesCore,
+  MAP_LAYERS.heatIsolated,
 ] as const;
 
 /**

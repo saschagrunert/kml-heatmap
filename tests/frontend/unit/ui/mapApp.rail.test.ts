@@ -7,6 +7,7 @@ import {
   BASE_STYLE_RETRY_MS,
   FALLBACK_STYLE,
   REPLAY_UNAVAILABLE_MESSAGE,
+  STATS_UNAVAILABLE_MESSAGE,
   WRAPPED_UNAVAILABLE_MESSAGE,
   MapApp,
 } from "../../../../kml_heatmap/frontend/mapApp";
@@ -26,11 +27,9 @@ import {
   loadFeatures,
   loadWrapped,
 } from "../../../../kml_heatmap/frontend/services/featureLoader";
-import {
-  REPLAY_CAMERA_MOVE,
-  resizeMapAfterTransition,
-} from "../../../../kml_heatmap/frontend/utils/mapHelpers";
+import { REPLAY_CAMERA_MOVE } from "../../../../kml_heatmap/frontend/utils/mapHelpers";
 import * as motion from "../../../../kml_heatmap/frontend/utils/motion";
+import { segmentOf } from "../../testHelpers";
 
 // The instances the mocked manager constructors hand out live in the setup
 // module, which is loaded before the mocks are registered
@@ -51,17 +50,9 @@ vi.mock("../../../../kml_heatmap/frontend/utils/domCache", () => ({
     clear: vi.fn(),
   },
 }));
-vi.mock(
-  "../../../../kml_heatmap/frontend/utils/mapHelpers",
-  async (importOriginal) => ({
-    ...(await importOriginal<
-      typeof import("../../../../kml_heatmap/frontend/utils/mapHelpers")
-    >()),
-    resizeMapAfterTransition: vi.fn(),
-  }),
-);
 vi.mock("../../../../kml_heatmap/frontend/utils/toast", () => ({
   showToast: vi.fn(),
+  announceStatus: vi.fn(),
   dismissToast: vi.fn(),
 }));
 const mobileBarMock = vi.hoisted(() => ({ mountFor: vi.fn() }));
@@ -76,11 +67,6 @@ vi.mock("../../../../kml_heatmap/frontend/ui/dataManager", () => ({
 vi.mock("../../../../kml_heatmap/frontend/ui/filterManager", () => ({
   FilterManager: vi.fn(function () {
     return m.mockFilterManagerInstance;
-  }),
-}));
-vi.mock("../../../../kml_heatmap/frontend/ui/statsManager", () => ({
-  StatsManager: vi.fn(function () {
-    return m.mockStatsManagerInstance;
   }),
 }));
 vi.mock("../../../../kml_heatmap/frontend/ui/airportManager", () => ({
@@ -98,20 +84,11 @@ vi.mock("../../../../kml_heatmap/frontend/ui/layerManager", () => ({
     return m.mockLayerManagerInstance;
   }),
 }));
-vi.mock(
-  "../../../../kml_heatmap/frontend/ui/stateManager",
-  async (importOriginal) => ({
-    // Reset view follows the real list of flags
-    BOOLEAN_KEYS: (
-      await importOriginal<
-        typeof import("../../../../kml_heatmap/frontend/ui/stateManager")
-      >()
-    ).BOOLEAN_KEYS,
-    StateManager: vi.fn(function () {
-      return m.mockStateManagerInstance;
-    }),
+vi.mock("../../../../kml_heatmap/frontend/ui/stateManager", () => ({
+  StateManager: vi.fn(function () {
+    return m.mockStateManagerInstance;
   }),
-);
+}));
 vi.mock("../../../../kml_heatmap/frontend/ui/wrappedManager", () => ({
   WrappedManager: vi.fn(function () {
     return m.mockWrappedManagerInstance;
@@ -134,6 +111,10 @@ vi.mock("../../../../kml_heatmap/frontend/services/featureLoader", () => ({
       WrappedManager: vi.fn(function () {
         return m.mockWrappedManagerInstance;
       }),
+      // The statistics panel rides in the Wrapped bundle
+      StatsManager: vi.fn(function () {
+        return m.mockStatsManagerInstance;
+      }),
     }),
   ),
 }));
@@ -149,10 +130,12 @@ vi.mock("../../../../kml_heatmap/frontend/ui/pathSelection", () => ({
 }));
 
 const {
+  createApp,
   fetchBaseStyle,
   initializeApp,
   mockAirportManagerInstance,
   mockLayerManagerInstance,
+  mockMap,
   mockPathSelectionInstance,
   mockStateManagerInstance,
   mockStatsManagerInstance,
@@ -172,15 +155,6 @@ const BASE_STYLE = {
   ],
 };
 
-function createApp(): MapApp {
-  return new MapApp({ ...m.APP_CONFIG });
-}
-
-/** The mock behind `app.map`, for what the real type does not have */
-function mockMap(app: MapApp): MockMap {
-  return app.map as unknown as MockMap;
-}
-
 describe("MapApp controls and map", () => {
   let app: MapApp;
 
@@ -188,7 +162,7 @@ describe("MapApp controls and map", () => {
     resetManagerMocks();
     mobileBarMock.mountFor.mockReturnValue(null);
     setupDOM();
-    app = createApp();
+    app = createApp(MapApp);
   });
 
   afterEach(() => {
@@ -305,9 +279,8 @@ describe("MapApp controls and map", () => {
       expect(document.body.classList.contains("stats-open")).toBe(false);
     });
 
-    it("opens the rail and remeasures the map", async () => {
+    it("opens the rail and slides the map aside", async () => {
       await initializeApp(app);
-      vi.mocked(resizeMapAfterTransition).mockClear();
 
       const column = document.getElementById("left-buttons")!;
       // The column's own layout and its labels, not the per-button state
@@ -327,10 +300,8 @@ describe("MapApp controls and map", () => {
 
       expect(document.getElementById("stats-rail")!.hidden).toBe(false);
       expect(document.body.classList.contains("stats-open")).toBe(true);
-      expect(resizeMapAfterTransition).toHaveBeenCalledWith(
-        app.map,
-        document.getElementById("map"),
-      );
+      // Resized once, at the end of the slide (see slideMapBesideRail)
+      expect(document.body.classList.contains("rail-sliding")).toBe(true);
       // The column is left alone; the stylesheet slides it past the rail
       expect(shape()).toEqual(before);
 
@@ -394,9 +365,6 @@ describe("MapApp controls and map", () => {
     });
 
     it("restores an open rail from the saved state", async () => {
-      mockStatsManagerInstance.setStatsPanelVisible.mockImplementation(
-        (visible: boolean) => app.store.set("statsPanelVisible", visible),
-      );
       mockStateManagerInstance.loadState.mockReturnValue({
         statsPanelVisible: true,
       });
@@ -405,7 +373,163 @@ describe("MapApp controls and map", () => {
 
       expect(document.getElementById("stats-rail")!.hidden).toBe(false);
       expect(document.body.classList.contains("stats-open")).toBe(true);
-      mockStatsManagerInstance.setStatsPanelVisible.mockReset();
+    });
+  });
+
+  describe("the lazily loaded statistics panel", () => {
+    const panel = (): HTMLElement => document.getElementById("stats-panel")!;
+
+    /** A Wrapped bundle that arrives when the test says so */
+    async function heldBundle(): Promise<() => void> {
+      const bundle = await loadWrapped();
+      let deliver: () => void = () => {};
+      vi.mocked(loadWrapped).mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            deliver = () => resolve(bundle);
+          }),
+      );
+      vi.mocked(loadWrapped).mockClear();
+      return () => deliver();
+    }
+
+    it("fetches nothing until the panel opens", async () => {
+      await initializeApp(app);
+
+      expect(loadWrapped).not.toHaveBeenCalled();
+      expect(app.statsManager).toBeUndefined();
+    });
+
+    it("says it is loading until the bundle is in, then starts the manager", async () => {
+      await initializeApp(app);
+      const deliver = await heldBundle();
+
+      app.store.set("statsPanelVisible", true);
+
+      // The rail opens at once, over a panel that says why it is empty
+      expect(document.getElementById("stats-rail")!.hidden).toBe(false);
+      expect(panel().querySelector(".kh-stats-loading")!.textContent).toBe(
+        "Loading statistics…",
+      );
+      expect(panel().getAttribute("aria-busy")).toBe("true");
+      expect(app.statsManager).toBeUndefined();
+
+      deliver();
+      await vi.waitFor(() =>
+        expect(app.statsManager).toBe(mockStatsManagerInstance),
+      );
+      await vi.waitFor(() =>
+        expect(panel().hasAttribute("aria-busy")).toBe(false),
+      );
+      expect(loadWrapped).toHaveBeenCalledTimes(1);
+    });
+
+    it("loads it once however often the panel opens", async () => {
+      await initializeApp(app);
+      const deliver = await heldBundle();
+
+      app.store.set("statsPanelVisible", true);
+      app.store.set("statsPanelVisible", false);
+      app.store.set("statsPanelVisible", true);
+      deliver();
+      await vi.waitFor(() => expect(app.statsManager).toBeDefined());
+      app.store.set("statsPanelVisible", false);
+      app.store.set("statsPanelVisible", true);
+
+      expect(loadWrapped).toHaveBeenCalledTimes(1);
+    });
+
+    it("titles the loading panel for the selection it will show", async () => {
+      await initializeApp(app);
+      await heldBundle();
+      const title = document.createElement("h2");
+      title.id = "stats-rail-title";
+      title.innerHTML =
+        '<span class="kh-stats-title-text">Flight Statistics</span>';
+      document.body.appendChild(title);
+      app.selectedPathIds.add(1);
+
+      app.store.set("statsPanelVisible", true);
+
+      expect(title.textContent).toBe("Selected Paths Statistics");
+    });
+
+    it("says so and closes the rail when the bundle cannot be fetched", async () => {
+      await initializeApp(app);
+      vi.mocked(loadWrapped).mockResolvedValueOnce(null);
+
+      app.store.set("statsPanelVisible", true);
+
+      await vi.waitFor(() =>
+        expect(app.store.get("statsPanelVisible")).toBe(false),
+      );
+      expect(showToast).toHaveBeenCalledWith(
+        STATS_UNAVAILABLE_MESSAGE,
+        "error",
+      );
+      expect(document.getElementById("stats-rail")!.hidden).toBe(true);
+      expect(panel().childElementCount).toBe(0);
+      expect(panel().hasAttribute("aria-busy")).toBe(false);
+
+      // The next opening tries again
+      app.store.set("statsPanelVisible", true);
+      await vi.waitFor(() =>
+        expect(app.statsManager).toBe(mockStatsManagerInstance),
+      );
+      expect(app.store.get("statsPanelVisible")).toBe(true);
+    });
+
+    it("takes Wrapped's failure away once the statistics bring the file (regression)", async () => {
+      await initializeApp(app);
+      vi.mocked(loadWrapped).mockResolvedValueOnce(null);
+      expect(await app.loadWrapped()).toBeUndefined();
+      vi.mocked(dismissToast).mockClear();
+
+      // The same file, which carries Wrapped as well
+      app.store.set("statsPanelVisible", true);
+      await vi.waitFor(() =>
+        expect(app.statsManager).toBe(mockStatsManagerInstance),
+      );
+
+      expect(dismissToast).toHaveBeenCalledWith(WRAPPED_UNAVAILABLE_MESSAGE);
+      expect(dismissToast).toHaveBeenCalledWith(STATS_UNAVAILABLE_MESSAGE);
+    });
+
+    it("says once that the file failed, for Wrapped and the statistics alike", async () => {
+      await initializeApp(app);
+      vi.mocked(loadWrapped)
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(null);
+      await app.loadWrapped();
+      vi.mocked(dismissToast).mockClear();
+      app.store.set("statsPanelVisible", true);
+      await vi.waitFor(() =>
+        expect(showToast).toHaveBeenCalledWith(
+          STATS_UNAVAILABLE_MESSAGE,
+          "error",
+        ),
+      );
+
+      // The toast of the first failure goes as the second one comes
+      expect(dismissToast).toHaveBeenCalledWith(WRAPPED_UNAVAILABLE_MESSAGE);
+      expect(dismissToast).not.toHaveBeenCalledWith(STATS_UNAVAILABLE_MESSAGE);
+    });
+
+    it("fetches the bundle ahead for a page that opens with the panel", async () => {
+      mockStateManagerInstance.loadState.mockReturnValue({
+        statsPanelVisible: true,
+      });
+      const deliver = await heldBundle();
+
+      // Before the first year has loaded: the rail opens after it
+      const started = initializeApp(app);
+      expect(loadWrapped).toHaveBeenCalled();
+      deliver();
+      await started;
+
+      await vi.waitFor(() =>
+        expect(app.statsManager).toBe(mockStatsManagerInstance),
+      );
     });
   });
 
@@ -518,7 +642,7 @@ describe("MapApp controls and map", () => {
     it("is not offered for a flight whose times are all 0", async () => {
       await initializeApp(app, m.defaultAirports, m.defaultMetadata, {
         ...m.defaultData,
-        path_segments: [{ path_id: 1, altitude_ft: 5000, time: 0 }],
+        path_segments: [segmentOf({ path_id: 1, altitude_ft: 5000, time: 0 })],
       });
 
       app.selectedPathIds.add(1);
@@ -597,6 +721,38 @@ describe("MapApp controls and map", () => {
       expect(m.mockDataManagerInstance.loadAirports).not.toHaveBeenCalled();
     });
 
+    it("stops the statistics panel's manager", async () => {
+      await initializeApp(app);
+      app.store.set("statsPanelVisible", true);
+      await vi.waitFor(() =>
+        expect(app.statsManager).toBe(mockStatsManagerInstance),
+      );
+      mockStatsManagerInstance.destroy.mockClear();
+
+      app.destroy();
+
+      expect(mockStatsManagerInstance.destroy).toHaveBeenCalledTimes(1);
+    });
+
+    it("builds no Wrapped manager once destroyed while its bundle loaded", async () => {
+      await initializeApp(app);
+      let deliver: () => void = () => {};
+      const bundle = await loadWrapped();
+      vi.mocked(loadWrapped).mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            deliver = () => resolve(bundle);
+          }),
+      );
+
+      const loading = app.loadWrapped();
+      app.destroy();
+      deliver();
+
+      expect(await loading).toBeUndefined();
+      expect(app.wrappedManager).toBeUndefined();
+    });
+
     it("drops a Replay click still waiting for the bundle", async () => {
       await initializeApp(app);
       let deliver: () => void = () => {};
@@ -658,6 +814,27 @@ describe("MapApp controls and map", () => {
       canvas.dispatchEvent(new Event("webglcontextlost", { cancelable: true }));
       canvas.dispatchEvent(new Event("webglcontextrestored"));
       expect(showToast).toHaveBeenCalledTimes(2);
+    });
+
+    it("has the skip link take the keyboard to the map's canvas", async () => {
+      const skip = document.createElement("a");
+      skip.className = "skip-nav";
+      skip.href = "#map";
+      document.body.prepend(skip);
+      await initializeApp(app);
+      const canvas = mockMap(app).getCanvas();
+      canvas.tabIndex = 0;
+      document.body.append(canvas);
+
+      const event = new MouseEvent("click", { cancelable: true });
+      skip.dispatchEvent(event);
+
+      // Its own jump landed on the container, where the arrow keys do
+      // nothing, and left #map in the history (regression)
+      expect(event.defaultPrevented).toBe(true);
+      expect(document.activeElement).toBe(canvas);
+      skip.remove();
+      canvas.remove();
     });
 
     it("clears the selection on map click outside replay", async () => {
@@ -899,6 +1076,7 @@ describe("MapApp controls and map", () => {
         "background",
         "aviation",
         "heat",
+        "heat-isolated",
         "heat-lines-glow",
         "heat-lines-core",
         "selection-highlight",
@@ -918,6 +1096,7 @@ describe("MapApp controls and map", () => {
       // Empty until the managers fill them
       for (const id of [
         "heat",
+        "heat-isolated",
         "heat-lines",
         "selection-highlight",
         "replay-route",
@@ -1132,6 +1311,7 @@ describe("MapApp controls and map", () => {
           "water",
           "aviation",
           "heat",
+          "heat-isolated",
           "heat-lines-glow",
           "heat-lines-core",
           "selection-highlight",

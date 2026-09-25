@@ -8,9 +8,10 @@
  * copies are taken straight from node_modules, so package-lock.json stays
  * the single place their versions are pinned and Dependabot can bump them
  * like any other dependency. The one thing left off a copy is the closing
- * comment that names a source map the site does not carry. html-to-image is
- * the exception to "as it is": the package has no module in one file, so
- * its module is bundled into one here (VENDOR_MODULES).
+ * comment that names a source map the site does not carry, and the one
+ * thing changed in one is a few fixes of MapLibre bugs (VENDOR_PATCHES).
+ * html-to-image is the exception to "as it is": the package has no module
+ * in one file, so its module is bundled into one here (VENDOR_MODULES).
  *
  * build.js copies them into kml_heatmap/static/vendor/ (generated, not
  * committed) and the Python side publishes that directory next to the page.
@@ -24,6 +25,7 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
+import { Buffer } from "node:buffer";
 import { dirname, join, posix } from "node:path";
 import { buildSync } from "esbuild";
 import { REPO_ROOT } from "./source-hash.js";
@@ -129,6 +131,80 @@ export function stripSourceMapComment(content, published = "") {
 }
 
 /**
+ * @typedef {object} VendorPatch
+ * @property {string} name - What it fixes, for the error when it no longer
+ *   applies
+ * @property {RegExp} find - The code it replaces, which has to occur exactly
+ *   once in the file; its groups keep the minifier's names
+ * @property {string} replace - The code in its place (`$1` and on for the
+ *   groups)
+ */
+
+/**
+ * Published path inside vendor/ -> the fixes made to that file as it is
+ * copied, each to the minified code of the version package-lock.json pins.
+ *
+ * Kept to MapLibre bugs that the app cannot work around from the outside,
+ * each a few characters, with its upstream issue text in the owner's hands.
+ * A fix whose code is no longer found exactly once fails the build: after a
+ * bump, see whether the new version fixed the bug (drop the patch) or only
+ * renamed the code around it (match it again). A patch in place of a copy
+ * of the source keeps the version pinned in one place, and the file small.
+ * @type {Record<string, VendorPatch[]>}
+ */
+export const VENDOR_PATCHES = {
+  "maplibre-gl.mjs": [
+    {
+      // MercatorCoveringTilesDetailsProvider.getTileBoundingVolume: with the
+      // relief, a tile's box spans the relief's lowest to highest point, and
+      // leaves out the height of the point the camera looks at, which the
+      // globe's provider keeps (Math.max). The chase view looks at the
+      // airplane in the air: the tiles of its trail under the camera fell
+      // outside the view and were never loaded, and no trail was drawn near
+      // the airplane.
+      name: "tiles culled below the camera's centre on the relief",
+      find: /(getTileBoundingVolume\(\w+,\w+,(\w+),(\w+)\)\{let (\w+)=Math\.min\(0,\2\),(\w+)=Math\.max\(0,\2\);if\(\3\?\.terrain\)\{[^}]*?\5=)(\w+)\.maxElevation\?\?\5\}/,
+      replace: "$1Math.max($6.maxElevation??$5,$5)}",
+    },
+    {
+      // Tile.loadVectorData: a GeoJSON tile that loads empty after a
+      // `setData` keeps the raw data of what it held before. Leaving the 3D
+      // view empties the ribbons' sources, and their tiles held on to
+      // 12 MB (a year) to 38 MB (all years) of data nothing drew anymore.
+      name: "raw tile data kept by a tile that loads empty",
+      find: /(!(\w+)\)\{this\.collisionBoxArray=new \w+)(;return\}\2\.featureIndex&&\(this\.latestFeatureIndex=\2\.featureIndex,\2\.rawTileData\?)/,
+      replace: "$1,this.latestRawTileData=null,this.latestEncoding=null$3",
+    },
+  ],
+};
+
+/**
+ * A vendored file with its fixes (VENDOR_PATCHES) made. Matched as latin1,
+ * one character per byte, like stripSourceMapComment, so every other byte
+ * stays as it is.
+ * @param {Buffer} content
+ * @param {string} published - Path of the file inside vendor/
+ * @returns {Buffer}
+ */
+export function applyVendorPatches(content, published) {
+  const patches = VENDOR_PATCHES[published];
+  if (!patches) return content;
+  let text = content.toString("latin1");
+  for (const { name, find, replace } of patches) {
+    const found = [...text.matchAll(new RegExp(find.source, "g"))].length;
+    if (found !== 1) {
+      throw new Error(
+        `scripts/vendor.js: the fix "${name}" matches ${found} places in ` +
+          `${published} instead of one. Has MapLibre changed there? See ` +
+          `VENDOR_PATCHES.`,
+      );
+    }
+    text = text.replace(find, replace);
+  }
+  return Buffer.from(text, "latin1");
+}
+
+/**
  * Copy the vendored files into kml_heatmap/static/vendor/.
  *
  * The directory is replaced rather than written over, so a file dropped
@@ -142,8 +218,11 @@ export function copyVendorAssets() {
     mkdirSync(dirname(destination), { recursive: true });
     writeFileSync(
       destination,
-      stripSourceMapComment(
-        readFileSync(join(NODE_MODULES, source)),
+      applyVendorPatches(
+        stripSourceMapComment(
+          readFileSync(join(NODE_MODULES, source)),
+          published,
+        ),
         published,
       ),
     );

@@ -12,9 +12,11 @@ import {
   isOnMarker,
   keepMarkerTapsFromZoom,
   MAP_STILL_TIMEOUT_MS,
+  mapSize,
   mapZoomToState,
   panPopupIntoView,
   resizeMapAfterTransition,
+  slideMapBesideRail,
   stateZoomToMap,
   toBounds,
   toLngLat,
@@ -22,6 +24,7 @@ import {
   unwrapLng,
   whenStyleReady,
   withMapStill,
+  withoutValidation,
 } from "../../../../kml_heatmap/frontend/utils/mapHelpers";
 import {
   Map as MockMap,
@@ -60,6 +63,39 @@ function rect(
     toJSON: () => ({}),
   };
 }
+
+describe("mapSize", () => {
+  it("measures the container once, and again after the map resized", () => {
+    const map = mapStub();
+    let width = 800;
+    const reads = vi.fn();
+    Object.defineProperty(map.getContainer(), "clientWidth", {
+      get: () => {
+        reads();
+        return width;
+      },
+    });
+    Object.defineProperty(map.getContainer(), "clientHeight", {
+      value: 600,
+    });
+
+    expect(mapSize(map)).toEqual({ width: 800, height: 600 });
+    mapSize(map);
+    mapSize(map);
+    // Asked in every frame of the replay's camera, it lays nothing out
+    expect(reads).toHaveBeenCalledTimes(1);
+
+    width = 400;
+    expect(mapSize(map).width).toBe(800);
+    map.emit("resize");
+    expect(mapSize(map)).toEqual({ width: 400, height: 600 });
+    expect(reads).toHaveBeenCalledTimes(2);
+    // One listener per map, however often it resizes
+    map.emit("resize");
+    mapSize(map);
+    expect(map.listenerCount("resize")).toBe(1);
+  });
+});
 
 describe("mapHelpers", () => {
   beforeEach(() => {
@@ -887,6 +923,146 @@ describe("mapHelpers", () => {
 
     it("is empty for a token that is not set", () => {
       expect(cssVar("--color-unset")).toBe("");
+    });
+  });
+
+  describe("withoutValidation", () => {
+    /**
+     * A map whose style records what it is given, with its methods on its
+     * prototype like MapLibre's
+     */
+    const styled = () => {
+      const added = { layers: vi.fn(), sources: vi.fn() };
+      class Style {
+        addLayer(...args: unknown[]): this {
+          added.layers(this, ...args);
+          return this;
+        }
+        addSource(...args: unknown[]): void {
+          added.sources(this, ...args);
+        }
+      }
+      const style = new Style();
+      return { added, style, map: { style } as unknown as MapLibreMap };
+    };
+
+    it("adds layers and sources without validating them, for as long as it runs", () => {
+      const { added, style, map } = styled();
+      const layer = { id: "a", type: "background" } as const;
+
+      const result = withoutValidation(map, () => {
+        // Through the style, as `Map.addLayer` and a style's difference do
+        map.style.addLayer(layer, "b");
+        map.style.addSource("s", { type: "geojson", data: "s.json" }, {});
+        return 42;
+      });
+
+      expect(result).toBe(42);
+      expect(added.layers).toHaveBeenCalledWith(style, layer, "b", {
+        validate: false,
+      });
+      expect(added.sources).toHaveBeenCalledWith(
+        style,
+        "s",
+        { type: "geojson", data: "s.json" },
+        { validate: false },
+      );
+      // And validating again afterwards, with the style's own methods
+      expect(Object.hasOwn(style, "addLayer")).toBe(false);
+      expect(Object.hasOwn(style, "addSource")).toBe(false);
+      map.style.addLayer(layer, "b");
+      expect(added.layers).toHaveBeenLastCalledWith(style, layer, "b");
+    });
+
+    it("validates again after a throw", () => {
+      const { style, map } = styled();
+
+      expect(() =>
+        withoutValidation(map, () => {
+          throw new Error("refused");
+        }),
+      ).toThrow("refused");
+      expect(Object.hasOwn(style, "addLayer")).toBe(false);
+    });
+
+    it("runs on a map without a style", () => {
+      expect(withoutValidation({} as MapLibreMap, () => "ran")).toBe("ran");
+    });
+  });
+
+  describe("slideMapBesideRail", () => {
+    let container: HTMLElement;
+    const classes = () => [...document.body.classList].sort();
+    const transitionEnd = (target: HTMLElement, propertyName: string) => {
+      const event = new Event("transitionend", { bubbles: true });
+      Object.assign(event, { propertyName });
+      target.dispatchEvent(event);
+    };
+
+    beforeEach(() => {
+      vi.useFakeTimers();
+      container = document.createElement("div");
+      document.body.appendChild(container);
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+      container.remove();
+      document.body.className = "";
+    });
+
+    it("slides the map at its whole width until the rail has opened", () => {
+      slideMapBesideRail(container, true, true);
+
+      expect(classes()).toEqual(["rail-sliding", "stats-open"]);
+      // A transition of something inside the map is not the slide's
+      const child = document.createElement("span");
+      container.appendChild(child);
+      transitionEnd(child, "transform");
+      transitionEnd(container, "left");
+      expect(classes()).toContain("rail-sliding");
+
+      transitionEnd(container, "transform");
+      expect(classes()).toEqual(["stats-open"]);
+    });
+
+    it("starts a closing slide where the open rail left the map", () => {
+      document.body.classList.add("stats-open");
+      const seen: string[][] = [];
+      const read = vi
+        .spyOn(window, "getComputedStyle")
+        .mockImplementation(() => {
+          seen.push(classes());
+          return {} as CSSStyleDeclaration;
+        });
+
+      slideMapBesideRail(container, false, true);
+
+      // Read once in the start position, then sliding back
+      expect(seen).toEqual([["rail-leaving"]]);
+      expect(classes()).toEqual(["rail-sliding"]);
+      read.mockRestore();
+      // No transition to end it: the phone's sheet does not move the map
+      vi.advanceTimersByTime(350);
+      expect(classes()).toEqual([]);
+    });
+
+    it("ends a slide under way when the rail turns back", () => {
+      slideMapBesideRail(container, true, true);
+      slideMapBesideRail(container, false, true);
+      vi.advanceTimersByTime(349);
+      expect(classes()).toEqual(["rail-sliding"]);
+
+      vi.advanceTimersByTime(1);
+      expect(classes()).toEqual([]);
+    });
+
+    it("only switches the rail without an animation or a map", () => {
+      slideMapBesideRail(container, true, false);
+      expect(classes()).toEqual(["stats-open"]);
+
+      slideMapBesideRail(null, false, true);
+      expect(classes()).toEqual([]);
     });
   });
 

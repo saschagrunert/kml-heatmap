@@ -28,11 +28,77 @@ _TEST_CACHE_DIR: Path | None = None
 FIXTURE_AIRPORTS_CSV = Path(__file__).parent / "fixtures" / "airports.csv"
 
 
+def parse_kml_coordinates(kml_file):
+    """Parse a KML file as the pipeline does, from the parse cache if it has it."""
+    from kml_heatmap.parser import load_cached_kml, parse_kml_file
+
+    cached, cache_path = load_cached_kml(kml_file)
+    if cached is not None:
+        return cached
+    return parse_kml_file(kml_file, cache_path)
+
+
+class FlatTiles:
+    """Ground at one elevation everywhere, without any tile (a TileSource).
+
+    With a flat model the ground of a flight is the line between its fields,
+    as the page draws it without a ground column.
+    """
+
+    def __init__(self, elevation_m=0.0):
+        self.elevation_m = elevation_m
+
+    def pixels(self, wanted):
+        from array import array
+
+        return {
+            tile: array("d", [self.elevation_m]) * len(indices)
+            for tile, indices in wanted.items()
+        }
+
+
 def pytest_configure(config):
     """Point the cache at a private directory before kml_heatmap is imported."""
     global _TEST_CACHE_DIR
     _TEST_CACHE_DIR = Path(tempfile.mkdtemp(prefix="kml_heatmap_test_"))
     os.environ["KML_HEATMAP_CACHE_DIR"] = str(_TEST_CACHE_DIR)
+
+
+def missing_frontend_build():
+    """The files of `npm run build` that kml_heatmap/static/ lacks.
+
+    Read at call time, from the module, like ``bundle_is_available`` does.
+    """
+    from kml_heatmap import site_assets
+
+    vendor = site_assets.STATIC_DIR / "vendor"
+    return [
+        *(bundle.name for bundle in site_assets.BUNDLE_FILES if not bundle.is_file()),
+        *(
+            f"vendor/{name}"
+            for name in site_assets.VENDOR_FILES
+            if not (vendor / name).is_file()
+        ),
+    ]
+
+
+def pytest_terminal_summary(terminalreporter, exitstatus, config):
+    """Say why a run failed when the frontend was never built.
+
+    Every test that builds a site fails without the bundles, each with an
+    error of its own (the export returns False, a fixture finds no
+    index.html); one line here names the cause and the fix.
+    """
+    if exitstatus == pytest.ExitCode.OK:
+        return
+    missing = missing_frontend_build()
+    if missing:
+        terminalreporter.write_sep("=", "the frontend is not built", red=True)
+        terminalreporter.write_line(
+            f"kml_heatmap/static/ lacks {', '.join(missing)}. The tests that "
+            "build a site need them: run `npm run build` first (`make test` "
+            "does)."
+        )
 
 
 def pytest_unconfigure(config):

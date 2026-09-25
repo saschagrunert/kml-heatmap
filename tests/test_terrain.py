@@ -5,10 +5,12 @@ small encoder of this file with every filter type, or answered by a tile
 source of the test's own. conftest.py makes any download fail loudly.
 """
 
+import ast
 import http.client
 import io
 import logging
 import math
+import operator
 import os
 import re
 import struct
@@ -23,7 +25,9 @@ from unittest.mock import MagicMock
 import pytest
 
 import kml_heatmap.terrain as terrain_module
-from kml_heatmap.constants import METERS_TO_FEET
+from kml_heatmap.constants import KM_TO_NAUTICAL_MILES, METERS_TO_FEET
+from kml_heatmap.data_exporter import PATH_ID_BITS
+from kml_heatmap.exceptions import TerrainUnavailableError
 from kml_heatmap.segment_codec import (
     ALTITUDE_STEP,
     COORDINATE_SCALE,
@@ -35,7 +39,6 @@ from kml_heatmap.segment_codec import (
 from kml_heatmap.terrain import (
     TERRAIN_ZOOM,
     TILE_SIZE,
-    FlatTiles,
     PngError,
     TerrariumTiles,
     TileKey,
@@ -48,6 +51,7 @@ from kml_heatmap.terrain import (
     terrarium_elevation,
 )
 from kml_heatmap.types import TrackPoint
+from tests.conftest import FlatTiles
 
 # --- A PNG encoder, the decoder's counterpart ---------------------------
 
@@ -545,9 +549,64 @@ class TestTerrariumTiles:
         fetch = MagicMock(side_effect=error)
         monkeypatch.setattr(terrain_module, "urlopen", fetch)
         monkeypatch.setattr(terrain_module, "FETCH_WORKERS", 1)
+        monkeypatch.setattr(terrain_module, "FETCH_RETRY_SECONDS", 0.0)
         wanted = {TileKey(10, x, 1): [0] for x in range(5)}
 
         assert TerrariumTiles(tmp_path).pixels(wanted) == {}
+        # Every attempt of the first tile, and none of the others
+        assert fetch.call_count == terrain_module.FETCH_ATTEMPTS
+
+    @pytest.mark.parametrize(
+        "glitch",
+        [
+            urllib.error.URLError("connection reset"),
+            TimeoutError("timed out"),
+            urllib.error.HTTPError("u", 503, "Unavailable", Message(), io.BytesIO()),
+            urllib.error.HTTPError("u", 429, "Too Many", Message(), io.BytesIO()),
+        ],
+    )
+    def test_a_glitch_is_tried_again(self, tmp_path, monkeypatch, glitch):
+        """One dropped connection must not leave the other tiles unfetched."""
+        glitched = set()
+
+        def fetch(request, **kwargs):
+            if request.full_url not in glitched:
+                glitched.add(request.full_url)
+                raise glitch
+            return _response(_tile_png(10.0))
+
+        pauses: list[float] = []
+        monkeypatch.setattr(terrain_module, "urlopen", fetch)
+        monkeypatch.setattr("kml_heatmap.terrain.time.sleep", pauses.append)
+        wanted = {TileKey(10, x, 1): [0] for x in range(3)}
+
+        answered = TerrariumTiles(tmp_path).pixels(wanted)
+
+        assert answered == {tile: array("d", [10.0]) for tile in wanted}
+        assert pauses == [terrain_module.FETCH_RETRY_SECONDS] * 3
+
+    def test_the_pause_grows_with_every_attempt(self, tmp_path, monkeypatch):
+        pauses: list[float] = []
+        monkeypatch.setattr(
+            terrain_module, "urlopen", MagicMock(side_effect=TimeoutError("slow"))
+        )
+        monkeypatch.setattr("kml_heatmap.terrain.time.sleep", pauses.append)
+
+        assert TerrariumTiles(tmp_path).pixels({TileKey(10, 1, 1): [0]}) == {}
+        assert pauses == [
+            terrain_module.FETCH_RETRY_SECONDS * 2**attempt
+            for attempt in range(terrain_module.FETCH_ATTEMPTS - 1)
+        ]
+
+    def test_a_tile_the_host_refuses_is_not_asked_again(self, tmp_path, monkeypatch):
+        fetch = MagicMock(
+            side_effect=urllib.error.HTTPError(
+                "u", 404, "Not Found", Message(), io.BytesIO()
+            )
+        )
+        monkeypatch.setattr(terrain_module, "urlopen", fetch)
+
+        assert TerrariumTiles(tmp_path).pixels({TileKey(10, 1, 1): [0]}) == {}
         fetch.assert_called_once()
 
     @pytest.mark.parametrize(
@@ -591,6 +650,45 @@ class TestTerrariumTiles:
 
         assert TerrariumTiles(tmp_path).pixels({TileKey(10, 1, 1): [0]}) == {}
         assert list(tmp_path.iterdir()) == []
+
+    def test_the_pixels_of_a_decoded_tile_are_kept(self, tmp_path, monkeypatch):
+        """The next build reads them instead of decoding the PNG again."""
+        tiles = TerrariumTiles(tmp_path)
+        tile = TileKey(10, 1, 1)
+        tiles.path(tile).write_bytes(terrarium_png(lambda x, y: x * 3.5 - y))
+        first = tiles.pixels({tile: [0, 5, 65535]})
+        assert (tmp_path / "10-1-1.pixels").is_file()
+
+        decode = MagicMock(side_effect=AssertionError("decoded again"))
+        monkeypatch.setattr(terrain_module, "decode_png", decode)
+        second = TerrariumTiles(tmp_path).pixels({tile: [0, 5, 65535]})
+
+        assert second == first == {tile: array("d", [0.0, 17.5, 892.5 - 255])}
+
+    @pytest.mark.parametrize(
+        "damage",
+        [
+            lambda kept: kept[:-10],
+            lambda kept: b"XXXX" + kept[4:],
+            # The kept pixels of another PNG than the one in the cache
+            lambda kept: kept[:5] + bytes(4) + kept[9:],
+            lambda kept: b"",
+        ],
+    )
+    def test_kept_pixels_that_do_not_fit_are_decoded_again(self, tmp_path, damage):
+        tiles = TerrariumTiles(tmp_path)
+        tile = TileKey(10, 1, 1)
+        tiles.path(tile).write_bytes(_tile_png(123.0))
+        tiles.pixels({tile: [0]})
+        kept = tmp_path / "10-1-1.pixels"
+        kept.write_bytes(damage(kept.read_bytes()))
+
+        assert tiles.pixels({tile: [0]}) == {tile: array("d", [123.0])}
+        # And kept again as they should be
+        assert TerrariumTiles(tmp_path).pixels({tile: [7]}) == {
+            tile: array("d", [123.0])
+        }
+        assert kept.read_bytes()[:4] == b"KHTP"
 
     def test_a_corrupt_cached_tile_is_removed(self, tmp_path):
         tiles = TerrariumTiles(tmp_path)
@@ -641,6 +739,29 @@ class TestTerrariumTiles:
         warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
         assert len(warnings) == 1
         assert "could not be decoded" in warnings[0].getMessage()
+
+    def test_required_terrain_fails_without_a_tile(self, monkeypatch):
+        monkeypatch.setenv(terrain_module.REQUIRE_TERRAIN_ENV, "1")
+        paths = {1: [TrackPoint(50.0, 8.0, 0.0)]}
+        x, y = _global_pixel(50.0, 8.0)
+        missing = TileKey(TERRAIN_ZOOM, int(x) // TILE_SIZE, int(y) // TILE_SIZE)
+
+        with pytest.raises(TerrainUnavailableError, match="REQUIRE_TERRAIN"):
+            sample_path_elevations(
+                paths, FunctionTiles(lambda gx, gy: 5.0, missing=[missing])
+            )
+        # Every tile there: nothing to complain about
+        assert list(sample_path_elevations(paths, FlatTiles(5.0))) == [1]
+
+    def test_required_terrain_fails_without_a_decoder(self, tmp_path, monkeypatch):
+        monkeypatch.setenv(terrain_module.REQUIRE_TERRAIN_ENV, "1")
+
+        class Broken:
+            def pixels(self, wanted):
+                raise terrain_module.DecodeFailedError("a worker died")
+
+        with pytest.raises(TerrainUnavailableError, match="could not be decoded"):
+            sample_path_elevations({1: [TrackPoint(50.0, 8.0, 0.0)]}, Broken())
 
     def test_a_download_in_a_test_fails_loudly(self, tmp_path):
         # conftest.py refuses every download; the tile code must not swallow
@@ -799,11 +920,46 @@ class TestGroundProfile:
 FRONTEND = Path(__file__).parent.parent / "kml_heatmap" / "frontend"
 
 
+_TS_OPERATORS = {
+    ast.Add: operator.add,
+    ast.Sub: operator.sub,
+    ast.Mult: operator.mul,
+    ast.Div: operator.truediv,
+    ast.Pow: operator.pow,
+}
+
+
+def _ts_evaluate(node, lookup):
+    """A numeric TypeScript initializer, which Python parses the same way.
+
+    Numbers, the four operators and ``**``, and the names of other constants
+    of the same file: ``2 ** 40`` or ``1.0 / NAUTICAL_MILES_TO_KM``. Anything
+    else fails the test rather than being guessed at.
+    """
+    match node:
+        case ast.Constant(value=int() | float() as value):
+            return float(value)
+        case ast.Name(id=name):
+            return lookup(name)
+        case ast.BinOp(left=left, op=op, right=right) if type(op) in _TS_OPERATORS:
+            return _TS_OPERATORS[type(op)](
+                _ts_evaluate(left, lookup), _ts_evaluate(right, lookup)
+            )
+        case ast.UnaryOp(op=ast.USub(), operand=operand):
+            return -_ts_evaluate(operand, lookup)
+    raise AssertionError(f"cannot evaluate {ast.unparse(node)}")
+
+
 def _ts_constant(relative, name):
     source = (FRONTEND / relative).read_text(encoding="utf-8")
-    match = re.search(rf"\bconst {name} = ([\d.e]+);", source)
-    assert match, f"{name} not found in {relative}"
-    return float(match.group(1))
+
+    def value(constant):
+        match = re.search(rf"\bconst {constant}(?:: \w+)? = ([^;]+);", source)
+        assert match, f"{constant} not found in {relative}"
+        expression = ast.parse(match.group(1).strip(), mode="eval").body
+        return _ts_evaluate(expression, value)
+
+    return value(name)
 
 
 @pytest.mark.parametrize(
@@ -812,8 +968,12 @@ def _ts_constant(relative, name):
         ("services/yearDecode.ts", "DATA_FORMAT_VERSION", FORMAT_VERSION),
         ("services/yearDecode.ts", "GROUND_STEP", GROUND_STEP),
         ("services/yearDecode.ts", "ALTITUDE_STEP", ALTITUDE_STEP),
-        ("calculations/lift.ts", "TAXI_KNOTS", terrain_module.TAXI_KNOTS),
-        ("calculations/lift.ts", "TAXI_MIN_FIXES", terrain_module.TAXI_MIN_FIXES),
+        ("calculations/groundProfile.ts", "TAXI_KNOTS", terrain_module.TAXI_KNOTS),
+        (
+            "calculations/groundProfile.ts",
+            "TAXI_MIN_FIXES",
+            terrain_module.TAXI_MIN_FIXES,
+        ),
         (
             "utils/geometry.ts",
             "METRES_PER_DEGREE",
@@ -825,11 +985,49 @@ def _ts_constant(relative, name):
         # The page draws the relief from the tiles the ground was sampled
         # from, and no finer
         ("calculations/lift.ts", "TERRAIN_TILE_MAX_ZOOM", TERRAIN_ZOOM),
+        # The units the altitudes and distances are exported and shown in
+        ("utils/constants.ts", "METERS_TO_FEET", METERS_TO_FEET),
+        ("utils/constants.ts", "KM_TO_NAUTICAL_MILES", KM_TO_NAUTICAL_MILES),
+        # A link names its flights by id, and ids are content hashes
+        ("state/urlState.ts", "PATH_ID_LIMIT", 2**PATH_ID_BITS),
     ],
 )
 def test_the_frontend_reads_what_the_exporter_writes(relative, name, value):
     """The two sides of the ground column share their numbers."""
     assert _ts_constant(relative, name) == value
+
+
+@pytest.mark.parametrize(
+    ("expression", "value"),
+    [
+        ("2 ** 40", 2.0**40),
+        ("1.0 / 1.852", 1.0 / 1.852),
+        ("-3.5e2", -350.0),
+    ],
+)
+def test_the_parity_check_reads_expressions(expression, value):
+    """Constants written as expressions are read, not skipped (regression)."""
+    node = ast.parse(expression, mode="eval").body
+    assert _ts_evaluate(node, lambda name: pytest.fail(name)) == value
+
+
+def test_the_parity_check_refuses_what_it_cannot_read():
+    node = ast.parse("Math.max(1, 2)", mode="eval").body
+    with pytest.raises(AssertionError, match="cannot evaluate"):
+        _ts_evaluate(node, lambda name: 0.0)
+
+
+def test_the_frontend_asks_for_tiles_of_the_size_they_are():
+    """The relief source is told the size of the tiles the ground came from.
+
+    The size is a constant of calculations/lift.ts, which reliefPixelM
+    measures the relief's pixels with as well.
+    """
+    source = (FRONTEND / "ui" / "terrain.ts").read_text(encoding="utf-8")
+    match = re.search(r'type: "raster-dem",[^}]*?\btileSize: (\w+),', source)
+    assert match, "the raster-dem source's tileSize not found in ui/terrain.ts"
+    assert match.group(1) == "TERRAIN_TILE_SIZE_PX"
+    assert _ts_constant("calculations/lift.ts", "TERRAIN_TILE_SIZE_PX") == TILE_SIZE
 
 
 def test_the_frontend_draws_the_relief_from_the_same_tiles():

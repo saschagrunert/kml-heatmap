@@ -3,6 +3,15 @@
  */
 
 /**
+ * The formatter of each number of decimals, made once. `toLocaleString`
+ * with options builds a new one on every call, about 30 times the cost of
+ * formatting with one that exists: the replay readout formats several
+ * numbers a frame, and that was a fifth of a second in every eight on a
+ * phone.
+ */
+const numberFormats = new Map<number, Intl.NumberFormat>();
+
+/**
  * A measurement with grouped digits, so five- and six-figure values stay
  * readable ("264,400" rather than "264400"). Every surface that prints a
  * number goes through this, so the panel, the legends, the tooltips and the
@@ -13,10 +22,15 @@
  */
 export function formatNumber(value: number, decimals = 0): string {
   if (!Number.isFinite(value)) return "0";
-  return value.toLocaleString("en-US", {
-    minimumFractionDigits: decimals,
-    maximumFractionDigits: decimals,
-  });
+  let format = numberFormats.get(decimals);
+  if (!format) {
+    format = new Intl.NumberFormat("en-US", {
+      minimumFractionDigits: decimals,
+      maximumFractionDigits: decimals,
+    });
+    numberFormats.set(decimals, format);
+  }
+  return format.format(value);
 }
 
 /**

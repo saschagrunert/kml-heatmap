@@ -22,7 +22,6 @@ _LAZY_EXPORTS = {
     "haversine_distance": ".geometry",
     "obfuscate_kml_files": ".obfuscate",
     "parse_aircraft_from_filename": ".aircraft",
-    "parse_kml_coordinates": ".parser",
     "validate_kml_file": ".validation",
 }
 

@@ -3,7 +3,10 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import type { ReplayManager } from "../../../../kml_heatmap/frontend/ui/replayManager";
-import { REPLAY_PANEL_HEIGHT_VAR } from "../../../../kml_heatmap/frontend/ui/replayManager";
+import {
+  REPLAY_LEGEND_HEIGHT_VAR,
+  REPLAY_PANEL_HEIGHT_VAR,
+} from "../../../../kml_heatmap/frontend/ui/replayManager";
 import { REPLAY_PRECONDITION_MESSAGE } from "../../../../kml_heatmap/frontend/ui/replayButton";
 import {
   LIVE_REGION_DELAY_MS,
@@ -27,7 +30,12 @@ import {
   unmountReplayDom,
   type MockApp,
 } from "./replayTestSetup";
-import { asMapApp, createDataset, createMockApp } from "../../testHelpers";
+import {
+  asMapApp,
+  createDataset,
+  createMockApp,
+  segmentOf,
+} from "../../testHelpers";
 import { setColorLayer } from "../../../../kml_heatmap/frontend/ui/layerVisibility";
 import * as motion from "../../../../kml_heatmap/frontend/utils/motion";
 
@@ -279,6 +287,61 @@ describe("ReplayManager activation", () => {
       expect(
         document.body.style.getPropertyValue(REPLAY_PANEL_HEIGHT_VAR),
       ).toBe("");
+    });
+
+    it("hands the height of the legend on screen to the stylesheet too", () => {
+      // Where the legend stands on the panel, the toasts stood on the
+      // legend (regression)
+      mockApp.selectedPathIds = new Set([1]);
+      Object.defineProperty(el("altitude-legend"), "offsetHeight", {
+        value: 95,
+        configurable: true,
+      });
+
+      replayManager.toggleReplay();
+      expect(
+        document.body.style.getPropertyValue(REPLAY_LEGEND_HEIGHT_VAR),
+      ).toBe("95px");
+
+      replayManager.toggleReplay();
+      expect(
+        document.body.style.getPropertyValue(REPLAY_LEGEND_HEIGHT_VAR),
+      ).toBe("");
+    });
+
+    it("closes on Escape, as Wrapped and the sheets do", () => {
+      mockApp.selectedPathIds = new Set([1]);
+      replayManager.toggleReplay();
+      expect(mockApp.replayActive).toBe(true);
+
+      document.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Escape", cancelable: true }),
+      );
+
+      expect(mockApp.replayActive).toBe(false);
+    });
+
+    it("leaves Escape to the speed picker and to a popup", () => {
+      mockApp.selectedPathIds = new Set([1]);
+      replayManager.toggleReplay();
+      const popup = document.createElement("div");
+      popup.className = "maplibregl-popup";
+      const inside = document.createElement("button");
+      popup.append(inside);
+      document.body.append(popup);
+
+      for (const target of [el("replay-speed"), inside]) {
+        target.dispatchEvent(
+          new KeyboardEvent("keydown", {
+            key: "Escape",
+            bubbles: true,
+            cancelable: true,
+          }),
+        );
+      }
+
+      expect(mockApp.replayActive).toBe(true);
+      popup.remove();
     });
 
     it("syncs the auto-zoom button with the autoZoom state on activation", () => {
@@ -728,14 +791,16 @@ describe("ReplayManager activation", () => {
 
     it("filters segments by selected path id", () => {
       mockApp.selectedPathIds = new Set([1]);
-      mockApp.currentData!.path_segments.push({
-        path_id: 2,
-        coords: [
-          [49.0, 17.0],
-          [49.1, 17.1],
-        ],
-        time: 10,
-      });
+      mockApp.currentData!.path_segments.push(
+        segmentOf({
+          path_id: 2,
+          coords: [
+            [49.0, 17.0],
+            [49.1, 17.1],
+          ],
+          time: 10,
+        }),
+      );
 
       replayManager.initializeReplay();
 
@@ -747,13 +812,15 @@ describe("ReplayManager activation", () => {
 
     it("ignores segments without timing data", () => {
       mockApp.selectedPathIds = new Set([1]);
-      mockApp.currentData!.path_segments.push({
-        path_id: 1,
-        coords: [
-          [48.3, 16.3],
-          [48.4, 16.4],
-        ],
-      });
+      mockApp.currentData!.path_segments.push(
+        segmentOf({
+          path_id: 1,
+          coords: [
+            [48.3, 16.3],
+            [48.4, 16.4],
+          ],
+        }),
+      );
 
       replayManager.initializeReplay();
 
@@ -762,15 +829,17 @@ describe("ReplayManager activation", () => {
 
     it("sorts segments by time", () => {
       mockApp.selectedPathIds = new Set([1]);
-      mockApp.currentData!.path_segments.push({
-        path_id: 1,
-        coords: [
-          [48.4, 16.4],
-          [48.5, 16.5],
-        ],
-        altitude_ft: 2000,
-        time: -10,
-      });
+      mockApp.currentData!.path_segments.push(
+        segmentOf({
+          path_id: 1,
+          coords: [
+            [48.4, 16.4],
+            [48.5, 16.5],
+          ],
+          altitude_ft: 2000,
+          time: -10,
+        }),
+      );
 
       replayManager.initializeReplay();
 
@@ -789,7 +858,10 @@ describe("ReplayManager activation", () => {
       mockApp.selectedPathIds = new Set([1]);
       // Another path's segments must not widen the ranges
       mockApp.currentData = createDataset(
-        [{ id: 1 }, { id: 2 }],
+        [
+          { id: 1, min_altitude_ft: 3000, max_altitude_ft: 5000 },
+          { id: 2, min_altitude_ft: 9000, max_altitude_ft: 9000 },
+        ],
         [
           ...createSegments(),
           {
@@ -807,10 +879,17 @@ describe("ReplayManager activation", () => {
 
       replayManager.initializeReplay();
 
-      expect(replayManager.state.colorMinAlt).toBe(3000);
-      expect(replayManager.state.colorMaxAlt).toBe(5000);
-      expect(replayManager.state.colorMinSpeed).toBe(100);
-      expect(replayManager.state.colorMaxSpeed).toBe(130);
+      expect(replayManager.state.colorAltRange).toMatchObject({
+        min: 3000,
+        max: 5000,
+      });
+      expect(replayManager.state.colorSpeedRange).toMatchObject({
+        min: 100,
+        max: 130,
+      });
+      // Spread by rank, as the colour layers draw the flight selected
+      expect(replayManager.state.colorAltRange.ranks).toBeDefined();
+      expect(replayManager.state.colorSpeedRange.ranks).toBeDefined();
     });
 
     it("uses the app's airspeed range when the path has no groundspeeds", () => {
@@ -822,8 +901,7 @@ describe("ReplayManager activation", () => {
 
       replayManager.initializeReplay();
 
-      expect(replayManager.state.colorMinSpeed).toBe(mockApp.airspeedRange.min);
-      expect(replayManager.state.colorMaxSpeed).toBe(mockApp.airspeedRange.max);
+      expect(replayManager.state.colorSpeedRange).toBe(mockApp.airspeedRange);
     });
 
     it("sets replayMaxTime from last segment and updates the slider", () => {
@@ -861,31 +939,6 @@ describe("ReplayManager activation", () => {
       expect(button.classList.contains("replay-airplane-root")).toBe(true);
       expect(button.querySelector(".replay-airplane-icon")).not.toBeNull();
       expect(mockApp.map!.getCanvasContainer().contains(button)).toBe(true);
-    });
-
-    it("leaves the replay sources alone when there is no start to fly from", () => {
-      mockApp.selectedPathIds = new Set([1]);
-      mockApp.currentData = createDataset(
-        [{ id: 1 }],
-        [
-          { path_id: 1, time: 0 },
-          { path_id: 1, time: 10 },
-        ],
-      );
-
-      expect(replayManager.initializeReplay()).toBe(false);
-      expect(replayManager.state.layerActive).toBe(false);
-      expect(replaySources(mockApp).route.setData).not.toHaveBeenCalled();
-    });
-
-    it("returns false when the first segment has no coordinates", () => {
-      mockApp.selectedPathIds = new Set([1]);
-      mockApp.currentData = createDataset(
-        [{ id: 1 }],
-        [{ path_id: 1, time: 0 }],
-      );
-
-      expect(replayManager.initializeReplay()).toBe(false);
     });
 
     it("resets replay state on initialization", () => {
@@ -957,13 +1010,15 @@ describe("ReplayManager activation", () => {
       replayManager.initializeReplay();
 
       expect(mockApp.layerManager.updateAltitudeLegend).toHaveBeenCalledWith(
-        3000,
-        5000,
+        replayManager.state.colorAltRange,
       );
       expect(mockApp.layerManager.updateAirspeedLegend).toHaveBeenCalledWith(
-        100,
-        130,
+        replayManager.state.colorSpeedRange,
       );
+      expect(replayManager.state.colorAltRange).toMatchObject({
+        min: 3000,
+        max: 5000,
+      });
     });
 
     it("removes old airplane marker if it exists before creating new one", () => {

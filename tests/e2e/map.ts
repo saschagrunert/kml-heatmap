@@ -682,6 +682,30 @@ export async function pathCount(
   return (await drawnPaths(page, layer)).length;
 }
 
+/**
+ * How many pieces of ribbon a colour layer has written for the 3D view,
+ * where its lines are empty (pathCount): the runs of a flight are ribbons
+ * there, in sources of their own, and only around the view once zoomed in.
+ * Read from the sources' data like drawnPaths, without the filter.
+ */
+export function ribbonCount(page: Page, layer: ColorLayer): Promise<number> {
+  return page.evaluate(async (mode) => {
+    const app = window.mapApp!;
+    const map = app.map!;
+    let count = 0;
+    for (const id of app[`${mode}Layer`].ids) {
+      const style = map.getLayer(id);
+      if (style?.type !== "fill-extrusion") continue;
+      if (map.getLayoutProperty(id, "visibility") === "none") continue;
+      const source = map.getSource(style.source);
+      if (source?.type !== "geojson") throw new Error(`"${id}" is not GeoJSON`);
+      const data = await (source as GeoJSONSource).getData();
+      if (data.type === "FeatureCollection") count += data.features.length;
+    }
+    return count;
+  }, layer);
+}
+
 /** Stroke colour of every piece of path in a colour layer, in drawing order */
 export async function pathColors(
   page: Page,

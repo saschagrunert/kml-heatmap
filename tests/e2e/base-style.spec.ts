@@ -34,6 +34,7 @@ import {
 const FLIGHT_LAYERS = [
   "aviation",
   "heat",
+  "heat-isolated",
   "heat-lines-glow",
   "heat-lines-core",
   "selection-highlight",
@@ -88,8 +89,9 @@ test.describe("Base style", () => {
     expect(before.drawn.heat).toBeGreaterThan(0);
     expect(before.drawn.paths).toBeGreaterThan(0);
     expect(before.features["paths-altitude-selected"]).toBeGreaterThan(0);
-    // Drawn for the selection whether shown or not, and carried over
-    expect(before.features["selection-highlight"]).toBeGreaterThan(0);
+    // Not worked out while the colour layer draws the selection itself
+    // (ui/selectionHighlight.ts)
+    expect(before.features["selection-highlight"]).toBe(0);
     await expect(attributionControl(page)).not.toContainText("CARTO");
 
     release();

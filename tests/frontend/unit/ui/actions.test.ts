@@ -3,6 +3,7 @@ import {
   DEFERRED_WHILE_INITIALIZING,
   bindActions,
   runAction,
+  type ActionName,
 } from "../../../../kml_heatmap/frontend/ui/actions";
 import { createMockApp, asMapApp, type MockApp } from "../../testHelpers";
 
@@ -123,10 +124,14 @@ describe("bindActions", () => {
     expect(app.uiToggles.shareLink).toHaveBeenCalledTimes(1);
   });
 
-  it("binds the statistics toggle", () => {
+  it("binds the statistics toggle to the store key the rail follows", () => {
+    // A store write, not a call on the stats manager: its code is lazily
+    // loaded and arrives on the first opening (ui/statsPanel.ts)
     elements["toggleStats"]!.click();
+    expect(app.store.get("statsPanelVisible")).toBe(true);
 
-    expect(app.statsManager.toggleStats).toHaveBeenCalledTimes(1);
+    elements["toggleStats"]!.click();
+    expect(app.store.get("statsPanelVisible")).toBe(false);
   });
 
   it("binds the replay transport", async () => {
@@ -225,7 +230,7 @@ describe("bindActions", () => {
     expect(app.pathSelection.toggleIsolateSelection).not.toHaveBeenCalled();
     expect(app.uiToggles.toggleHeatmap).toHaveBeenCalledTimes(1);
     expect(app.uiToggles.toggleAltitude).toHaveBeenCalledTimes(1);
-    expect(app.statsManager.toggleStats).toHaveBeenCalledTimes(1);
+    expect(app.store.get("statsPanelVisible")).toBe(true);
   });
 
   it("logs rejected filter promises instead of throwing", async () => {
@@ -274,6 +279,7 @@ describe("runAction", () => {
   });
 
   it("says so for an action it does not know", () => {
-    expect(runAction(asMapApp(app), "unknownAction")).toBe(false);
+    // A name the page gives, such as a stale template's
+    expect(runAction(asMapApp(app), "unknownAction" as ActionName)).toBe(false);
   });
 });

@@ -1,7 +1,7 @@
 /**
  * The flight list of an airport popup: the keyboard's way to one flight.
  */
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import type { Popup } from "maplibre-gl";
 import { listFlights } from "../../../../kml_heatmap/frontend/ui/airportFlights";
 import type { PathInfo } from "../../../../kml_heatmap/frontend/types";
@@ -12,6 +12,10 @@ import {
   type MockApp,
 } from "../../testHelpers";
 import { Popup as MockPopup } from "../../../mocks/maplibre-gl";
+import {
+  resetSiteData,
+  siteData,
+} from "../../../../kml_heatmap/frontend/state/siteData";
 
 const pathInfo: PathInfo[] = [
   {
@@ -68,11 +72,21 @@ describe("listFlights", () => {
   }
 
   beforeEach(() => {
+    // The codes the export found in the names; "Somewhere" has none
+    siteData.airports = [
+      { name: "EDAQ Halle-Oppin", lat: 51.55, lon: 12.05, code: "EDAQ" },
+      { name: "EDDP Leipzig", lat: 51.42, lon: 12.24, code: "EDDP" },
+      { name: "Somewhere <b>odd</b>", lat: 51, lon: 12 },
+    ];
     document.body.innerHTML = '<div id="map"></div>';
     mockApp = createMockApp({
       currentData: createDataset(pathInfo),
       selectedYear: "all",
     });
+  });
+
+  afterEach(() => {
+    resetSiteData();
   });
 
   it("names each flight by route, aircraft and year only", () => {

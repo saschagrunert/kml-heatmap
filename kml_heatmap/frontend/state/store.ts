@@ -5,28 +5,27 @@
 
 import { logError } from "../utils/logger";
 import type { KMLDataset } from "../types";
+import { initialToggles, TOGGLE_KEYS, type ToggleFlags } from "./toggles";
 
 export interface Range {
   min: number;
   max: number;
+  /**
+   * The values at evenly spaced ranks of the data the range is of, from
+   * `min` to `max`, which the colours are spread by (see scalePosition in
+   * utils/colors.ts); without them they run evenly from `min` to `max`
+   */
+  ranks?: readonly number[];
 }
 
-export interface StoreState {
+/**
+ * The app's state. The toggles (state/toggles.ts) are flags of the store
+ * like any other; the rest follows.
+ */
+export interface StoreState extends ToggleFlags {
   selectedYear: string;
   selectedAircraft: string;
   selectedPathIds: Set<number>;
-  isolateSelection: boolean;
-  heatmapVisible: boolean;
-  altitudeVisible: boolean;
-  airspeedVisible: boolean;
-  airportsVisible: boolean;
-  aviationVisible: boolean;
-  /** Whether the map is drawn as a globe rather than in Mercator */
-  globeVisible: boolean;
-  /** Whether the flights are lifted to their altitude (calculations/lift.ts) */
-  threeDVisible: boolean;
-  /** Whether the ground is drawn from satellite imagery (ui/satellite.ts) */
-  satelliteVisible: boolean;
   /**
    * Whether the 3D view draws the relief, and the flights stand on the
    * sampled ground (see LayerManager.syncTerrain, its only writer)
@@ -50,9 +49,6 @@ export interface StoreState {
    * what the map shows follows from both (see ui/layerVisibility.ts).
    */
   replayActive: boolean;
-  statsPanelVisible: boolean;
-  /** Wrapped modal visibility */
-  wrappedVisible: boolean;
   currentData: KMLDataset | null;
   /** Whether the exported flights carry groundspeeds (metadata.json) */
   hasTimingData: boolean;
@@ -82,15 +78,7 @@ export const STORE_ACCESSOR_KEYS = [
   "selectedYear",
   "selectedAircraft",
   "selectedPathIds",
-  "isolateSelection",
-  "heatmapVisible",
-  "altitudeVisible",
-  "airspeedVisible",
-  "airportsVisible",
-  "aviationVisible",
-  "globeVisible",
-  "threeDVisible",
-  "satelliteVisible",
+  ...TOGGLE_KEYS,
   "terrainActive",
   "reliefShaded",
   "reliefLevel",
@@ -132,21 +120,11 @@ export function createDefaultState(): StoreState {
     selectedYear: "all",
     selectedAircraft: "all",
     selectedPathIds: new Set(),
-    isolateSelection: false,
-    heatmapVisible: true,
-    altitudeVisible: false,
-    airspeedVisible: false,
-    airportsVisible: true,
-    aviationVisible: false,
-    globeVisible: false,
-    threeDVisible: false,
-    satelliteVisible: false,
+    ...initialToggles(),
     terrainActive: false,
     reliefShaded: false,
     reliefLevel: 0,
     replayActive: false,
-    statsPanelVisible: false,
-    wrappedVisible: false,
     currentData: null,
     hasTimingData: false,
   };

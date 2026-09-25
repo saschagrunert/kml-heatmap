@@ -13,6 +13,7 @@ import {
   resetMapLibreMock,
   type Map as MockMap,
 } from "../../../mocks/maplibre-gl";
+import { loadWrapped } from "../../../../kml_heatmap/frontend/services/featureLoader";
 
 // The instances the mocked manager constructors hand out live in the setup
 // module, which is loaded before the mocks are registered
@@ -33,17 +34,9 @@ vi.mock("../../../../kml_heatmap/frontend/utils/domCache", () => ({
     clear: vi.fn(),
   },
 }));
-vi.mock(
-  "../../../../kml_heatmap/frontend/utils/mapHelpers",
-  async (importOriginal) => ({
-    ...(await importOriginal<
-      typeof import("../../../../kml_heatmap/frontend/utils/mapHelpers")
-    >()),
-    resizeMapAfterTransition: vi.fn(),
-  }),
-);
 const toastMock = vi.hoisted(() => ({
   showToast: vi.fn(),
+  announceStatus: vi.fn(),
   dismissToast: vi.fn(),
 }));
 vi.mock("../../../../kml_heatmap/frontend/utils/toast", () => toastMock);
@@ -63,11 +56,6 @@ vi.mock("../../../../kml_heatmap/frontend/ui/filterManager", () => ({
     return m.mockFilterManagerInstance;
   }),
 }));
-vi.mock("../../../../kml_heatmap/frontend/ui/statsManager", () => ({
-  StatsManager: vi.fn(function () {
-    return m.mockStatsManagerInstance;
-  }),
-}));
 vi.mock("../../../../kml_heatmap/frontend/ui/airportManager", () => ({
   AirportManager: vi.fn(function () {
     return m.mockAirportManagerInstance;
@@ -83,20 +71,11 @@ vi.mock("../../../../kml_heatmap/frontend/ui/layerManager", () => ({
     return m.mockLayerManagerInstance;
   }),
 }));
-vi.mock(
-  "../../../../kml_heatmap/frontend/ui/stateManager",
-  async (importOriginal) => ({
-    // The flags Reset view puts back are the real list
-    BOOLEAN_KEYS: (
-      await importOriginal<
-        typeof import("../../../../kml_heatmap/frontend/ui/stateManager")
-      >()
-    ).BOOLEAN_KEYS,
-    StateManager: vi.fn(function () {
-      return m.mockStateManagerInstance;
-    }),
+vi.mock("../../../../kml_heatmap/frontend/ui/stateManager", () => ({
+  StateManager: vi.fn(function () {
+    return m.mockStateManagerInstance;
   }),
-);
+}));
 vi.mock("../../../../kml_heatmap/frontend/ui/wrappedManager", () => ({
   WrappedManager: vi.fn(function () {
     return m.mockWrappedManagerInstance;
@@ -119,6 +98,10 @@ vi.mock("../../../../kml_heatmap/frontend/services/featureLoader", () => ({
       WrappedManager: vi.fn(function () {
         return m.mockWrappedManagerInstance;
       }),
+      // The statistics panel rides in the Wrapped bundle
+      StatsManager: vi.fn(function () {
+        return m.mockStatsManagerInstance;
+      }),
     }),
   ),
 }));
@@ -134,6 +117,7 @@ vi.mock("../../../../kml_heatmap/frontend/ui/pathSelection", () => ({
 }));
 
 const {
+  createApp,
   defaultAirports,
   defaultData,
   defaultMetadata,
@@ -142,6 +126,7 @@ const {
   mockDataManagerInstance,
   mockFilterManagerInstance,
   mockLayerManagerInstance,
+  mockMap,
   mockReplayManagerInstance,
   mockStateManagerInstance,
   mockStatsManagerInstance,
@@ -150,15 +135,6 @@ const {
   setupDOM,
   yearSelect,
 } = m;
-
-function createApp(): MapApp {
-  return new MapApp({ ...m.APP_CONFIG });
-}
-
-/** The mock behind `app.map`, for what the real type does not have */
-function mockMap(app: MapApp): MockMap {
-  return app.map as unknown as MockMap;
-}
 
 function visibility(app: MapApp, id: string): unknown {
   return mockMap(app).layer(id).layout["visibility"];
@@ -171,7 +147,7 @@ describe("MapApp.initialize", () => {
     resetManagerMocks();
     mobileBarMock.mountFor.mockReturnValue(null);
     setupDOM();
-    app = createApp();
+    app = createApp(MapApp);
   });
 
   afterEach(() => {
@@ -232,7 +208,7 @@ describe("MapApp.initialize", () => {
       // No idle since the data came, but nothing is missing either
       vi.advanceTimersByTime(MAP_STALL_MS);
 
-      const other = createApp();
+      const other = createApp(MapApp);
       await initializeApp(other);
       mockMap(other).loaded.mockReturnValue(false);
       other.destroy();
@@ -251,12 +227,7 @@ describe("MapApp.initialize", () => {
 
       expect(mockDataManagerInstance.loadAirports).toHaveBeenCalledTimes(1);
       expect(mockDataManagerInstance.loadMetadata).toHaveBeenCalledTimes(1);
-      expect(mockDataManagerInstance.loadData).toHaveBeenCalledWith(
-        "2025",
-        undefined,
-        expect.objectContaining({ label: "Retry" }),
-      );
-      expect(app.allAirportsData).toEqual(defaultAirports);
+      expect(mockDataManagerInstance.loadData).toHaveBeenCalledWith("2025");
       expect(app.aircraftModels).toBe(defaultMetadata.aircraft_models);
       expect(app.hasTimingData).toBe(true);
       expect(app.currentData).toBe(defaultData);
@@ -334,11 +305,7 @@ describe("MapApp.initialize", () => {
       expect(app.aircraftModels).toEqual({});
       expect(app.hasTimingData).toBe(false);
       expect(app.selectedYear).toBe("all");
-      expect(mockDataManagerInstance.loadData).toHaveBeenCalledWith(
-        "all",
-        undefined,
-        expect.objectContaining({ label: "Retry" }),
-      );
+      expect(mockDataManagerInstance.loadData).toHaveBeenCalledWith("all");
     });
   });
 
@@ -357,11 +324,7 @@ describe("MapApp.initialize", () => {
         "The list of years is unavailable, showing all years",
         "error",
       );
-      expect(mockDataManagerInstance.loadData).toHaveBeenCalledWith(
-        "all",
-        undefined,
-        expect.objectContaining({ label: "Retry" }),
-      );
+      expect(mockDataManagerInstance.loadData).toHaveBeenCalledWith("all");
     });
   });
 
@@ -416,11 +379,7 @@ describe("MapApp.initialize", () => {
         "Year 2019 is not available, showing 2025",
         "info",
       );
-      expect(mockDataManagerInstance.loadData).toHaveBeenCalledWith(
-        "2025",
-        undefined,
-        expect.objectContaining({ label: "Retry" }),
-      );
+      expect(mockDataManagerInstance.loadData).toHaveBeenCalledWith("2025");
     });
 
     it('falls back to "all" when no years are available', async () => {
@@ -1031,24 +990,25 @@ describe("MapApp.initialize", () => {
       expect(app.isolateSelection).toBe(false);
     });
 
-    it("restores the stats panel through the stats manager", async () => {
+    it("restores the stats panel and starts its manager", async () => {
       mockStateManagerInstance.loadState.mockReturnValue({
         statsPanelVisible: true,
       });
 
       await initializeApp(app);
 
-      expect(
-        mockStatsManagerInstance.setStatsPanelVisible,
-      ).toHaveBeenCalledWith(true);
+      expect(app.store.get("statsPanelVisible")).toBe(true);
+      await vi.waitFor(() =>
+        expect(app.statsManager).toBe(mockStatsManagerInstance),
+      );
     });
 
-    it("leaves the stats panel closed when not saved", async () => {
+    it("leaves the stats panel closed, and its code unloaded, when not saved", async () => {
       await initializeApp(app);
 
-      expect(
-        mockStatsManagerInstance.setStatsPanelVisible,
-      ).not.toHaveBeenCalled();
+      expect(app.store.get("statsPanelVisible")).toBe(false);
+      expect(loadWrapped).not.toHaveBeenCalled();
+      expect(app.statsManager).toBeUndefined();
     });
 
     it("reopens the wrapped modal after a delay when it was open", async () => {

@@ -7,14 +7,16 @@
  * its route, aircraft and year only: a date or a time of day would say when
  * somebody flew.
  *
- * It is part of the feature bundle, which the first airport popup fetches;
- * AirportManager adds it whenever the popup content is written (see
- * writePopupContent), and lays the popup out again afterwards.
+ * AirportManager adds it whenever the popup is open with new content (see
+ * listPopupFlights), and lays the popup out again afterwards. It is part of
+ * the app rather than of the feature bundle: fetching that bundle, and its
+ * stylesheet, for the first popup cost far more than the list itself.
  */
 import type { Popup } from "maplibre-gl";
 import type { MapApp } from "../mapApp";
 import { datasetIndex } from "../calculations/datasetIndex";
-import { escapeHtml, splitAirportName } from "../utils/htmlGenerators";
+import { escapeHtml } from "../utils/htmlGenerators";
+import { airportCode } from "../features/airports";
 import { watchScrollEnd, type ScrollEndWatcher } from "../utils/scrollFade";
 
 /** Apps whose selection the open list already follows */
@@ -23,9 +25,9 @@ const following = new WeakSet<MapApp>();
 /** Keeps the fade of the list that is shown; one popup, so one list */
 let listEnd: ScrollEndWatcher | null = null;
 
-/** An airport as the list names it: its code where the label has one */
-function airportCode(label = "?"): string {
-  return splitAirportName(label).code || label;
+/** An airport as the list names it: its code where it has one */
+function routeEnd(label = "?"): string {
+  return airportCode(label) ?? label;
 }
 
 /**
@@ -39,10 +41,8 @@ export function listFlights(app: MapApp, popup: Popup, name: string): void {
   const container = popup.isOpen() ? popup.getElement() : undefined;
   const host = container?.querySelector(".kh-popup-airport");
   const data = app.currentData;
-  // The content can be rewritten or the popup closed while the bundle loads
   if (!container || !host || !data) return;
   if (host.querySelector(".kh-popup-flights")) return;
-  host.querySelector(".kh-popup-flights-loading")?.remove();
 
   // MapLibre closes a popup on a click, never on a key
   container.onkeydown = (event) => {
@@ -55,7 +55,7 @@ export function listFlights(app: MapApp, popup: Popup, name: string): void {
     const path = byId.get(id);
     if (!path) continue;
     const label = [
-      airportCode(path.start_airport) + " → " + airportCode(path.end_airport),
+      routeEnd(path.start_airport) + " → " + routeEnd(path.end_airport),
       path.aircraft_registration,
       path.year,
     ]

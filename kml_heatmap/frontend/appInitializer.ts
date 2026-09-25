@@ -11,7 +11,7 @@ import {
 import { domCache } from "./utils/domCache";
 import { applyMetricColors } from "./utils/htmlGenerators";
 import { createActivationFilter, toLngLat } from "./utils/mapHelpers";
-import { dismissToast, showToast } from "./utils/toast";
+import { announceStatus, showToast } from "./utils/toast";
 import { setAirportLabelHover } from "./ui/airportLabels";
 import { datasetIndex } from "./calculations/datasetIndex";
 import { calculateAirspeedRange } from "./features/layers";
@@ -65,6 +65,29 @@ export function resolveYearSelection(
   app.selectedYear = year;
 }
 
+/** What the year dropdown says while no year is loaded */
+export const NO_YEAR_LABEL = "Year";
+
+/**
+ * Show no year in the dropdown: a placeholder that cannot be picked, so
+ * that picking the year that failed is a change and asks for it again. With
+ * no option selected the control showed no text at all.
+ */
+export function showNoYear(select: HTMLSelectElement): void {
+  let placeholder = Array.from(select.options).find(
+    (option) => option.value === "",
+  );
+  if (!placeholder) {
+    placeholder = document.createElement("option");
+    placeholder.value = "";
+    placeholder.textContent = NO_YEAR_LABEL;
+    placeholder.disabled = true;
+    placeholder.hidden = true;
+    select.prepend(placeholder);
+  }
+  placeholder.selected = true;
+}
+
 /**
  * Load initial data including airports, metadata, and path data
  * @param app - The MapApp instance to operate on
@@ -78,7 +101,6 @@ export async function loadInitialData(app: MapApp): Promise<void> {
     app.dataManager.loadAirports(),
     app.dataManager.loadMetadata(),
   ]);
-  app.allAirportsData = airports;
 
   // Populate year filter dropdown and validate the selected year
   if (metadata && metadata.available_years) {
@@ -92,8 +114,11 @@ export async function loadInitialData(app: MapApp): Promise<void> {
     app.selectedYear = "all";
   }
 
-  // Add airport markers
+  // Add airport markers. None shows until the dataset says which airports
+  // its flights used: a first load that failed left the dots of every year
+  // on the map, unlabelled.
   createAirportMarkers(app, airports);
+  app.airportManager.updateAirportOpacity();
 
   // The statistics are computed from the loaded paths; the metadata only
   // adds the model names that aircraft.json knows
@@ -137,10 +162,9 @@ export async function loadInitialData(app: MapApp): Promise<void> {
   // it does not have or an aircraft filter it has no flights for.
   const failure = followLoadFailure(app);
   const year = app.selectedYear;
-  const data = await app.dataManager.loadData(year, undefined, {
-    label: "Retry",
-    run: failure.retry,
-  });
+  // The toast of a failure offers no Retry: the panel on the map does, and
+  // two of them at once, styled apart, were two ways of doing one thing
+  const data = await app.dataManager.loadData(year);
   // A year switch that went ahead during the load has published its own
   // dataset, and this one would replace it under a store and a dropdown
   // that name the other year
@@ -152,6 +176,7 @@ export async function loadInitialData(app: MapApp): Promise<void> {
       }
       app.filterManager.updateAircraftDropdown();
     });
+    if (data) announceDataset(year);
     // No year is loaded, so the dropdown shows none: picking the one that
     // failed is then a change, and asks for it again. Unless someone has
     // picked another one meanwhile, which is applied once the load is over.
@@ -160,7 +185,7 @@ export async function loadInitialData(app: MapApp): Promise<void> {
     // during the load kept showing the year).
     const select = domCache.get("year-select", HTMLSelectElement);
     if (!data && select?.value === year) {
-      select.selectedIndex = -1;
+      showNoYear(select);
       app.mobileBar?.sheet.refresh();
     }
   }
@@ -171,7 +196,7 @@ export async function loadInitialData(app: MapApp): Promise<void> {
 
   // Restore stats panel visibility
   if (app.savedState && app.savedState.statsPanelVisible) {
-    app.statsManager.setStatsPanelVisible(true);
+    app.statsPanelVisible = true;
   }
 }
 
@@ -194,18 +219,28 @@ export function publishDataset(app: MapApp, data: KMLDataset): void {
 }
 
 /**
+ * Say which year the map shows once its flights are there. The loading
+ * indicator's region said what was loading and then went quiet, so the end
+ * of a load, a retry's included, was never heard. After the batch that
+ * published it: this replaces what its listeners said about the dataset,
+ * such as a selection it cleared.
+ * @param year - The year that was published, or "all"
+ */
+export function announceDataset(year: string): void {
+  announceStatus("Showing " + (year === "all" ? "all years" : year));
+}
+
+/**
  * Say on the map itself that the first load left it without flights, and
  * offer to load them again. Otherwise the page was an empty map whose
  * dropdown named the year, with a toast that went after four seconds.
  * @param app - The MapApp instance to operate on
- * @returns `retry` loads the year again (the toast offers it too), and
- *   `settle` says the first load is over, before which nothing is shown
+ * @returns `settle` says the first load is over, before which nothing is
+ *   shown
  */
-function followLoadFailure(app: MapApp): {
-  retry: () => void;
-  settle: () => void;
-} {
+function followLoadFailure(app: MapApp): { settle: () => void } {
   const panel = domCache.get("map-empty");
+  const retryButton = domCache.get("map-empty-retry");
   let settled = false;
   let retrying = false;
   const sync = (): void => {
@@ -215,12 +250,26 @@ function followLoadFailure(app: MapApp): {
     if (hide && panel.contains(document.activeElement)) {
       app.map?.getCanvas().focus();
     }
+    const appears = panel.hidden && !hide;
     panel.hidden = hide;
+    // The one thing to do on the page then, so the keyboard is taken to
+    // it, unless the focus was put somewhere else meanwhile: the map's
+    // canvas is where the Retry left it
+    const focused = document.activeElement;
+    if (
+      appears &&
+      (focused === null ||
+        focused === document.body ||
+        focused === app.map?.getCanvas())
+    ) {
+      retryButton?.focus();
+    }
   };
   const retry = (): void => {
     if (retrying) return;
-    // What they said is being acted on; a new failure says so again
-    dismissToast();
+    // What they said is being acted on; a new failure says so again. Only
+    // the failures of loads: another error on screen is still true.
+    app.dataManager.dismissFailures();
     retrying = true;
     sync();
     void app.filterManager.retryLoad().finally(() => {
@@ -228,12 +277,9 @@ function followLoadFailure(app: MapApp): {
       sync();
     });
   };
-  domCache
-    .get("map-empty-retry")
-    ?.addEventListener("click", retry, { signal: app.signal });
+  retryButton?.addEventListener("click", retry, { signal: app.signal });
   app.store.subscribe("currentData", sync);
   return {
-    retry,
     settle: () => {
       settled = true;
       sync();

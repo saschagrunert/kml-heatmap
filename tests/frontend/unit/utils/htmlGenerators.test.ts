@@ -52,15 +52,15 @@ describe("htmlGenerators", () => {
   });
 
   describe("splitAirportName", () => {
-    it("splits an ICAO code from the airport name", () => {
-      expect(splitAirportName("EDAQ Halle-Oppin")).toEqual({
+    it("splits the airport's code from the airport name", () => {
+      expect(splitAirportName("EDAQ Halle-Oppin", "EDAQ")).toEqual({
         code: "EDAQ",
         name: "Halle-Oppin",
       });
     });
 
     it("keeps multi-word names intact", () => {
-      expect(splitAirportName("LFGA Colmar Houssen airport")).toEqual({
+      expect(splitAirportName("LFGA Colmar Houssen airport", "LFGA")).toEqual({
         code: "LFGA",
         name: "Colmar Houssen airport",
       });
@@ -71,8 +71,29 @@ describe("htmlGenerators", () => {
         code: "",
         name: "Halle Oppin",
       });
-      expect(splitAirportName("EDAQ")).toEqual({ code: "", name: "EDAQ" });
-      expect(splitAirportName("")).toEqual({ code: "", name: "" });
+      expect(splitAirportName("EDAQ", "EDAQ")).toEqual({
+        code: "",
+        name: "EDAQ",
+      });
+      expect(splitAirportName("", "EDAQ")).toEqual({ code: "", name: "" });
+    });
+
+    it("guesses no code from the label (regression)", () => {
+      // What looked like a code was taken for one: a three-letter word, or
+      // a code the export did not find the airport's
+      expect(splitAirportName("OLD Airfield")).toEqual({
+        code: "",
+        name: "OLD Airfield",
+      });
+      expect(splitAirportName("EDAQ Halle-Oppin")).toEqual({
+        code: "",
+        name: "EDAQ Halle-Oppin",
+      });
+      // A code further on is the airport's, but there is no name to split
+      expect(splitAirportName("Halle EDAQ", "EDAQ")).toEqual({
+        code: "",
+        name: "Halle EDAQ",
+      });
     });
   });
 
@@ -151,6 +172,12 @@ describe("htmlGenerators", () => {
     it("renders the home badge for the home base", () => {
       const html = generateAirportPopupHtml({ ...params, isHomeBase: true });
       expect(html).toContain('<span class="kh-popup-home-badge">HOME</span>');
+      // Its header in the home colour, like its marker and badge, where it
+      // was in the green of every other airport's (regression)
+      expect(html).toContain("kh-popup-header-home");
+      expect(generateAirportPopupHtml(params)).not.toContain(
+        "kh-popup-header-home",
+      );
     });
 
     it("escapes the name and falls back to Unknown", () => {
@@ -174,10 +201,8 @@ describe("htmlGenerators", () => {
           [49.0, 12.0],
         ],
       },
-      altMin: 0,
-      altMax: 5000,
-      speedMin: 0,
-      speedMax: 200,
+      altRange: { min: 0, max: 5000 },
+      speedRange: { min: 0, max: 200 },
     };
 
     it("renders altitude and groundspeed with their colours as data", () => {
@@ -253,16 +278,21 @@ describe("htmlGenerators", () => {
       expect(html).not.toContain(icon("airport", 20));
     });
 
-    it("defaults altitude and groundspeed to 0 when missing", () => {
+    it("shows a sea-level altitude, and no groundspeed where there is none", () => {
+      // A log without timing: the build writes its unknown speeds as 0
       const html = generateSegmentPopupHtml({
         ...fullParams,
-        segment: { path_id: 1, coords: fullParams.segment.coords },
+        segment: {
+          ...fullParams.segment,
+          altitude_ft: 0,
+          groundspeed_knots: 0,
+        },
       });
 
       expect(html).toContain("0 ft");
       expect(html).toContain("(0 m)");
-      expect(html).toContain("0 kt");
-      expect(html).toContain("0 km/h");
+      expect(html).not.toContain("Groundspeed");
+      expect(html).not.toContain(" kt");
       expect(html).toContain(
         `data-metric-color="${getColorForAltitude(0, 0, 5000)}"`,
       );
@@ -301,16 +331,6 @@ describe("htmlGenerators", () => {
       expect(html).toContain(ddToDms(48.5, true));
       expect(html).toContain(ddToDms(11.5, false));
       expect(html).not.toContain(ddToDms(49.0, true));
-    });
-
-    it("shows N/A for track and position when coords are missing", () => {
-      const html = generateSegmentPopupHtml({
-        ...fullParams,
-        segment: { path_id: 1 },
-      });
-
-      expect(html).toContain("Track: N/A");
-      expect(html).toMatch(/N\/A N\/A/);
     });
 
     it("formats the end position in DMS", () => {

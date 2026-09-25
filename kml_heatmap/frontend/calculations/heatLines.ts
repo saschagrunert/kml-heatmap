@@ -53,7 +53,7 @@ function segmentSeconds(
     seconds = next.time - segment.time;
   }
   if (seconds < 0 || seconds > MAX_LOGGED_STEP_S) {
-    const knots = segment.groundspeed_knots ?? 0;
+    const knots = segment.groundspeed_knots;
     seconds =
       knots > 1
         ? (segmentDistance(segment) * 1000) /
@@ -183,7 +183,7 @@ export function heatLineFeatures(
   };
 
   segments.forEach((segment, index) => {
-    if (!keep(segment.path_id) || !segment.coords) return;
+    if (!keep(segment.path_id)) return;
     const seconds = segmentSeconds(segment, segments[index + 1]);
     addTo(segment.coords[0], seconds / 2);
     addTo(segment.coords[1], seconds / 2);
@@ -198,9 +198,9 @@ export function heatLineFeatures(
   // The end of one segment is the start of the next: look it up once
   let lastEndSeconds = 0;
   kept.forEach((segment, index) => {
-    const [start, end] = segment.coords!;
+    const [start, end] = segment.coords;
     const last = index > 0 ? kept[index - 1]! : null;
-    const lastEnd = last?.coords![1];
+    const lastEnd = last?.coords[1];
     const carriesOn =
       last?.path_id === segment.path_id &&
       lastEnd?.[0] === start[0] &&
@@ -236,7 +236,7 @@ export function heatLineFeatures(
     const step = Math.round(smoothed[index]!);
     if (!joins[index] || step !== lineStep) {
       flush();
-      line.push(toLngLat(segment.coords![0]));
+      line.push(toLngLat(segment.coords[0]));
       lineStep = step;
     }
     appendCurve(line, curves, keptIndex[index]!);

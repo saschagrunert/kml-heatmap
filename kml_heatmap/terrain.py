@@ -22,10 +22,16 @@ the altitudes it recorded taxiing there are the ground (see
 offset to the other in proportion to the distance flown. A flight taxis on
 the map at both ends, and follows the relief in between.
 
-Nothing here may fail a build: a tile that cannot be fetched or decoded
-leaves the positions under it without ground, and a path with a position
-without ground gets no ground column at all, so the page falls back to the
-line between the fields for it.
+Nothing here fails a build unless asked to: a tile that cannot be fetched
+or decoded leaves the positions under it without ground, and a path with a
+position without ground gets no ground column at all, so the page falls back
+to the line between the fields for it. A build that publishes the site sets
+``KML_HEATMAP_REQUIRE_TERRAIN=1``, which fails it instead (see
+``sample_path_elevations``).
+
+Decoding a PNG takes a few tens of milliseconds of pure Python, which a few
+hundred tiles turn into seconds on every build. The pixels of a decoded tile
+are therefore kept next to its PNG as well (see ``_read_pixel_planes``).
 """
 
 from __future__ import annotations
@@ -51,6 +57,7 @@ from urllib.request import Request, urlopen
 from . import __version__
 from .cache import CACHE_DIR, REGULAR_FILE_MODE
 from .constants import METERS_TO_FEET
+from .exceptions import TerrainUnavailableError
 from .logger import logger
 from .segment_codec import GROUND_STEP
 from .types import COORDINATE_DECIMALS
@@ -62,10 +69,10 @@ if TYPE_CHECKING:
     from .types import FlightPath, SegmentRow
 
 __all__ = [
+    "REQUIRE_TERRAIN_ENV",
     "TERRAIN_CACHE_DIR",
     "TERRAIN_ZOOM",
     "DecodeFailedError",
-    "FlatTiles",
     "PngError",
     "TerrariumTiles",
     "TileKey",
@@ -91,6 +98,16 @@ TERRAIN_CACHE_DIR = CACHE_DIR / "terrain"
 # a few overlap the latency without hammering the host
 FETCH_WORKERS = 8
 FETCH_TIMEOUT_SECONDS = 20
+# A request that fails on the way (a dropped connection, a timeout) or that
+# the host answers with a server error is tried this often, waiting
+# FETCH_RETRY_SECONDS before the second attempt and twice as long before each
+# one after: one glitch must not leave every other tile of the run unfetched
+FETCH_ATTEMPTS = 4
+FETCH_RETRY_SECONDS = 1.0
+# Too many requests, and the server errors worth another attempt
+_RETRIED_HTTP_CODES = frozenset({429, 500, 502, 503, 504})
+# Set to "1", a tile that cannot be fetched or decoded fails the build
+REQUIRE_TERRAIN_ENV = "KML_HEATMAP_REQUIRE_TERRAIN"
 # A tile is about 100 KB; anything far larger is not a tile
 MAX_TILE_BYTES = 4 * 1024 * 1024
 USER_AGENT = (
@@ -101,7 +118,7 @@ DECODE_POOL_MIN_TILES = 8
 
 # Groundspeed below which a fix is taxiing, and the fixes of taxiing it takes
 # to tell where a field is: the values of groundProfileFt in the frontend
-# (calculations/lift.ts), which this mirrors
+# (calculations/groundProfile.ts), which this mirrors
 TAXI_KNOTS = 40
 TAXI_MIN_FIXES = 3
 
@@ -133,28 +150,6 @@ class TileSource(Protocol):
     def pixels(
         self, wanted: Mapping[TileKey, Sequence[int]]
     ) -> dict[TileKey, Sequence[float]]: ...
-
-
-class FlatTiles:
-    """Ground at one elevation everywhere, without any tile.
-
-    For builds that must not depend on the network (the pipeline tests):
-    with a flat model the ground of a flight is the line between its fields,
-    as the page draws it without a ground column.
-    """
-
-    def __init__(self, elevation_m: float = 0.0) -> None:
-        """Answer ``elevation_m`` for every pixel."""
-        self.elevation_m = elevation_m
-
-    def pixels(
-        self, wanted: Mapping[TileKey, Sequence[int]]
-    ) -> dict[TileKey, Sequence[float]]:
-        """Every pixel of every tile at the one elevation."""
-        return {
-            tile: array("d", [self.elevation_m]) * len(indices)
-            for tile, indices in wanted.items()
-        }
 
 
 # --- PNG ----------------------------------------------------------------
@@ -301,31 +296,115 @@ def terrarium_elevation(red: int, green: int, blue: int) -> float:
 
 def decode_tile_pixels(data: bytes, indices: Sequence[int]) -> list[float]:
     """The elevations of the pixels at ``indices`` of a Terrarium tile."""
+    return list(_elevations_at(_decode_planes(data), indices))
+
+
+# The decoded pixels of a tile, next to its PNG: a header, then the red,
+# the green and the blue value of every pixel, one plane after the other,
+# compressed. Planes compress better than the PNG itself (the red one is all
+# but constant) and inflate in a fraction of a millisecond. The header holds
+# the CRC of the PNG the pixels are of, so a tile fetched again is decoded
+# again; bump the version whenever the layout changes.
+PIXELS_SUFFIX = ".pixels"
+_PIXELS_HEADER = struct.Struct(">4sBI")
+_PIXELS_MAGIC = b"KHTP"
+_PIXELS_VERSION = 1
+_PLANES_BYTES = 3 * TILE_SIZE * TILE_SIZE
+
+
+def _pixels_path(path: Path) -> Path:
+    return path.with_suffix(PIXELS_SUFFIX)
+
+
+def _decode_planes(data: bytes) -> bytes:
+    """The red, green and blue planes of a Terrarium tile's PNG."""
     width, height, channels, pixels = decode_png(data)
     if width != TILE_SIZE or height != TILE_SIZE:
         raise PngError(f"tile is {width}x{height} pixels, not {TILE_SIZE}")
-    return [
-        terrarium_elevation(
-            pixels[index * channels],
-            pixels[index * channels + 1],
-            pixels[index * channels + 2],
+    return (
+        bytes(pixels[0::channels])
+        + bytes(pixels[1::channels])
+        + bytes(pixels[2::channels])
+    )
+
+
+def _read_pixel_planes(path: Path, data: bytes) -> bytes | None:
+    """The kept planes of the tile at ``path`` whose PNG is ``data``.
+
+    None when there are none, or none of this PNG, or they are damaged:
+    the tile is then decoded again.
+    """
+    try:
+        kept = _pixels_path(path).read_bytes()
+        magic, version, crc = _PIXELS_HEADER.unpack_from(kept)
+        if (magic, version, crc) != (_PIXELS_MAGIC, _PIXELS_VERSION, zlib.crc32(data)):
+            return None
+        planes = zlib.decompressobj().decompress(
+            kept[_PIXELS_HEADER.size :], _PLANES_BYTES + 1
         )
-        for index in indices
-    ]
+    except OSError, struct.error, zlib.error:
+        return None
+    return planes if len(planes) == _PLANES_BYTES else None
+
+
+def _keep_pixel_planes(path: Path, data: bytes, planes: bytes) -> None:
+    """Keep the planes of a decoded tile next to its PNG, atomically."""
+    header = _PIXELS_HEADER.pack(_PIXELS_MAGIC, _PIXELS_VERSION, zlib.crc32(data))
+    tmp_path: str | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            dir=path.parent, prefix=".tile.", suffix=".tmp", delete=False
+        ) as tmp:
+            tmp_path = tmp.name
+            tmp.write(header + zlib.compress(planes, 6))
+        os.chmod(tmp_path, REGULAR_FILE_MODE)
+        os.replace(tmp_path, _pixels_path(path))
+        tmp_path = None
+    except OSError as e:
+        # Only the next build pays for it: it decodes the tile again
+        logger.debug("Cannot keep the pixels of %s: %s", path.name, e)
+    finally:
+        if tmp_path is not None:
+            with contextlib.suppress(OSError):
+                os.unlink(tmp_path)
+
+
+def _elevations_at(planes: bytes, indices: Sequence[int]) -> array[float]:
+    """``terrarium_elevation`` of the pixels at ``indices`` of the planes."""
+    green = TILE_SIZE * TILE_SIZE
+    blue = 2 * green
+    return array(
+        "d",
+        [
+            planes[index] * 256
+            + planes[green + index]
+            + planes[blue + index] / 256
+            - 32768
+            for index in indices
+        ],
+    )
 
 
 def _decode_cached_tile(path: Path, indices: Sequence[int]) -> array[float] | None:
-    """``decode_tile_pixels`` of a cached tile, None when it is unusable.
+    """The elevations of the pixels at ``indices`` of a cached tile.
 
-    A module-level function, so the decoding pool can run it. A file that
-    does not decode is removed, so the next build fetches it again.
+    From the pixels kept of it when there are any, from its PNG otherwise,
+    whose pixels are then kept. None when the tile is unusable. A
+    module-level function, so the decoding pool can run it. A file that does
+    not decode is removed, so the next build fetches it again.
     """
     try:
-        return array("d", decode_tile_pixels(path.read_bytes(), indices))
+        data = path.read_bytes()
+        planes = _read_pixel_planes(path, data)
+        if planes is None:
+            planes = _decode_planes(data)
+            _keep_pixel_planes(path, data, planes)
+        return _elevations_at(planes, indices)
     except (OSError, PngError) as e:
         logger.debug("Elevation tile %s is unusable: %s", path.name, e)
-        with contextlib.suppress(OSError):
-            path.unlink()
+        for unusable in (path, _pixels_path(path)):
+            with contextlib.suppress(OSError):
+                unusable.unlink()
         return None
 
 
@@ -335,10 +414,12 @@ def _decode_cached_tile(path: Path, indices: Sequence[int]) -> array[float] | No
 class TerrariumTiles:
     """Terrarium tiles from AWS, kept in a cache directory.
 
-    A tile is fetched once and kept as the PNG it arrived as. The first
-    request that cannot reach the host (offline, DNS, a timeout) stops the
-    other downloads of the run; a tile the host answers with an error is
-    only missing itself. Neither fails the build.
+    A tile is fetched once and kept as the PNG it arrived as, and its
+    pixels once decoded next to it. A request that fails on the way or with
+    a server error is tried again (see ``FETCH_ATTEMPTS``); the first one
+    that fails every time (offline, DNS, the host down) stops the other
+    downloads of the run. A tile the host answers with another error is only
+    missing itself. Neither fails the build on its own.
     """
 
     def __init__(self, cache_dir: Path | None = None) -> None:
@@ -350,29 +431,59 @@ class TerrariumTiles:
         """Where a tile is kept."""
         return self.cache_dir / f"{tile.z}-{tile.x}-{tile.y}.png"
 
+    def _fetch(self, url: str) -> bytes | None:
+        """The body the host answers ``url`` with, None when there is none.
+
+        Tries again with a growing pause after a failure on the way or a
+        server error, and gives the host up for the run (see ``_offline``)
+        once the last attempt failed as well.
+        """
+        error: Exception | None = None
+        for attempt in range(FETCH_ATTEMPTS):
+            if attempt:
+                time.sleep(FETCH_RETRY_SECONDS * 2 ** (attempt - 1))
+            if self._offline.is_set():
+                return None
+            request = Request(url, headers={"User-Agent": USER_AGENT})  # noqa: S310
+            try:
+                with urlopen(  # noqa: S310 # nosec B310
+                    request,
+                    timeout=FETCH_TIMEOUT_SECONDS,
+                    context=ssl.create_default_context(),
+                ) as response:
+                    data: bytes = response.read(MAX_TILE_BYTES + 1)
+                    return data
+            except urllib.error.HTTPError as e:
+                e.close()
+                if e.code not in _RETRIED_HTTP_CODES:
+                    # The host answered: this tile is missing, the others
+                    # may not be
+                    logger.debug("Elevation tile %s: HTTP %s", url, e.code)
+                    return None
+                error = e
+            # http.client.IncompleteRead (a connection dropped mid-body) is
+            # no OSError
+            except (OSError, http.client.HTTPException, ValueError) as e:
+                error = e
+            logger.debug(
+                "Elevation tile %s, attempt %d of %d: %s",
+                url,
+                attempt + 1,
+                FETCH_ATTEMPTS,
+                error,
+            )
+        if not self._offline.is_set():
+            self._offline.set()
+            logger.debug("Elevation tiles unreachable: %s", error)
+        return None
+
     def _download(self, tile: TileKey) -> int:
         """Fetch a tile into the cache; the bytes fetched, 0 when it failed."""
         if self._offline.is_set():
             return 0
         url = TILE_URL.format(z=tile.z, x=tile.x, y=tile.y)
-        request = Request(url, headers={"User-Agent": USER_AGENT})  # noqa: S310
-        try:
-            with urlopen(  # noqa: S310 # nosec B310
-                request,
-                timeout=FETCH_TIMEOUT_SECONDS,
-                context=ssl.create_default_context(),
-            ) as response:
-                data = response.read(MAX_TILE_BYTES + 1)
-        except urllib.error.HTTPError as e:
-            # The host answered: this tile is missing, the others may not be
-            logger.debug("Elevation tile %s: HTTP %s", url, e.code)
-            e.close()
-            return 0
-        # http.client.IncompleteRead (a connection dropped mid-body) is no OSError
-        except (OSError, http.client.HTTPException, ValueError) as e:
-            if not self._offline.is_set():
-                self._offline.set()
-                logger.debug("Elevation tiles unreachable: %s", e)
+        data = self._fetch(url)
+        if data is None:
             return 0
         if len(data) > MAX_TILE_BYTES or not data.startswith(PNG_SIGNATURE):
             logger.debug("Elevation tile %s is not a PNG tile", url)
@@ -429,8 +540,11 @@ class TerrariumTiles:
         paths = [path for _, path in cached]
         indices = [wanted[tile] for tile, _ in cached]
         # Decoding a tile takes a few tens of milliseconds of pure Python,
-        # which adds up over hundreds of them; the cores share it
-        if len(cached) < DECODE_POOL_MIN_TILES:
+        # which adds up over hundreds of them; the cores share it. Once the
+        # pixels of every tile are kept, reading them takes less time than
+        # starting the pool.
+        to_decode = sum(not _pixels_path(path).is_file() for path in paths)
+        if to_decode < DECODE_POOL_MIN_TILES:
             decoded = list(map(_decode_cached_tile, paths, indices, strict=True))
         else:
             workers = min(os.process_cpu_count() or 1, len(cached))
@@ -640,15 +754,23 @@ def sample_path_elevations(
     at the coordinate as the exporter rounds it, which is what its segment
     rows carry. A point the tiles do not cover is NaN, and a path none of
     whose points they cover is left out. Logs one summary, and one warning
-    when tiles were missing; never raises for a tile it could not get.
+    when tiles were missing; never raises for a tile it could not get,
+    unless ``KML_HEATMAP_REQUIRE_TERRAIN`` is "1": then a missing tile or a
+    decoding pool that died raises ``TerrainUnavailableError``.
     """
     started = time.monotonic()
+    required = os.environ.get(REQUIRE_TERRAIN_ENV) == "1"
     try:
         elevations, tiles, missing = sample_elevations(
             (coordinate for path in paths.values() for coordinate in _rounded(path)),
             source,
         )
     except DecodeFailedError as e:
+        if required:
+            raise TerrainUnavailableError(
+                f"The elevation tiles could not be decoded ({e}), and "
+                f"{REQUIRE_TERRAIN_ENV}=1 requires them"
+            ) from e
         logger.warning(
             "Terrain: the elevation tiles could not be decoded (%s); every "
             "flight keeps the ground between its airfields",
@@ -672,6 +794,11 @@ def sample_path_elevations(
         tiles,
         time.monotonic() - started,
     )
+    if missing and required:
+        raise TerrainUnavailableError(
+            f"{missing} of {tiles} elevation tile(s) are unavailable, and "
+            f"{REQUIRE_TERRAIN_ENV}=1 requires every one"
+        )
     if missing:
         logger.warning(
             "Terrain: %d of %d elevation tile(s) are unavailable (offline?); "
@@ -716,8 +843,7 @@ def _field_offset_ft(
     middle of the model under them the field as the model has it. None for
     a path that starts or ends in the air, or without speeds to tell. A
     speed of 0 is no speed (see ``process_path_segments``), which ends the
-    taxiing like a fast one; the frontend, which never sees a path without
-    speeds from this exporter, counts it as taxiing.
+    taxiing like a fast one, here and in the frontend (fieldFt).
     """
     altitudes: list[float] = []
     grounds: list[float] = []

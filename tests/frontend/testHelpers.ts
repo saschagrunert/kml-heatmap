@@ -6,11 +6,11 @@ import type { MapApp } from "../../kml_heatmap/frontend/mapApp";
 import type {
   PathInfo,
   PathSegment,
-  Airport,
   KMLDataset,
 } from "../../kml_heatmap/frontend/types";
 import { datasetIndex } from "../../kml_heatmap/frontend/calculations/datasetIndex";
 import { ReplayState } from "../../kml_heatmap/frontend/ui/replayState";
+import { ReliefState } from "../../kml_heatmap/frontend/ui/reliefState";
 import {
   AppStore,
   DEFAULT_AIRSPEED_RANGE,
@@ -19,6 +19,7 @@ import {
   STORE_ACCESSOR_KEYS,
   type StoreState,
 } from "../../kml_heatmap/frontend/state/store";
+import { TOGGLES } from "../../kml_heatmap/frontend/state/toggles";
 import { segmentsForPathIds } from "../../kml_heatmap/frontend/calculations/statistics";
 import { followLayerVisibility } from "../../kml_heatmap/frontend/ui/layerVisibility";
 import {
@@ -72,6 +73,25 @@ export function createSegment(
   };
 }
 
+/**
+ * A segment of which a test gives the fields the code under test reads.
+ * The others are those of a segment that stands still at 0,0: at sea
+ * level, and without a speed (0, as a log without timing has).
+ */
+export function segmentOf(
+  fields: Pick<PathSegment, "path_id"> & Partial<PathSegment>,
+): PathSegment {
+  return {
+    coords: [
+      [0, 0],
+      [0, 0],
+    ],
+    altitude_ft: 0,
+    groundspeed_knots: 0,
+    ...fields,
+  };
+}
+
 /** Mocked manager set attached to a mock app */
 interface MockManagers {
   dataManager: {
@@ -84,6 +104,7 @@ interface MockManagers {
     destroy: Mock;
     applyHeatmapEmphasis: Mock;
     showHeatmap: Mock;
+    dismissFailures: Mock;
   };
   layerManager: {
     clearLayer: Mock;
@@ -94,8 +115,6 @@ interface MockManagers {
     hitTest: Mock;
     onPathClick: Mock;
     closeSegmentPopup: Mock;
-    restyle: Mock;
-    ribbonsShown: number;
   };
   filterManager: {
     updateAircraftDropdown: Mock;
@@ -107,8 +126,6 @@ interface MockManagers {
   statsManager: {
     updateStatsPanel: Mock;
     updateStatsForSelection: Mock;
-    toggleStats: Mock;
-    setStatsPanelVisible: Mock;
   };
   pathSelection: {
     togglePathSelection: Mock;
@@ -149,6 +166,7 @@ interface MockManagers {
   canResetView: Mock;
   loadReplay: Mock;
   loadWrapped: Mock;
+  loadStats: Mock;
   replayManager: {
     state: ReplayState;
     canReplay: Mock;
@@ -228,7 +246,6 @@ export interface MockAppOverrides extends Partial<StoreState> {
   airspeedRange?: MapApp["airspeedRange"];
   config?: Partial<MapApp["config"]>;
   isInitializing?: boolean;
-  allAirportsData?: Airport[];
   airportMarkers?: MapApp["airportMarkers"];
   airportToPaths?: MapApp["airportToPaths"];
   savedState?: MapApp["savedState"];
@@ -279,6 +296,7 @@ function createMockManagers(): MockManagers {
       destroy: vi.fn(),
       applyHeatmapEmphasis: vi.fn(),
       showHeatmap: vi.fn(),
+      dismissFailures: vi.fn(),
     },
     layerManager: {
       clearLayer: vi.fn(),
@@ -289,8 +307,6 @@ function createMockManagers(): MockManagers {
       hitTest: vi.fn(() => null),
       onPathClick: vi.fn(),
       closeSegmentPopup: vi.fn(),
-      restyle: vi.fn(),
-      ribbonsShown: 1,
     },
     filterManager: {
       updateAircraftDropdown: vi.fn(),
@@ -302,8 +318,6 @@ function createMockManagers(): MockManagers {
     statsManager: {
       updateStatsPanel: vi.fn(),
       updateStatsForSelection: vi.fn(),
-      toggleStats: vi.fn(),
-      setStatsPanelVisible: vi.fn(),
     },
     pathSelection: {
       togglePathSelection: vi.fn(),
@@ -358,6 +372,9 @@ function createMockManagers(): MockManagers {
     // already there, so the loaders hand them straight back
     loadReplay: vi.fn(() => Promise.resolve(replayManager)),
     loadWrapped: vi.fn(() => Promise.resolve(wrappedManager)),
+    loadStats: vi.fn(function (this: MockApp) {
+      return Promise.resolve(this.statsManager);
+    }),
     replayManager,
     wrappedManager,
     mapOrientation: {
@@ -378,12 +395,8 @@ function createMockManagers(): MockManagers {
   };
 }
 
-/** Every store key: the accessor keys plus the two panel flags */
-const STORE_KEYS: readonly (keyof StoreState)[] = [
-  ...STORE_ACCESSOR_KEYS,
-  "statsPanelVisible",
-  "wrappedVisible",
-];
+/** Every store key, each of which has an accessor */
+const STORE_KEYS: readonly (keyof StoreState)[] = STORE_ACCESSOR_KEYS;
 
 /**
  * A mock MapLibre map the way the app leaves it once `mapReady` resolves:
@@ -442,6 +455,8 @@ function buildMockApp(
 
   const app = {
     store,
+    // A real one on the app's store, as the app has it
+    relief: new ReliefState(store),
     config: {
       center: [50, 8] as [number, number],
       bounds: [
@@ -451,7 +466,6 @@ function buildMockApp(
       dataDir: "data",
       ...config,
     },
-    allAirportsData: [],
     isInitializing: false,
     ...mapFields,
     // Like the app's after initialize(): the map, with its layers on it
@@ -566,10 +580,9 @@ export function asMapApp(app: MockApp): MapApp {
  */
 export function syncControlsWithStore(app: MockApp): void {
   const store = app.store;
-  syncToggleButton(store, "altitudeVisible", "altitude-btn");
-  syncToggleButton(store, "airspeedVisible", "airspeed-btn");
-  syncToggleButton(store, "airportsVisible", "airports-btn");
-  syncToggleButton(store, "aviationVisible", "aviation-btn");
+  for (const toggle of TOGGLES) {
+    if ("pressed" in toggle) syncToggleButton(store, toggle.key, toggle.button);
+  }
   syncLegend(store, "airspeedVisible", "airspeed-legend");
   followLayerVisibility(asMapApp(app));
 }

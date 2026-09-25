@@ -91,9 +91,10 @@ def build_path_info(
     marker ("Home", "Aunt Martha" when the path never landed there) would
     count as an airport nobody can see. The marker rules are those of
     ``airports.deduplicate_airports`` and ``airports.extract_airport_name``:
-    a name holding an ICAO code or of more than one word, at a real start
-    or landing. A name that is no route ("EDDS" for a local flight) is the
-    start of the path when it is one of the markers, since
+    a name holding an ICAO code, or an airport of a route of more than one
+    word, at a real start or landing. A name that is no route ("EDDS" for a
+    local flight) is the start of the path when it is one of the markers,
+    since
     ``airports.deduplicate_airports`` puts the start of every path on the
     map under its name. None keeps every route name (for callers without
     airports) and no other.
@@ -160,6 +161,21 @@ def _segment_groundspeed(
     )
 
 
+def exported_knots(groundspeed_knots: float | None) -> float:
+    """A groundspeed as the year file carries it: in whole knots.
+
+    A tenth of a knot shows nowhere on the page, and whole knots repeat far
+    more from row to row, which gzip turns into a year file an eighth
+    smaller. 0 is "no speed" (see ``process_path_segments``), so a speed
+    that is known and positive stays at least 1 kt: rounded to 0, a taxi at
+    walking pace would become unknown and end the taxiing that
+    ``terrain.ground_profile_ft`` and the page anchor the ground on.
+    """
+    if groundspeed_knots is None or groundspeed_knots <= 0:
+        return 0.0
+    return float(max(1, round(groundspeed_knots)))
+
+
 def process_path_segments(
     path: FlightPath,
     path_duration_seconds: float,
@@ -175,9 +191,12 @@ def process_path_segments(
     start of the first row is returned separately.
 
     The groundspeeds use the unrounded geometry, which is about the aircraft
-    rather than about the export. A groundspeed that is unknown (no timing,
-    or only implausible values) is exported as 0, which the frontend reads
-    as "no speed" rather than as standing still.
+    rather than about the export, and are exported in whole knots (see
+    ``exported_knots``). A groundspeed that is unknown (no timing, or only
+    implausible values) is exported as 0, which the frontend reads as "no
+    speed" rather than as standing still. Times stay at a tenth of a second:
+    loggers write fixes a fraction of a second apart as often as whole ones,
+    and the replay moves the airplane by them.
 
     Returns:
         Tuple of (start point, segment rows). The start point is empty when
@@ -231,7 +250,7 @@ def process_path_segments(
             end[0],
             end[1],
             altitude_ft,
-            round(groundspeed_knots, 1) if groundspeed_knots is not None else 0.0,
+            exported_knots(groundspeed_knots),
         ]
         if segment.relative_time is not None:
             row.append(round(segment.relative_time, 1))

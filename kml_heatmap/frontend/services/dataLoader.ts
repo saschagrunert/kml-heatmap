@@ -6,11 +6,12 @@
 import { logDebug, logError } from "../utils/logger";
 import { withTimeout } from "../utils/withTimeout";
 import type { YearDecoder } from "./yearDecoder";
+import { importWithRetry } from "./lazyImport";
+import { siteData } from "../state/siteData";
 import type {
   KMLDataset,
   Airport,
   Metadata,
-  DataLoaderOptions,
   FetchJsonOptions,
   LoadingState,
 } from "../types";
@@ -152,96 +153,50 @@ export function fetchBytes(
 /** What build.js names the bundle of ./yearWorker, next to this one */
 const YEAR_WORKER_BUNDLE = "./yearWorker.bundle.js";
 
+/** What the loader uses of services/yearWorker.ts */
+type YearTools = Pick<typeof import("./yearWorker"), "createYearDecoder">;
+
 /**
  * Import what works on year data: the worker that parses and decodes the
  * year files, and what builds the datasets from its answers. None of it is
  * part of the app's bundles; the build resolves the specifier to
- * yearWorker.bundle.js, which the page fetches next to the first year file.
- * A retry names the file under a URL the page has not tried yet, because a
- * browser may answer a failed import() from memory (see
- * services/featureLoader.ts).
+ * yearWorker.bundle.js, which the page fetches next to the first year file
+ * (see services/lazyImport.ts for a retry).
  * @param failedImports - Imports that were rejected before this one
  * @returns The exports of services/yearWorker.ts
  */
-export function importYearTools(
-  failedImports: number,
-): Promise<Pick<typeof import("./yearWorker"), "createYearDecoder">> {
-  return failedImports === 0
-    ? import("./yearWorker")
-    : import(
-        new URL(`${YEAR_WORKER_BUNDLE}?retry=${failedImports}`, import.meta.url)
-          .href
-      );
+export function importYearTools(failedImports: number): Promise<YearTools> {
+  return importWithRetry(
+    () => import("./yearWorker"),
+    YEAR_WORKER_BUNDLE,
+    failedImports,
+  );
 }
 
 /**
- * The request per stylesheet URL, so that callers share one rather than
- * racing. Keyed on the URL as given; a failed one is dropped so the next
- * attempt starts over.
+ * DataLoader constructor options
  */
-const stylesheetRequests = new Map<string, Promise<void>>();
-
-/**
- * Load a stylesheet, and leave it in the document.
- *
- * A link keeps applying only as long as it is in the head, so this one is
- * not removed once it has loaded. Callers asking for the same
- * URL share one request: dedupe on the link already being in the head was
- * wrong twice over, because a link that is still in flight had not applied
- * yet, and because the attempt that appended it removes it on its own
- * failure. A first attempt that had already been given up on could take the
- * stylesheet of a later, successful one back out of the page with it.
- *
- * @param url - URL to load
- * @param timeoutMs - Time after which the load is given up on
- * @returns Promise that resolves once the stylesheet applies
- */
-export function loadStylesheet(
-  url: string,
-  timeoutMs: number = LOAD_TIMEOUT_MS,
-): Promise<void> {
-  const inFlight = stylesheetRequests.get(url);
-  if (inFlight) return inFlight;
-
-  const request = new Promise<void>((resolve, reject) => {
-    const link = document.createElement("link");
-    link.rel = "stylesheet";
-    link.href = url;
-    // Tests and debugging match on this rather than on href, which the
-    // browser resolves to an absolute URL
-    link.dataset["href"] = url;
-    const settle = (): void => {
-      clearTimeout(timer);
-      link.onload = null;
-      link.onerror = null;
-    };
-    const giveUp = (reason: string): void => {
-      settle();
-      link.remove();
-      reject(new Error(reason + ": " + url));
-    };
-    link.onload = () => {
-      settle();
-      resolve();
-    };
-    link.onerror = () => giveUp("Failed to load stylesheet");
-    const timer = setTimeout(
-      () => giveUp("Timed out loading stylesheet"),
-      timeoutMs,
-    );
-    document.head.appendChild(link);
-  });
-
-  stylesheetRequests.set(url, request);
-  // A failure is not cached, so the next attempt tries again; the rejection
-  // is handled by the caller, and this handler must not become one itself
-  request.catch(() => stylesheetRequests.delete(url));
-  return request;
-}
-
-/** Forget every stylesheet request (used by tests) */
-export function resetStylesheetLoader(): void {
-  stylesheetRequests.clear();
+export interface DataLoaderOptions {
+  dataDir?: string;
+  /** `onProgress` is given for year files of a known size, the ones a bar is drawn for */
+  fetchJson?: (url: string, options?: FetchJsonOptions) => Promise<unknown>;
+  /** Fetches the year files, which the year worker parses; same options */
+  fetchBytes?: (
+    url: string,
+    options?: FetchJsonOptions,
+  ) => Promise<ArrayBuffer>;
+  /** Imports the year worker's bundle, see importYearTools */
+  importYearTools?: typeof importYearTools;
+  /** Invoked whenever the loading operation changes, see LoadingState */
+  showLoading?: (state: LoadingState) => void;
+  hideLoading?: () => void;
+  /**
+   * Invoked once per top-level load when one or more year files failed to
+   * load, with the list of failed years. `stale` is set once a year file
+   * turned out to be of another format than this page reads: a cached page
+   * next to newer data, which a reload of the page cures.
+   */
+  onLoadError?: (failedYears: string[], stale?: boolean) => void;
 }
 
 /** One year file of the loading operation, see DataLoader */
@@ -348,7 +303,6 @@ export class DataLoader {
   private metadataRequest: Promise<Metadata> | null = null;
   private showLoading: (state: LoadingState) => void;
   private hideLoading: () => void;
-  private getWindow: () => Window & typeof globalThis;
   private onLoadError: NonNullable<DataLoaderOptions["onLoadError"]>;
 
   constructor(options: DataLoaderOptions = {}) {
@@ -361,7 +315,6 @@ export class DataLoader {
     this.importYearTools = options.importYearTools || importYearTools;
     this.showLoading = options.showLoading || (() => {});
     this.hideLoading = options.hideLoading || (() => {});
-    this.getWindow = options.getWindow || (() => window);
     this.onLoadError = options.onLoadError || (() => {});
   }
 
@@ -421,7 +374,7 @@ export class DataLoader {
 
   /** A year file starts downloading */
   private beginDownload(year: string): Download {
-    const size = this.getWindow().KML_METADATA?.year_file_bytes?.[year];
+    const size = siteData.metadata?.year_file_bytes?.[year];
     const download: Download = {
       // A size of zero is as good as none: nothing can be a share of it
       size: size !== undefined && size > 0 ? size : undefined,
@@ -738,21 +691,19 @@ export class DataLoader {
   }
 
   /**
-   * Load airports data. The list is published on window.KML_AIRPORTS, which
-   * is where the code that needs it without a loader at hand reads it from
-   * (features/airports.ts, the Wrapped card).
+   * Load airports data, published in state/siteData.ts, which is where the
+   * code that needs it without a loader at hand reads it from
    * @returns Array of airport objects
    */
   async loadAirports(): Promise<Airport[]> {
     try {
-      const win = this.getWindow();
-      if (!win.KML_AIRPORTS) {
+      if (!siteData.airports) {
         this.airportsRequest ??= this.fetchJson(
           this.dataDir + "/airports.json",
         ).then((json) => checked(json, isAirports, "airports.json"));
-        win.KML_AIRPORTS = await this.airportsRequest;
+        siteData.airports = (await this.airportsRequest).airports;
       }
-      return win.KML_AIRPORTS?.airports || [];
+      return siteData.airports;
     } catch (error) {
       logError("Error loading airports:", error);
       return [];
@@ -762,19 +713,18 @@ export class DataLoader {
   }
 
   /**
-   * Load metadata, published on window.KML_METADATA like the airports
+   * Load metadata, published in state/siteData.ts like the airports
    * @returns Metadata object or null on error
    */
   async loadMetadata(): Promise<Metadata | null> {
     try {
-      const win = this.getWindow();
-      if (!win.KML_METADATA) {
+      if (!siteData.metadata) {
         this.metadataRequest ??= this.fetchJson(
           this.dataDir + "/metadata.json",
         ).then((json) => checked(json, isMetadata, "metadata.json"));
-        win.KML_METADATA = await this.metadataRequest;
+        siteData.metadata = await this.metadataRequest;
       }
-      return win.KML_METADATA || null;
+      return siteData.metadata;
     } catch (error) {
       logError("Error loading metadata:", error);
       return null;

@@ -17,6 +17,13 @@ import type {
 } from "../../../../kml_heatmap/frontend/types";
 import { icon } from "../../../../kml_heatmap/frontend/utils/icons";
 
+/**
+ * The ICAO code the export writes for an airport (airports.json's `code`).
+ * The names here lead with it where they have one.
+ */
+const exportedCode = (name: string): string | undefined =>
+  /^[A-Z]{4}(?= )/.exec(name)?.[0];
+
 describe("wrappedHtml", () => {
   describe("generateStatsHtml", () => {
     const mockYearStats: YearStats = {
@@ -454,10 +461,10 @@ describe("wrappedHtml", () => {
     });
 
     it("splits the ICAO code from the home base name", () => {
-      const html = generateHomeBaseHtml({
-        name: "EDAQ Halle-Oppin",
-        flight_count: 25,
-      });
+      const html = generateHomeBaseHtml(
+        { name: "EDAQ Halle-Oppin", flight_count: 25 },
+        "EDAQ",
+      );
 
       expect(html).toContain(
         '<span class="top-airport-code">EDAQ</span>' +
@@ -491,7 +498,11 @@ describe("wrappedHtml", () => {
   describe("generateDestinationsHtml", () => {
     const identity = (code: string) => code;
     const noFlags = () => null;
-    const plain = { countryName: identity, flagSrc: noFlags };
+    const plain = {
+      countryName: identity,
+      flagSrc: noFlags,
+      airportCode: exportedCode,
+    };
 
     it("generates grouped destinations HTML", () => {
       const grouped = new Map([
@@ -522,6 +533,21 @@ describe("wrappedHtml", () => {
         '<li class="destination"><span class="destination-code">EDDH</span>' +
           '<span class="destination-name">Hamburg Helmut Schmidt</span></li>',
       );
+    });
+
+    it("shows the exported code and reads none from the name", () => {
+      const grouped = new Map([["DE", ["EDDH Hamburg", "EDDM Munich"]]]);
+
+      const html = generateDestinationsHtml(grouped, {
+        ...plain,
+        airportCode: (name) => (name === "EDDH Hamburg" ? "EDDH" : undefined),
+      });
+
+      expect(html).toContain('<span class="destination-code">EDDH</span>');
+      expect(html).toContain(
+        '<span class="destination-name">EDDM Munich</span>',
+      );
+      expect(html.match(/destination-code/g)).toHaveLength(1);
     });
 
     it("keeps the whole label as the name when there is no code", () => {
@@ -623,6 +649,7 @@ describe("wrappedHtml", () => {
       const html = generateDestinationsHtml(grouped, {
         countryName: () => "Germany",
         flagSrc: (code) => `flags/${code.toLowerCase()}.svg`,
+        airportCode: exportedCode,
       });
 
       expect(html).toContain('<img class="country-flag" src="flags/de.svg"');
@@ -637,6 +664,7 @@ describe("wrappedHtml", () => {
       const html = generateDestinationsHtml(grouped, {
         countryName: displayName,
         flagSrc: () => null,
+        airportCode: exportedCode,
       });
 
       // A code chip rather than a flag emoji: Windows renders no flags
@@ -654,6 +682,7 @@ describe("wrappedHtml", () => {
       const html = generateDestinationsHtml(grouped, {
         countryName: () => "<b>Country</b>",
         flagSrc: () => null,
+        airportCode: exportedCode,
       });
 
       expect(html).toContain("&lt;b&gt;Country&lt;/b&gt;");

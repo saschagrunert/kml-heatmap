@@ -14,6 +14,7 @@
 import type { Map as MapLibreMap } from "maplibre-gl";
 import type { MapApp } from "../mapApp";
 import { domCache } from "../utils/domCache";
+import { DEGREES_TO_RADIANS } from "../utils/geometry";
 import { isReplayCameraMove } from "../utils/mapHelpers";
 import { showToast } from "../utils/toast";
 
@@ -166,7 +167,7 @@ export class MapOrientation {
         button?.style.setProperty("--compass-tilt", `rotateX(${tilt}deg)`);
         button?.style.setProperty(
           "--compass-grow",
-          String(1 / Math.sqrt(Math.cos((tilt * Math.PI) / 180))),
+          String(1 / Math.sqrt(Math.cos(tilt * DEGREES_TO_RADIANS))),
         );
       } else {
         button?.style.removeProperty("--compass-tilt");

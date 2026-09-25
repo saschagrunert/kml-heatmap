@@ -225,6 +225,19 @@ describe("layer visibility", () => {
       },
     );
 
+    it("dim the heatmap under the aviation chart too", () => {
+      followLayerVisibility(asMapApp(app));
+      app.dataManager.applyHeatmapEmphasis.mockClear();
+
+      // Its airspace outlines drowned under the bloom (regression)
+      app.aviationVisible = true;
+      expect(dimsHeatmap(asMapApp(app))).toBe(true);
+      expect(app.dataManager.applyHeatmapEmphasis).toHaveBeenCalledTimes(1);
+
+      app.aviationVisible = false;
+      expect(dimsHeatmap(asMapApp(app))).toBe(false);
+    });
+
     it("come and go with the selection, and dim the heatmap with them", () => {
       followLayerVisibility(asMapApp(app));
       app.dataManager.applyHeatmapEmphasis.mockClear();

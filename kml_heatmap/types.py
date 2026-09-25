@@ -117,6 +117,8 @@ class AirportMarker(TypedDict):
     lat: float
     lon: float
     name: str
+    # The ICAO code of the name (airport_lookup.airport_icao_code)
+    code: NotRequired[str]
     country: NotRequired[str]
 
 

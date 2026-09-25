@@ -20,6 +20,14 @@ export const DEGREES_TO_RADIANS = Math.PI / 180;
 /** The circumference of the earth, in metres, at the equator */
 export const EARTH_CIRCUMFERENCE_M = 40075016.686;
 
+/** The pixels a tile of the map spans, and the world at zoom 0 */
+export const TILE_SIZE_PX = 512;
+
+/** Metres a pixel spans at the equator at a map zoom */
+export function metresPerPixel(zoom: number): number {
+  return EARTH_CIRCUMFERENCE_M / (TILE_SIZE_PX * 2 ** zoom);
+}
+
 /**
  * The difference of two angles, the short way round (degrees), from -180
  * up to 180. Exact where there is no way round to take: the difference is
@@ -189,7 +197,7 @@ export function segmentBounds(
   let maxLat = -Infinity;
   let maxLon = -Infinity;
   for (const segment of segments) {
-    for (const [lat, lon] of segment.coords ?? []) {
+    for (const [lat, lon] of segment.coords) {
       if (lat < minLat) minLat = lat;
       if (lat > maxLat) maxLat = lat;
       if (lon < minLon) minLon = lon;

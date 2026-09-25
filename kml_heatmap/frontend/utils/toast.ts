@@ -66,7 +66,12 @@ export function announceStatus(message: string): void {
 /** A button on a toast, such as Retry after a failed load */
 export interface ToastAction {
   label: string;
-  run: () => void;
+  /**
+   * Does what the button says. False when it cannot be done now, which
+   * keeps the toast: taking it away would lose the only word of what is
+   * still wrong.
+   */
+  run: () => boolean | void;
 }
 
 /** How long an info toast stays on screen (ms) */
@@ -86,10 +91,10 @@ function removeToast(toast: HTMLElement): void {
   setTimeout(() => toast.remove(), 1000);
 }
 
-/** A button that takes its toast away and then does its work */
+/** A button that does its work and then takes its toast away */
 function toastButton(
   toast: HTMLElement,
-  run: () => void,
+  run: ToastAction["run"],
   label: string,
 ): HTMLButtonElement {
   const button = document.createElement("button");
@@ -97,8 +102,8 @@ function toastButton(
   button.className = "toast-button";
   button.textContent = label;
   button.addEventListener("click", () => {
+    if (run() === false) return;
     removeToast(toast);
-    run();
   });
   return button;
 }

@@ -12,6 +12,7 @@ from kml_heatmap.export_pipeline import (
     _segment_groundspeed,
     altitude_gain_m,
     build_path_info,
+    exported_knots,
     path_duration,
     process_path_segments,
 )
@@ -156,7 +157,7 @@ class TestBuildPathInfo:
         """The frontend counts a path for an airport by comparing these names."""
         from kml_heatmap.airports import deduplicate_airports
         from kml_heatmap.export_writers import export_airports_data
-        from kml_heatmap.parser import parse_kml_coordinates
+        from tests.conftest import parse_kml_coordinates
 
         kml = tmp_path / "1_DEAGJ_DA20.kml"
         coords = "".join(
@@ -188,7 +189,7 @@ class TestBuildPathInfo:
             export_airports_data,
             exported_airport_names,
         )
-        from kml_heatmap.parser import parse_kml_coordinates
+        from tests.conftest import parse_kml_coordinates
 
         kml = tmp_path / "1_DEAGJ_DA20.kml"
         coords = "".join(
@@ -314,6 +315,13 @@ class TestAltitudeGain:
         above = self.HYSTERESIS_M + 0.1
         assert altitude_gain_m([100.0, 100 + above]) == pytest.approx(above)
 
+    def test_the_hysteresis_itself_counts(self):
+        """A rise or dip of exactly the hysteresis starts or ends a climb."""
+        h = self.HYSTERESIS_M
+        assert altitude_gain_m([0.0, h]) == h
+        # The dip to h ends the climb to 2h, and the rise back is another
+        assert altitude_gain_m([0.0, 2 * h, h, 2 * h]) == pytest.approx(3 * h)
+
     def test_a_dip_below_the_hysteresis_does_not_end_a_climb(self):
         altitudes = [100.0, 500.0, 500 - self.HYSTERESIS_M + 1, 800.0]
         assert altitude_gain_m(altitudes) == pytest.approx(700.0)
@@ -429,8 +437,37 @@ class TestProcessPathSegments:
     def test_groundspeed_rounded(self):
         _, rows = process_path_segments(_make_path(timed=True), 540.0)
         for row in rows:
-            assert row[3] == round(row[3], 1)
+            assert row[3] == round(row[3])
             assert row[3] > 0
+
+    @pytest.mark.parametrize(
+        ("knots", "exported"),
+        [
+            (None, 0.0),
+            (0.0, 0.0),
+            # A known speed below half a knot is no unknown one
+            (0.01, 1.0),
+            (0.4, 1.0),
+            (1.4, 1.0),
+            (1.6, 2.0),
+            (39.4, 39.0),
+            (120.5, 120.0),
+            (167.4, 167.0),
+        ],
+    )
+    def test_whole_knots(self, knots, exported):
+        assert exported_knots(knots) == exported
+
+    def test_a_crawl_keeps_a_speed(self):
+        """Taxiing at walking pace still counts as taxiing, not as unknown."""
+        step_km = 0.3 * 1.852 / 3600 * 60  # a minute at 0.3 kt
+        path = [
+            TrackPoint(50.0 + i * step_km / 111.195, 8.5, 100.0, 60.0 * i)
+            for i in range(5)
+        ]
+        _, rows = process_path_segments(path, 240.0)
+        assert rows
+        assert all(row[3] == 1.0 for row in rows)
 
     def test_relative_time_rounded(self):
         path = [
