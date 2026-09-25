@@ -13,6 +13,7 @@ import {
   TERRAIN_TILE_MAX_ZOOM,
 } from "./lift";
 import { groundLevelsFt } from "./statistics";
+import { smoothFlights, type SmoothedFlights } from "./smoothing";
 
 /**
  * Groundspeed below which a flight is taken to be taxiing, in knots: a
@@ -130,29 +131,37 @@ export function groundProfilesFt(
   sampled: boolean,
   level: number,
 ): { ground: Float64Array; offsets: Float64Array[] | null } {
-  if (!sampled) {
-    return { ground: groundProfileFt(segments, false), offsets: null };
-  }
-  // The levels of a cut are mostly those of the cut before, a level away
+  const ground = levelGroundFt(segments, sampled, level);
+  if (!sampled) return { ground, offsets: null };
+  const offsets = GROUND_LEVELS.map((step) => {
+    const other = levelGroundFt(segments, true, level + step);
+    return ground.map((feet, i) => feet - other[i]!);
+  });
+  return { ground, offsets };
+}
+
+/**
+ * The ground under every segment at the relief level `level` alone (see
+ * groundProfileFt), kept per level where it is the sampled one: the levels
+ * of a cut are mostly those of the cut before, a level away
+ */
+export function levelGroundFt(
+  segments: readonly PathSegment[],
+  sampled: boolean,
+  level: number,
+): Float64Array {
+  if (!sampled) return groundProfileFt(segments, false);
   let byLevel = sampledGround.get(segments);
   if (!byLevel) {
     sampledGround.set(segments, (byLevel = new Map<number, Float64Array>()));
   }
-  const at = (wanted: number): Float64Array => {
-    const clamped = Math.min(Math.max(wanted, 0), RELIEF_MAX_LEVEL);
-    let profile = byLevel.get(clamped);
-    if (!profile) {
-      profile = groundProfileFt(segments, true, clamped);
-      byLevel.set(clamped, profile);
-    }
-    return profile;
-  };
-  const ground = at(level);
-  const offsets = GROUND_LEVELS.map((step) => {
-    const other = at(level + step);
-    return ground.map((feet, i) => feet - other[i]!);
-  });
-  return { ground, offsets };
+  const clamped = Math.min(Math.max(level, 0), RELIEF_MAX_LEVEL);
+  let profile = byLevel.get(clamped);
+  if (!profile) {
+    profile = groundProfileFt(segments, true, clamped);
+    byLevel.set(clamped, profile);
+  }
+  return profile;
 }
 
 /**
@@ -167,12 +176,67 @@ let sampledGround = new WeakMap<
 >();
 
 /**
- * Let go of the ground worked out for every level, as the 3D view goes: a
- * profile is a number per segment, and a dataset of all years kept one for
- * each level it was shown at, for as long as it stayed on the flat map
+ * Let go of the ground worked out for every level, and of the flights
+ * smoothed on it, as the 3D view goes: a profile is a number per segment,
+ * and a dataset of all years kept one for each level it was shown at, for
+ * as long as it stayed on the flat map
  */
 export function releaseGroundProfiles(): void {
   sampledGround = new WeakMap();
+  releaseGroundedFlights();
+}
+
+/**
+ * The flights of a dataset smoothed on their ground (see groundedFlights),
+ * the last worked out, and the ground and level they stand on
+ */
+let grounded: {
+  segments: readonly PathSegment[];
+  level: number;
+  flights: SmoothedFlights;
+} | null = null;
+
+/**
+ * Every flight of `segments` smoothed at its height above its ground
+ * (smoothFlights): the sampled ground of the relief level `level` where
+ * `sampled`, with the ground of the levels around it, and otherwise the
+ * line between its fields, which is the same at every level. The ribbons
+ * of the colour layers are cut from these and the heat cloud is drawn
+ * along them (calculations/heatCloud.ts), so the last is kept for both:
+ * smoothing every flight of all years is most of the work of turning the
+ * 3D view on. It holds a curve point by point, which for all years is tens
+ * of megabytes; the layer manager lets go of it once neither needs it
+ * (releaseGroundedFlights).
+ */
+export function groundedFlights(
+  segments: readonly PathSegment[],
+  sampled: boolean,
+  level: number,
+): SmoothedFlights {
+  const key = sampled ? Math.min(Math.max(level, 0), RELIEF_MAX_LEVEL) : -1;
+  if (grounded?.segments === segments && grounded.level === key) {
+    return grounded.flights;
+  }
+  // Each flight stands on its own fields (groundProfileFt), and on the
+  // relief where it is drawn, as coarse as the level draws it, with the
+  // ground of the levels around it
+  const { ground, offsets } = groundProfilesFt(segments, sampled, level);
+  const flights = smoothFlights(segments, (i) => segments[i]!.altitude_ft, {
+    groundOf: (i) => ground[i]!,
+    offsets,
+  });
+  grounded = { segments, level: key, flights };
+  return flights;
+}
+
+/** Whether flights smoothed by groundedFlights are held, and of what */
+export function heldGroundedFlights(): readonly PathSegment[] | null {
+  return grounded?.segments ?? null;
+}
+
+/** Let go of the flights smoothed by groundedFlights */
+export function releaseGroundedFlights(): void {
+  grounded = null;
 }
 
 /** Metres flown to the end of each of the segments `indices` of a flight */

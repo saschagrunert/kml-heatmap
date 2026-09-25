@@ -5,8 +5,9 @@
  * is an entry point of its own that the app imports the first time it is
  * used (see services/featureLoader.ts). Everything it shares with the app
  * lives in shared.bundle.js, so this bundle adds only replay itself, the
- * relief of the 3D view, which the layer manager fetches as it is first
- * wanted, and the satellite imagery, which its switch fetches. Wrapped has
+ * relief and the heat cloud of the 3D view, which the layer manager
+ * fetches as they are first wanted, and the satellite imagery, which its
+ * switch fetches. Wrapped has
  * a bundle of its own (wrapped.ts).
  *
  * The app is imported for the bundler's sake. esbuild puts every module in
@@ -22,11 +23,13 @@ import "./mapApp";
 import { ReplayManager } from "./ui/replayManager";
 import { followTerrain } from "./ui/terrain";
 import { followSatellite } from "./ui/satellite";
+import { followHeatCloud } from "./ui/heatCloud";
 
 export interface FeatureModule {
   ReplayManager: typeof ReplayManager;
   followTerrain: typeof followTerrain;
   followSatellite: typeof followSatellite;
+  followHeatCloud: typeof followHeatCloud;
 }
 
-export { ReplayManager, followTerrain, followSatellite };
+export { ReplayManager, followTerrain, followSatellite, followHeatCloud };

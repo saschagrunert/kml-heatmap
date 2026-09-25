@@ -147,6 +147,29 @@ describe("layer visibility", () => {
     expect(el("heatmap-btn").getAttribute("aria-pressed")).toBe("true");
   });
 
+  it("steps the flat heatmap aside while the 3D view draws the heat as a cloud, and keeps its switch on", () => {
+    followLayerVisibility(asMapApp(app));
+    expect(visibility(MAP_LAYERS.heat)).toBe("visible");
+
+    app.store.set("heatCloud", true);
+    for (const id of app.heatmapLayer.ids) {
+      expect(visibility(id), id).toBe("none");
+    }
+    expect(el("heatmap-btn").getAttribute("aria-pressed")).toBe("true");
+    expect(app.heatmapVisible).toBe(true);
+
+    // Off and on again: the cloud's to show, not the flat heatmap's
+    app.heatmapVisible = false;
+    expect(el("heatmap-btn").getAttribute("aria-pressed")).toBe("false");
+    app.heatmapVisible = true;
+    expect(visibility(MAP_LAYERS.heat)).toBe("none");
+
+    app.dataManager.showHeatmap.mockClear();
+    app.store.set("heatCloud", false);
+    expect(app.dataManager.showHeatmap).toHaveBeenCalledTimes(1);
+    expect(visibility(MAP_LAYERS.heat)).toBe("visible");
+  });
+
   it("draws a colour layer anew as the replay ends", () => {
     // Its legend shows the range of the replayed flight until then
     app.altitudeVisible = true;

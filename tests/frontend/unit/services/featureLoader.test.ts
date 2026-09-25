@@ -34,6 +34,7 @@ const features = {
   ReplayManager: vi.fn(),
   listFlights: vi.fn(),
   followTerrain: vi.fn(),
+  followHeatCloud: vi.fn(),
 } as unknown as FeatureModule;
 
 const wrapped = {

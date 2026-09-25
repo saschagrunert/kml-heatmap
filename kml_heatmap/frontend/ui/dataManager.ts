@@ -618,7 +618,7 @@ function hideProgressBar(bar: HTMLElement): void {
  * decision, so it lives in the stylesheet with the rest of them; a paint
  * property cannot read `var()`, so the token is read here.
  */
-function dimmedHeatmapOpacity(): number {
+export function dimmedHeatmapOpacity(): number {
   const value = Number.parseFloat(cssVar("--heatmap-dimmed-opacity"));
   return Number.isFinite(value) && value >= 0 && value <= 1
     ? value

@@ -24,6 +24,7 @@ const LAYER_KEYS: readonly (keyof StoreState)[] = [
   "aviationVisible",
   "replayActive",
   "selectedPathIds",
+  "heatCloud",
 ];
 
 /**
@@ -68,8 +69,10 @@ export function altitudeColours(app: MapApp): boolean {
 /**
  * Show every layer the store asks for. The layer flags keep what the user
  * chose, and a running replay hides the heatmap and the colour layers on
- * top of them, so closing it brings back exactly that choice. The lines of
- * a selection show where nothing else draws it. Nothing else sets the
+ * top of them, so closing it brings back exactly that choice. The 3D view
+ * draws the heat as a cloud (ui/heatCloud.ts) in place of the flat heatmap,
+ * which steps aside while the cloud is on the map. The lines of a selection
+ * show where nothing else draws it. Nothing else sets the
  * visibility of these layers, the heatmap's toggle or the altitude scale:
  * a toggle, a restored link and the start and end of a replay only write
  * store keys.
@@ -78,8 +81,9 @@ export function followLayerVisibility(app: MapApp): void {
   const apply = (): void => {
     const replay = app.replayActive;
     const heatmap = app.heatmapVisible && !replay;
-    if (heatmap !== app.heatmapLayer.isVisible()) {
-      if (heatmap) app.dataManager.showHeatmap();
+    const flat = heatmap && !app.heatCloud;
+    if (flat !== app.heatmapLayer.isVisible()) {
+      if (flat) app.dataManager.showHeatmap();
       else app.heatmapLayer.setVisible(false);
     }
     // Which of heatmap and colour layer reads first follows the flags too

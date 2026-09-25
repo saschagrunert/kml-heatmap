@@ -35,7 +35,12 @@ import {
   ribbonId,
 } from "../../../../kml_heatmap/frontend/calculations/lift";
 import { ribbonHeightFt } from "../../../../kml_heatmap/frontend/calculations/ribbonPaint";
-import { groundProfilesFt } from "../../../../kml_heatmap/frontend/calculations/groundProfile";
+import {
+  groundedFlights,
+  groundProfilesFt,
+  heldGroundedFlights,
+} from "../../../../kml_heatmap/frontend/calculations/groundProfile";
+import type { SmoothedFlights } from "../../../../kml_heatmap/frontend/calculations/smoothing";
 import {
   findNearestSegment,
   rankValues,
@@ -66,17 +71,24 @@ vi.mock("maplibre-gl", async (importOriginal) => {
   return { ...actual, Popup, default: { ...actual.default, Popup } };
 });
 
-// The feature bundle, as far as the relief of the 3D view takes it, and
-// with `held` still on its way
-const featureBundle = vi.hoisted(() => ({ available: true, held: false }));
+// The feature bundle, as far as the relief of the 3D view takes it (the
+// heat cloud has tests of its own), and with `held` still on its way
+const featureBundle = vi.hoisted(() => ({
+  available: true,
+  held: false,
+  followHeatCloud: vi.fn(),
+}));
 vi.mock("../../../../kml_heatmap/frontend/services/featureLoader", async () => {
   const { followTerrain } =
     await import("../../../../kml_heatmap/frontend/ui/terrain");
+  const { followHeatCloud } = featureBundle;
   return {
     loadFeatures: vi.fn(() =>
       featureBundle.held
         ? new Promise<never>(() => {})
-        : Promise.resolve(featureBundle.available ? { followTerrain } : null),
+        : Promise.resolve(
+            featureBundle.available ? { followTerrain, followHeatCloud } : null,
+          ),
     ),
   };
 });
@@ -2635,8 +2647,7 @@ describe("LayerManager", () => {
     });
 
     it("lets the smoothed flights go once nothing lifted needs them", async () => {
-      const smoothed = (): unknown =>
-        (layerManager as unknown as { smoothed: unknown }).smoothed;
+      const smoothed = heldGroundedFlights;
       drawClimb();
       expect(smoothed()).not.toBeNull();
 
@@ -2661,6 +2672,16 @@ describe("LayerManager", () => {
       expect(smoothed()).not.toBeNull();
       layerManager.clearLayer("altitude");
       expect(smoothed()).toBeNull();
+
+      // Kept for the heat cloud, which draws along them (ui/heatCloud.ts)
+      drawMode(layerManager, "altitude");
+      expect(smoothed()).not.toBeNull();
+      mockApp.store.batch(() => {
+        mockApp.heatmapVisible = true;
+        mockApp.heatCloud = true;
+      });
+      layerManager.clearLayer("altitude");
+      expect(smoothed()).not.toBeNull();
     });
 
     it("takes a ribbon down by the lift at the map's centre, as MapLibre raises it", async () => {
@@ -2878,6 +2899,7 @@ describe("LayerManager", () => {
       mockApp.map!.layer(RIBBONS).paint["fill-extrusion-opacity"];
 
     it("draws the relief for a 3D view the page opened with (regression)", async () => {
+      featureBundle.followHeatCloud.mockClear();
       // A link or a restored session: 3D and the zoom are set before the
       // manager exists, and the map fires no zoomend for them
       layerManager.destroy();
@@ -2891,6 +2913,10 @@ describe("LayerManager", () => {
 
       expect(mockApp.terrainActive).toBe(true);
       expect(mockApp.map!.getTerrain()).not.toBeNull();
+      // The heat cloud comes with the relief's code, once
+      expect(featureBundle.followHeatCloud).toHaveBeenCalledExactlyOnceWith(
+        mockApp,
+      );
     });
 
     /** The exaggerations of the levels the ribbons were cut for */
@@ -3404,8 +3430,13 @@ describe("LayerManager", () => {
 
     it("keeps the flights smoothed on the globe as a zoom ends on another level", async () => {
       await drawOverHills(11);
-      const smoothed = () =>
-        (layerManager as unknown as { smoothed: unknown }).smoothed;
+      const smoothed = (): SmoothedFlights | null => {
+        const segments = heldGroundedFlights();
+        return (
+          segments &&
+          groundedFlights(segments, mockApp.terrainActive, mockApp.reliefLevel)
+        );
+      };
       mockApp.globeVisible = true;
       const onGlobe = smoothed();
       expect(onGlobe).not.toBeNull();

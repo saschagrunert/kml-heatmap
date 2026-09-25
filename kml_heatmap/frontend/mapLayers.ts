@@ -353,10 +353,12 @@ function addDataLayersTo(map: MapLibreMap): void {
       before,
     );
   }
-  for (const id of PATH_RIBBON_SOURCES) {
-    addRibbons(map, id, hidden, undefined, before);
-  }
-
+  // The replay's trail over the flights, and below every ribbon: on the
+  // relief MapLibre draws the layers that lie on the ground into a texture
+  // of the relief, in one pass as long as no other layer comes between
+  // them, and the relief once more for every other run of them. The 3D
+  // view draws the ribbons and the heat cloud (ui/heatCloud.ts) above them
+  // all in any case.
   map.addSource(MAP_SOURCES.replayTrail, {
     type: "geojson",
     data: emptyGeoJson(),
@@ -375,6 +377,10 @@ function addDataLayersTo(map: MapLibreMap): void {
     },
     before,
   );
+  for (const id of PATH_RIBBON_SOURCES) {
+    addRibbons(map, id, hidden, undefined, before);
+  }
+
   // In the 3D view the trail is written here instead (see ReplayRenderer)
   addRibbons(
     map,
