@@ -11,8 +11,10 @@ import { AUTO_ZOOM_MIN } from "../utils/constants";
 import { isBehindGlobe, toLngLat, unwrapLng } from "../utils/mapHelpers";
 import {
   airplaneLiftPx,
+  heightAtZoomFt,
   liftExaggeration,
   ribbonWidthZoom,
+  type GroundedHeight,
 } from "../calculations/lift";
 import { prefersReducedMotion } from "../utils/motion";
 import { ChaseCamera, dampStep, type SavedCamera } from "./chaseCamera";
@@ -287,14 +289,14 @@ class UserMapMovement {
 /**
  * Where the airplane is and where it heads, for the turns and the lift
  * that follow the map. `heightFt` is its height above the flight's
- * ground, null while the trail is flat.
+ * ground, null while the trail is flat, with the ground of the relief
+ * levels around there (see ReplayState.airplaneHeight).
  */
-interface AirplaneHeading {
+interface AirplaneHeading extends GroundedHeight {
   marker: ReplayAirplane;
   /** Where the airplane is on its flight's curve (see replayPoint) */
   position: [number, number];
   track: number;
-  heightFt: number | null;
   /** The replay's, whose trail's ribbons are as wide as the zoom asks */
   state: ReplayState;
 }
@@ -400,7 +402,7 @@ export class ReplayCamera {
   private turnIcon(): void {
     const map = this.app.map;
     if (!map || !this.heading) return;
-    const { marker, track, heightFt, state, position } = this.heading;
+    const { marker, track, state, position } = this.heading;
     const [lat, lon] = marker.getLatLng();
     if (lat !== position[0] || lon !== position[1]) marker.setLatLng(position);
     const chase = this.chase;
@@ -412,12 +414,13 @@ export class ReplayCamera {
       marker.setLift(-y, x);
     } else {
       // Exaggerated as the trail is drawn, which keeps its level until a
-      // zoom ends
+      // zoom ends, over the relief the map draws under it at its zoom, as
+      // the trail stands on it (see ribbonHeights)
       marker.setLift(
         airplaneLiftPx(
           map,
           map.getCenter().lat,
-          heightFt,
+          heightAtZoomFt(this.heading, map.getZoom()),
           liftExaggeration(this.app.reliefLevel),
         ),
       );
@@ -568,7 +571,7 @@ export class ReplayCamera {
     const lift = airplaneLiftPx(
       map,
       map.getCenter().lat,
-      state.airplaneHeightFt,
+      heightAtZoomFt(state.airplaneHeight(), map.getZoom()),
       liftExaggeration(this.app.reliefLevel),
     );
     const point = { x: ground.x, y: ground.y - lift };

@@ -79,12 +79,15 @@ import {
 } from "../calculations/statistics";
 import { loadFeatures } from "../services/featureLoader";
 import {
-  groundProfileFt,
+  followsLevel,
+  groundProfilesFt,
   isLiftedAt,
   liftExaggeration,
   liftOffsetPx,
   reliefLevel,
+  ribbonHeightFt,
   ribbonOf,
+  ribbonProperties,
   ribbonWidthZoom,
   smoothFlights,
   type SmoothedFlights,
@@ -343,6 +346,11 @@ export class LayerManager implements PathHitTester {
    * them on their new ground (ui/terrain.ts), 1 otherwise
    */
   ribbonsShown = 1;
+  /**
+   * How often the relief level has changed, the visit of a level a cut of
+   * the ribbons belongs to, which their id tells apart (see ribbonId)
+   */
+  ribbonEpoch = 0;
 
   private readonly handleMouseMove = (e: MapMouseEvent): void => {
     // The overview of the Wrapped dialog is this map, but there to be
@@ -370,9 +378,9 @@ export class LayerManager implements PathHitTester {
   private readonly handleZoomEnd = (): void => {
     const map = this.listeningTo;
     if (!map || !this.app.threeDVisible) return;
-    // Onto or off the relief, or onto another level of it, the flights are
-    // cut anew on their other ground, once its code has arrived (see
-    // syncTerrain)
+    // Onto or off the relief the flights are cut anew on their other
+    // ground, once its code has arrived (see syncTerrain); onto another
+    // level of it, as wide as the new level asks, below
     const changed = this.syncTerrain();
     if (changed === null) return;
     if (changed || this.cutAwaited) this.redrawVisibleModes();
@@ -658,14 +666,20 @@ export class LayerManager implements PathHitTester {
       // taken down by as much before the segment and the distance to it
       // are looked for (see liftOffsetPx, which scales by the centre).
       // Over the relief that ground is raised too, but `project` and
-      // `unproject` meet the relief themselves. The ribbon's exaggeration
-      // is its own, which a zoom across a level leaves until it ends
-      const { h, e } = feature.properties as Partial<PathRunProperties>;
+      // `unproject` meet the relief themselves, of the level of the map's
+      // zoom, as the ribbon's own height is taken. The exaggeration is the
+      // one the map is drawn for, which every ribbon has (see ribbonHeights)
+      const properties = feature.properties as Partial<PathRunProperties>;
       const ribbon =
-        h !== undefined &&
-        e !== undefined &&
-        ribbonLayers.has(feature.layer.id);
-      const lift = ribbon ? liftOffsetPx(map, map.getCenter().lat, h, e) : 0;
+        properties.h !== undefined && ribbonLayers.has(feature.layer.id);
+      const lift = ribbon
+        ? liftOffsetPx(
+            map,
+            map.getCenter().lat,
+            ribbonHeightFt(properties, map.getZoom()),
+            liftExaggeration(this.app.reliefLevel),
+          )
+        : 0;
       const ground = lift ? map.unproject([point.x, point.y + lift]) : pointer;
       // A line is drawn along its flight's curve, and its points belong to
       // the segment they lie on (see calculations/curves.ts)
@@ -1054,7 +1068,7 @@ export class LayerManager implements PathHitTester {
     const smoothed = lifted ? this.smoothedFlights(segments) : null;
     const widthZoom = ribbonWidthZoom(map.getZoom());
     table.widthZoom = threeD ? widthZoom : null;
-    const e = liftExaggeration(this.app.reliefLevel);
+    const level = this.app.reliefLevel;
     const features: GeoJSON.Feature<
       GeoJSON.LineString | GeoJSON.MultiPolygon,
       PathRunProperties
@@ -1083,7 +1097,10 @@ export class LayerManager implements PathHitTester {
       for (const piece of ribbonOf(smoothed, run.start, run.end, widthZoom)) {
         features.push({
           type: "Feature",
-          properties: { ...properties, h: piece.h, e },
+          properties: {
+            ...properties,
+            ...ribbonProperties(piece, level, this.ribbonEpoch),
+          },
           geometry: piece.geometry,
         });
       }
@@ -1244,9 +1261,9 @@ export class LayerManager implements PathHitTester {
   private smoothedFlights(segments: PathSegment[]): SmoothedFlights {
     if (this.smoothed?.segments !== segments) {
       // Each flight stands on its own fields (groundProfileFt), and on the
-      // relief where it is drawn, as coarse as the level draws it (let go
-      // of as either changes)
-      const ground = groundProfileFt(
+      // relief where it is drawn, as coarse as the level draws it, with the
+      // ground of the levels around it (let go of as either changes)
+      const { ground, offsets } = groundProfilesFt(
         segments,
         this.app.terrainActive,
         this.app.reliefLevel,
@@ -1255,6 +1272,7 @@ export class LayerManager implements PathHitTester {
         segments,
         flights: smoothFlights(segments, (i) => segments[i]!.altitude_ft ?? 0, {
           groundOf: (i) => ground[i]!,
+          offsets,
         }),
       };
     }
@@ -1266,17 +1284,24 @@ export class LayerManager implements PathHitTester {
    * is drawn for (reliefLevel): its exaggeration and how coarse its ground
    * is, which the heights of the flights and the ground they are cut on
    * follow. The level is the one the ribbons are cut for, and changes only
-   * as a zoom ends: the map switches the relief in the same task as the
-   * ground changes, and the flights stay on it while the zoom goes on.
-   * Returns whether either changed, which the caller answers by cutting
-   * the flights anew. The globe leaves the relief out (MapLibre 6.10
-   * breaks the ribbons up on it) and only shades it (reliefShaded), over the flat ground the
-   * ribbons stand on there. Its code comes with the feature bundle, which
-   * is fetched the first time either is wanted: until it has arrived the
-   * relief is not drawn and the cut is left to its arrival (cutAwaited),
-   * or to its failure, after which the flights stay on the flat map. Cut
-   * on the flat ground first, they would be cut twice in a row, and the
-   * map's worker hold both cuts at once.
+   * as a zoom ends: the map switches the exaggeration of the relief and of
+   * the ribbons in one frame (see ui/terrain.ts), and a ribbon stands on
+   * the relief of every level around the one it was cut for (see
+   * ribbonHeights), so the flights stay on it while the zoom goes on and
+   * until they are cut for the new level, as wide as it asks. Returns
+   * whether the relief came or went, which the caller answers by cutting
+   * the flights anew on their other ground; a level that moved lets go of
+   * the smoothed flights, for the cut at the end of the zoom, and of the
+   * ribbons that cannot stay on the relief until then (see followsLevel)
+   * or are out of sight. The globe
+   * leaves the relief out (MapLibre 6.10 breaks the ribbons up on it) and
+   * only shades it (reliefShaded), over the flat ground the ribbons stand
+   * on there. Its code comes with the feature bundle, which is fetched the
+   * first time either is wanted: until it has arrived the relief is not
+   * drawn and the cut is left to its arrival (cutAwaited), or to its
+   * failure, after which the flights stay on the flat map. Cut on the flat
+   * ground first, they would be cut twice in a row, and the map's worker
+   * hold both cuts at once.
    */
   private syncTerrain(): boolean | null {
     const map = this.listeningTo;
@@ -1299,34 +1324,48 @@ export class LayerManager implements PathHitTester {
       if (wanted) {
         // Nothing follows the level before the code has arrived, but a cut
         // of the flights meanwhile, on the flat map, is lifted by it
+        if (level !== this.app.reliefLevel) this.ribbonEpoch++;
         this.app.reliefLevel = level;
         this.cutAwaited = true;
         return null;
       }
     }
-    const moved = shaded && level !== this.app.reliefLevel;
-    if (wanted === this.app.terrainActive && !moved) return false;
+    const was = this.app.reliefLevel;
+    const moved = shaded && level !== was;
+    const switched = wanted !== this.app.terrainActive;
+    if (!switched && !moved) return false;
+    if (level !== was) this.ribbonEpoch++;
     // The relief goes before it would be built for the new level
     if (!wanted) this.app.terrainActive = false;
     this.app.reliefLevel = level;
     this.app.terrainActive = wanted;
     this.smoothed = null;
-    this.releaseRibbons();
-    return true;
+    if (switched || !followsLevel(was, level)) {
+      // Out of sight until the new cut has landed (ui/terrain.ts)
+      this.releaseRibbons(false);
+    } else if (moved) {
+      // A mode out of sight is cut again as it shows, and would show the
+      // cut of before until then, on the ground of another level
+      this.releaseRibbons(true);
+    }
+    return switched;
   }
 
   /**
    * Empty the ribbons about to be cut on their other ground, before they
-   * are: the map's worker lets go of the tiles of the old cut before it
-   * takes in the new one, instead of holding both, and the page of its copy
-   * of the old before the new is built. Nobody sees them go: the relief's
-   * code hides the ribbons as the ground changes, until the new cut has
-   * been drawn (ui/terrain.ts). A mode that is hidden is drawn anew as it
-   * shows (drawsNow).
+   * are, or those of the modes out of sight only (`hiddenOnly`): the map's
+   * worker lets go of the tiles of the old cut before it takes in the new
+   * one, instead of holding both, and the page of its copy of the old
+   * before the new is built. Nobody sees them go: the relief's code hides
+   * the ribbons as the relief comes or goes, or the level changes to one
+   * they do not follow (see followsLevel), until the new cut has been drawn
+   * (ui/terrain.ts). A mode that is hidden is drawn anew as it shows
+   * (drawsNow).
    */
-  private releaseRibbons(): void {
+  private releaseRibbons(hiddenOnly: boolean): void {
     const map = this.readyMap();
     for (const mode of MODES) {
+      if (hiddenOnly && this.drawsNow(mode)) continue;
       const ribbons = Object.values(this.getConfig(mode).ribbons);
       for (const { written } of Object.values(this.state[mode].tables)) {
         if (written && ribbons.includes(written)) {

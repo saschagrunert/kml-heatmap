@@ -22,6 +22,7 @@ import {
   liftExaggeration,
   liftFt,
   liftOffsetPx,
+  ribbonId,
 } from "../../../../kml_heatmap/frontend/calculations/lift";
 import { ReplayState } from "../../../../kml_heatmap/frontend/ui/replayState";
 import type { ReplayManager } from "../../../../kml_heatmap/frontend/ui/replayManager";
@@ -437,7 +438,7 @@ describe("trail runs", () => {
     const at = replayFeature.replayPoint(state.smoothed, 1, 0.3)!;
     state.trailTip = { index: 1, ...at };
 
-    const line = trailFeatureCollection(state, 13, 2).features[0]!.geometry
+    const line = trailFeatureCollection(state, 13, 11).features[0]!.geometry
       .coordinates as [number, number][];
 
     // Not the end of the segment, 70 % of it ahead of the airplane
@@ -451,7 +452,7 @@ describe("trail runs", () => {
     const state = stateWith(makeChain([0, 10000]));
     for (let i = 0; i < 2; i++) appendTrailSegment(state, i, false);
 
-    const data = trailFeatureCollection(state, 13, 2);
+    const data = trailFeatureCollection(state, 13, 11);
 
     expect(data.type).toBe("FeatureCollection");
     expect(data.features).toHaveLength(2);
@@ -485,14 +486,15 @@ describe("trail runs in the 3D view", () => {
     state.lifted = true;
     for (let i = 0; i < 2; i++) appendTrailSegment(state, i, false);
 
-    const data = trailFeatureCollection(state, 13, 2);
+    const data = trailFeatureCollection(state, 13, 11);
 
     // The lines' source is another one
     expect(data.features.every((f) => f.geometry.type === "MultiPolygon")).toBe(
       true,
     );
-    // Exaggerated as the relief under them, as the flights' ribbons are
-    expect(data.features.every((f) => f.properties.e === 2)).toBe(true);
+    // Cut for the level of the relief under them, and exaggerated as it
+    // is, as the flights' ribbons are
+    expect(data.features.every((f) => f.properties.l === 11)).toBe(true);
     const heights = data.features.map((ribbon) => ribbon.properties.h!);
     expect(heights[0]).toBe(0);
     expect(heights).toEqual([...heights].sort((a, b) => a - b));
@@ -506,7 +508,7 @@ describe("trail runs in the 3D view", () => {
     for (let i = 0; i < 2; i++) appendTrailSegment(state, i, false);
 
     expect(
-      trailFeatureCollection(state, 13, 2).features.every(
+      trailFeatureCollection(state, 13, 11).features.every(
         (feature) => feature.geometry.type === "LineString",
       ),
     ).toBe(true);
@@ -525,11 +527,11 @@ describe("trail runs in the 3D view", () => {
     const geometryOf = (data: ReturnType<typeof trailFeatureCollection>) =>
       data.features.map((feature) => feature.geometry);
 
-    const before = geometryOf(trailFeatureCollection(state, 13, 2));
+    const before = geometryOf(trailFeatureCollection(state, 13, 11));
     const cutFirst = state.trailPieces.get(first!)!.pieces;
     const cutSecond = state.trailPieces.get(second!)!.pieces;
     appendTrailSegment(state, 3, false);
-    const after = geometryOf(trailFeatureCollection(state, 13, 2));
+    const after = geometryOf(trailFeatureCollection(state, 13, 11));
 
     // The first run is the same, down to its geometry; the second grew
     expect(state.trailPieces.get(first!)!.pieces).toBe(cutFirst);
@@ -537,7 +539,7 @@ describe("trail runs in the 3D view", () => {
     expect(after[0]).toBe(before[0]);
 
     // Another zoom level, and every run is cut again, as wide as it asks
-    trailFeatureCollection(state, 9, 2);
+    trailFeatureCollection(state, 9, 9);
     expect(state.trailPieces.get(first!)!.pieces).not.toBe(cutFirst);
     expect(state.trailPieces.get(first!)!.widthZoom).toBe(9);
   });
@@ -554,7 +556,7 @@ describe("trail runs in the 3D view", () => {
     const at = replayFeature.replayPoint(state.smoothed!, 1, 1 / 3)!;
     state.trailTip = { index: 1, ...at };
 
-    const pieces = trailFeatureCollection(state, 13, 2).features;
+    const pieces = trailFeatureCollection(state, 13, 11).features;
     // The end of the last quad is the airplane, between its two edges
     const quads = pieces[pieces.length - 1]!.geometry
       .coordinates as number[][][][];
@@ -569,8 +571,46 @@ describe("trail runs in the 3D view", () => {
       index: 1,
       ...replayFeature.replayPoint(state.smoothed!, 1, 2 / 3)!,
     };
-    trailFeatureCollection(state, 13, 2);
+    trailFeatureCollection(state, 13, 11);
     expect(state.trailPieces.get(run!)).toBe(cut);
+  });
+
+  it("gives the ribbons the ground of the levels around, up to the airplane", () => {
+    const segments = makeChain([3000, 3000]);
+    const state = new ReplayState();
+    state.segments = segments;
+    // Over ground 80 ft lower a level further out, 320 ft two levels out,
+    // in steps the offsets of zoom 8 are rounded to
+    const none = new Float64Array(segments.length);
+    state.smoothed = replayFeature.replayCurve(
+      segments,
+      (i) => segments[i]!.altitude_ft ?? 0,
+      () => 1000,
+      [
+        Float64Array.from(segments, () => 320),
+        Float64Array.from(segments, () => 80),
+        none,
+      ],
+    );
+    state.lifted = true;
+    for (let i = 0; i < 2; i++) appendTrailSegment(state, i, false);
+    state.trailTip = {
+      index: 1,
+      ...replayFeature.replayPoint(state.smoothed, 1, 1 / 2)!,
+    };
+
+    const { features } = trailFeatureCollection(state, 8, 8);
+
+    expect(features.length).toBeGreaterThan(0);
+    for (const { properties } of features) {
+      expect(properties).toMatchObject({ l: 8, k: 8, "o-2": 320, "o-1": 80 });
+      expect(properties["o1"]).toBeUndefined();
+    }
+    // Cut in a later visit of the level, the map knows them by its id
+    const later = trailFeatureCollection(state, 8, 8, 2).features;
+    expect(new Set(later.map(({ properties }) => properties.k))).toEqual(
+      new Set([ribbonId(8, 2)]),
+    );
   });
 });
 
@@ -800,6 +840,7 @@ describe("ReplayRenderer", () => {
     airspeedVisible: boolean;
     replayActive: boolean;
     reliefLevel: number;
+    layerManager: { ribbonEpoch: number };
   };
   let mockReplayManager: { state: ReplayState };
   let frames: FrameRequestCallback[];
@@ -863,6 +904,7 @@ describe("ReplayRenderer", () => {
       airspeedVisible: false,
       replayActive: false,
       reliefLevel: 13,
+      layerManager: { ribbonEpoch: 0 },
     };
 
     mockReplayManager = {
@@ -1160,7 +1202,7 @@ describe("ReplayRenderer", () => {
       runFrame();
 
       expect(trailSource().setData).toHaveBeenCalledTimes(1);
-      expect(trailSource().data).toEqual(trailFeatureCollection(state, 13, 2));
+      expect(trailSource().data).toEqual(trailFeatureCollection(state, 13, 11));
       expect(
         (trailSource().data as { features: unknown[] }).features,
       ).toHaveLength(2);
@@ -1464,6 +1506,33 @@ describe("ReplayRenderer", () => {
           0,
         );
         expect(lift()).toBeGreaterThan(0);
+      });
+
+      it("lifts it above the relief of the map's zoom, as its trail stands on it", () => {
+        const state = mockReplayManager.state;
+        // Cut for level 10, over ground 200 ft lower at the next level in
+        state.groundLevel = 10;
+        const lower = Float64Array.from(state.segments, () => 200);
+        const none = new Float64Array(state.segments.length);
+        state.smoothed = replayFeature.replayCurve(
+          state.segments,
+          (i) => state.segments[i]!.altitude_ft ?? 0,
+          () => 1000,
+          [none, none, lower],
+        );
+        map.jumpTo({ center: [8, 20], zoom: 11.5, pitch: 60 });
+
+        callUpdateDisplay();
+
+        expect(lift()).toBeCloseTo(
+          liftOffsetPx(
+            map as unknown as MapLibreMap,
+            20,
+            700,
+            liftExaggeration(mockApp.reliefLevel),
+          ),
+          0,
+        );
       });
 
       it("lifts it zoomed out too, where the replay starts", () => {

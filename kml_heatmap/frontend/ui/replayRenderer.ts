@@ -46,11 +46,12 @@ import { getColorForAirspeed, getColorForAltitude } from "../utils/colors";
 import { calculateBearing } from "../utils/geometry";
 import {
   isLiftedAt,
-  liftExaggeration,
   ribbonOf,
   ribbonPieces,
+  ribbonProperties,
   ribbonWidthZoom,
   type RibbonPiece,
+  type RibbonProperties,
 } from "../calculations/lift";
 import { appendCurve } from "../calculations/curves";
 import { replayPoint } from "../features/replay";
@@ -262,10 +263,8 @@ export function truncateTrail(state: ReplayState, time: number): void {
 }
 
 /** What a feature of the trail carries: its colour, and a ribbon its height */
-interface TrailProperties {
+interface TrailProperties extends Partial<RibbonProperties> {
   color: string;
-  h?: number;
-  e?: number;
 }
 
 type TrailFeature = Feature<LineString | MultiPolygon, TrailProperties>;
@@ -286,13 +285,25 @@ function tipPieces(
   const heights = chain.heights.slice(from, tip.point + 1);
   points.push(tip.position);
   heights.push(tip.heightFt);
-  return ribbonPieces(points, heights, widthZoom, chain.points[from - 1]);
+  const offsets = chain.offsets?.map((level, k) => [
+    ...level.slice(from, tip.point + 1),
+    tip.offsetsFt?.[k] ?? level[tip.point]!,
+  ]);
+  return ribbonPieces(
+    points,
+    heights,
+    widthZoom,
+    chain.points[from - 1],
+    undefined,
+    offsets,
+  );
 }
 
 /**
  * The trail as the data of its source: one line per colour run, or in the
- * 3D view (`state.lifted`) the runs as ribbons at their height, as wide as
- * `widthZoom` asks, for the ribbons' source; zoomed in as far as
+ * 3D view (`state.lifted`) the runs as ribbons at their height, cut for
+ * the relief level `level` in its `epoch`-th visit (see ribbonId) and as
+ * wide as `widthZoom` asks, for the ribbons' source; zoomed in as far as
  * LIFT_MAX_ZOOM, the lines again. Both run along the flight's curve
  * (`state.smoothed`), and end at the airplane (`state.trailTip`), part way
  * along the segment it flies. Only a run that has grown or changed its
@@ -306,7 +317,8 @@ export function trailFeatureCollection(
     "trailRuns" | "smoothed" | "trailPieces" | "lifted" | "trailTip"
   >,
   widthZoom: number,
-  exaggeration: number,
+  level: number,
+  epoch = 0,
 ): FeatureCollection<LineString | MultiPolygon, TrailProperties> {
   const curve = state.smoothed;
   const lifted = state.lifted && isLiftedAt(widthZoom) ? curve : null;
@@ -359,7 +371,10 @@ export function trailFeatureCollection(
         : cut.pieces;
       return pieces.map((piece) => ({
         type: "Feature" as const,
-        properties: { color: run.color, h: piece.h, e: exaggeration },
+        properties: {
+          color: run.color,
+          ...ribbonProperties(piece, level, epoch),
+        },
         geometry: piece.geometry,
       }));
     }),
@@ -701,7 +716,8 @@ export class ReplayRenderer {
         trailFeatureCollection(
           state,
           widthZoom,
-          liftExaggeration(this.app.reliefLevel),
+          this.app.reliefLevel,
+          this.app.layerManager.ribbonEpoch,
         ),
       );
   }
@@ -823,6 +839,7 @@ export class ReplayRenderer {
       lon1 + (lon2 - lon1) * fraction,
     ];
     state.airplaneHeightFt = state.lifted ? (onCurve?.heightFt ?? null) : null;
+    state.airplaneOffsetsFt = onCurve?.offsetsFt;
     // Nothing is drawn at time 0 (see drawNewSegments)
     this.setTrailTip(
       state,
@@ -832,6 +849,7 @@ export class ReplayRenderer {
             point: onCurve.point,
             position: currentPos,
             heightFt: onCurve.heightFt,
+            offsetsFt: onCurve.offsetsFt,
           }
         : null,
     );
@@ -866,7 +884,7 @@ export class ReplayRenderer {
       marker,
       position: currentPos,
       track: bearing,
-      heightFt: state.airplaneHeightFt,
+      ...state.airplaneHeight(),
       state,
     };
     if (

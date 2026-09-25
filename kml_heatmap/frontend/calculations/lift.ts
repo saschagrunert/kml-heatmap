@@ -66,8 +66,38 @@ export const TERRAIN_TILE_MAX_ZOOM = 10;
  * nor the ground changes any more.
  */
 export function reliefLevel(zoom: number): number {
-  return Math.min(ribbonWidthZoom(zoom), TERRAIN_TILE_MAX_ZOOM + 1);
+  return Math.min(Math.max(ribbonWidthZoom(zoom), 0), RELIEF_MAX_LEVEL);
 }
+
+/** The last relief level, see reliefLevel */
+export const RELIEF_MAX_LEVEL = TERRAIN_TILE_MAX_ZOOM + 1;
+
+/**
+ * The relief levels, counted from the one the flights are cut for, whose
+ * ground a ribbon carries as well. MapLibre lifts a ribbon by the relief of
+ * the level of the tile it is drawn in, and not every tile is of the level
+ * the flights are cut for: while a zoom goes on, the tiles of the next
+ * level in or out take over before the zoom ends and the flights are cut
+ * for it, and in the distance of a tilted view the tiles are a level or two
+ * further out. The paint takes the ground of the tile's own level (see
+ * ribbonHeights), so a ribbon stands on the relief under it at every one of
+ * these; a level further away takes the ground of the nearest of them.
+ */
+export const GROUND_LEVELS: readonly number[] = [-2, -1, 1];
+
+/**
+ * The feature property that carries the ground of the level `step` levels
+ * from the one a ribbon was cut for (see GROUND_LEVELS)
+ */
+function groundKey(step: number): `o${number}` {
+  return `o${step}`;
+}
+
+/**
+ * The finest step the ground offsets are rounded to, in feet: the ground
+ * is written in steps of 10 ft (GROUND_STEP in segment_codec.py)
+ */
+const GROUND_OFFSET_STEP_FT = 10;
 
 /**
  * How much the relief and the heights of the flights are exaggerated, by
@@ -94,6 +124,47 @@ const EXAGGERATION_BY_LEVEL: readonly number[] = [
 export function liftExaggeration(level: number): number {
   const last = EXAGGERATION_BY_LEVEL.length - 1;
   return EXAGGERATION_BY_LEVEL[Math.min(Math.max(level, 0), last)]!;
+}
+
+/**
+ * Whether the ribbons cut for the relief level `level` are known to the map
+ * by an id (see ribbonId): those of a level next to one with another
+ * exaggeration, which a zoom across one level switches them to (see
+ * ribbonHeights). Every feature the map knows so costs the map a few bytes
+ * in every tile it is in, and the flights zoomed out, the most of them, are
+ * left out.
+ */
+export function switchesExaggeration(level: number): boolean {
+  const own = liftExaggeration(level);
+  return (
+    liftExaggeration(level - 1) !== own || liftExaggeration(level + 1) !== own
+  );
+}
+
+/**
+ * Whether the ribbons cut for the relief level `cut` stay on the relief the
+ * map draws for the level `level` until they are cut for it: with the same
+ * exaggeration, or one they switch to (switchesExaggeration). Their ground
+ * is that of the nearest level they carry (see GROUND_LEVELS).
+ */
+export function followsLevel(cut: number, level: number): boolean {
+  return (
+    liftExaggeration(cut) === liftExaggeration(level) ||
+    switchesExaggeration(cut)
+  );
+}
+
+/**
+ * The id the map knows the ribbons cut for the relief level `level` by, in
+ * the `epoch`-th visit of a level (LayerManager.ribbonEpoch): a feature
+ * state for it reaches all of them, and them only (see ui/terrain.ts).
+ * MapLibre keeps an entry for every id it was given a state for, and works
+ * out the paint of every feature of such an id anew in each tile it loads,
+ * which for a whole cut takes seconds on a slow machine; a cut of a later
+ * visit has an id no state has been given.
+ */
+export function ribbonId(level: number, epoch: number): number {
+  return level + (RELIEF_MAX_LEVEL + 1) * epoch;
 }
 
 /** Whether the 3D view lifts the flights at the map zoom `zoom` */
@@ -147,6 +218,27 @@ const BAND_STOPS: readonly (readonly [zoom: number, bandM: number])[] = [
 
 const METRES_PER_DEGREE = 111320;
 const DEGREES_TO_RADIANS = Math.PI / 180;
+
+/**
+ * The step the ground offsets of ribbons cut at the zoom `widthZoom` (see
+ * ribbonWidthZoom) are rounded to, in feet: GROUND_OFFSET_STEP_FT, doubled
+ * as long as it stays at most a quarter of a pixel in the middle of the
+ * level, exaggerated as the level is. Rounding moves a ribbon by an eighth
+ * of a pixel at most then, a quarter on the tiles of the next level in, and
+ * over flat land most offsets round to nothing and are left out of the
+ * features (see ribbonProperties), of which the map's worker holds hundreds
+ * of thousands.
+ */
+export function groundOffsetStepFt(widthZoom: number): number {
+  const quarterPxFt =
+    metresPerPixel(widthZoom + 0.5) /
+    4 /
+    liftExaggeration(reliefLevel(widthZoom)) /
+    FEET_TO_METERS;
+  let step = GROUND_OFFSET_STEP_FT;
+  while (step * 2 <= quarterPxFt) step *= 2;
+  return step;
+}
 
 /** A segment's altitude as feet above its flight's ground, never below */
 export function liftFt(altitudeFt: number, groundFt: number): number {
@@ -250,6 +342,132 @@ export function groundProfileFt(
     });
   }
   return ground;
+}
+
+/**
+ * The ground under every segment at the relief level `level` (see
+ * groundProfileFt), and the ground of each of the levels around it that a
+ * ribbon carries (GROUND_LEVELS): as the feet to add to a height above the
+ * one to have it above the other, in the order of GROUND_LEVELS. They are
+ * null without the sampled ground: the line between the fields is the same
+ * at every level.
+ */
+export function groundProfilesFt(
+  segments: readonly PathSegment[],
+  sampled: boolean,
+  level: number,
+): { ground: Float64Array; offsets: Float64Array[] | null } {
+  if (!sampled) {
+    return { ground: groundProfileFt(segments, false), offsets: null };
+  }
+  // The levels of a cut are mostly those of the cut before, a level away
+  let byLevel = sampledGround.get(segments);
+  if (!byLevel) {
+    sampledGround.set(segments, (byLevel = new Map<number, Float64Array>()));
+  }
+  const at = (wanted: number): Float64Array => {
+    const clamped = Math.min(Math.max(wanted, 0), RELIEF_MAX_LEVEL);
+    let profile = byLevel.get(clamped);
+    if (!profile) {
+      profile = groundProfileFt(segments, true, clamped);
+      byLevel.set(clamped, profile);
+    }
+    return profile;
+  };
+  const ground = at(level);
+  const offsets = GROUND_LEVELS.map((step) => {
+    const other = at(level + step);
+    return ground.map((feet, i) => feet - other[i]!);
+  });
+  return { ground, offsets };
+}
+
+/**
+ * The sampled ground of the segments of a dataset by relief level, as
+ * groundProfilesFt has worked it out: a dataset does not change while it
+ * is on the map, and goes with it
+ */
+const sampledGround = new WeakMap<
+  readonly PathSegment[],
+  Map<number, Float64Array>
+>();
+
+/**
+ * The levels whose ground a ribbon stands on, counted from the one it was
+ * cut for, in order: the ones of GROUND_LEVELS, and that one itself, whose
+ * ground is the one its height is above
+ */
+const STANDING_LEVELS = [...GROUND_LEVELS, 0].sort((a, b) => a - b);
+
+/**
+ * Which level's ground stands for the level `step` levels from the one cut
+ * for: the first of STANDING_LEVELS at or above it, the last above them
+ * all. The paint picks them alike (see ribbonHeights).
+ */
+function standingLevel(step: number): number {
+  return (
+    STANDING_LEVELS.find((level) => level >= step) ??
+    STANDING_LEVELS[STANDING_LEVELS.length - 1]!
+  );
+}
+
+/**
+ * Of the ground offsets `offsets` of a point cut for the relief level
+ * `cutLevel` (see GROUND_LEVELS), the one of the relief under a tile of the
+ * map zoom `zoom`
+ */
+export function groundOffsetFt(
+  offsets: ArrayLike<number> | undefined,
+  cutLevel: number,
+  zoom: number,
+): number {
+  const index = GROUND_LEVELS.indexOf(
+    standingLevel(reliefLevel(zoom) - cutLevel),
+  );
+  return offsets && index >= 0 ? offsets[index]! : 0;
+}
+
+/**
+ * The feet above the relief under a tile of the map zoom `zoom` of a point
+ * `heightFt` above the ground of the relief level `cutLevel`, with the
+ * ground offsets there (see groundOffsetFt), never below
+ */
+export function heightOnReliefFt(
+  heightFt: number,
+  offsets: ArrayLike<number> | undefined,
+  cutLevel: number,
+  zoom: number,
+): number {
+  return Math.max(heightFt + groundOffsetFt(offsets, cutLevel, zoom), 0);
+}
+
+/**
+ * A point's feet above the ground of the relief level `level`, and the
+ * ground of the levels around it there (see groundOffsetFt); a height of
+ * null is none, where the flights are not lifted
+ */
+export interface GroundedHeight {
+  heightFt: number | null;
+  offsetsFt?: readonly number[] | undefined;
+  level?: number | undefined;
+}
+
+/**
+ * The feet above the relief under a tile of the map zoom `zoom` of a point
+ * lifted as `point` says (see heightOnReliefFt), or null for none
+ */
+export function heightAtZoomFt(
+  point: GroundedHeight,
+  zoom: number,
+): number | null {
+  return point.heightFt === null
+    ? null
+    : heightOnReliefFt(
+        point.heightFt,
+        point.offsetsFt,
+        point.level ?? reliefLevel(zoom),
+        zoom,
+      );
 }
 
 /** Metres flown to the end of each of the segments `indices` of a flight */
@@ -448,6 +666,11 @@ export interface SmoothedLine {
   heights: number[];
   /** Where each given point is in `points` */
   vertex: number[];
+  /**
+   * With the ground of other levels (see SmoothOptions): the offsets of
+   * each at every point, by level in the order of GROUND_LEVELS
+   */
+  offsets?: number[][];
 }
 
 /** Degrees the direction turns at `b`, from `a` over `b` to `c` */
@@ -526,6 +749,12 @@ export interface SmoothOptions {
    * and the ground is taken off them after they are smoothed
    */
   ground?: readonly number[] | undefined;
+  /**
+   * The ground of the levels around the one of `ground` at each point, as
+   * offsets to it (see groundProfilesFt), by level: they run along the
+   * curve as the ground does
+   */
+  offsets?: readonly (readonly number[])[] | undefined;
 }
 
 /**
@@ -545,11 +774,13 @@ export interface SmoothOptions {
 export function smoothLine(
   points: readonly Coordinate[],
   heights: readonly number[],
-  { turnStepDeg = SMOOTH_TURN_DEG, ground }: SmoothOptions = {},
+  { turnStepDeg = SMOOTH_TURN_DEG, ground, offsets }: SmoothOptions = {},
 ): SmoothedLine {
   if (points.length === 0) return { points: [], heights: [], vertex: [] };
-  // The ground at every point of the curve, straight between the given ones
+  // The ground at every point of the curve, straight between the given
+  // ones, and the offsets of the other levels' as well
   const under = ground && [ground[0]!];
+  const around = offsets?.map((level) => [level[0]!]);
   // Planar metres around the line, so the curve is round on the ground
   const [lat0] = points[0]!;
   const scale = Math.cos(lat0 * DEGREES_TO_RADIANS);
@@ -583,16 +814,22 @@ export function smoothLine(
       out.points.push([y! / METRES_PER_DEGREE, x! / scale / METRES_PER_DEGREE]);
       out.heights.push(smoothHeight(h0, h1, h2, h3, k / steps));
       under?.push(ground![i]! + ((ground![i + 1]! - ground![i]!) * k) / steps);
+      around?.forEach((level, l) => {
+        const given = offsets![l]!;
+        level.push(given[i]! + ((given[i + 1]! - given[i]!) * k) / steps);
+      });
     }
     out.points.push(points[i + 1]!);
     out.heights.push(h2);
     under?.push(ground![i + 1]!);
+    around?.forEach((level, l) => level.push(offsets![l]![i + 1]!));
     out.vertex.push(out.points.length - 1);
   }
   limitSlope(out.points, out.heights);
   if (under) {
     out.heights = out.heights.map((feet, j) => liftFt(feet, under[j]!));
   }
+  if (around) out.offsets = around;
   return out;
 }
 
@@ -643,6 +880,11 @@ export interface SmoothFlightsOptions {
    * altitudes then (see SmoothOptions)
    */
   groundOf?: ((index: number) => number) | undefined;
+  /**
+   * With `groundOf`, the ground of the levels around its one under the end
+   * of each segment, as offsets to it by level (see groundProfilesFt)
+   */
+  offsets?: readonly ArrayLike<number>[] | null | undefined;
 }
 
 /**
@@ -659,7 +901,7 @@ export function smoothFlights(
     coords?: readonly [Coordinate, Coordinate] | undefined;
   }[],
   heightOf: (index: number) => number,
-  { turnStepDeg, groundOf }: SmoothFlightsOptions = {},
+  { turnStepDeg, groundOf, offsets }: SmoothFlightsOptions = {},
 ): SmoothedFlights {
   const count = segments.length;
   const chainOf = new Int32Array(count).fill(-1);
@@ -691,6 +933,7 @@ export function smoothFlights(
     const points: Coordinate[] = [first.coords[0]];
     const heights: number[] = [heightOf(i)];
     const ground = groundOf && [groundOf(i)];
+    const around = groundOf && offsets?.map((level) => [level[i]!]);
     for (const m of members) {
       // Across the antimeridian the curve goes on past 180 rather than
       // round the world, through the spline points it would add there
@@ -699,8 +942,13 @@ export function smoothFlights(
       points.push(lng === end[1] ? end : [end[0], lng]);
       heights.push(heightOf(m));
       ground?.push(groundOf!(m));
+      around?.forEach((level, l) => level.push(offsets![l]![m]!));
     }
-    const line = smoothLine(points, heights, { turnStepDeg, ground });
+    const line = smoothLine(points, heights, {
+      turnStepDeg,
+      ground,
+      offsets: around,
+    });
     members.forEach((m, j) => {
       chainOf[m] = chains.length;
       from[m] = line.vertex[j]!;
@@ -734,6 +982,7 @@ export function ribbonOf(
     widthZoom,
     chain.points[a - 1],
     chain.points[b + 1],
+    chain.offsets?.map((level) => level.slice(a, b + 1)),
   );
 }
 
@@ -771,6 +1020,13 @@ export function pointOnFlight(
 export interface RibbonPiece {
   /** Feet above the flight's ground: the height in the piece's middle */
   h: number;
+  /**
+   * The ground of the levels around the one of `h` in the piece's middle,
+   * as offsets to it in the steps of groundOffsetStepFt, by level in the
+   * order of GROUND_LEVELS; absent where the ground is the same at every
+   * level
+   */
+  o?: number[];
   geometry: GeoJSON.MultiPolygon;
 }
 
@@ -782,7 +1038,9 @@ export interface RibbonPiece {
  * pieces of the same height that follow each other make one feature. The
  * quads share their corners (see ribbonEdges), so the ribbon runs on through
  * its bends and its climbs without a gap. See ribbonEdges for `widthZoom`,
- * `before` and `after`.
+ * `before` and `after`. `offsets` are the ground of the levels around the
+ * one of `heights` at each point (see SmoothedLine), which each piece takes
+ * along from its middle.
  */
 export function ribbonPieces(
   points: readonly Coordinate[],
@@ -790,9 +1048,11 @@ export function ribbonPieces(
   widthZoom: number,
   before?: Coordinate,
   after?: Coordinate,
+  offsets?: readonly (readonly number[])[],
 ): RibbonPiece[] {
   const { left, right } = ribbonEdges(points, widthZoom, before, after);
   const pieces: RibbonPiece[] = [];
+  const step = groundOffsetStepFt(widthZoom);
   const lerp = (a: number[], b: number[], t: number): number[] => [
     a[0]! + (b[0]! - a[0]!) * t,
     a[1]! + (b[1]! - a[1]!) * t,
@@ -805,41 +1065,188 @@ export function ribbonPieces(
       const t0 = k / count;
       const t1 = (k + 1) / count;
       const h = from + ((to - from) * (k + 0.5)) / count;
+      const o = offsets?.map((level) => {
+        const offset =
+          level[i]! + ((level[i + 1]! - level[i]!) * (k + 0.5)) / count;
+        // Without a negative zero, which JSON writes as a zero anyway
+        return Math.round(offset / step) * step || 0;
+      });
       const a = lerp(left[i]!, left[i + 1]!, t0);
       const b = lerp(left[i]!, left[i + 1]!, t1);
       const c = lerp(right[i]!, right[i + 1]!, t1);
       const d = lerp(right[i]!, right[i + 1]!, t0);
       const quad = [[a, b, c, d, a]];
       const last = pieces[pieces.length - 1];
-      if (last?.h === h) last.geometry.coordinates.push(quad);
-      else
+      if (last?.h === h && sameOffsets(last.o, o)) {
+        last.geometry.coordinates.push(quad);
+      } else {
         pieces.push({
           h,
+          ...(o && { o }),
           geometry: { type: "MultiPolygon", coordinates: [quad] },
         });
+      }
     }
   }
   return pieces;
 }
 
+/** Whether two pieces stand on the same ground at every level */
+function sameOffsets(
+  a: readonly number[] | undefined,
+  b: readonly number[] | undefined,
+): boolean {
+  return a === b || (!!a && !!b && a.every((offset, i) => offset === b[i]));
+}
+
+/** What a feature of a ribbon carries of its piece, see ribbonProperties */
+export interface RibbonProperties {
+  /** Feet above the ground of the level `l`, see RibbonPiece */
+  h: number;
+  /** The relief level the ribbon was cut for (see reliefLevel) */
+  l: number;
+  /**
+   * The id the map knows the ribbon by (see ribbonId), where it switches
+   * the exaggeration (see switchesExaggeration)
+   */
+  k?: number;
+  /**
+   * The ground of another level (see groundKey), where it is not the one
+   * of `l`
+   */
+  [ground: `o${number}`]: number;
+}
+
+/**
+ * The properties of the feature of a ribbon piece cut for the relief level
+ * `level` in the `epoch`-th visit of a level: its height, the level, the id
+ * where the map is to know the feature by one (see ribbonId), and the
+ * ground of the levels around it where that is not the level's own: an
+ * offset of zero is left out, and the paint takes a ground left out for the
+ * one of the level (see ribbonHeights). Over flat land most pieces have
+ * none.
+ */
+export function ribbonProperties(
+  piece: RibbonPiece,
+  level: number,
+  epoch: number,
+): RibbonProperties {
+  const properties: RibbonProperties = {
+    h: piece.h,
+    l: level,
+    ...(switchesExaggeration(level) && { k: ribbonId(level, epoch) }),
+  };
+  piece.o?.forEach((offset, k) => {
+    if (offset !== 0) properties[groundKey(GROUND_LEVELS[k]!)] = offset;
+  });
+  return properties;
+}
+
+/**
+ * The feet a ribbon's feature is drawn above the relief under a tile of
+ * the map zoom `zoom`, from its properties (see ribbonProperties), as the
+ * paint has it
+ */
+export function ribbonHeightFt(
+  properties: Partial<RibbonProperties>,
+  zoom: number,
+): number {
+  const { h = 0, l = reliefLevel(zoom) } = properties;
+  return heightOnReliefFt(
+    h,
+    GROUND_LEVELS.map((step) => properties[groundKey(step)] ?? 0),
+    l,
+    zoom,
+  );
+}
+
+/**
+ * The feature state that gives the ribbons cut for another relief level
+ * the exaggeration of the one the map is drawn for, see ribbonHeights
+ */
+export const EXAGGERATION_STATE = "e";
+
+/** By map zoom: the band of height of a ribbon, in metres (BAND_STOPS) */
+function bandM(zoom: number): number {
+  const i = BAND_STOPS.findIndex(([stop]) => stop > zoom);
+  if (i === 0) return BAND_STOPS[0]![1];
+  if (i < 0) return BAND_STOPS[BAND_STOPS.length - 1]![1];
+  const [z0, m0] = BAND_STOPS[i - 1]!;
+  const [z1, m1] = BAND_STOPS[i]!;
+  return m0 + ((m1 - m0) * (zoom - z0)) / (z1 - z0);
+}
+
+/** The exaggeration of the relief level `level` (liftExaggeration) */
+function exaggerationOf(
+  level: ExpressionSpecification,
+): ExpressionSpecification {
+  const stops = EXAGGERATION_BY_LEVEL.flatMap((factor, i) =>
+    i > 0 && factor !== EXAGGERATION_BY_LEVEL[i - 1] ? [i, factor] : [],
+  );
+  return [
+    "step",
+    level,
+    EXAGGERATION_BY_LEVEL[0]!,
+    ...stops,
+  ] as ExpressionSpecification;
+}
+
+/**
+ * The feet to add to a ribbon's height to have it above the ground of the
+ * relief level `level`, from the ground its feature carries: the one of
+ * the nearest level it has (see standingLevel), and a ground it leaves out
+ * the one it was cut on
+ */
+function groundOffsetAt(level: number): ExpressionSpecification {
+  const step: ExpressionSpecification = ["-", level, ["get", "l"]];
+  const offset = (standing: number): ExpressionSpecification | number =>
+    standing === 0 ? 0 : ["coalesce", ["get", groundKey(standing)], 0];
+  return [
+    "case",
+    ...STANDING_LEVELS.slice(0, -1).flatMap((standing) => [
+      ["<=", step, standing],
+      offset(standing),
+    ]),
+    offset(STANDING_LEVELS[STANDING_LEVELS.length - 1]!),
+  ] as ExpressionSpecification;
+}
+
 /**
  * The paint of a ribbon's bottom and top, from the height `h` of its
- * feature, in feet, and the exaggeration `e` it was cut for (see
- * liftExaggeration): the exaggeration is the relief's, which is one number
- * per level, and a paint that followed the zoom would follow the zoom of
- * each tile, a level or two further out in the distance of a tilted view.
- * The band goes by zoom; `zoom` may only be the input of a top-level
- * interpolation, hence the height inside every stop.
+ * feature, in feet above the ground of the relief level `l` it was cut
+ * for, and the ground it carries of the levels around (see
+ * ribbonProperties).
+ *
+ * MapLibre works out a paint that goes by zoom for each tile at the tile's
+ * own zoom, and lifts the ribbons of a tile by the relief of that tile's
+ * level. A step by zoom takes the ground of the tile's level, so a ribbon
+ * stands on the relief under it whichever level's tiles the map draws: the
+ * next level's while a zoom goes on, before the flights are cut for it as
+ * it ends, and coarser ones in the distance of a tilted view. The band goes
+ * by the tile's zoom, as the one of the middle of its level, as the width
+ * does (see RIBBON_WIDTH_PX): an interpolation by zoom would mix the ground
+ * of the tile's level with the next one's by the map's zoom. On the tiles
+ * of a level further out than the one cut for, the distance of a tilted
+ * view, it is the band of the next level in, as thin as an interpolation
+ * made it there: MapLibre takes the value of the level after a tile's for
+ * every map zoom past it.
+ *
+ * The exaggeration does not go by the tile: it is the relief's, one number
+ * for the whole map, which switches as a zoom ends. A ribbon has the one of
+ * the level it was cut for, and one of another level, still drawn while the
+ * flights are cut for the new one, the new one from a feature state for its
+ * id (EXAGGERATION_STATE, see ui/terrain.ts and ribbonId): the map applies
+ * it to all of its tiles in the frame it switches the relief, where a new
+ * paint would have them cut again one by one.
  */
 export function ribbonHeights(): {
   base: ExpressionSpecification;
   height: ExpressionSpecification;
 } {
-  const exaggeration: ExpressionSpecification = ["get", "e"];
-  const metres: ExpressionSpecification = [
-    "*",
-    ["get", "h"],
-    ["*", exaggeration, FEET_TO_METERS],
+  const exaggeration: ExpressionSpecification = [
+    "coalesce",
+    ["feature-state", EXAGGERATION_STATE],
+    exaggerationOf(["get", "l"]),
   ];
   // A piece spans its step, half of it below its middle and half above, so
   // the pieces of a slope meet; the band goes on top of that
@@ -848,28 +1255,47 @@ export function ribbonHeights(): {
     exaggeration,
     (LIFT_STEP_FT / 2) * FEET_TO_METERS,
   ];
+  const base: unknown[] = [];
+  const height: unknown[] = [];
+  for (let zoom = 0; zoom < LIFT_MAX_ZOOM; zoom++) {
+    const level = reliefLevel(zoom);
+    const metres: ExpressionSpecification = [
+      "*",
+      ["max", ["+", ["get", "h"], groundOffsetAt(level)], 0],
+      ["*", exaggeration, FEET_TO_METERS],
+    ];
+    const band: ExpressionSpecification | number =
+      level < RELIEF_MAX_LEVEL
+        ? [
+            "case",
+            [">", ["get", "l"], level],
+            bandM(zoom + 1),
+            bandM(zoom + 0.5),
+          ]
+        : bandM(zoom + 0.5);
+    // The first output is the one below the first stop
+    if (zoom > 0) {
+      base.push(zoom);
+      height.push(zoom);
+    }
+    base.push(["max", ["-", metres, halfStep], 0]);
+    height.push(["+", metres, halfStep, band]);
+  }
   return {
-    base: ["max", ["-", metres, halfStep], 0],
-    height: [
-      "interpolate",
-      ["linear"],
-      ["zoom"],
-      ...BAND_STOPS.flatMap(([zoom, bandM]) => [
-        zoom,
-        ["+", metres, halfStep, bandM],
-      ]),
-    ] as ExpressionSpecification,
+    base: ["step", ["zoom"], ...base] as ExpressionSpecification,
+    height: ["step", ["zoom"], ...height] as ExpressionSpecification,
   };
 }
 
 /**
  * How far up the screen a point `heightFt` above the ground is drawn, in
  * pixels: the height as the ribbons have it, exaggerated by `exaggeration`
- * (the one they were cut with, see liftMetres), over the metres a pixel
- * spans at `zoom`, foreshortened by the tilt. Flat, a height takes no room on
- * the screen. MapLibre scales every extrusion by the metres of a pixel at
- * the map's centre, wherever the extrusion stands, so `lat` is the centre's
- * latitude (for a camera move, the one it ends at), not the point's. An
+ * (the one of the level the map is drawn for, see liftMetres), over the
+ * metres a pixel spans at `zoom`, foreshortened by the tilt. Flat, a height
+ * takes no room on the screen. MapLibre scales every extrusion by the
+ * metres of a pixel at the map's centre, wherever the extrusion stands, so
+ * `lat` is the centre's latitude (for a camera move, the one it ends at),
+ * not the point's. An
  * approximation that leaves the perspective out, close enough to put the
  * airplane on its ribbon and to rank what is under the pointer.
  */
@@ -890,8 +1316,8 @@ export function liftOffsetPx(
  * the ground under it: its height, exaggerated by `exaggeration` like the
  * ribbons' (see liftExaggeration). That is the one of the level the map
  * is drawn for (reliefLevel in the store), not of the zoom: while a zoom
- * crosses a level the ribbons and the relief keep the level they were cut
- * for until it ends.
+ * crosses a level the ribbons and the relief keep the exaggeration of the
+ * level before until it ends (see ribbonHeights).
  */
 export function liftMetres(heightFt: number, exaggeration: number): number {
   return heightFt * FEET_TO_METERS * exaggeration;

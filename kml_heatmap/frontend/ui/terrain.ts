@@ -18,7 +18,14 @@
  */
 import type { Map as MapLibreMap } from "maplibre-gl";
 import type { MapApp } from "../mapApp";
-import { liftExaggeration, TERRAIN_TILE_MAX_ZOOM } from "../calculations/lift";
+import {
+  EXAGGERATION_STATE,
+  followsLevel,
+  liftExaggeration,
+  ribbonId,
+  switchesExaggeration,
+  TERRAIN_TILE_MAX_ZOOM,
+} from "../calculations/lift";
 import { MAP_LAYERS, MAP_SOURCES } from "../utils/constants";
 import { cssVar, whenContextRestored } from "../utils/mapHelpers";
 import { SATELLITE_LAYER } from "./satellite";
@@ -47,7 +54,8 @@ const RIBBON_LAYERS = [
  * reliefLevel, and its shading with reliefShaded, from now on. Each switch
  * builds the relief anew and throws away what the map drew onto it (a few
  * milliseconds), which is why it follows the level, once a zoom has
- * ended, and never the zoom itself.
+ * ended, and never the zoom itself. The ribbons switch their exaggeration
+ * with it, in the same frame (see exaggerateRibbons).
  */
 export function followTerrain(app: MapApp): void {
   const map = app.map;
@@ -69,18 +77,27 @@ export function followTerrain(app: MapApp): void {
   // The relief is part of the style, so it waits for one
   void app.mapReady.then(() => {
     const settle = settleRibbons(app, map);
-    const change = (): void => {
+    const ribbons = exaggerateRibbons(app, map);
+    // Onto or off the relief the ribbons stand on other ground; another
+    // level of it they stand on already (see ribbonHeights), and take its
+    // exaggeration along with the relief, all but those the map does not
+    // know by an id (see followsLevel), which wait out of sight for their
+    // new cut then
+    app.store.subscribe("terrainActive", () => {
       settle();
       apply();
-    };
-    app.store.subscribe("terrainActive", change);
-    app.store.subscribe("reliefLevel", change);
+    });
+    app.store.subscribe("reliefLevel", (level) => {
+      if (!ribbons(level)) settle();
+      apply();
+    });
     app.store.subscribe("reliefShaded", apply);
     // MapLibre restores the relief with the style after a lost WebGL
     // context, but some of what it draws onto it stays black until the
     // relief is built anew
     whenContextRestored(map, () => {
       map.setTerrain(null);
+      ribbons(null);
       apply();
     });
     // A move ends on ground whose elevation tiles land after it: the map
@@ -163,6 +180,82 @@ function shade(map: MapLibreMap, shown: boolean): void {
     },
     before,
   );
+}
+
+/**
+ * What gives the ribbons cut for another relief level the exaggeration of
+ * the level the map is drawn for, as the store moves to the level `level`,
+ * and tells whether all the ribbons the map may still draw stay on the
+ * relief until they are cut for it (see followsLevel); null gives the
+ * states again to a map that has lost them with its style.
+ *
+ * The map may still draw the cut of every level since all the ribbons last
+ * landed; the layer manager empties those of a mode out of sight. The cuts
+ * of a level the map knows by an id get the exaggeration of the new level
+ * through a feature state for that id, which the map applies to all of
+ * their tiles in the frame the relief switches. The cut for the new level
+ * has an id no state was given (see ribbonId), and gets none: MapLibre
+ * works out the paint of every feature of an id it has a state for anew in
+ * each tile it loads. Once all the ribbons have landed, the old cuts and
+ * their ids are gone for good.
+ */
+function exaggerateRibbons(
+  app: MapApp,
+  map: MapLibreMap,
+): (level: number | null) => boolean {
+  const cutOf = (level: number): { level: number; id: number | null } => ({
+    level,
+    id: switchesExaggeration(level)
+      ? ribbonId(level, app.layerManager.ribbonEpoch)
+      : null,
+  });
+  /** The cuts the map may draw: their level, and their id or null */
+  let cuts = [cutOf(app.reliefLevel)];
+  // The exaggeration each id's ribbons were given
+  const given = new Map<number, number>();
+  const give = (): void => {
+    const exaggeration = liftExaggeration(app.reliefLevel);
+    for (const { level, id } of cuts) {
+      if (id === null) continue;
+      const own = liftExaggeration(level) === exaggeration;
+      if (own ? !given.has(id) : given.get(id) === exaggeration) continue;
+      for (const source of RIBBON_LAYERS) {
+        if (!map.getSource(source)) continue;
+        if (own) {
+          map.removeFeatureState({ source, id }, EXAGGERATION_STATE);
+        } else {
+          map.setFeatureState(
+            { source, id },
+            { [EXAGGERATION_STATE]: exaggeration },
+          );
+        }
+      }
+      if (own) given.delete(id);
+      else given.set(id, exaggeration);
+    }
+  };
+  const landed = (): void => {
+    const loading = RIBBON_LAYERS.some(
+      (id) => map.getSource(id) && !map.isSourceLoaded(id),
+    );
+    if (loading) return;
+    map.off("render", landed);
+    cuts = [cutOf(app.reliefLevel)];
+    given.clear();
+  };
+  return (level) => {
+    if (level === null) {
+      given.clear();
+      give();
+      return true;
+    }
+    const follow = cuts.every((drawn) => followsLevel(drawn.level, level));
+    cuts.push(cutOf(level));
+    give();
+    map.off("render", landed);
+    map.on("render", landed);
+    return follow;
+  };
 }
 
 /**

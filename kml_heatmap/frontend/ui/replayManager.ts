@@ -13,7 +13,8 @@ import { setControlIcon } from "../utils/icons";
 import { AUTO_ZOOM_FOLLOW, MAP_SOURCES } from "../utils/constants";
 import {
   airplaneLiftPx,
-  groundProfileFt,
+  groundProfilesFt,
+  heightAtZoomFt,
   liftExaggeration,
   reliefLevel,
   type SmoothedFlights,
@@ -337,16 +338,18 @@ export class ReplayManager {
     ) {
       state.onTerrain = this.app.terrainActive;
       state.groundLevel = level;
-      const ground = (state.groundFt = groundProfileFt(
+      const { ground, offsets } = groundProfilesFt(
         state.segments,
         state.onTerrain,
         level,
-      ));
+      );
+      state.groundFt = ground;
       state.smoothed = liftReplayCurve(
         curve,
         state.segments,
         (i) => state.segments[i]!.altitude_ft ?? 0,
         (i) => ground[i]!,
+        offsets,
       );
     }
     state.trailPieces = new WeakMap();
@@ -493,11 +496,12 @@ export class ReplayManager {
     const state = this.state;
     state.onTerrain = this.app.terrainActive;
     state.groundLevel = this.app.reliefLevel;
-    const ground = (state.groundFt = groundProfileFt(
+    const { ground, offsets } = groundProfilesFt(
       state.segments,
       state.onTerrain,
       state.groundLevel,
-    ));
+    );
+    state.groundFt = ground;
     // The flight's curve, timed, and at its height for the 3D view: once
     // per replay, flat or lifted, and on the ground of the view (see
     // setLifted). The replay goes by the times the curve has smoothed, on
@@ -506,6 +510,7 @@ export class ReplayManager {
       state.segments,
       (i) => state.segments[i]!.altitude_ft ?? 0,
       (i) => ground[i]!,
+      offsets,
     ));
     state.segments = state.segments.map((segment, i) => ({
       ...segment,
@@ -919,7 +924,7 @@ export class ReplayManager {
     const lift = airplaneLiftPx(
       map,
       position[0],
-      this.state.airplaneHeightFt,
+      heightAtZoomFt(this.state.airplaneHeight(), AUTO_ZOOM_FOLLOW),
       liftExaggeration(reliefLevel(AUTO_ZOOM_FOLLOW)),
       AUTO_ZOOM_FOLLOW,
     );

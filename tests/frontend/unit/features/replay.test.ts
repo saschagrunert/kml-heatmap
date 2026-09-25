@@ -320,6 +320,40 @@ describe("replay feature", () => {
       expect([...fresh.times]).toEqual([...curve.times]);
     });
 
+    it("carries the ground of the levels around along the curve, to where the airplane is", () => {
+      const segments = flight(turn, [2, 1, 3, 1, 2, 4]);
+      const offsets = [Float64Array.from(segments, (_, i) => i * 10)];
+
+      const curve = replayCurve(
+        segments,
+        () => 3000,
+        () => 500,
+        offsets,
+      );
+      const lifted = liftReplayCurve(
+        curve,
+        segments,
+        () => 3000,
+        () => 500,
+        offsets,
+      );
+
+      // A segment's offset is the one under its end, as its ground is
+      expect(replayPoint(curve, 1, 1)!.offsetsFt).toEqual([10]);
+      const middle = replayPoint(curve, 2, 0.5)!.offsetsFt![0]!;
+      expect(middle).toBeGreaterThan(10);
+      expect(middle).toBeLessThan(20);
+      expect(replayPoint(lifted, 2, 0.5)!.offsetsFt).toEqual([middle]);
+      // Without them the airplane has none
+      expect(
+        replayPoint(
+          replayCurve(segments, () => 3000),
+          2,
+          0.5,
+        )!.offsetsFt,
+      ).toBeUndefined();
+    });
+
     it("has nothing for a segment without coordinates", () => {
       const segments: PathSegment[] = [
         { path_id: 1, time: 0 },

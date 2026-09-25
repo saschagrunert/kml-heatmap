@@ -29,6 +29,8 @@ import {
 import {
   liftExaggeration,
   liftOffsetPx,
+  ribbonHeightFt,
+  ribbonId,
 } from "../../../../kml_heatmap/frontend/calculations/lift";
 import { findNearestSegment } from "../../../../kml_heatmap/frontend/features/layers";
 import { HILLSHADE_LAYER } from "../../../../kml_heatmap/frontend/ui/terrain";
@@ -2328,10 +2330,11 @@ describe("LayerManager", () => {
       expect(setDataCalls(RIBBONS)).toBe(writes);
 
       // A level further in, half as wide on the ground: as wide on screen.
-      // Let go of first, as the relief and its ground change with it.
+      // Written over the cut of before, which stands on the relief of both
+      // levels until the new one has landed.
       mockApp.map!.jumpTo({ zoom: 8.1 });
       mockApp.map!.emit("zoomend");
-      expect(setDataCalls(RIBBONS)).toBe(writes + 2);
+      expect(setDataCalls(RIBBONS)).toBe(writes + 1);
       expect(ribbonWidthM()).toBeCloseTo(at7 / 2, 3);
       // About 3 pixels at zoom 8.5, 512 px tiles, at 48 degrees
       const metresPerPixel =
@@ -2555,7 +2558,7 @@ describe("LayerManager", () => {
           r: 0,
           g: ribbons()[0]!.properties.g,
           h: 1000,
-          e: 2,
+          l: 11,
         }),
       ];
 
@@ -2666,9 +2669,15 @@ describe("LayerManager", () => {
       expect(mockApp.map!.getTerrain()).not.toBeNull();
     });
 
-    /** The exaggerations the ribbons were cut for */
+    /** The exaggerations of the levels the ribbons were cut for */
     const exaggerations = (): Set<number | undefined> =>
-      new Set(features(RIBBONS).map((ribbon) => ribbon.properties.e));
+      new Set(
+        features(RIBBONS).map((ribbon) =>
+          ribbon.properties.l === undefined
+            ? undefined
+            : liftExaggeration(ribbon.properties.l),
+        ),
+      );
 
     it("draws the relief at every zoom, exaggerated as the flights, and stands them on the sampled ground", async () => {
       await drawOverHills(11);
@@ -2729,9 +2738,162 @@ describe("LayerManager", () => {
       expect(exaggerations()).toEqual(new Set([liftExaggeration(7)]));
       expect(Math.max(...heights())).toBe(2000);
       // Cut once, on the new ground and for the new level at the same time,
-      // after the cut of before has been let go of: the map's worker holds
-      // one of them at a time
+      // after the cut of before has been let go of: cut for level 11, which
+      // the map knows by no id, it cannot take the exaggeration of level 7
+      // and waits out of sight, and the map's worker holds one cut at a time
       expect(writes().slice(before)).toEqual([0, heights().length]);
+      // No feature state either: MapLibre works out the paint of every
+      // feature of an id with one anew in each tile it loads
+      expect(mockApp.map!.featureStates.size).toBe(0);
+    });
+
+    /** The exaggeration the ribbons of an id were given by feature state */
+    const given = (id: number): unknown =>
+      (
+        mockApp.map!.featureStates.get(`${RIBBONS}:${id}`) as
+          { e?: number } | undefined
+      )?.e;
+    /** The id of the ribbons cut for `level` now (see ribbonId) */
+    const idOf = (level: number): number =>
+      ribbonId(level, layerManager.ribbonEpoch);
+
+    it("keeps the ribbons in sight as a zoom ends a level on, and switches the exaggeration of the old cut with the relief", async () => {
+      await drawOverHills(8.2);
+      mockApp.map!.emit("render");
+      mockApp.map!.isSourceLoaded.mockImplementation((id) => id !== RIBBONS);
+      const cut8 = idOf(8);
+      expect(features(RIBBONS)[0]!.properties).toMatchObject({
+        l: 8,
+        k: cut8,
+      });
+      // Nothing to switch yet, and no state
+      expect(mockApp.map!.featureStates.size).toBe(0);
+
+      mockApp.map!.jumpTo({ zoom: 7.2 });
+      mockApp.map!.emit("zoomend");
+
+      // The ribbons cut for level 8 take the exaggeration of level 7 in the
+      // same task as the relief does, and stay in sight
+      expect(opacity()).toBeGreaterThan(0);
+      expect(mockApp.map!.getTerrain()).toMatchObject({
+        exaggeration: liftExaggeration(7),
+      });
+      expect(given(cut8)).toBe(liftExaggeration(7));
+      // Those cut for level 7 have an id no state was given, and never is
+      // while they are the ones for the level of the map
+      const cut7 = idOf(7);
+      expect(cut7).not.toBe(cut8);
+      expect(features(RIBBONS)[0]!.properties).toMatchObject({
+        l: 7,
+        k: cut7,
+      });
+      expect(given(cut7)).toBeUndefined();
+      expect(
+        [...mockApp.map!.featureStates.keys()].every((key) =>
+          key.endsWith(`:${cut8}`),
+        ),
+      ).toBe(true);
+
+      // Back before the cut for level 7 has landed: the cut for level 8
+      // has its own again, the one for 7 that of 8, and the new cut for 8
+      // an id of its own
+      mockApp.map!.jumpTo({ zoom: 8.2 });
+      mockApp.map!.emit("zoomend");
+      expect(given(cut8)).toBeUndefined();
+      expect(given(cut7)).toBe(liftExaggeration(8));
+      expect(idOf(8)).not.toBe(cut8);
+      expect(given(idOf(8))).toBeUndefined();
+
+      // Once all have landed the old cuts are gone, and nothing is given
+      // to them again
+      mockApp.map!.isSourceLoaded.mockReturnValue(true);
+      mockApp.map!.emit("render");
+      const states = mockApp.map!.setFeatureState.mock.calls.length;
+      mockApp.map!.isSourceLoaded.mockImplementation((id) => id !== RIBBONS);
+      mockApp.map!.jumpTo({ zoom: 9.2 });
+      mockApp.map!.emit("zoomend");
+      const calls = mockApp.map!.setFeatureState.mock.calls.slice(states);
+      expect(calls.length).toBeGreaterThan(0);
+      expect(
+        calls.every(
+          ([{ id }]) => id === ribbonId(8, layerManager.ribbonEpoch - 1),
+        ),
+      ).toBe(true);
+    });
+
+    it("hides the ribbons that cannot follow the level while an older cut may still be drawn", async () => {
+      await drawOverHills(5.2);
+      mockApp.map!.emit("render");
+      // The cut for level 6 is still on its way as the zoom goes on
+      mockApp.map!.isSourceLoaded.mockImplementation((id) => id !== RIBBONS);
+      mockApp.map!.jumpTo({ zoom: 6.2 });
+      mockApp.map!.emit("zoomend");
+      // Level 5 has the exaggeration of 6: they stay in sight
+      expect(opacity()).toBeGreaterThan(0);
+
+      mockApp.map!.jumpTo({ zoom: 7.2 });
+      mockApp.map!.emit("zoomend");
+      // The map may still draw the cut for level 5, which it knows by no id
+      // and which cannot take the exaggeration of level 7
+      expect(opacity()).toBe(0);
+
+      // Had the cut for level 6 landed, they would have followed
+      mockApp.map!.isSourceLoaded.mockReturnValue(true);
+      mockApp.map!.emit("render");
+      expect(opacity()).toBeGreaterThan(0);
+      mockApp.map!.jumpTo({ zoom: 6.2 });
+      mockApp.map!.emit("zoomend");
+      mockApp.map!.emit("render");
+      mockApp.map!.isSourceLoaded.mockImplementation((id) => id !== RIBBONS);
+      mockApp.map!.jumpTo({ zoom: 7.2 });
+      mockApp.map!.emit("zoomend");
+      expect(opacity()).toBeGreaterThan(0);
+    });
+
+    it("lets go of the ribbons of a mode out of sight as the level changes", async () => {
+      await drawOverHills(8.2);
+      const before = writes().length;
+      // Hidden, as a replay hides it, with its runs kept
+      mockApp.altitudeLayer.setVisible(false);
+
+      mockApp.map!.jumpTo({ zoom: 7.2 });
+      mockApp.map!.emit("zoomend");
+
+      // Emptied rather than left with the cut for level 8, which would show
+      // on the ground of another level until it was cut again
+      expect(writes().slice(before)).toEqual([0]);
+      mockApp.altitudeLayer.setVisible(true);
+      layerManager.updateSelectionStyles();
+      expect(writes().length).toBe(before + 2);
+      expect(features(RIBBONS)[0]!.properties).toMatchObject({ l: 7 });
+    });
+
+    it("gives the ribbons the ground of the levels around the one they are cut for", async () => {
+      await drawOverHills(9.2);
+      // A ridge under the cruise, which the levels further out smooth away
+      const data = mockApp.currentData!;
+      mockApp.currentData = {
+        ...data,
+        path_segments: data.path_segments.map((segment, i) => ({
+          ...segment,
+          ground_ft: i === 4 ? 4000 : 1000,
+        })),
+      };
+      layerManager.redrawAltitudePaths();
+
+      const ribbons = features(RIBBONS);
+      expect(ribbons.every((ribbon) => ribbon.properties.l === 9)).toBe(true);
+      // Over the ridge the ground of the coarser levels is lower, so a
+      // ribbon stands higher above it there
+      const over = ribbons.filter(
+        (ribbon) => (ribbon.properties["o-1"] ?? 0) > 0,
+      );
+      expect(over.length).toBeGreaterThan(0);
+      for (const ribbon of over) {
+        expect(ribbonHeightFt(ribbon.properties, 8.5)).toBeGreaterThan(
+          ribbon.properties.h!,
+        );
+      }
     });
 
     it("leaves the relief and the flights as they are while a zoom goes on", async () => {
@@ -2798,6 +2960,8 @@ describe("LayerManager", () => {
       mockApp.map!.emit("render");
       expect(opacity()).toBeGreaterThan(0);
 
+      // Level 11 is not one the map knows its ribbons by (see
+      // switchesExaggeration), and 7 has another exaggeration
       mockApp.map!.isSourceLoaded.mockImplementation((id) => id !== "terrain");
       mockApp.map!.jumpTo({ zoom: 7.2 });
       mockApp.map!.emit("zoomend");
