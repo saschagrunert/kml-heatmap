@@ -17,13 +17,14 @@ they run the same steps as `make build` (frontend bundle, then
 generated is committed; `docs/` is only the default output directory of a
 local `make build`.
 
-Install the pre-commit hooks (ruff, prettier, typos, gitleaks, whitespace
-fixers and, for commits that touch `data/`, the obfuscation check) with
-`pip install pre-commit && pre-commit install`. All but gitleaks and the
-whitespace fixers run from your own environment rather than a pinned mirror, so
-activate the virtual environment and run `npm ci` to get the versions CI
-installs. See
-[CONTRIBUTING.md](CONTRIBUTING.md) for the workflow and commit conventions.
+Install the pre-commit hooks (ruff, prettier, typos, gitleaks, the whitespace
+fixers, the merge conflict marker, TOML and YAML checks and, for commits that
+touch `data/`, the obfuscation check) with
+`pip install pre-commit && pre-commit install`. All but gitleaks and the hooks
+of `pre-commit-hooks` run from your own environment rather than a pinned
+mirror, so activate the virtual environment and run `npm ci` to get the
+versions CI installs. See [CONTRIBUTING.md](CONTRIBUTING.md) for the workflow
+and commit conventions.
 
 ## Frontend (TypeScript)
 
@@ -46,7 +47,7 @@ npm run test             # Run unit tests
 npm run test:watch       # Watch mode for tests
 npm run test:ui          # Run tests with UI
 npm run test:coverage    # Generate coverage report
-npm run test:e2e         # Run E2E tests (Playwright, all projects)
+npm run test:e2e         # Run E2E tests (Playwright; visual only in its image, see CONTRIBUTING.md)
 npm run test:e2e:mobile  # Run E2E tests with the mobile project
 npm run test:e2e:webkit  # Run E2E tests with the WebKit projects (iPhone and desktop Safari)
 npm run test:e2e:ui      # Run E2E tests with interactive UI
@@ -86,7 +87,14 @@ are the ones of shared links, one higher than MapLibre's own (see
 `ZOOM_OFFSET` in `utils/constants.ts`). A few specs depend on whether the site
 was built with `CARTO_API_KEY` (any value works) and skip otherwise; CI tests
 a site with a dummy key and, for the specs about the base map requests
-(`base-style`, `error-free`, `layers`) on the desktop, one without.
+(`base-style`, `error-free`, `layers`) on the desktop, one without. It builds
+both once, in the `e2e-sites` job, and runs every e2e job in the Playwright
+image the visual job uses. The `desktop` and `mobile` projects are split into
+two shards each (`--shard`), and the relief tests of the 3D view ("on the
+relief" in `orientation.spec.ts`) of the `desktop` project run in a job of
+their own, with the whole runner to themselves, since software WebGL takes
+seconds per frame of the relief. The `webkit-desktop` project runs them with
+its other specs.
 
 The tests run against `docs/` (the `visual` project against `visual-site/`,
 with the same checks), which must be built from the current sources first. A
@@ -112,9 +120,9 @@ npm run test:e2e
 npm run test:e2e:mobile
 
 # On NixOS, use the system Chromium; Playwright's WebKit build does not run
-# there, but the Playwright container image carries it (the image the visual
-# job of .github/workflows/test.yml runs; scripts/check_locks.py keeps the
-# reference here in step with it)
+# there, but the Playwright container image carries it (the image the e2e
+# and visual jobs of .github/workflows/test.yml run; scripts/check_locks.py
+# keeps the reference here in step with it)
 nix-shell -p chromium python3 --run 'CHROMIUM_PATH=$(which chromium) npm run test:e2e -- --project=desktop --project=mobile'
 podman run --rm --userns=keep-id -v "$PWD:/work" -w /work mcr.microsoft.com/playwright:v1.63.0-noble@sha256:eff16c30e6f3f4af0a03fa4b706120d5e9b0891c344a27d64559aff5900a4a27 npx playwright test --project=webkit --project=webkit-desktop
 ```
@@ -141,7 +149,9 @@ their traces in `test-results/`, and every run writes an HTML report to
   vendored MapLibre and html-to-image files exceed their size budget in
   `build.js`. Each has a
   budget for its bytes as written and one for them gzipped (level 9); the
-  comment above the budgets says how much room they leave and why
+  comment above the budgets says how much room they leave and why. CI's
+  zlib compresses up to about 0.5 % differently from a local build, so go
+  by the gzipped sizes CI prints when a budget is close
 - **Development**: Unminified for debugging
 - Both write a source map next to the bundle; it holds the mappings and file
   names only, not the TypeScript sources
@@ -208,6 +218,8 @@ none and the statistics rail falls back to the ISO country code.
     aircraft are drawn in `utils/icons.ts` because Lucide carries neither
 - **Tests**
   - Unit tests: `tests/frontend/unit/` (Vitest)
+  - Contract tests of the exported data files: `tests/frontend/contract/`
+    (Vitest)
   - E2E tests: `tests/e2e/` (Playwright)
 - **Stylesheets** in `kml_heatmap/static/` (`styles.css`, `features.css`
   and `wrapped.css`)
@@ -281,7 +293,9 @@ builds the package, `requirements-build.lock`), and the package on top with
 `--no-deps`, so nothing is resolved from the ranges. Regenerate the lock
 files with `make lock` after changing the dependencies. The test lock is
 compiled with the runtime lock as a constraint, so a package both of them
-pin has the same version in each.
+pin has the same version in each. `make lock` runs the pip-tools that
+`requirements-tools.in` pins, installed from `requirements-tools.lock` with
+the hashes of its dependencies, and recompiles that lock last.
 
 **Testing:**
 
@@ -292,7 +306,7 @@ is fast and readable. The flags used by CI and `make test` are:
 pytest                                          # Run all tests
 pytest tests/test_parser.py                     # Run specific test file
 pytest -x                                       # Stop on first failure
-pytest -n auto --cov --cov-branch --cov-report=xml --cov-report=term
+pytest -n auto --cov --cov-branch --cov-report=xml:coverage/coverage.xml --cov-report=term
 pytest --cov --cov-report=html                  # HTML coverage report (htmlcov/)
 ```
 
@@ -404,8 +418,11 @@ the shading alone (`reliefShaded` in the store, set by `syncTerrain` for the
 6.10 breaks the ribbons up on the relief of the globe: `terrainActive`, and
 with it the ground the ribbons are cut on, stays off there.
 
-The page fetches the tiles from `s3.amazonaws.com`, which the CSP names in
-`connect-src` (MapLibre fetches raster-dem tiles; `img-src` needs no entry).
+The page fetches the tiles from `s3.amazonaws.com`, whose
+`elevation-tiles-prod/` bucket alone the CSP names in `connect-src`
+(MapLibre fetches raster-dem tiles; `img-src` needs no entry).
+`tests/frontend/unit/csp.test.ts` fails when a URL the frontend fetches is
+not allowed there.
 The e2e fixture (`tests/e2e/fixtures.ts`) answers them itself with a flat
 tile 500 m up, so specs and screenshots stay deterministic and a spec can
 tell the flights stand on the relief.

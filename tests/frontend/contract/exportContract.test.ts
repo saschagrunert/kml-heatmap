@@ -94,7 +94,7 @@ function isCoordinatePair(value: unknown): value is number[] {
   );
 }
 
-export function isPathInfo(value: unknown): value is PathInfo {
+function isPathInfo(value: unknown): value is PathInfo {
   if (!isRecord(value)) return false;
   const id = value["id"];
   if (!isInteger(id) || id < 0 || id >= PATH_ID_LIMIT) return false;
@@ -134,7 +134,7 @@ export function isPathInfo(value: unknown): value is PathInfo {
  * a float here would mean the exporter stopped scaling a column. Only the
  * time column may hold null, for a row without a relative time.
  */
-export function isRawColumns(value: unknown): value is RawColumns {
+function isRawColumns(value: unknown): value is RawColumns {
   if (!Array.isArray(value)) return false;
   if (value.length !== 4 && value.length !== 5) return false;
   if (!value.every(Array.isArray)) return false;
@@ -149,7 +149,7 @@ export function isRawColumns(value: unknown): value is RawColumns {
   );
 }
 
-export function isRawPathSegments(value: unknown): boolean {
+function isRawPathSegments(value: unknown): boolean {
   if (!isRecord(value)) return false;
   if ("rows" in value) return false;
   const columns = value["columns"];
@@ -181,7 +181,7 @@ export function isRawPathSegments(value: unknown): boolean {
   );
 }
 
-export function isRawYearData(value: unknown): value is RawYearData {
+function isRawYearData(value: unknown): value is RawYearData {
   if (!isRecord(value)) return false;
   if (value["format"] !== DATA_FORMAT_VERSION) return false;
   if (!isInteger(value["year"])) return false;
@@ -198,7 +198,7 @@ export function isRawYearData(value: unknown): value is RawYearData {
   return true;
 }
 
-export function isAirport(value: unknown): value is Airport {
+function isAirport(value: unknown): value is Airport {
   return (
     isRecord(value) &&
     isString(value["name"]) &&
@@ -211,9 +211,7 @@ export function isAirport(value: unknown): value is Airport {
   );
 }
 
-export function isAirportsFile(
-  value: unknown,
-): value is { airports: Airport[] } {
+function isAirportsFile(value: unknown): value is { airports: Airport[] } {
   return (
     isRecord(value) &&
     Array.isArray(value["airports"]) &&
@@ -229,7 +227,7 @@ function isAircraftModels(value: unknown): value is Record<string, string> {
   );
 }
 
-export function isMetadata(value: unknown): value is Metadata {
+function isMetadata(value: unknown): value is Metadata {
   if (!isRecord(value)) return false;
   // Both 0 without timing data, never null
   const minSpeed = value["min_groundspeed_knots"];

@@ -39,6 +39,10 @@ export default defineConfig<object, SiteOptions>({
   // The retry keeps the trace of the first attempt; a test that only passes
   // on the retry is still a failure, not a green run
   failOnFlakyTests: isCI,
+  // One browser per core of the runner, each drawing WebGL in software. The
+  // e2e job of .github/workflows/test.yml splits the desktop and mobile
+  // projects into shards and gives the relief tests of orientation.spec.ts,
+  // the slowest to draw, a runner of their own.
   ...(isCI ? { workers: "100%" } : {}),
   // The console reporter Playwright would pick anyway, plus the HTML report
   // that CI uploads with the traces when a run fails

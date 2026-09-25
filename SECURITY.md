@@ -38,21 +38,23 @@ current.
 
 ## Content Security Policy
 
-The generated page carries a CSP in a `<meta>` tag. Scripts, styles, fonts
-and workers load only from the site itself; there is no `'unsafe-inline'`
-for scripts or styles. Only `connect-src` names foreign hosts: CARTO
+The generated page carries a CSP in a `<meta>` tag. Scripts, styles, fonts and
+workers load only from the site itself; there is no `'unsafe-inline'` for
+scripts or styles. Only `connect-src` names foreign hosts: CARTO
 (`basemaps.cartocdn.com` for the style, `*.basemaps.cartocdn.com` for the
 tiles, glyphs and sprite of the base map), the open flightmaps tile server
-(`nwy-tiles-api.prod.newaydata.com`), the elevation tiles on AWS
-(`s3.amazonaws.com`) the 3D view draws its relief from, and EOX's satellite
-imagery (`tiles.maps.eox.at`), which the browser asks for only while the
-Satellite switch is on, and which then sees the visitor's address and the
-area in view (see Privacy in the README). MapLibre fetches
-every tile, so `img-src` allows only the site itself, `data:` and `blob:`.
-MapLibre GL JS is published with the
-site as ES modules and starts its worker from one of them, so
-`worker-src 'self'` is enough and no `blob:` worker is allowed.
-Colours computed at runtime are applied through the CSSOM, and a test fails
-on any CSP violation the page reports. A meta CSP cannot set
-`frame-ancestors`, and GitHub Pages sends no such header, so the site can be
-framed; it holds no state an embedding page could change.
+(`nwy-tiles-api.prod.newaydata.com`), the elevation tiles on AWS (the
+`elevation-tiles-prod` bucket on `s3.amazonaws.com`, not the whole host) the
+3D view draws its relief from, and EOX's satellite imagery
+(`tiles.maps.eox.at`), which the browser asks for only while the Satellite
+switch is on, and which then sees the visitor's address and the area in view
+(see Privacy in the README). MapLibre fetches every tile, so `img-src` allows
+only the site itself, `data:` and `blob:`. MapLibre GL JS is published with
+the site as ES modules and starts its worker from one of them, so
+`worker-src 'self'` is enough and no `blob:` worker is allowed. Colours
+computed at runtime are applied through the CSSOM, and a test fails on any CSP
+violation the page reports. A unit test (`tests/frontend/unit/csp.test.ts`)
+checks every URL the frontend fetches against `connect-src`, and every foreign
+source there against those URLs. A meta CSP cannot set `frame-ancestors`, and
+GitHub Pages sends no such header, so the site can be framed; it holds no
+state an embedding page could change.

@@ -46,7 +46,7 @@ carry no real dates anyway.
 make build INPUT_DIR=kml_test_10000
 
 # Or with Docker
-mkdir -p out
+mkdir -p out ~/.cache/kml-heatmap
 docker run --rm --user "$(id -u):$(id -g)" \
   -v "$PWD/kml_test_10000:/data/kml_test_10000" -v "$PWD/out:/data/out" \
   -v ~/.cache/kml-heatmap:/cache \
@@ -74,13 +74,18 @@ nothing else reads together:
 
 - `requirements.lock` and `requirements-test.lock` still satisfy the ranges
   in `pyproject.toml`, and the two agree on every package both pin (CI
-  installs `requirements-test.lock` alone where it needs both). Dependabot
-  bumps `pyproject.toml` without recompiling the locks, so this fails such a
-  pull request with a hint to run `make lock`.
-- The Playwright image of the `visual` job in `.github/workflows/test.yml`
-  is pinned by its `@sha256` digest, its tag matches the `@playwright/test`
-  version in `package-lock.json`, and `CONTRIBUTING.md` and `DEVELOPMENT.md`
-  quote exactly the same image reference.
+  installs `requirements-test.lock` alone where it needs both).
+  `requirements-build.lock` satisfies `build-system.requires` (the
+  setuptools CI builds the wheel with), and `requirements-tools.lock` the
+  pip-tools pin in `requirements-tools.in` (what `make lock` runs).
+  Dependabot bumps `pyproject.toml` and `requirements-tools.in` without
+  recompiling the locks, so this fails such a pull request with a hint to
+  run `make lock`.
+- The Playwright image of the `e2e` and `visual` jobs in
+  `.github/workflows/test.yml` is the same in both, pinned by its `@sha256`
+  digest, its tag matches the `@playwright/test` version in
+  `package-lock.json`, and `CONTRIBUTING.md` and `DEVELOPMENT.md` quote
+  exactly the same image reference.
 - `__version__` in `kml_heatmap/__init__.py` matches `version` in
   `package.json` and both version fields of `package-lock.json`.
 
@@ -113,7 +118,7 @@ python scripts/build_visual_site.py
 
 The content hash of everything that shapes a built site: the TypeScript
 sources in `kml_heatmap/frontend/`, the files in `BUILD_FILES` (`build.js`,
-`scripts/vendor.js`, `tsconfig.json` and the two stylesheets) and the
+`scripts/vendor.js`, `tsconfig.json` and the three stylesheets) and the
 versions `package-lock.json` pins for `BUILD_PACKAGES` (esbuild, Lucide as
 the one package bundled into the page, and MapLibre, html-to-image and
 flag-icons, which are vendored next to the bundles). `build.js` writes it into

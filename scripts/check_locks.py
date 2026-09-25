@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""Check that the hashed lock files still satisfy pyproject.toml, that the
-Playwright image is pinned by digest and matches the pinned library (in the
+"""Check that the hashed lock files still satisfy pyproject.toml (and the
+pip-tools lock its requirements-tools.in), that the Playwright image is
+pinned by digest and matches the pinned library (in every job of the
 workflow and in the commands the documentation quotes), and that the package
 version is the same on both sides of the project.
 
@@ -30,17 +31,15 @@ ROOT = Path(__file__).resolve().parent.parent
 PIN = re.compile(r"^([A-Za-z0-9][A-Za-z0-9._-]*)==([^\s\\;]+)", re.MULTILINE)
 # The __version__ assignment at the top of kml_heatmap/__init__.py
 PACKAGE_VERSION = re.compile(r'^__version__\s*=\s*"([^"]+)"', re.MULTILINE)
-# The Playwright image of the test workflow, as a tag and a digest
-# (v1.2.3-noble@sha256:...). The groups are the whole reference, the version
-# and the digest; the digest is optional here so that a missing one is
-# reported as such rather than as a workflow without the image.
-PLAYWRIGHT_IMAGE = re.compile(
-    r"image:\s*(mcr\.microsoft\.com/playwright:v(\S+?)-[a-z]+"
-    r"(?:@(sha256:[0-9a-f]{64}))?)\s*$",
-    re.MULTILINE,
-)
-# Any reference to the Playwright image, such as in a documented command
+# Any reference to the Playwright image, in a job of the test workflow or in
+# a documented command
 PLAYWRIGHT_IMAGE_REFERENCE = re.compile(r"mcr\.microsoft\.com/playwright:[^\s`]+")
+# One of them in full, a tag and a digest (v1.2.3-noble@sha256:...). The
+# groups are the version and the digest; the digest is optional here so that
+# a missing or malformed one is reported as such.
+PLAYWRIGHT_IMAGE = re.compile(
+    r"mcr\.microsoft\.com/playwright:v(\S+?)-[a-z]+(?:@(sha256:[0-9a-f]{64}))?"
+)
 # The documents that quote the image for running the visual tests locally
 PLAYWRIGHT_IMAGE_DOCS = ("CONTRIBUTING.md", "DEVELOPMENT.md")
 
@@ -112,30 +111,37 @@ def playwright_image_mismatches() -> list[str]:
     """Check the Playwright container against the pinned @playwright/test.
 
     The visual job compares screenshots inside that image, and the committed
-    snapshots were generated in it. An image a version ahead of the library
-    renders differently, which reads as a page regression rather than as the
-    version drift it is.
+    snapshots were generated in it; the e2e jobs run in it too. An image a
+    version ahead of the library renders differently, which reads as a page
+    regression rather than as the version drift it is, and two jobs on two
+    images would no longer test the same browsers.
     """
     text = (ROOT / ".github/workflows/test.yml").read_text(encoding="utf-8")
-    match = PLAYWRIGHT_IMAGE.search(text)
-    if match is None:
+    images = list(dict.fromkeys(PLAYWRIGHT_IMAGE_REFERENCE.findall(text)))
+    if not images:
         return [".github/workflows/test.yml runs no Playwright image"]
-    image, version, digest = match.groups()
     problems = []
-    # A tag alone can be moved to another build; the digest cannot
-    if digest is None:
+    if len(images) > 1:
         problems.append(
-            ".github/workflows/test.yml does not pin the Playwright image "
-            "by its @sha256 digest"
+            ".github/workflows/test.yml runs different Playwright images: "
+            + ", ".join(images)
         )
     pinned = read_npm_version("@playwright/test")
     if pinned is None:
         problems.append("package-lock.json does not pin @playwright/test")
-    elif version != pinned:
-        problems.append(
-            f".github/workflows/test.yml runs the Playwright image "
-            f"v{version}, package-lock.json pins {pinned}"
-        )
+    for image in images:
+        match = PLAYWRIGHT_IMAGE.fullmatch(image)
+        # A tag alone can be moved to another build; the digest cannot
+        if match is None or match.group(2) is None:
+            problems.append(
+                f".github/workflows/test.yml does not pin the Playwright image "
+                f"{image} by its @sha256 digest"
+            )
+        if match is not None and pinned is not None and match.group(1) != pinned:
+            problems.append(
+                f".github/workflows/test.yml runs the Playwright image "
+                f"v{match.group(1)}, package-lock.json pins {pinned}"
+            )
     # The documented commands are how the snapshots get regenerated, so an
     # image other than the one CI compares in produces snapshots that fail
     for name in PLAYWRIGHT_IMAGE_DOCS:
@@ -144,11 +150,11 @@ def playwright_image_mismatches() -> list[str]:
             continue
         problems.extend(
             f"{name} quotes the Playwright image {quoted}, "
-            f".github/workflows/test.yml runs {image}"
+            f".github/workflows/test.yml runs {images[0]}"
             for quoted in PLAYWRIGHT_IMAGE_REFERENCE.findall(
                 path.read_text(encoding="utf-8")
             )
-            if quoted != image
+            if quoted != images[0]
         )
     return problems
 
@@ -159,7 +165,19 @@ def read_pins(lock: str) -> dict[str, str]:
     return {canonicalize_name(name): version for name, version in PIN.findall(text)}
 
 
-def unsatisfied(requirements: list[str], pins: dict[str, str], lock: str) -> list[str]:
+def read_requirements(path: str) -> list[str]:
+    """The requirements of a pip-compile input, without comments and options."""
+    text = (ROOT / path).read_text(encoding="utf-8")
+    lines = (line.split("#", 1)[0].strip() for line in text.splitlines())
+    return [line for line in lines if line and not line.startswith("-")]
+
+
+def unsatisfied(
+    requirements: list[str],
+    pins: dict[str, str],
+    lock: str,
+    source: str = "pyproject.toml",
+) -> list[str]:
     """Describe every requirement the pins of a lock file do not meet."""
     problems = []
     for line in requirements:
@@ -171,8 +189,7 @@ def unsatisfied(requirements: list[str], pins: dict[str, str], lock: str) -> lis
             problems.append(f"{lock} does not pin {requirement.name}")
         elif not requirement.specifier.contains(pinned, prereleases=True):
             problems.append(
-                f"{lock} pins {requirement.name}=={pinned}, "
-                f'pyproject.toml asks for "{line}"'
+                f'{lock} pins {requirement.name}=={pinned}, {source} asks for "{line}"'
             )
     return problems
 
@@ -200,6 +217,20 @@ def main() -> int:
         problems += unsatisfied(
             build, read_pins("requirements-build.lock"), "requirements-build.lock"
         )
+    # What `make lock` itself runs; the lock workflow installs it unattended
+    missing = [
+        name
+        for name in ("requirements-tools.in", "requirements-tools.lock")
+        if not (ROOT / name).is_file()
+    ]
+    problems += [f"{name} is missing" for name in missing]
+    if not missing:
+        problems += unsatisfied(
+            read_requirements("requirements-tools.in"),
+            read_pins("requirements-tools.lock"),
+            "requirements-tools.lock",
+            "requirements-tools.in",
+        )
     # CI installs requirements-test.lock alone where it needs both, which is
     # only the same as installing both while the shared pins agree
     problems += [
@@ -214,8 +245,8 @@ def main() -> int:
 
     if not problems and not image_problems and not version_problems:
         print(
-            "The lock files satisfy pyproject.toml, the Playwright image "
-            "matches and the package version agrees."
+            "The lock files satisfy pyproject.toml and requirements-tools.in, "
+            "the Playwright image matches and the package version agrees."
         )
         return 0
     for problem in problems + image_problems + version_problems:
@@ -223,8 +254,8 @@ def main() -> int:
     if problems:
         print(
             "The lock files are out of date; run `make lock` and commit "
-            "requirements.lock, requirements-test.lock and "
-            "requirements-build.lock.",
+            "requirements.lock, requirements-test.lock, "
+            "requirements-build.lock and requirements-tools.lock.",
             file=sys.stderr,
         )
     if image_problems:
