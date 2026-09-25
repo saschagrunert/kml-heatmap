@@ -10,7 +10,6 @@ import {
   showToast,
 } from "../../../../kml_heatmap/frontend/utils/toast";
 import * as motion from "../../../../kml_heatmap/frontend/utils/motion";
-import { domCache } from "../../../../kml_heatmap/frontend/utils/domCache";
 import { HIDEABLE_CONTROL_IDS } from "../../../../kml_heatmap/frontend/utils/constants";
 import { LngLat, Popup } from "../../../mocks/maplibre-gl";
 import { asMapApp, type MockApp } from "../../testHelpers";
@@ -68,7 +67,6 @@ describe("WrappedManager dialog", () => {
     it("does not open twice on a page without controls to hide", () => {
       for (const id of HIDEABLE_CONTROL_IDS)
         document.getElementById(id)?.remove();
-      domCache.clear();
       wrappedManager.showWrapped();
       el("wrapped-stats").innerHTML = "rendered once";
 
@@ -81,10 +79,11 @@ describe("WrappedManager dialog", () => {
     it("hides the control elements behind the dialog", () => {
       wrappedManager.showWrapped();
 
-      expect(el("stats-btn").style.display).toBe("none");
-      expect(el("share-btn").style.display).toBe("none");
       expect(el("left-buttons").style.display).toBe("none");
       expect(el("right-buttons").style.display).toBe("none");
+      expect(el("altitude-legend").style.display).toBe("none");
+      // The buttons go with their columns, not one by one
+      expect(el("stats-btn").style.display).toBe("");
     });
 
     it("focuses the close button and makes the page behind inert", () => {
@@ -335,25 +334,24 @@ describe("WrappedManager dialog", () => {
     });
 
     it("restores the control elements to what they were", () => {
-      el("aviation-btn").style.display = "block";
+      el("altitude-legend").style.display = "block";
       openWrapped();
-      expect(el("aviation-btn").style.display).toBe("none");
+      expect(el("altitude-legend").style.display).toBe("none");
 
       wrappedManager.closeWrapped();
 
-      expect(el("stats-btn").style.display).toBe("");
       expect(el("left-buttons").style.display).toBe("");
       expect(el("right-buttons").style.display).toBe("");
-      expect(el("aviation-btn").style.display).toBe("block");
+      expect(el("altitude-legend").style.display).toBe("block");
     });
 
     it("keeps a control hidden that was hidden before", () => {
-      el("aviation-btn").style.display = "none";
+      el("airspeed-legend").style.display = "none";
 
       openWrapped();
       wrappedManager.closeWrapped();
 
-      expect(el("aviation-btn").style.display).toBe("none");
+      expect(el("airspeed-legend").style.display).toBe("none");
     });
 
     it("hides the modal and records it in the store", () => {
@@ -598,7 +596,7 @@ describe("WrappedManager dialog", () => {
       wrappedManager.closeWrapped();
 
       expect(el("wrapped-modal").hidden).toBe(false);
-      expect(el("stats-btn").style.display).toBe("none");
+      expect(el("left-buttons").style.display).toBe("none");
       expect(el("left-buttons").hasAttribute("inert")).toBe(true);
     });
 
@@ -769,12 +767,12 @@ describe("WrappedManager dialog", () => {
     it("ignores Escape after the dialog was closed", () => {
       openWrapped();
       wrappedManager.closeWrapped();
-      el("stats-btn").style.display = "block";
+      el("left-buttons").style.display = "block";
 
       document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
 
       // A second close would have restored the controls again
-      expect(el("stats-btn").style.display).toBe("block");
+      expect(el("left-buttons").style.display).toBe("block");
       expect(el("wrapped-modal").hidden).toBe(true);
     });
   });

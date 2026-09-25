@@ -1,6 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { MapOrientation } from "../../../../kml_heatmap/frontend/ui/mapOrientation";
-import { domCache } from "../../../../kml_heatmap/frontend/utils/domCache";
 import { REPLAY_CAMERA_MOVE } from "../../../../kml_heatmap/frontend/utils/mapHelpers";
 import {
   asMapApp,
@@ -34,7 +33,6 @@ describe("MapOrientation", () => {
   }
 
   beforeEach(() => {
-    domCache.clear();
     unmount = mountElements({
       // In the document, so the map's canvas can take focus
       map: "div",
@@ -111,11 +109,11 @@ describe("MapOrientation", () => {
 
     it("shows the compass unavailable while the map is north up and flat", () => {
       expect(compass().getAttribute("aria-disabled")).toBe("true");
-      expect(compass().style.opacity).toBe("0.5");
+      // The stylesheet dims it from the attribute
+      expect(compass().style.opacity).toBe("");
 
       turn({ bearing: 40 });
       expect(compass().getAttribute("aria-disabled")).toBe("false");
-      expect(compass().style.opacity).toBe("1");
 
       turn({ bearing: 0, pitch: 30 });
       expect(compass().getAttribute("aria-disabled")).toBe("false");

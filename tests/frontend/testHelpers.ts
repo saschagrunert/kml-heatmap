@@ -101,6 +101,8 @@ interface MockManagers {
     updateAircraftDropdown: Mock;
     filterByYear: Mock;
     filterByAircraft: Mock;
+    retryLoad: Mock;
+    cancelPending: Mock;
   };
   statsManager: {
     updateStatsPanel: Mock;
@@ -144,6 +146,7 @@ interface MockManagers {
   toggleReplay: Mock;
   resetView: Mock;
   isReset: Mock;
+  canResetView: Mock;
   loadReplay: Mock;
   loadWrapped: Mock;
   replayManager: {
@@ -171,6 +174,7 @@ interface MockManagers {
   };
   mapOrientation: {
     toggleGlobe: Mock;
+    toggleThreeD: Mock;
     resetNorth: Mock;
   };
   uiToggles: {
@@ -179,6 +183,7 @@ interface MockManagers {
     toggleAirspeed: Mock;
     toggleAirports: Mock;
     toggleAviation: Mock;
+    toggleSatellite: Mock;
     exportMap: Mock;
     shareLink: Mock;
   };
@@ -291,6 +296,8 @@ function createMockManagers(): MockManagers {
       updateAircraftDropdown: vi.fn(),
       filterByYear: vi.fn().mockResolvedValue(undefined),
       filterByAircraft: vi.fn().mockResolvedValue(undefined),
+      retryLoad: vi.fn().mockResolvedValue(true),
+      cancelPending: vi.fn(),
     },
     statsManager: {
       updateStatsPanel: vi.fn(),
@@ -344,6 +351,9 @@ function createMockManagers(): MockManagers {
     resetView: vi.fn(() => Promise.resolve()),
     // Something to reset unless a test says otherwise
     isReset: vi.fn(() => false),
+    canResetView: vi.fn(function (this: MockApp) {
+      return !this.isInitializing && !this.isReset();
+    }),
     // Replay and Wrapped are fetched on demand in the app; the stubs are
     // already there, so the loaders hand them straight back
     loadReplay: vi.fn(() => Promise.resolve(replayManager)),
@@ -352,6 +362,7 @@ function createMockManagers(): MockManagers {
     wrappedManager,
     mapOrientation: {
       toggleGlobe: vi.fn(),
+      toggleThreeD: vi.fn(),
       resetNorth: vi.fn(),
     },
     uiToggles: {
@@ -360,6 +371,7 @@ function createMockManagers(): MockManagers {
       toggleAirspeed: vi.fn(),
       toggleAirports: vi.fn(),
       toggleAviation: vi.fn(),
+      toggleSatellite: vi.fn(),
       exportMap: vi.fn(),
       shareLink: vi.fn().mockResolvedValue(undefined),
     },

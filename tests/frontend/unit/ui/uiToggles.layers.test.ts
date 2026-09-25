@@ -75,14 +75,13 @@ describe("UIToggles layers", () => {
   });
 
   describe("toggleHeatmap", () => {
-    it("hides the heatmap and dims the button", () => {
+    it("hides the heatmap and releases the button", () => {
       expect(visibility(MAP_LAYERS.heat)).toBe("visible");
 
       uiToggles.toggleHeatmap();
 
       expect(app.heatmapVisible).toBe(false);
       expect(visibility(MAP_LAYERS.heat)).toBe("none");
-      expect(el("heatmap-btn").style.opacity).toBe("0.5");
       expect(el("heatmap-btn").getAttribute("aria-pressed")).toBe("false");
       expect(app.dataManager.showHeatmap).toHaveBeenCalledTimes(1);
     });
@@ -95,7 +94,6 @@ describe("UIToggles layers", () => {
       expect(app.heatmapVisible).toBe(true);
       expect(app.dataManager.showHeatmap).toHaveBeenCalledTimes(2);
       expect(visibility(MAP_LAYERS.heat)).toBe("visible");
-      expect(el("heatmap-btn").style.opacity).toBe("1");
       expect(el("heatmap-btn").getAttribute("aria-pressed")).toBe("true");
     });
 
@@ -116,7 +114,6 @@ describe("UIToggles layers", () => {
       expect(visibility(MAP_LAYERS.pathsAltitude)).toBe("visible");
       expect(visibility(MAP_LAYERS.pathsAltitudeSelected)).toBe("visible");
       expect(runs(MAP_SOURCES.pathsAltitude)).toBeGreaterThan(0);
-      expect(el("altitude-btn").style.opacity).toBe("1");
       expect(el("altitude-btn").getAttribute("aria-pressed")).toBe("true");
       expect(el("altitude-legend").hidden).toBe(false);
       expect(toastMock.showToast).not.toHaveBeenCalled();
@@ -154,7 +151,7 @@ describe("UIToggles layers", () => {
       expect(visibility(MAP_LAYERS.pathsAltitude)).toBe("none");
       // Kept, the features of a hidden layer held tens of MB
       expect(runs(MAP_SOURCES.pathsAltitude)).toBe(0);
-      expect(el("altitude-btn").style.opacity).toBe("0.5");
+      expect(el("altitude-btn").getAttribute("aria-pressed")).toBe("false");
       expect(el("altitude-legend").hidden).toBe(true);
     });
 
@@ -206,7 +203,7 @@ describe("UIToggles layers", () => {
       expect(visibility(MAP_LAYERS.pathsAirspeed)).toBe("visible");
       expect(visibility(MAP_LAYERS.pathsAirspeedSelected)).toBe("visible");
       expect(el("altitude-legend").hidden).toBe(true);
-      expect(el("airspeed-btn").style.opacity).toBe("1");
+      expect(el("airspeed-btn").getAttribute("aria-pressed")).toBe("true");
       expect(el("airspeed-legend").hidden).toBe(false);
       expect(toastMock.showToast).toHaveBeenCalledWith(
         "Altitude layer disabled",
@@ -221,7 +218,7 @@ describe("UIToggles layers", () => {
 
       expect(app.airspeedVisible).toBe(false);
       expect(visibility(MAP_LAYERS.pathsAirspeed)).toBe("none");
-      expect(el("airspeed-btn").style.opacity).toBe("0.5");
+      expect(el("airspeed-btn").getAttribute("aria-pressed")).toBe("false");
       expect(el("airspeed-legend").hidden).toBe(true);
     });
 
@@ -240,7 +237,6 @@ describe("UIToggles layers", () => {
 
       expect(app.airportsVisible).toBe(false);
       expect(el("map").classList.contains(AIRPORTS_HIDDEN_CLASS)).toBe(true);
-      expect(el("airports-btn").style.opacity).toBe("0.5");
       expect(el("airports-btn").getAttribute("aria-pressed")).toBe("false");
     });
 
@@ -251,7 +247,6 @@ describe("UIToggles layers", () => {
 
       expect(app.airportsVisible).toBe(true);
       expect(el("map").classList.contains(AIRPORTS_HIDDEN_CLASS)).toBe(false);
-      expect(el("airports-btn").style.opacity).toBe("1");
       expect(el("airports-btn").getAttribute("aria-pressed")).toBe("true");
     });
 

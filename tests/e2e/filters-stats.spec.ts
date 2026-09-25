@@ -161,11 +161,11 @@ test.describe("Filters and Statistics", () => {
     await expect(page.locator("#stats-rail-title")).toContainText(
       "Flight Statistics",
     );
-    // The count decides the plural, so match the shape rather than a literal.
-    // Matched on the element: the panel's text runs straight on into the
-    // build line below it.
+    // The count decides the plural, so match the shape rather than a literal,
+    // grouped by thousands as the rail writes it. Matched on the element: the
+    // panel's text runs straight on into the build line below it.
     await expect(panel.locator(".kh-stats-footer")).toHaveText(
-      /^\d+ data points?$/,
+      /^\d{1,3}(,\d{3})* data points?$/,
     );
     // The commit is left out where the build could not tell which one it was
     await expect(panel.locator(".kh-stats-build")).toHaveText(

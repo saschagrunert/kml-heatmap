@@ -11,7 +11,6 @@ import {
   REPLAY_PRECONDITION_MESSAGE,
   updateReplayButtonState,
 } from "../../../../kml_heatmap/frontend/ui/replayButton";
-import { domCache } from "../../../../kml_heatmap/frontend/utils/domCache";
 
 function button(): HTMLButtonElement {
   return document.getElementById("replay-btn") as HTMLButtonElement;
@@ -20,20 +19,22 @@ function button(): HTMLButtonElement {
 describe("updateReplayButtonState", () => {
   beforeEach(() => {
     document.body.innerHTML = '<button id="replay-btn"></button>';
-    domCache.clear();
   });
 
   it("dims the button and says what is missing when replay is not possible", () => {
     updateReplayButtonState(false);
 
-    expect(button().style.opacity).toBe("0.5");
+    // aria-disabled, which the stylesheet dims; no style of its own
+    expect(button().getAttribute("aria-disabled")).toBe("true");
+    expect(button().style.opacity).toBe("");
     expect(button().title).toBe(REPLAY_PRECONDITION_MESSAGE);
   });
 
   it("brings it to full strength once replay is possible", () => {
     updateReplayButtonState(true);
 
-    expect(button().style.opacity).toBe("1");
+    expect(button().getAttribute("aria-disabled")).toBe("false");
+    expect(button().style.opacity).toBe("");
     expect(button().title).toBe(REPLAY_BUTTON_LABEL);
   });
 
@@ -52,7 +53,6 @@ describe("updateReplayButtonState", () => {
 
   it("does nothing when the control is not on the page", () => {
     document.body.innerHTML = "";
-    domCache.clear();
 
     expect(() => updateReplayButtonState(true)).not.toThrow();
   });

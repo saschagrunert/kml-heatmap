@@ -5,6 +5,7 @@ import {
   TOAST_STACK_ID,
   TOAST_STATUS_ID,
   announceInRegion,
+  dismissToast,
   showToast,
 } from "../../../../kml_heatmap/frontend/utils/toast";
 
@@ -74,7 +75,9 @@ describe("showToast", () => {
     // The visible toast is only the picture of the message, so it is not
     // announced a second time
     expect(
-      document.getElementById(TOAST_STACK_ID)!.getAttribute("aria-hidden"),
+      document
+        .querySelector(".toast-notification")!
+        .getAttribute("aria-hidden"),
     ).toBe("true");
     expect(
       document.querySelector(".toast-notification")!.getAttribute("role"),
@@ -127,6 +130,98 @@ describe("showToast", () => {
 
     toast.dispatchEvent(new Event("transitionend"));
     expect(document.querySelector(".toast-notification")).toBeNull();
+  });
+
+  describe("an error", () => {
+    const toast = (): HTMLElement =>
+      document.querySelector<HTMLElement>(".toast-error")!;
+    const buttons = (): HTMLButtonElement[] =>
+      Array.from(toast().querySelectorAll("button"));
+
+    it("stays until it is dismissed", () => {
+      showToast("Export failed", "error");
+
+      vi.advanceTimersByTime(60_000);
+      expect(toast().classList.contains("toast-visible")).toBe(true);
+      // Its buttons are in reach, so it is not hidden from assistive tech
+      expect(toast().getAttribute("aria-hidden")).toBeNull();
+      expect(
+        document.getElementById(TOAST_STACK_ID)!.getAttribute("aria-hidden"),
+      ).toBeNull();
+
+      const [dismiss] = buttons();
+      expect(dismiss!.getAttribute("aria-label")).toBe("Dismiss");
+      dismiss!.click();
+      vi.advanceTimersByTime(1000);
+      expect(document.querySelector(".toast-error")).toBeNull();
+    });
+
+    it("keeps its message as its text", () => {
+      showToast("Export failed", "error");
+
+      expect(toast().textContent).toBe("Export failed");
+    });
+
+    it("carries the action that puts it right", () => {
+      const run = vi.fn();
+      showToast("Failed to load flight data for 2025", "error", {
+        label: "Retry",
+        run,
+      });
+
+      const [retry, dismiss] = buttons();
+      expect(retry!.textContent).toBe("Retry");
+      expect(dismiss!.getAttribute("aria-label")).toBe("Dismiss");
+      retry!.click();
+
+      expect(run).toHaveBeenCalledTimes(1);
+      // A new failure says so with a toast of its own
+      expect(toast().classList.contains("toast-visible")).toBe(false);
+    });
+
+    it("replaces the same error rather than stacking a copy", () => {
+      showToast("Export failed", "error");
+      showToast("Export failed", "error");
+      vi.advanceTimersByTime(1000);
+
+      expect(document.querySelectorAll(".toast-error")).toHaveLength(1);
+    });
+
+    it("goes when told, by its message or with every other", () => {
+      showToast("Map rendering interrupted", "error");
+      showToast("Export failed", "error");
+
+      dismissToast("Map rendering interrupted");
+      vi.advanceTimersByTime(1000);
+      expect(
+        Array.from(document.querySelectorAll(".toast-error")).map(
+          (element) => element.textContent,
+        ),
+      ).toEqual(["Export failed"]);
+
+      dismissToast();
+      vi.advanceTimersByTime(1000);
+      expect(document.querySelector(".toast-error")).toBeNull();
+    });
+
+    it("hands the focus of its button to the map as it goes", () => {
+      // To the canvas, which takes the arrow keys, not the container
+      const map = document.createElement("div");
+      map.id = "map";
+      map.tabIndex = -1;
+      const canvas = document.createElement("canvas");
+      canvas.tabIndex = 0;
+      map.append(canvas);
+      document.body.append(map);
+      showToast("Export failed", "error");
+      const [dismiss] = buttons();
+      dismiss!.focus();
+
+      dismiss!.click();
+
+      expect(document.activeElement).toBe(canvas);
+      map.remove();
+    });
   });
 
   it("removes toast via fallback timeout when transitionend does not fire", () => {

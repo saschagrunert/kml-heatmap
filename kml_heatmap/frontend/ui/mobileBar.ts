@@ -8,9 +8,9 @@
  * drive their panels directly.
  *
  * The bar is built at runtime because the template is shared with the
- * desktop layout. Everything it needs already exists in the page, so it
- * wires straight to the managers and mirrors the existing dropdowns instead
- * of holding state of its own.
+ * desktop layout. Everything it needs already exists in the page, so it runs
+ * the same actions as the desktop controls (ui/actions.ts) and mirrors the
+ * existing dropdowns instead of holding state of its own.
  *
  * When replay activates the bar steps aside entirely: the replay panel takes
  * the bottom edge, so the two never stack.
@@ -20,7 +20,7 @@ import type { SheetRow } from "./mobileSheet";
 import { MobileSheet } from "./mobileSheet";
 import { icon, type IconName } from "../utils/icons";
 import { MOBILE_BREAKPOINT_PX } from "../utils/constants";
-import { logError } from "../utils/logger";
+import { runAction } from "./actions";
 
 /** Bar and sheet exist only below this width (matches the CSS breakpoint) */
 export const MOBILE_BAR_BREAKPOINT_PX = MOBILE_BREAKPOINT_PX;
@@ -28,7 +28,11 @@ export const MOBILE_BAR_BREAKPOINT_PX = MOBILE_BREAKPOINT_PX;
 /** Control columns the bar replaces while it is mounted */
 const LEGACY_CONTROL_IDS = ["left-buttons", "right-buttons"];
 
-/** Store keys that change what the sheets show */
+/**
+ * Store keys that change what the sheets show. The dataset is one: the
+ * aircraft list, Replay and Reset view all follow it, and a Filter sheet
+ * opened during the first load showed an empty aircraft list until closed.
+ */
 const SHEET_KEYS = [
   "heatmapVisible",
   "altitudeVisible",
@@ -42,24 +46,32 @@ const SHEET_KEYS = [
   "isolateSelection",
   "selectedYear",
   "selectedAircraft",
+  "currentData",
+  "hasTimingData",
 ] as const;
 
 type TabId = "layers" | "filter" | "stats" | "wrapped" | "more";
+
+/**
+ * What a tab opens: a sheet, the statistics (a disclosure, as the desktop
+ * Statistics button is) or the Wrapped dialog (a button that opens a dialog,
+ * as the desktop Wrapped button is). None of them is a pressed toggle.
+ */
+type TabKind = "sheet" | "disclosure" | "dialog";
 
 interface TabSpec {
   id: TabId;
   icon: IconName;
   label: string;
-  /** Sheet openers are dialog buttons; the rest are toggles */
-  opensSheet: boolean;
+  kind: TabKind;
 }
 
 const TABS: TabSpec[] = [
-  { id: "layers", icon: "layers", label: "Layers", opensSheet: true },
-  { id: "filter", icon: "filter", label: "Filter", opensSheet: true },
-  { id: "stats", icon: "stats", label: "Stats", opensSheet: false },
-  { id: "wrapped", icon: "wrapped", label: "Wrapped", opensSheet: false },
-  { id: "more", icon: "more", label: "More", opensSheet: true },
+  { id: "layers", icon: "layers", label: "Layers", kind: "sheet" },
+  { id: "filter", icon: "filter", label: "Filter", kind: "sheet" },
+  { id: "stats", icon: "stats", label: "Stats", kind: "disclosure" },
+  { id: "wrapped", icon: "wrapped", label: "Wrapped", kind: "dialog" },
+  { id: "more", icon: "more", label: "More", kind: "sheet" },
 ];
 
 export class MobileBar {
@@ -142,7 +154,7 @@ export class MobileBar {
       this.closeSheet();
       this.root.remove();
     } else if (!document.contains(this.root)) {
-      document.body.append(this.root);
+      insertBeforeMap(this.root);
     }
   }
 
@@ -166,7 +178,7 @@ export class MobileBar {
     if (this.mounted) return;
     this.mounted = true;
 
-    if (!this.app.replayActive) document.body.append(this.root);
+    if (!this.app.replayActive) insertBeforeMap(this.root);
     this.sheet.mount(document.body);
 
     // The floating button groups are what the bar replaces
@@ -222,13 +234,16 @@ export class MobileBar {
 
     tab.append(label);
 
-    if (spec.opensSheet) {
+    if (spec.kind === "sheet") {
       // No aria-expanded: the sheet is modal and covers the whole bar, so
       // the tab is not an operable disclosure once it is open
       tab.setAttribute("aria-haspopup", "dialog");
       tab.setAttribute("aria-controls", this.sheet.root.id);
+    } else if (spec.kind === "dialog") {
+      tab.setAttribute("aria-haspopup", "dialog");
     } else {
-      tab.setAttribute("aria-pressed", "false");
+      tab.setAttribute("aria-controls", "stats-rail");
+      tab.setAttribute("aria-expanded", "false");
     }
 
     tab.addEventListener("click", () => this.selectTab(spec.id));
@@ -263,15 +278,12 @@ export class MobileBar {
       case "stats":
         this.closeSheet();
         this.tabs.get(id)?.focus();
-        this.app.statsManager.toggleStats();
+        runAction(this.app, "toggleStats");
         break;
       case "wrapped":
         this.closeSheet();
         this.tabs.get(id)?.focus();
-        void this.app
-          .loadWrapped()
-          .then((manager) => manager?.showWrapped())
-          .catch(logError);
+        runAction(this.app, "showWrapped");
         break;
     }
     this.syncTabs();
@@ -303,7 +315,9 @@ export class MobileBar {
       if (!tab) continue;
       const active = this.isTabActive(spec.id);
       tab.classList.toggle("active", active);
-      if (!spec.opensSheet) tab.setAttribute("aria-pressed", String(active));
+      if (spec.kind === "disclosure") {
+        tab.setAttribute("aria-expanded", String(active));
+      }
     }
   }
 
@@ -322,7 +336,7 @@ export class MobileBar {
         icon: "heatmap",
         label: "Heatmap",
         isOn: () => app.heatmapVisible,
-        onToggle: () => app.uiToggles.toggleHeatmap(),
+        onToggle: () => runAction(app, "toggleHeatmap"),
       },
       {
         kind: "switch",
@@ -330,7 +344,7 @@ export class MobileBar {
         icon: "airport",
         label: "Airports",
         isOn: () => app.airportsVisible,
-        onToggle: () => app.uiToggles.toggleAirports(),
+        onToggle: () => runAction(app, "toggleAirports"),
       },
       {
         kind: "switch",
@@ -339,7 +353,7 @@ export class MobileBar {
         label: "Altitude",
         chip: "altitude",
         isOn: () => app.altitudeVisible,
-        onToggle: () => app.uiToggles.toggleAltitude(),
+        onToggle: () => runAction(app, "toggleAltitude"),
       },
       {
         kind: "switch",
@@ -348,8 +362,12 @@ export class MobileBar {
         label: "Speed",
         chip: "speed",
         isOn: () => app.airspeedVisible,
-        isDisabled: () => isControlDisabled("airspeed-btn"),
-        onToggle: () => app.uiToggles.toggleAirspeed(),
+        // Read from the store rather than off the desktop button, which is
+        // a copy of the same flag
+        isDisabled: () => !app.hasTimingData,
+        hint: () =>
+          app.hasTimingData ? null : "No timing data in the flights",
+        onToggle: () => runAction(app, "toggleAirspeed"),
       },
       {
         kind: "switch",
@@ -357,7 +375,7 @@ export class MobileBar {
         icon: "aviation",
         label: "Aviation",
         isOn: () => app.aviationVisible,
-        onToggle: () => app.uiToggles.toggleAviation(),
+        onToggle: () => runAction(app, "toggleAviation"),
       },
       // Not a layer, but how the layers are drawn, and this is the sheet
       // someone looks in for it. The compass floats over the map instead
@@ -368,7 +386,7 @@ export class MobileBar {
         icon: "globe",
         label: "Globe",
         isOn: () => app.globeVisible,
-        onToggle: () => app.mapOrientation.toggleGlobe(),
+        onToggle: () => runAction(app, "toggleGlobe"),
       },
       {
         kind: "switch",
@@ -376,7 +394,7 @@ export class MobileBar {
         icon: "threeD",
         label: "3D",
         isOn: () => app.threeDVisible,
-        onToggle: () => app.mapOrientation.toggleThreeD(),
+        onToggle: () => runAction(app, "toggleThreeD"),
       },
       {
         kind: "switch",
@@ -384,7 +402,7 @@ export class MobileBar {
         icon: "satellite",
         label: "Satellite",
         isOn: () => app.satelliteVisible,
-        onToggle: () => app.uiToggles.toggleSatellite(),
+        onToggle: () => runAction(app, "toggleSatellite"),
       },
     ];
   }
@@ -420,7 +438,7 @@ export class MobileBar {
           app.canReplay() ? null : "Select one flight with timing data",
         isDisabled: () => !app.canReplay(),
         onSelect: () => {
-          app.toggleReplay();
+          runAction(app, "toggleReplay");
         },
       },
       {
@@ -430,20 +448,22 @@ export class MobileBar {
         label: "Isolate selection",
         isOn: () => app.isolateSelection,
         isDisabled: () => app.selectedPathIds.size === 0,
-        onToggle: () => app.pathSelection.toggleIsolateSelection(),
+        hint: () =>
+          app.selectedPathIds.size === 0 ? "Select flights to isolate" : null,
+        onToggle: () => runAction(app, "toggleIsolateSelection"),
       },
       {
         kind: "action",
         id: "reset-view",
         icon: "reset",
         label: "Reset view",
-        isDisabled: () => app.isReset(),
+        isDisabled: () => !app.canResetView(),
         // With nothing to reset a tap does nothing, and the sheet stays
         closeOnSelect: false,
         onSelect: () => {
-          if (app.isReset()) return;
+          if (!app.canResetView()) return;
           this.closeSheet();
-          app.resetView().catch(logError);
+          runAction(app, "resetView");
         },
       },
       {
@@ -451,16 +471,14 @@ export class MobileBar {
         id: "export",
         icon: "export",
         label: "Export image",
-        onSelect: () => app.uiToggles.exportMap(),
+        onSelect: () => runAction(app, "exportMap"),
       },
       {
         kind: "action",
         id: "share",
         icon: "share",
         label: "Copy link",
-        onSelect: () => {
-          void app.uiToggles.shareLink();
-        },
+        onSelect: () => runAction(app, "shareLink"),
       },
       {
         kind: "action",
@@ -490,10 +508,9 @@ export class MobileBar {
  * the document.
  *
  * No inline style is written here. The inline `display` belongs to
- * hideControls() and restoreControls(), which own it while Wrapped is open
- * or an export is in flight. Snapshotting it here used to capture their
- * `none` and restore it forever, stranding every desktop control after a
- * rotation across the breakpoint.
+ * hideControls() and restoreControls(), which own it while Wrapped is open.
+ * Snapshotting it here used to capture their `none` and restore it forever,
+ * stranding every desktop control after a rotation across the breakpoint.
  */
 function setLegacyControlsHidden(hidden: boolean): void {
   for (const id of LEGACY_CONTROL_IDS) {
@@ -503,8 +520,15 @@ function setLegacyControlsHidden(hidden: boolean): void {
   }
 }
 
-/** Whether a control in the page is currently disabled */
-function isControlDisabled(id: string): boolean {
-  const element = document.getElementById(id);
-  return element instanceof HTMLButtonElement ? element.disabled : false;
+/**
+ * Put the bar ahead of the map in the document, where the control columns
+ * it stands in for are, so that it comes before the map's markers in the
+ * tab order rather than after every one of them. Wrapped has the map in its
+ * dialog; the bar goes to the end of the page then.
+ */
+function insertBeforeMap(bar: HTMLElement): void {
+  const map = document.getElementById("map");
+  if (map?.parentElement === document.body)
+    document.body.insertBefore(bar, map);
+  else document.body.append(bar);
 }

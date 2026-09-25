@@ -54,7 +54,10 @@ vi.mock("../../../../kml_heatmap/frontend/services/dataLoader", () => ({
   }),
 }));
 
-const toastMock = vi.hoisted(() => ({ showToast: vi.fn() }));
+const toastMock = vi.hoisted(() => ({
+  showToast: vi.fn(),
+  dismissToast: vi.fn(),
+}));
 vi.mock("../../../../kml_heatmap/frontend/utils/toast", () => toastMock);
 
 /** A state of the loader, one year of unknown size unless said otherwise */
@@ -182,6 +185,7 @@ describe("DataManager", () => {
       expect(toastMock.showToast).toHaveBeenCalledWith(
         "Failed to load flight data for 2024, 2025",
         "error",
+        undefined,
       );
     });
   });
@@ -533,6 +537,7 @@ describe("DataManager", () => {
       expect(toastMock.showToast).toHaveBeenCalledWith(
         "No flight data available for 2025",
         "error",
+        undefined,
       );
     });
 
@@ -544,6 +549,7 @@ describe("DataManager", () => {
       expect(toastMock.showToast).toHaveBeenCalledWith(
         "No flight data available for all years",
         "error",
+        undefined,
       );
     });
 
@@ -559,6 +565,82 @@ describe("DataManager", () => {
       expect(toastMock.showToast).toHaveBeenCalledWith(
         "Failed to load flight data for 2025",
         "error",
+        undefined,
+      );
+    });
+
+    it("offers the caller's retry on the toast of a failed load", async () => {
+      const retry = { label: "Retry", run: vi.fn() };
+      loaderMocks.loadData.mockImplementation(() => {
+        loaderMocks.options!.onLoadError!(["2025"]);
+        return Promise.resolve(null);
+      });
+
+      await dataManager.loadData("2025", undefined, retry);
+      expect(toastMock.showToast).toHaveBeenLastCalledWith(
+        "Failed to load flight data for 2025",
+        "error",
+        retry,
+      );
+
+      loaderMocks.loadData.mockResolvedValue(null);
+      await dataManager.loadData("2024", undefined, retry);
+      expect(toastMock.showToast).toHaveBeenLastCalledWith(
+        "No flight data available for 2024",
+        "error",
+        retry,
+      );
+    });
+
+    it("keeps a switch's Retry off the years of a load of all it replaced", async () => {
+      // The load of all years goes on after a switch replaced it, and its
+      // failure used to carry the Retry of the switch, for another year
+      const retry = { label: "Retry", run: vi.fn() };
+      let finishAll: () => void = () => {};
+      loaderMocks.loadData.mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finishAll = () => {
+              loaderMocks.options!.onLoadError!(["2023"]);
+              resolve(null);
+            };
+          }),
+      );
+      const all = dataManager.loadData("all", undefined, retry);
+      loaderMocks.loadData.mockReturnValueOnce(new Promise(() => {}));
+      void dataManager.loadData("2025", undefined, retry);
+
+      finishAll();
+      await all;
+
+      expect(toastMock.showToast).toHaveBeenCalledWith(
+        "Failed to load flight data for 2023",
+        "error",
+        undefined,
+      );
+    });
+
+    it("takes the failures on screen away once a dataset has loaded", async () => {
+      loaderMocks.loadData.mockImplementationOnce(() => {
+        loaderMocks.options!.onLoadError!(["2025"]);
+        return Promise.resolve(null);
+      });
+      await dataManager.loadData("2025");
+      loaderMocks.loadData.mockResolvedValueOnce({
+        ...baseData(),
+        incomplete: true,
+      });
+      await dataManager.loadData("all");
+      // Some years of all are missing: that failure is still true
+      expect(toastMock.dismissToast).not.toHaveBeenCalled();
+
+      // An error stays until dismissed; once the page has a whole dataset
+      // again, it no longer says anything about what is on screen
+      loaderMocks.loadData.mockResolvedValueOnce(baseData());
+      await dataManager.loadData("2025");
+
+      expect(toastMock.dismissToast).toHaveBeenCalledWith(
+        "Failed to load flight data for 2025",
       );
     });
 
@@ -568,6 +650,7 @@ describe("DataManager", () => {
       expect(toastMock.showToast).toHaveBeenCalledWith(
         "Failed to load flight data for 2024, 2025. Reload the page to update it.",
         "error",
+        undefined,
       );
     });
   });

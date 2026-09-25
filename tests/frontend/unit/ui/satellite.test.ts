@@ -29,7 +29,7 @@ import {
 } from "../../testHelpers";
 import { resetMapLibreMock } from "../../../mocks/maplibre-gl";
 
-const toast = vi.hoisted(() => ({ showToast: vi.fn() }));
+const toast = vi.hoisted(() => ({ showToast: vi.fn(), dismissToast: vi.fn() }));
 vi.mock("../../../../kml_heatmap/frontend/utils/toast", () => toast);
 
 // The feature bundle, as far as the imagery takes it
@@ -152,6 +152,10 @@ describe("the satellite switch", () => {
     await settle();
     expect(featureBundle.followSatellite).toHaveBeenCalledTimes(1);
     expect(app.satelliteVisible).toBe(true);
+    // The error stays until dismissed, and is no longer true
+    expect(toast.dismissToast).toHaveBeenCalledWith(
+      SATELLITE_UNAVAILABLE_MESSAGE,
+    );
   });
 
   it("says nothing when the code fails after the switch is off again", async () => {

@@ -1,11 +1,12 @@
 /**
  * Store-driven toggle button state.
  * The store is the single source of truth: a button reflects its boolean
- * store key through `aria-pressed`, the `active` class and its opacity.
- * `aria-pressed` is what assistive technology reads. The stylesheet draws
- * the pressed look from the class alone, because the statistics disclosure
- * and the mobile tabs that open a sheet carry the class but no
- * `aria-pressed`.
+ * store key through `aria-pressed` and the `active` class. `aria-pressed` is
+ * what assistive technology reads. The stylesheet draws the pressed look
+ * from the class alone, because the statistics disclosure and the mobile
+ * tabs carry the class but no `aria-pressed`. Nothing here writes a style:
+ * an off toggle is drawn at full strength, and only a control that cannot
+ * act (`disabled`, `aria-disabled`) is dimmed, by the stylesheet.
  */
 import type { AppStore, StoreState } from "../state/store";
 import { domCache } from "./domCache";
@@ -24,7 +25,6 @@ export function applyToggleButtonState(
 ): void {
   button.setAttribute("aria-pressed", String(active));
   button.classList.toggle("active", active);
-  button.style.opacity = active ? "1.0" : "0.5";
 }
 
 /**

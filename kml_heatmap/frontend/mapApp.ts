@@ -31,7 +31,7 @@ import { MobileBar } from "./ui/mobileBar";
 import { bindActions } from "./ui/actions";
 import { loadInitialData } from "./appInitializer";
 import { logError } from "./utils/logger";
-import { showToast } from "./utils/toast";
+import { dismissToast, showToast } from "./utils/toast";
 import { domCache } from "./utils/domCache";
 import { syncLegend, syncToggleButton } from "./utils/buttonState";
 import { applyGradientTokens } from "./utils/colors";
@@ -512,8 +512,9 @@ export class MapApp {
     // Setup map event handlers
     this.setupEventHandlers();
 
-    // Mark initialization as complete
+    // Mark initialization as complete. Reset view waited for it.
     this.isInitializing = false;
+    this.syncResetButton();
 
     // Restore wrapped panel state if it was open
     const state = this.savedState;
@@ -546,7 +547,11 @@ export class MapApp {
         showToast(MAP_STALL_MESSAGE, "error");
       }
     }, MAP_STALL_MS);
-    map.once("idle", () => clearTimeout(timer));
+    map.once("idle", () => {
+      clearTimeout(timer);
+      // An error stays until dismissed; this one is over once the map drew
+      dismissToast(MAP_STALL_MESSAGE);
+    });
   }
 
   /**
@@ -598,8 +603,10 @@ export class MapApp {
     const aircraftSelect = domCache.get("aircraft-select", HTMLSelectElement);
     // Capture both before filtering: switching the year rebuilds the aircraft
     // dropdown and would otherwise overwrite a pending aircraft selection.
+    // A dropdown that shows no year is one whose first load failed (see
+    // loadInitialData), not one someone changed
     const pendingYear =
-      yearSelect && yearSelect.value !== this.selectedYear
+      yearSelect && yearSelect.value && yearSelect.value !== this.selectedYear
         ? yearSelect.value
         : null;
     const pendingAircraft =
@@ -658,6 +665,13 @@ export class MapApp {
           this.store.set(key, value);
         }
       }
+      // Altitude and speed colour the same paths, and the toggles never
+      // leave both on (setColorLayer); a link written by hand, or with every
+      // flag of `v` set, can. Altitude is the one kept, as it needs no
+      // timing data.
+      if (this.altitudeVisible && this.airspeedVisible) {
+        this.airspeedVisible = false;
+      }
       // Isolating nothing is not a state the controls can leave: a link
       // written before path ids were versioned drops its selection but still
       // carries the isolate flag
@@ -681,8 +695,10 @@ export class MapApp {
 
     // MapLibre runs every camera move through easeTo or flyTo and shortens
     // those to nothing under reduced motion, the app's own included; the
-    // glide after a drag goes with them. The tile and label fades are the
-    // one animation it would still run.
+    // glide after a drag goes with them. It asks the media query itself on
+    // every move as long as it is not given `reduceMotion`, so a change of
+    // the setting takes effect without a reload. The tile and label fades
+    // are the one animation it would still run, and are set here once.
     const animate = !prefersReducedMotion();
 
     // A saved zoom of 0 is a view like any other, not a missing one. A
@@ -728,10 +744,10 @@ export class MapApp {
       bearing,
       pitch: this.savedState?.pitch ?? 0,
       maxPitch: MAP_MAX_PITCH,
-      reduceMotion: !animate,
       fadeDuration: animate ? 300 : 0,
     });
     map.addControl(new AttributionControl({ compact: false }), "bottom-right");
+    followAttributionHeight(map);
     this.map = map;
     // A first visit has just been fitted to it, and a saved view or a link
     // may show the very same (see isReset)
@@ -750,18 +766,23 @@ export class MapApp {
     // For as long as the app lives, like its other DOM listeners
     const mapCanvas = map.getCanvas();
     const lifetime = { signal: this.signal };
+    const interrupted = "Map rendering interrupted, restoring…";
     mapCanvas.addEventListener(
       "webglcontextlost",
       (e) => {
         e.preventDefault();
         logError("WebGL context lost");
-        showToast("Map rendering interrupted, restoring…", "error");
+        showToast(interrupted, "error");
       },
       lifetime,
     );
     mapCanvas.addEventListener(
       "webglcontextrestored",
-      () => showToast("Map rendering restored", "info"),
+      () => {
+        // An error stays until dismissed, and this one has put itself right
+        dismissToast(interrupted);
+        showToast("Map rendering restored", "info");
+      },
       lifetime,
     );
 
@@ -844,11 +865,10 @@ export class MapApp {
 
   /**
    * The store drives the toggle buttons and the colour legends: initial
-   * state and every change are reflected in aria-pressed, the active class,
-   * the opacity and the legend visibility. The heatmap's toggle and the
-   * altitude scale also depend on whether a replay runs, so they follow
-   * the layers (see ui/layerVisibility.ts). Replay only clears the opacity
-   * of the toggles it disables, and puts it back when it closes.
+   * state and every change are reflected in aria-pressed, the active class
+   * and the legend visibility. The heatmap's toggle and the altitude scale
+   * also depend on whether a replay runs, so they follow the layers (see
+   * ui/layerVisibility.ts).
    */
   private setupButtonSync(): void {
     syncToggleButton(this.store, "altitudeVisible", "altitude-btn");
@@ -934,7 +954,7 @@ export class MapApp {
   async resetView(): Promise<void> {
     // Like Isolate with nothing selected: unavailable, and a press does
     // nothing (see syncResetButton)
-    if (this.isReset()) return;
+    if (!this.canResetView()) return;
     const defaults = createDefaultState();
     const applied = await this.filterManager.filterByYear(
       this.defaultYear,
@@ -971,17 +991,27 @@ export class MapApp {
   }
 
   /**
+   * Whether Reset view can be pressed: once the first load is over, and
+   * while it would change something
+   */
+  canResetView(): boolean {
+    return !this.isInitializing && !this.isReset();
+  }
+
+  /**
    * Whether Reset view would change nothing: every key it sets has the
    * value it sets, and the camera is where the last fit to the start view
    * took it, north up and flat. The camera is compared within what a link
    * rounds it to (state/urlState.ts), so a link to the start view, or a
    * reload of it, still opens on it; a pan, a zoom, a turn or a tilt
-   * leaves it, and a resize or Wrapped's round trip does not.
+   * leaves it, and a resize or Wrapped's round trip does not. A page whose
+   * year failed to load is not what a first visit shows, so Reset view is
+   * the way to try again there.
    */
   isReset(): boolean {
     const map = this.map;
     const start = this.startCamera;
-    if (!map || !start) return false;
+    if (!map || !start || !this.currentData) return false;
     const defaults = createDefaultState();
     const center = map.getCenter();
     const target = start.center as LngLat;
@@ -1053,7 +1083,7 @@ export class MapApp {
    * manager, which is only fetched once someone opens replay.
    */
   private followReplayAvailability(): void {
-    // A running replay owns the button (it reads Stop); it is back in step
+    // A running replay owns the button (it is pressed); it is back in step
     // with the selection as the replay closes
     const refresh = (): void => {
       if (!this.replayActive) updateReplayButtonState(this.canReplay());
@@ -1067,19 +1097,17 @@ export class MapApp {
 
   /**
    * Show Reset view unavailable while the page is what it would make of it,
-   * the way Isolate and Replay are: aria-disabled and dimmed, but still in
-   * the tab order. It runs for the keys Reset view sets, the data (a first
-   * visit's year is only known with it) and the end of every camera move,
-   * the fit's own included (see initializeManagers). A replay disables the
-   * button and puts its opacity aside (see ReplayManager), so it is left
-   * alone until the replay closes, which runs it again.
+   * or still loading, the way Isolate and Replay are: aria-disabled, which
+   * the stylesheet dims, but still in the tab order. It runs for the keys
+   * Reset view sets, the data (a first visit's year is only known with it),
+   * the end of the first load and the end of every camera move, the fit's
+   * own included (see initializeManagers). A replay disables the button
+   * outright, and closing it runs this again.
    */
   private readonly syncResetButton = (): void => {
     const button = domCache.get("reset-view-btn");
     if (!button || this.replayActive) return;
-    const reset = this.isReset();
-    button.setAttribute("aria-disabled", String(reset));
-    button.style.opacity = reset ? "0.5" : "1.0";
+    button.setAttribute("aria-disabled", String(!this.canResetView()));
   };
 
   /**
@@ -1108,7 +1136,10 @@ export class MapApp {
     unavailable: string,
   ): Promise<T | null> {
     const bundle = await load();
-    if (!bundle) showToast(unavailable, "error");
+    // The failure of an earlier try stays until dismissed, and would say
+    // the code is unavailable over the panel it has just opened
+    if (bundle) dismissToast(unavailable);
+    else showToast(unavailable, "error");
     return bundle;
   }
 
@@ -1251,6 +1282,35 @@ function restoreFocusFromRail(
   // The map is the last resort: next to the controls in order. It is the
   // canvas that takes focus, the container around it does not.
   map?.getCanvas().focus();
+}
+
+/**
+ * Keep --attribution-h at the height of the map's credit. The credit wraps
+ * once a layer adds one of its own (see styles.css), and the legends, the
+ * toasts and the phone's replay panel stand on top of it. A phone shows two
+ * of its lines, and a tap on it beside its links all of them.
+ */
+function followAttributionHeight(map: MapLibreMap): void {
+  const credit = map
+    .getContainer()
+    .querySelector<HTMLElement>(".maplibregl-ctrl-attrib");
+  if (!credit) return;
+  credit.addEventListener("click", (event) => {
+    if (!(event.target as Element).closest("a")) {
+      credit.classList.toggle("is-expanded");
+    }
+  });
+  if (typeof ResizeObserver === "undefined") return;
+  new ResizeObserver(() => {
+    const height = credit.getBoundingClientRect().height;
+    // Hidden while a sheet covers its corner: the chrome keeps its place
+    if (height > 0) {
+      document.documentElement.style.setProperty(
+        "--attribution-h",
+        `${height}px`,
+      );
+    }
+  }).observe(credit);
 }
 
 /** Markup shown in place of the map when initialization fails */

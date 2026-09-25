@@ -25,13 +25,19 @@ from kml_heatmap.site_assets import CSS_FILES, STATIC_DIR, _copy_and_minify_css
 # styles.css is what every visit loads before the map can be drawn. It was one
 # 68 KB sheet until replay and Wrapped moved into features.css, which cut it to
 # about 39 KB; the budget keeps that win rather than letting it drain back.
+# Raised from 42 KB for the UI fixes of the review of 2026-09-25 (41,093 B
+# before, 43,345 B after): the states of the controls drawn from their
+# attributes (and the system's highlight for one that is on, in forced
+# colours), the toast that stays with its Retry and Dismiss, the note on
+# the map when the first year fails to load, the dimmed parts of an
+# unavailable sheet row and the phone's two line credit.
 #
 # features.css and wrapped.css are fetched only when replay or Wrapped is
 # opened, so they are the more forgiving. The two were one 28.8 KB sheet until
 # Wrapped got a bundle of its own; split, they minify to 5.0 KB (replay) and
 # 23.2 KB (Wrapped), and each budget keeps about 2 KB over that.
 STYLESHEET_BUDGET_BYTES = {
-    "styles.css": 42 * 1024,
+    "styles.css": 44 * 1024,
     "features.css": 7 * 1024,
     "wrapped.css": 26 * 1024,
 }

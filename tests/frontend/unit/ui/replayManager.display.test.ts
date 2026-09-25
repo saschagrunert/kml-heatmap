@@ -245,23 +245,40 @@ describe("ReplayManager display", () => {
       const slider = el("replay-slider") as HTMLInputElement;
       expect(slider.value).toBe("60");
       expect(slider.getAttribute("aria-valuetext")).toBe("1:00 of 2:00");
-      expect(el("replay-slider-start").textContent).toBe("1:00");
+    });
+
+    it("keeps the current time out of the start of the timeline", () => {
+      // It read as a second clock beside the one in the transport row
+      const sliderStart = el("replay-slider-start");
+      sliderStart.textContent = "0:00";
+      replayManager.state.currentTime = 60;
+
+      replayManager.updateReplayDisplay();
+
+      expect(sliderStart.textContent).toBe("0:00");
+    });
+
+    it("gives the elapsed time the hours of a flight that has them", () => {
+      // "3:26 / 3:22:57" mixed two formats in one readout
+      replayManager.state.maxTime = 3 * 3600 + 22 * 60 + 57;
+      replayManager.state.currentTime = 3 * 60 + 26;
+
+      replayManager.updateReplayDisplay();
+
+      expect(el("replay-time-display").textContent).toBe("0:03:26 / 3:22:57");
     });
 
     it("writes the transport row only when its text changes", () => {
       replayManager.state.currentTime = 60;
       replayManager.updateReplayDisplay();
       const timeDisplay = el("replay-time-display");
-      const sliderStart = el("replay-slider-start");
       // A sentinel survives a frame that changes nothing visible
       timeDisplay.textContent = "sentinel";
-      sliderStart.textContent = "sentinel";
 
       replayManager.state.currentTime = 60.2;
       replayManager.updateReplayDisplay();
 
       expect(timeDisplay.textContent).toBe("sentinel");
-      expect(sliderStart.textContent).toBe("sentinel");
       // The slider itself moves with the fine time value
       expect((el("replay-slider") as HTMLInputElement).value).toBe("60.2");
 
@@ -269,7 +286,6 @@ describe("ReplayManager display", () => {
       replayManager.updateReplayDisplay();
 
       expect(timeDisplay.textContent).toBe("1:01 / 2:00");
-      expect(sliderStart.textContent).toBe("1:01");
     });
 
     it("draws path segments incrementally from the last drawn index", () => {

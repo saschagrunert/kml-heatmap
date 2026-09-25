@@ -50,6 +50,9 @@
   --color-accent-orange: #ffa500;
   --color-accent-mint: #66cdaa;
   --color-home-blue: #007bff;
+  /* The same blue a step darker, for text on it: --color-text reads at
+     5.2:1 on this where it reached 3.6:1 on the marker's own blue */
+  --color-home-blue-deep: #0062cc;
   --color-error: #ff4444;
 
   /* RGB triplets for translucent variants: rgba(var(--x-rgb), alpha) */
@@ -127,7 +130,9 @@
      unit read as a separate word; em, so it follows the unit's own size. */
   --unit-gap: 0.18em;
   --edge-gap: 10px;
-  /* Height reserved for the map attribution bar on small screens */
+  /* Height of the map's credit, which the chrome stacks above. One line;
+     MapApp measures it once the map is up, as it wraps when a layer adds a
+     credit of its own (see followAttributionHeight). */
   --attribution-h: 20px;
   --btn-min-height: 36px;
   /* Statistics rail: the map is inset by exactly this much beside it */
@@ -338,6 +343,12 @@ body {
   .control-btn.active:hover {
     background-color: rgba(var(--color-accent-blue-rgb), 0.14);
   }
+  /* In a row the row carries the tint (see .control-row below); the button
+     tinted on top of it again turned a hovered active row two-tone */
+  .control-row > .btn-surface:hover,
+  .control-row > .control-btn:hover {
+    background-color: transparent;
+  }
 }
 
 /* Every control now flows inside a group or the rail header, so nothing
@@ -349,9 +360,19 @@ body {
   outline: 2px solid var(--color-accent-blue);
   outline-offset: 2px;
 }
-.control-btn:disabled {
+/* Unavailable: a control that cannot act right now, `disabled` or, for the
+   ones that stay in the tab order to explain themselves, aria-disabled.
+   This is the only dimmed state. A toggle that is merely off is drawn at
+   full strength and without the accent: off and unavailable used to share
+   the half opacity, and Aviation off looked as dead as Replay with nothing
+   selected. The state lives in the attributes, which the toggles and the
+   actions write (utils/buttonState.ts), never in an inline style. */
+.control-btn:disabled,
+.control-btn[aria-disabled="true"] {
   opacity: 0.5;
   cursor: not-allowed;
+}
+.control-btn:disabled {
   background-color: var(--color-bg-secondary);
   color: var(--color-text-muted);
   border-color: var(--color-divider);
@@ -409,12 +430,6 @@ body {
   display: none;
 }
 
-/* Initial state classes. `.initially-hidden` is defined at the end of the
-   file so it beats the component rules that set a display of their own. */
-.initially-half-opacity {
-  opacity: 0.5;
-}
-
 /* Filter dropdowns: an icon plus a bare select, flat inside a control row */
 .filter-dropdown {
   cursor: pointer;
@@ -464,14 +479,16 @@ body {
   outline: 2px solid var(--color-accent-blue);
   outline-offset: -2px;
 }
-.control-row:has(select:disabled) {
-  color: var(--color-text-muted);
-}
+/* Dimmed once, like a disabled button: the browser dims a disabled select
+   on its own as well, and the two together left the filters at a third of
+   their strength during a replay */
 .filter-dropdown:has(select:disabled) {
   opacity: 0.5;
   cursor: not-allowed;
 }
 .filter-dropdown select:disabled {
+  opacity: 1;
+  color: inherit;
   cursor: not-allowed;
 }
 
@@ -491,7 +508,9 @@ body {
      in a 300px-tall window the Aviation toggle was drawn past the bottom
      of the screen with nothing able to reach it. */
   flex-shrink: 0;
-  background-color: rgba(var(--color-bg-secondary-rgb), 0.92);
+  /* Opaque, like every surface over the map: at 0.92 the place names and
+     airport codes of the map showed through behind the labels */
+  background-color: var(--color-bg-secondary);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-panel);
   /* Rows run the full width of the group, so the corners have to clip them */
@@ -547,6 +566,12 @@ body {
     background-color: var(--color-bg-hover);
   }
 }
+/* The icon of a toggle that is on takes the accent too, as in the phone's
+   sheet: with off drawn at full strength, the tint alone was a quiet way to
+   tell the two apart */
+.control-row > .control-btn.active .icon {
+  color: var(--color-accent-blue);
+}
 /* The group clips its children to its own radius, which cut the corners off
    the focus ring of the row sitting against its bottom: the ring ran into
    the rounded corner and came back square. That row carries the matching
@@ -597,9 +622,6 @@ body {
 .control-row:hover:has(> .control-btn.active:disabled) {
   background-color: rgba(var(--color-accent-blue-rgb), 0.07);
   box-shadow: inset 2px 0 0 0 rgba(var(--color-accent-blue-rgb), 0.5);
-}
-.control-row:has(> .control-btn:disabled) {
-  color: var(--color-text-muted);
 }
 /* The text of a control inside a row */
 .control-label {
@@ -668,7 +690,7 @@ body {
   padding: var(--space-xs) var(--space-xs) var(--space-xs) var(--space-md);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-pill);
-  background-color: rgba(var(--color-bg-secondary-rgb), 0.95);
+  background-color: var(--color-bg-secondary);
   box-shadow: var(--shadow-panel);
   font-size: var(--text-md);
   color: var(--color-text);
@@ -699,6 +721,10 @@ body {
     background-color: var(--color-bg-active);
     color: var(--color-text);
   }
+}
+#selection-clear-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 #selection-clear-btn:focus-visible {
   outline: 2px solid var(--color-accent-blue);
@@ -756,7 +782,7 @@ body {
   position: fixed;
   bottom: calc(var(--attribution-h) + var(--space-sm) + var(--safe-bottom));
   left: calc(var(--edge-gap) + var(--safe-left));
-  background-color: rgba(var(--color-bg-secondary-rgb), 0.92);
+  background-color: var(--color-bg-secondary);
   color: var(--color-text);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-panel);
@@ -911,12 +937,13 @@ body.stats-open #left-buttons {
   left: calc(var(--stats-rail-w) + var(--space-lg) + var(--safe-left));
 }
 /* Beside the rail on a tablet the map is around 500 px wide, and the two
-   172 px columns cover two thirds of it. Between the mobile bar below 768 px
-   and the full desktop chrome there was nothing, so the columns compact to
-   their icons here. Every control carries its name in `aria-label` and
-   `title`, and the filter rows keep their value, which is the one piece of
-   text in a column that is not a repeat of its icon. */
-@media (min-width: 768px) and (max-width: 1023.98px) {
+   172 px columns cover two thirds of it; at 1024 px they still left a band
+   of 330 px clear between them. Between the mobile bar below 768 px and the
+   full desktop chrome there was nothing, so up to 1280 px the columns
+   compact to their icons. Every control carries its name in `aria-label`
+   and `title`, and the filter rows keep their value, which is the one piece
+   of text in a column that is not a repeat of its icon. */
+@media (min-width: 768px) and (max-width: 1279.98px) {
   body.stats-open .control-column {
     width: auto;
   }
@@ -982,7 +1009,7 @@ body.stats-open #left-buttons {
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
-  background-color: rgba(var(--color-bg-secondary-rgb), 0.95);
+  background-color: var(--color-bg-secondary);
   color: var(--color-text);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-panel);
@@ -1054,21 +1081,25 @@ body.stats-open #left-buttons {
 .maplibregl-map .maplibregl-ctrl-attrib.maplibregl-compact {
   min-height: 0;
   box-sizing: border-box;
-  background: rgba(var(--color-bg-secondary-rgb), 0.85);
+  background: var(--color-bg-secondary);
   color: var(--color-text-muted);
   font-size: var(--text-xs);
   line-height: 1.5;
   padding: 1px var(--space-xs);
   margin: 0;
   border-radius: var(--radius-control) 0 0 0;
-  max-width: calc(100vw - var(--space-lg));
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  /* Of the corner it sits in, which is as wide as the map at most */
+  max-width: calc(100% - var(--space-lg));
+  text-align: right;
 }
-/* The credit is one short line and is always shown in full. MapLibre would
-   fold it behind an info button on a narrow map; the control is created
-   with `compact: false`, and this keeps the button away if it ever is not. */
+/* The credit is always shown in full. It is one short line for the base
+   map, and the relief, the imagery and the aviation layer each add a credit
+   of their own: on a phone the three ran to over 1,000 px, and a single line
+   cut off at the edge showed only the first of them. So it wraps, and the
+   chrome above it follows its measured height (--attribution-h). MapLibre
+   would fold it behind an info button on a narrow map; the control is
+   created with `compact: false`, and this keeps the button away if it ever
+   is not. */
 .maplibregl-map .maplibregl-ctrl-attrib .maplibregl-ctrl-attrib-button {
   display: none;
 }
@@ -1077,6 +1108,10 @@ body.stats-open #left-buttons {
 }
 .maplibregl-map .maplibregl-ctrl-bottom-right {
   z-index: var(--z-attribution);
+  /* As wide as the map, so the credit's max-width is a share of the map:
+     against a corner as wide as its own content, it wrapped a line that
+     would have fitted. The corner takes no pointer events, its controls do. */
+  left: 0;
 }
 .maplibregl-map .maplibregl-ctrl-attrib a {
   color: var(--color-text-secondary);
@@ -1285,7 +1320,7 @@ body.stats-open #left-buttons {
    ========================================================================== */
 .popup-container {
   min-width: 180px;
-  padding: var(--space-sm) var(--space-xs);
+  padding: var(--space-sm) var(--space-md);
   background-color: var(--color-bg-secondary);
   color: var(--color-text);
 }
@@ -1342,7 +1377,7 @@ body.stats-open #left-buttons {
   align-items: center;
   justify-content: center;
   padding: var(--space-sm);
-  background-color: rgba(var(--color-bg-secondary-rgb), 0.92);
+  background-color: var(--color-bg-secondary);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-control);
   z-index: var(--z-footer);
@@ -1394,7 +1429,7 @@ body.stats-open #left-buttons {
 }
 .toast-notification {
   transform: translateY(20px);
-  background-color: rgba(var(--color-bg-secondary-rgb), 0.95);
+  background-color: var(--color-bg-secondary);
   color: var(--color-text);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-panel);
@@ -1419,6 +1454,76 @@ body.stats-open #left-buttons {
 }
 .toast-notification.toast-error {
   border-color: var(--color-error);
+  /* An error stays until it is dismissed, and carries the buttons to do it */
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding-right: var(--space-sm);
+  text-align: left;
+  pointer-events: auto;
+}
+.toast-button {
+  flex-shrink: 0;
+  min-height: 28px;
+  padding: 0 var(--space-sm);
+  border: none;
+  border-radius: var(--radius-control);
+  background-color: var(--color-bg-raised);
+  color: var(--color-text);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  cursor: pointer;
+}
+.toast-button:first-of-type {
+  margin-left: auto;
+}
+.toast-button:has(.icon) {
+  display: flex;
+  align-items: center;
+  background-color: transparent;
+  color: var(--color-text-secondary);
+}
+@media (hover: hover) {
+  .toast-button:hover {
+    background-color: var(--color-bg-active);
+    color: var(--color-text);
+  }
+}
+.toast-button:focus-visible {
+  outline: 2px solid var(--color-accent-blue);
+  outline-offset: 2px;
+}
+
+/* ==========================================================================
+   No flights to show
+
+   Where the loading indicator was, once the first year has failed to load
+   ========================================================================== */
+#map-empty {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: var(--z-controls);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-md);
+  max-width: calc(100vw - var(--space-lg) * 2);
+  padding: var(--space-base) var(--space-lg);
+  box-sizing: border-box;
+  background-color: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-panel);
+  box-shadow: var(--shadow-panel);
+  font-size: var(--text-base);
+  text-align: center;
+}
+#map-empty[hidden] {
+  display: none;
+}
+#map-empty p {
+  margin: 0;
 }
 
 /* ==========================================================================
@@ -1472,7 +1577,7 @@ body.stats-open #left-buttons {
     bottom: 0;
     display: flex;
     align-items: stretch;
-    background-color: rgba(var(--color-bg-secondary-rgb), 0.97);
+    background-color: var(--color-bg-secondary);
     border-top: 1px solid var(--color-border);
     padding-bottom: var(--safe-bottom);
     padding-left: var(--safe-left);
@@ -1659,12 +1764,19 @@ body.stats-open #left-buttons {
   .sheet-row.active .icon {
     color: var(--color-accent-blue);
   }
-  .sheet-row:disabled,
+  /* The label, the icon and the control dim; the hint that says why the
+     row is unavailable is the one thing in it to read, and at half strength
+     on the sheet it fell to 2.4:1 */
   .sheet-row[aria-disabled="true"],
   .sheet-row:has(select:disabled) {
-    opacity: 0.5;
-    color: var(--color-text-muted);
     cursor: not-allowed;
+  }
+  .sheet-row[aria-disabled="true"] > .icon,
+  .sheet-row[aria-disabled="true"] .sheet-row-label,
+  .sheet-row[aria-disabled="true"] .gradient-chip,
+  .sheet-row[aria-disabled="true"] .sheet-row-control,
+  .sheet-row:has(select:disabled) {
+    opacity: 0.5;
   }
   .sheet-row:has(select:focus-visible) {
     outline: 2px solid var(--color-accent-blue);
@@ -1832,6 +1944,18 @@ body.stats-open #left-buttons {
   .maplibregl-map .maplibregl-ctrl-attrib.maplibregl-compact {
     font-size: var(--text-sm);
   }
+  /* The relief, the imagery and the aviation layer together ran the credit
+     to four lines over the map. Two show; a tap on the credit shows the rest
+     (see followAttributionHeight), and so does a link in it taking focus. */
+  .maplibregl-map
+    .maplibregl-ctrl-attrib:not(.is-expanded, :focus-within)
+    .maplibregl-ctrl-attrib-inner {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    overflow: hidden;
+  }
 
   #github-footer {
     padding: var(--space-xs);
@@ -1856,7 +1980,9 @@ body.stats-open #left-buttons {
   body:has(.mobile-bar):has(.mobile-sheet.is-open) .maplibregl-ctrl-attrib {
     display: none;
   }
-  body:has(.mobile-bar) .maplibregl-map .maplibregl-ctrl-bottom-right {
+  /* Only while the map is on the page: in Wrapped's dialog it ends above
+     the bar, and its credit floated a bar's height over its bottom edge */
+  body:has(.mobile-bar) > #map .maplibregl-ctrl-bottom-right {
     bottom: calc(var(--mobile-bar-h) + var(--safe-bottom));
   }
   body:has(.mobile-bar) .color-legend,
@@ -1897,7 +2023,7 @@ body.stats-open #left-buttons {
 }
 .kh-popup-home-badge {
   font-size: var(--text-sm);
-  background: var(--color-home-blue);
+  background: var(--color-home-blue-deep);
   color: var(--color-text);
   padding: 2px var(--space-xs);
   border-radius: var(--radius-bar);
@@ -1949,6 +2075,16 @@ body.stats-open #left-buttons {
   max-height: 9.5rem;
   overflow-y: auto;
   overscroll-behavior: contain;
+  /* The fade of the statistics panel, for a list cut off mid-row; the
+     popup drops `is-at-end` once there is no more (utils/scrollFade.ts) */
+  mask-image: linear-gradient(
+    to bottom,
+    #000 calc(100% - var(--space-lg)),
+    transparent 100%
+  );
+}
+.kh-popup-flights.is-at-end {
+  mask-image: none;
 }
 .kh-popup-flight {
   font: inherit;
@@ -2071,6 +2207,13 @@ body.stats-open #left-buttons {
      before the unit made the distance cell two lines tall while the three
      beside it stayed one, and the row of lead figures came out ragged. */
   white-space: nowrap;
+}
+/* Numbers are set in the monospace face, the words beside them are not:
+   "12 flights" was monospace from end to end */
+.kh-stats-lead-unit,
+.kh-stats-unit,
+.kh-stats-noun {
+  font-family: var(--font-ui);
 }
 .kh-stats-lead-unit {
   font-size: var(--text-sm);
@@ -2411,12 +2554,16 @@ body.stats-open #left-buttons {
   .maplibregl-popup-content {
     border-width: 2px;
   }
-  /* Off is carried by the absence of the accent, not by half strength.
-     `!important` because the toggles write their opacity as an inline style
-     (utils/buttonState.ts), which no selector can outrank. */
-  .initially-half-opacity,
-  .control-btn:disabled {
-    opacity: 0.75 !important;
+  /* Unavailable controls are still told apart, at more strength */
+  .control-btn:disabled,
+  .control-btn[aria-disabled="true"],
+  .filter-dropdown:has(select:disabled),
+  .sheet-row[aria-disabled="true"] > .icon,
+  .sheet-row[aria-disabled="true"] .sheet-row-label,
+  .sheet-row[aria-disabled="true"] .gradient-chip,
+  .sheet-row[aria-disabled="true"] .sheet-row-control,
+  .sheet-row:has(select:disabled) {
+    opacity: 0.75;
   }
 }
 
@@ -2424,6 +2571,19 @@ body.stats-open #left-buttons {
   .color-legend .gradient-bar,
   .ramp-chip {
     border: 1px solid CanvasText;
+  }
+  /* A toggle that is on differs from one that is off by the accent's tint,
+     edge and icon alone, which forced colours paint over or leave faint:
+     it takes the system's highlight instead. Not adjusted, as the text
+     would otherwise stand on a plate of the page colour. */
+  .btn-surface.active,
+  .control-row > .control-btn.active {
+    forced-color-adjust: none;
+    background-color: Highlight;
+    color: HighlightText;
+  }
+  .control-row > .control-btn.active .icon {
+    color: inherit;
   }
 }
 
@@ -2439,6 +2599,7 @@ body.stats-open #left-buttons {
   .mobile-bar,
   .mobile-sheet,
   .toast-notification,
+  #map-empty,
   .skip-nav,
   .maplibregl-ctrl-group {
     display: none !important;

@@ -8,7 +8,7 @@ import { domCache } from "../utils/domCache";
 import { announceInRegion, announceStatus, showToast } from "../utils/toast";
 import { findMinMax } from "../utils/arrayHelpers";
 import { formatTime } from "../utils/formatters";
-import { applyToggleButtonState, setControlLabel } from "../utils/buttonState";
+import { applyToggleButtonState } from "../utils/buttonState";
 import { setControlIcon } from "../utils/icons";
 import { AUTO_ZOOM_FOLLOW, MAP_SOURCES } from "../utils/constants";
 import {
@@ -48,9 +48,8 @@ import {
   REPLAY_BUTTON_LABEL,
   REPLAY_PRECONDITION_MESSAGE,
 } from "./replayButton";
+import { calculateAirspeedRange } from "../features/layers";
 
-const REPLAY_BUTTON_ACTIVE_LABEL = "Stop replay";
-const REPLAY_BUTTON_TEXT = "Replay";
 const REPLAY_EXIT_LABEL = "Close replay";
 
 /**
@@ -139,8 +138,6 @@ export const MAX_FRAME_DELTA_MS = 100;
 export class ReplayManager {
   private app: MapApp;
   private renderer: ReplayRenderer;
-  /** Inline opacity of the controls replay disabled, put back afterwards */
-  private savedOpacities = new Map<HTMLElement, string>();
   /** Ends the subscriptions that keep the trail in step with the layers */
   private unsubscribeTrail: (() => void) | null = null;
   /**
@@ -275,13 +272,14 @@ export class ReplayManager {
     // just removed from the document, so move it into the panel
     exit.focus();
 
+    // A toggle keeps its name, and aria-pressed says it is on; a label
+    // that turned into "Stop replay" was read as "Stop replay, pressed".
+    // The icon is the one that changes, to what a press does now.
     const replayBtn = domCache.get("replay-btn");
     if (replayBtn) {
       setControlIcon(replayBtn, "stop");
-      setControlLabel(replayBtn, REPLAY_BUTTON_TEXT);
       applyToggleButtonState(replayBtn, true);
-      replayBtn.setAttribute("aria-label", REPLAY_BUTTON_ACTIVE_LABEL);
-      replayBtn.title = REPLAY_BUTTON_ACTIVE_LABEL;
+      replayBtn.title = REPLAY_BUTTON_LABEL;
     }
 
     this.updateAutoZoomButton();
@@ -382,14 +380,12 @@ export class ReplayManager {
     document.body.style.removeProperty(REPLAY_PANEL_HEIGHT_VAR);
     this.stopFollowingLayers();
 
+    // Whether it is available again is settled by MapApp once the replay
+    // is off (see followReplayAvailability)
     const replayBtn = domCache.get("replay-btn");
     if (replayBtn) {
       setControlIcon(replayBtn, "play");
-      setControlLabel(replayBtn, REPLAY_BUTTON_TEXT);
-      // The opacity is settled by MapApp once the replay is off
       applyToggleButtonState(replayBtn, false);
-      replayBtn.setAttribute("aria-label", REPLAY_BUTTON_LABEL);
-      replayBtn.title = REPLAY_BUTTON_LABEL;
     }
 
     document.body.classList.remove("replay-active");
@@ -405,9 +401,8 @@ export class ReplayManager {
     // No camera follows the airplane any more
     this.renderer.stopWatchingMap();
 
-    // The inline opacity first: the store puts the toggles' own back. The
-    // layers come back the way the user left them, and the mobile bar
-    // returns (see ui/layerVisibility.ts, MobileBar).
+    // The layers come back the way the user left them, and the mobile bar
+    // returns (see ui/layerVisibility.ts, MobileBar)
     this.setElementsDisabled(REPLAY_DISABLED_CONTROL_IDS, false);
     this.app.replayActive = false;
     // After the bar is back, which may be the control that takes focus
@@ -573,17 +568,14 @@ export class ReplayManager {
     this.state.colorMinAlt = altRange.min;
     this.state.colorMaxAlt = altRange.max;
 
-    const groundspeeds = sourceSegments
-      .map((s) => s.groundspeed_knots ?? 0)
-      .filter((s) => s > 0);
-    if (groundspeeds.length > 0) {
-      const speedRange = findMinMax(groundspeeds);
-      this.state.colorMinSpeed = speedRange.min;
-      this.state.colorMaxSpeed = speedRange.max;
-    } else {
-      this.state.colorMinSpeed = this.app.airspeedRange.min;
-      this.state.colorMaxSpeed = this.app.airspeedRange.max;
-    }
+    // Stretched over the middle of the flight's speeds, as the speed layer
+    // is (see calculateAirspeedRange)
+    const speedRange = calculateAirspeedRange(
+      sourceSegments,
+      this.app.airspeedRange,
+    );
+    this.state.colorMinSpeed = speedRange.min;
+    this.state.colorMaxSpeed = speedRange.max;
   }
 
   private setupReplayUI(): void {
@@ -593,9 +585,16 @@ export class ReplayManager {
     const slider = domCache.get("replay-slider", HTMLInputElement);
     if (slider) slider.max = this.state.maxTime.toString();
 
+    // The two ends of the timeline. The current time is in the transport
+    // row above; repeated at the start of the slider it read as a second
+    // clock, so the start says where the timeline begins.
     const sliderEnd = domCache.get("replay-slider-end");
     if (sliderEnd) {
       sliderEnd.textContent = formatTime(this.state.maxTime);
+    }
+    const sliderStart = domCache.get("replay-slider-start");
+    if (sliderStart) {
+      sliderStart.textContent = formatTime(0, this.state.maxTime);
     }
 
     this.app.layerManager.updateAltitudeLegend(
@@ -706,34 +705,14 @@ export class ReplayManager {
     });
   }
 
+  /** The stylesheet dims what is disabled (see `.control-btn:disabled`) */
   private setElementsDisabled(ids: string[], disabled: boolean): void {
     ids.forEach((id) => {
       const el = domCache.get(id);
       if (el instanceof HTMLButtonElement || el instanceof HTMLSelectElement) {
         el.disabled = disabled;
-        this.setDisabledOpacity(el, disabled);
       }
     });
-  }
-
-  /**
-   * The store-driven toggles carry an inline opacity, and an inline 1.0
-   * beat the stylesheet's dimmed look for a disabled control, so a
-   * disabled toggle looked as live as an enabled one. The inline value is
-   * set aside while the control is disabled and put back afterwards.
-   */
-  private setDisabledOpacity(el: HTMLElement, disabled: boolean): void {
-    if (disabled) {
-      if (!this.savedOpacities.has(el)) {
-        this.savedOpacities.set(el, el.style.opacity);
-      }
-      el.style.opacity = "";
-      return;
-    }
-    const saved = this.savedOpacities.get(el);
-    if (saved === undefined) return;
-    el.style.opacity = saved;
-    this.savedOpacities.delete(el);
   }
 
   playReplay(): void {

@@ -44,6 +44,13 @@ describe("formatter utilities", () => {
       expect(formatTime(0)).toBe("0:00");
     });
 
+    it("shows hours when the time it lines up with has them", () => {
+      // The elapsed time of a replay, beside a total of over an hour
+      expect(formatTime(206, 12177)).toBe("0:03:26");
+      expect(formatTime(0, 3600)).toBe("0:00:00");
+      expect(formatTime(206, 3599)).toBe("3:26");
+    });
+
     it("formats large time values", () => {
       expect(formatTime(36000)).toBe("10:00:00");
     });

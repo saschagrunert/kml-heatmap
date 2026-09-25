@@ -232,14 +232,16 @@ export class UIToggles {
     const mapContainer = domCache.get("map");
     if (!btn || !mapContainer) return;
     // An export is already running
-    if (btn.disabled) return;
+    if (btn.getAttribute("aria-disabled") === "true") return;
 
-    btn.disabled = true;
+    // Unavailable while it runs, but not `disabled`: that takes the focus
+    // off the button that was just pressed and drops it to <body>
+    btn.setAttribute("aria-disabled", "true");
     // Only the label changes so the button keeps its icon
     setControlLabel(btn, EXPORT_BUTTON_BUSY_LABEL);
 
     const restore = () => {
-      btn.disabled = false;
+      btn.setAttribute("aria-disabled", "false");
       setControlLabel(btn, EXPORT_BUTTON_LABEL);
     };
 
@@ -298,15 +300,17 @@ export class UIToggles {
   }
 
   /**
-   * Share the current view: the native share sheet when available, otherwise
-   * the link is copied to the clipboard.
+   * Share the current view: the native share sheet on a phone or a tablet,
+   * as with an exported image, otherwise the link is copied to the
+   * clipboard. The control says "Copy link", and desktop Safari and Chrome
+   * have a share sheet too, which opened instead of copying.
    */
   async shareLink(): Promise<void> {
     // The URL is read right now, so the debounced save has to land first
     this.app.stateManager.flush();
     const url = window.location.href;
 
-    if (typeof navigator.share === "function") {
+    if (isSmallDevice() && typeof navigator.share === "function") {
       try {
         await navigator.share({ url, title: document.title });
         return;

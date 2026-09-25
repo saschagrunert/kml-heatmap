@@ -29,7 +29,6 @@ import {
 } from "./replayTestSetup";
 import { asMapApp, createDataset, createMockApp } from "../../testHelpers";
 import { setColorLayer } from "../../../../kml_heatmap/frontend/ui/layerVisibility";
-import { domCache } from "../../../../kml_heatmap/frontend/utils/domCache";
 import * as motion from "../../../../kml_heatmap/frontend/utils/motion";
 
 vi.mock("../../../../kml_heatmap/frontend/utils/htmlGenerators", () => ({
@@ -84,7 +83,6 @@ describe("ReplayManager activation", () => {
     it("stops listening to the slider once the app is gone", () => {
       // A fresh panel, so only the manager of the ended app listens to it
       unmountReplayDom();
-      domCache.clear();
       mountReplayDom();
       const lifetime = new AbortController();
       const manager = createReplayManager(
@@ -206,6 +204,11 @@ describe("ReplayManager activation", () => {
 
     it("swaps the replay button to stop without losing its label", () => {
       mockApp.selectedPathIds = new Set([1]);
+      // As the template names it
+      el("replay-btn").setAttribute(
+        "aria-label",
+        "Replay selected flight path",
+      );
 
       replayManager.toggleReplay();
 
@@ -215,14 +218,21 @@ describe("ReplayManager activation", () => {
       expect(replayBtn.querySelector(".control-label")!.textContent).toBe(
         "Replay",
       );
-      expect(replayBtn.style.opacity).toBe("1");
       expect(replayBtn.getAttribute("aria-pressed")).toBe("true");
-      expect(replayBtn.getAttribute("aria-label")).toBe("Stop replay");
-      expect(replayBtn.title).toBe("Stop replay");
+      // A toggle keeps its name: "Stop replay, pressed" said the opposite
+      // of what a press does. aria-pressed carries the state.
+      expect(replayBtn.getAttribute("aria-label")).toBe(
+        "Replay selected flight path",
+      );
+      expect(replayBtn.title).toBe("Replay selected flight path");
     });
 
     it("restores the replay button on deactivation", () => {
       mockApp.selectedPathIds = new Set([1]);
+      el("replay-btn").setAttribute(
+        "aria-label",
+        "Replay selected flight path",
+      );
       replayManager.toggleReplay();
 
       replayManager.toggleReplay();
@@ -278,19 +288,21 @@ describe("ReplayManager activation", () => {
       replayManager.toggleReplay();
 
       const autoZoomBtn = el("replay-autozoom-btn");
-      expect(autoZoomBtn.style.opacity).toBe("1");
+      expect(autoZoomBtn.classList.contains("active")).toBe(true);
       expect(autoZoomBtn.getAttribute("aria-pressed")).toBe("true");
       expect(autoZoomBtn.title).toBe("Auto-zoom enabled");
     });
 
-    it("dims the auto-zoom button when auto-zoom is off", () => {
+    it("shows the auto-zoom button off when auto-zoom is off", () => {
       mockApp.selectedPathIds = new Set([1]);
       replayManager.state.autoZoom = false;
 
       replayManager.toggleReplay();
 
       const autoZoomBtn = el("replay-autozoom-btn");
-      expect(autoZoomBtn.style.opacity).toBe("0.5");
+      // Off, not unavailable: no accent, and nothing dims it
+      expect(autoZoomBtn.classList.contains("active")).toBe(false);
+      expect(autoZoomBtn.style.opacity).toBe("");
       expect(autoZoomBtn.getAttribute("aria-pressed")).toBe("false");
     });
 
@@ -1296,12 +1308,10 @@ describe("ReplayManager activation", () => {
     });
 
     it("lets the stylesheet dim the disabled toggles", () => {
-      expect(el("airports-btn").style.opacity).toBe("1");
-      expect(el("heatmap-btn").style.opacity).toBe("1");
-
       activate();
 
-      // An inline 1.0 beat the disabled look, so the toggle looked live
+      // Nothing inline to beat the disabled look, so no toggle looks live
+      expect((el("airports-btn") as HTMLButtonElement).disabled).toBe(true);
       expect(el("airports-btn").style.opacity).toBe("");
       expect(el("heatmap-btn").style.opacity).toBe("");
     });
@@ -1365,24 +1375,16 @@ describe("ReplayManager activation", () => {
       expect((el("wrapped-btn") as HTMLButtonElement).disabled).toBe(false);
     });
 
-    it("hands the toggles their state and opacity back", () => {
+    it("hands the toggles their state back", () => {
       mockApp.airportsVisible = false;
 
       openAndClose();
 
       const heatmapBtn = el("heatmap-btn");
       expect(heatmapBtn.getAttribute("aria-pressed")).toBe("true");
-      expect(heatmapBtn.style.opacity).toBe("1");
-      expect(el("airports-btn").style.opacity).toBe("0.5");
-    });
-
-    it("leaves the opacity of a control it did not disable alone", () => {
-      openAndClose();
-      el("airspeed-btn").style.opacity = "0.7";
-
-      openAndClose();
-
-      expect(el("airspeed-btn").style.opacity).toBe("0.7");
+      expect(el("airports-btn").getAttribute("aria-pressed")).toBe("false");
+      expect(heatmapBtn.style.opacity).toBe("");
+      expect(el("airports-btn").style.opacity).toBe("");
     });
   });
 });

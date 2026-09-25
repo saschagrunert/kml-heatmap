@@ -11,9 +11,10 @@ import {
 import { domCache } from "./utils/domCache";
 import { applyMetricColors } from "./utils/htmlGenerators";
 import { createActivationFilter, toLngLat } from "./utils/mapHelpers";
-import { showToast } from "./utils/toast";
+import { dismissToast, showToast } from "./utils/toast";
 import { setAirportLabelHover } from "./ui/airportLabels";
 import { datasetIndex } from "./calculations/datasetIndex";
+import { calculateAirspeedRange } from "./features/layers";
 import type { MapApp } from "./mapApp";
 import type { Airport, AirportMarker, KMLDataset } from "./types";
 
@@ -43,27 +44,25 @@ export function resolveYearSelection(
     availableYears.length > 0 ? Math.max(...availableYears).toString() : "all";
   app.defaultYear = latestValue;
 
-  if (app.selectedYear === "all") {
+  let year = app.selectedYear;
+  if (year === "all") {
     // Default to the latest year only if no saved state exists
-    if (!app.restoredYearFromState) {
-      app.selectedYear = latestValue;
-    }
-  } else if (
-    !availableYears.some((year) => year.toString() === app.selectedYear)
-  ) {
+    if (!app.restoredYearFromState) year = latestValue;
+  } else if (!availableYears.some((known) => known.toString() === year)) {
     showToast(
       "Year " +
-        app.selectedYear +
+        year +
         " is not available, showing " +
         (availableYears.length > 0 ? latestValue : "all years"),
       "info",
     );
-    app.selectedYear = latestValue;
+    year = latestValue;
   }
 
-  if (select) {
-    select.value = app.selectedYear;
-  }
+  // The dropdown before the store: the Filter sheet mirrors the dropdown
+  // and reads it as soon as the store announces the year
+  if (select) select.value = year;
+  app.selectedYear = year;
 }
 
 /**
@@ -88,9 +87,9 @@ export async function loadInitialData(app: MapApp): Promise<void> {
     // Without the index there is no year to offer, so a restored year
     // would show as "All years" in the dropdown while the map loads it
     showToast("The list of years is unavailable, showing all years", "error");
-    app.selectedYear = "all";
     const select = domCache.get("year-select", HTMLSelectElement);
     if (select) select.value = "all";
+    app.selectedYear = "all";
   }
 
   // Add airport markers
@@ -136,14 +135,36 @@ export async function loadInitialData(app: MapApp): Promise<void> {
   // statistics panel and the airport markers follow it through their store
   // subscriptions; one flush, so nobody sees the dataset with a selection
   // it does not have or an aircraft filter it has no flights for.
-  const data = await app.dataManager.loadData(app.selectedYear);
-  app.store.batch(() => {
-    if (data) {
-      dropUnknownPathIds(app, data);
-      app.currentData = data;
-    }
-    app.filterManager.updateAircraftDropdown();
+  const failure = followLoadFailure(app);
+  const year = app.selectedYear;
+  const data = await app.dataManager.loadData(year, undefined, {
+    label: "Retry",
+    run: failure.retry,
   });
+  // A year switch that went ahead during the load has published its own
+  // dataset, and this one would replace it under a store and a dropdown
+  // that name the other year
+  if (app.selectedYear === year) {
+    app.store.batch(() => {
+      if (data) {
+        dropUnknownPathIds(app, data);
+        publishDataset(app, data);
+      }
+      app.filterManager.updateAircraftDropdown();
+    });
+    // No year is loaded, so the dropdown shows none: picking the one that
+    // failed is then a change, and asks for it again. Unless someone has
+    // picked another one meanwhile, which is applied once the load is over.
+    // The Filter sheet mirrors the dropdown, and the store has not changed
+    // to tell it, so it is told to read the dropdown again (a sheet opened
+    // during the load kept showing the year).
+    const select = domCache.get("year-select", HTMLSelectElement);
+    if (!data && select?.value === year) {
+      select.selectedIndex = -1;
+      app.mobileBar?.sheet.refresh();
+    }
+  }
+  failure.settle();
 
   // Set initial airport marker sizes
   app.airportManager.updateAirportMarkerSizes();
@@ -152,6 +173,72 @@ export async function loadInitialData(app: MapApp): Promise<void> {
   if (app.savedState && app.savedState.statsPanelVisible) {
     app.statsManager.setStatsPanelVisible(true);
   }
+}
+
+/**
+ * Make a dataset the one the page shows. The speed scale is stretched over
+ * the speeds of its flights (see calculateAirspeedRange), the way the
+ * altitude scale follows the altitudes of the dataset it draws. Runs in the
+ * batch that publishes the rest.
+ * @param app - The MapApp instance to operate on
+ * @param data - The dataset to show
+ */
+export function publishDataset(app: MapApp, data: KMLDataset): void {
+  if (app.hasTimingData) {
+    const range = calculateAirspeedRange(data.path_segments, app.airspeedRange);
+    // A dataset whose flights all went one speed has no scale to stretch,
+    // and keeps the one of the metadata
+    if (range.max > range.min) app.airspeedRange = range;
+  }
+  app.currentData = data;
+}
+
+/**
+ * Say on the map itself that the first load left it without flights, and
+ * offer to load them again. Otherwise the page was an empty map whose
+ * dropdown named the year, with a toast that went after four seconds.
+ * @param app - The MapApp instance to operate on
+ * @returns `retry` loads the year again (the toast offers it too), and
+ *   `settle` says the first load is over, before which nothing is shown
+ */
+function followLoadFailure(app: MapApp): {
+  retry: () => void;
+  settle: () => void;
+} {
+  const panel = domCache.get("map-empty");
+  let settled = false;
+  let retrying = false;
+  const sync = (): void => {
+    if (!panel) return;
+    const hide = !settled || retrying || app.currentData !== null;
+    // Its own Retry is what hides it, and would take the focus with it
+    if (hide && panel.contains(document.activeElement)) {
+      app.map?.getCanvas().focus();
+    }
+    panel.hidden = hide;
+  };
+  const retry = (): void => {
+    if (retrying) return;
+    // What they said is being acted on; a new failure says so again
+    dismissToast();
+    retrying = true;
+    sync();
+    void app.filterManager.retryLoad().finally(() => {
+      retrying = false;
+      sync();
+    });
+  };
+  domCache
+    .get("map-empty-retry")
+    ?.addEventListener("click", retry, { signal: app.signal });
+  app.store.subscribe("currentData", sync);
+  return {
+    retry,
+    settle: () => {
+      settled = true;
+      sync();
+    },
+  };
 }
 
 /**

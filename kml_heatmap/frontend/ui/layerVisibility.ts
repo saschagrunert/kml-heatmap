@@ -9,7 +9,7 @@ import {
 } from "../utils/buttonState";
 import { domCache } from "../utils/domCache";
 import { loadFeatures } from "../services/featureLoader";
-import { showToast } from "../utils/toast";
+import { dismissToast, showToast } from "../utils/toast";
 
 /** Said when the imagery's code cannot be fetched and the switch goes off */
 export const SATELLITE_UNAVAILABLE_MESSAGE =
@@ -128,6 +128,8 @@ export function followSatelliteSwitch(app: MapApp): void {
       if (app.signal.aborted) return;
       loading = false;
       if (features) {
+        // A failure of an earlier try stays until dismissed
+        dismissToast(SATELLITE_UNAVAILABLE_MESSAGE);
         stop();
         features.followSatellite(app);
         return;

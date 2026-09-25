@@ -160,13 +160,15 @@ test.describe("Mobile bar", () => {
       await expect(tab).not.toHaveAttribute("aria-expanded", /.*/);
       await expect(tab).not.toHaveClass(/\bactive\b/);
     }
-    // The panel tabs are toggles, not disclosures
-    for (const id of ["stats", "wrapped"]) {
-      await expect(page.locator(`#mobile-tab-${id}`)).toHaveAttribute(
-        "aria-pressed",
-        "false",
-      );
-    }
+    // Stats is a disclosure of the statistics, as the desktop button is,
+    // and Wrapped opens a dialog; neither is a pressed toggle
+    const stats = page.locator("#mobile-tab-stats");
+    await expect(stats).toHaveAttribute("aria-expanded", "false");
+    await expect(stats).toHaveAttribute("aria-controls", "stats-rail");
+    await expect(stats).not.toHaveAttribute("aria-pressed", /.*/);
+    const wrapped = page.locator("#mobile-tab-wrapped");
+    await expect(wrapped).toHaveAttribute("aria-haspopup", "dialog");
+    await expect(wrapped).not.toHaveAttribute("aria-pressed", /.*/);
   });
 
   test.describe("Layers sheet", () => {
@@ -372,7 +374,8 @@ test.describe("Mobile bar", () => {
 
     await expect(panel).toBeVisible();
     await expect(panel).toContainText("Flights");
-    await expect(tab).toHaveAttribute("aria-pressed", "true");
+    // A disclosure of the statistics, like the desktop Statistics button
+    await expect(tab).toHaveAttribute("aria-expanded", "true");
     // The tab is the way back, so the rail drops its own collapse control
     // The title stays; only the collapse control is redundant on mobile
     await expect(page.locator("#stats-rail-header")).toBeVisible();
@@ -381,7 +384,7 @@ test.describe("Mobile bar", () => {
     await tab.click();
 
     await expect(panel).toBeHidden();
-    await expect(tab).toHaveAttribute("aria-pressed", "false");
+    await expect(tab).toHaveAttribute("aria-expanded", "false");
   });
 
   test("the Wrapped tab opens the year in review", async ({ page }) => {
@@ -393,12 +396,12 @@ test.describe("Mobile bar", () => {
 
     await expect(modal).toBeVisible();
     await expect(page.locator("#wrapped-card-airports")).toBeVisible();
-    await expect(tab).toHaveAttribute("aria-pressed", "true");
+    await expect(tab).toHaveClass(/\bactive\b/);
 
     await page.locator("[data-action=closeWrapped]").click();
 
     await expect(modal).toBeHidden();
-    await expect(tab).toHaveAttribute("aria-pressed", "false");
+    await expect(tab).not.toHaveClass(/\bactive\b/);
   });
 
   test.describe("Wrapped", () => {
@@ -488,6 +491,13 @@ test.describe("Mobile bar", () => {
       await expect(replay.locator(".sheet-row-hint")).toHaveText(
         "Select one flight with timing data",
       );
+      // The label dims, the hint that explains it does not
+      await expect(replay).toHaveCSS("opacity", "1");
+      await expect(replay.locator(".sheet-row-label")).toHaveCSS(
+        "opacity",
+        "0.5",
+      );
+      await expect(replay.locator(".sheet-row-hint")).toHaveCSS("opacity", "1");
       await expect(page.locator("#replay-btn")).toHaveAttribute(
         "aria-pressed",
         "false",
@@ -497,10 +507,16 @@ test.describe("Mobile bar", () => {
         "Select exactly one flight with timing data to replay",
       );
 
-      // Isolating needs something to isolate
-      await expect(
-        page.locator('.sheet-row[data-row="isolate"]'),
-      ).toBeDisabled();
+      // Isolating needs something to isolate. Unavailable the way Isolate
+      // is on the desktop: announced so, and still reachable by keyboard.
+      const isolate = page.locator('.sheet-row[data-row="isolate"]');
+      await expect(isolate).toHaveAttribute("aria-disabled", "true");
+      expect(
+        await isolate.evaluate((el) => (el as HTMLButtonElement).disabled),
+      ).toBe(false);
+      // Forced: Playwright waits for an aria-disabled control to be enabled
+      await isolate.click({ force: true });
+      await expect(isolate).toHaveAttribute("aria-checked", "false");
 
       await expect(page.locator('.sheet-row[data-row="export"]')).toBeEnabled();
       await expect(page.locator('.sheet-row[data-row="share"]')).toBeEnabled();

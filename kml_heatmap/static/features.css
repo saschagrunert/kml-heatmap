@@ -26,7 +26,8 @@
   bottom: calc(var(--space-lg) + var(--safe-bottom));
   left: 50%;
   transform: translateX(-50%);
-  background-color: rgba(var(--color-bg-secondary-rgb), 0.95);
+  /* Opaque, like the control groups: the map's labels showed through */
+  background-color: var(--color-bg-secondary);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-panel);
   padding: var(--space-md) var(--space-lg);
@@ -101,11 +102,6 @@
   padding: 0;
   min-width: 44px;
   line-height: 1;
-}
-/* The aircraft filter's arrow, which points north-east, turned to point
-   ahead: the chase view looks where the aircraft flies */
-#replay-chase-btn .icon {
-  transform: rotate(-45deg);
 }
 #replay-time-display {
   color: var(--color-text);
@@ -249,6 +245,15 @@
   }
 }
 
+/* The toasts stand in the middle of the bottom edge, where the panel is, and
+   covered its readouts: during a replay they stack above it instead */
+body.replay-active .toast-stack {
+  bottom: calc(
+    var(--space-lg) + var(--safe-bottom) + var(--replay-panel-h, 0px) +
+      var(--space-sm)
+  );
+}
+
 /* Centred beside the rail, the panel covers the GitHub link in the bottom
    right corner until the window is about 900 px wide. The link steps aside
    for the replay there, as it does on a phone. */
@@ -266,11 +271,13 @@
     min-height: var(--btn-min-height);
   }
 
-  /* Replay controls span the viewport width */
+  /* Replay controls span the viewport width, above the map's credit: the
+     replay takes the bar out of the document, and with it the rule below
+     that kept the two apart, so the credit sat over the panel's bottom */
   #replay-controls {
     left: calc(var(--edge-gap) + var(--safe-left));
     right: calc(var(--edge-gap) + var(--safe-right));
-    bottom: calc(var(--edge-gap) + var(--safe-bottom));
+    bottom: calc(var(--attribution-h) + var(--space-sm) + var(--safe-bottom));
     transform: none;
     min-width: 0;
     width: auto;
@@ -315,6 +322,12 @@
      covers the lower third of the panel and the collapse control reappears. */
   body.replay-active #stats-rail {
     visibility: hidden;
+  }
+  body.replay-active .toast-stack {
+    bottom: calc(
+      var(--attribution-h) + var(--space-sm) + var(--safe-bottom) +
+        var(--replay-panel-h, 0px) + var(--space-sm)
+    );
   }
   body:has(.mobile-bar) #replay-controls {
     bottom: calc(

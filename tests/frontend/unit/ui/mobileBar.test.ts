@@ -3,6 +3,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import type { MapApp } from "../../../../kml_heatmap/frontend/mapApp";
+import type { KMLDataset } from "../../../../kml_heatmap/frontend/types";
 import { AppStore } from "../../../../kml_heatmap/frontend/state/store";
 import {
   MobileBar,
@@ -55,7 +56,7 @@ function setWidth(width: number): void {
 }
 
 function createMockApp() {
-  const store = new AppStore();
+  const store = new AppStore({ hasTimingData: true });
   const wrappedManager = { showWrapped: vi.fn() };
   const replayManager = { canReplay: vi.fn(() => true), toggleReplay: vi.fn() };
   return {
@@ -66,10 +67,11 @@ function createMockApp() {
       toggleAltitude: vi.fn(),
       toggleAirspeed: vi.fn(),
       toggleAviation: vi.fn(),
+      toggleSatellite: vi.fn(),
       exportMap: vi.fn(),
       shareLink: vi.fn(() => Promise.resolve()),
     },
-    mapOrientation: { toggleGlobe: vi.fn() },
+    mapOrientation: { toggleGlobe: vi.fn(), toggleThreeD: vi.fn() },
     statsManager: { toggleStats: vi.fn() },
     wrappedManager,
     pathSelection: { toggleIsolateSelection: vi.fn() },
@@ -85,6 +87,12 @@ function createMockApp() {
     resetView: vi.fn(() => Promise.resolve()),
     // Something to reset unless a test says otherwise
     isReset: vi.fn(() => false),
+    // The first load is over unless a test says otherwise; the bar runs the
+    // actions that need data through the same check as the desktop controls
+    isInitializing: false,
+    canResetView(): boolean {
+      return !this.isInitializing && !this.isReset();
+    },
     get heatmapVisible() {
       return store.get("heatmapVisible");
     },
@@ -108,6 +116,9 @@ function createMockApp() {
     },
     get selectedPathIds() {
       return store.get("selectedPathIds");
+    },
+    get hasTimingData() {
+      return store.get("hasTimingData");
     },
     get replayActive() {
       return store.get("replayActive");
@@ -344,7 +355,14 @@ describe("MobileBar", () => {
       // The open sheet covers the bar, so the tab is not an operable
       // disclosure and must not claim to be one
       expect(tab("layers").getAttribute("aria-expanded")).toBeNull();
-      expect(tab("stats").getAttribute("aria-pressed")).toBe("false");
+    });
+
+    it("makes Stats a disclosure and Wrapped a dialog opener, as on the desktop", () => {
+      expect(tab("stats").getAttribute("aria-pressed")).toBeNull();
+      expect(tab("stats").getAttribute("aria-expanded")).toBe("false");
+      expect(tab("stats").getAttribute("aria-controls")).toBe("stats-rail");
+      expect(tab("wrapped").getAttribute("aria-pressed")).toBeNull();
+      expect(tab("wrapped").getAttribute("aria-haspopup")).toBe("dialog");
     });
 
     it("opens the layers sheet and marks the tab active", () => {
@@ -378,7 +396,7 @@ describe("MobileBar", () => {
       app.store.set("statsPanelVisible", true);
 
       expect(tab("stats").classList.contains("active")).toBe(true);
-      expect(tab("stats").getAttribute("aria-pressed")).toBe("true");
+      expect(tab("stats").getAttribute("aria-expanded")).toBe("true");
     });
 
     it("opens the wrapped card and follows its state", async () => {
@@ -487,6 +505,29 @@ describe("MobileBar", () => {
       ).toBe("2025");
     });
 
+    it("follows the dataset, which fills the aircraft list", () => {
+      // Opened during the first load, it kept an empty aircraft list: the
+      // list is filled with the dataset, and nothing refreshed the sheet
+      create();
+      tab("filter").click();
+      const option = document.createElement("option");
+      option.value = "D-EXYZ";
+      option.textContent = "D-EXYZ";
+      document.getElementById("aircraft-select")!.append(option);
+
+      app.store.set("currentData", {
+        path_info: [],
+        path_segments: [],
+      } as unknown as KMLDataset);
+
+      const mirrored = document.querySelector<HTMLSelectElement>(
+        '[data-row="aircraft"] select',
+      )!;
+      expect(Array.from(mirrored.options).map((o) => o.value)).toContain(
+        "D-EXYZ",
+      );
+    });
+
     it("names each dropdown by its row label", () => {
       create();
       tab("filter").click();
@@ -566,16 +607,27 @@ describe("MobileBar", () => {
       expect(row.getAttribute("aria-checked")).toBe("true");
     });
 
-    it("disables the speed row while the speed button is disabled", () => {
+    it("marks the speed row unavailable without timing data in the store", () => {
+      // The desktop button is not what it reads: that is a copy of the flag
       (document.getElementById("airspeed-btn") as HTMLButtonElement).disabled =
-        true;
+        false;
+      app.store.set("hasTimingData", false);
       create();
       tab("layers").click();
+      const row =
+        document.querySelector<HTMLButtonElement>('[data-row="speed"]')!;
 
-      expect(
-        document.querySelector<HTMLButtonElement>('[data-row="speed"]')!
-          .disabled,
-      ).toBe(true);
+      // Unavailable like Isolate: announced, reachable, and says why
+      expect(row.getAttribute("aria-disabled")).toBe("true");
+      expect(row.disabled).toBe(false);
+      expect(row.querySelector(".sheet-row-hint")!.textContent).toBe(
+        "No timing data in the flights",
+      );
+      row.click();
+      expect(app.uiToggles.toggleAirspeed).not.toHaveBeenCalled();
+
+      app.store.set("hasTimingData", true);
+      expect(row.getAttribute("aria-disabled")).toBe("false");
     });
   });
 
@@ -636,11 +688,16 @@ describe("MobileBar", () => {
       );
     });
 
-    it("keeps isolate disabled without a selection", () => {
-      expect(
-        document.querySelector<HTMLButtonElement>('[data-row="isolate"]')!
-          .disabled,
-      ).toBe(true);
+    it("keeps isolate unavailable without a selection, as on the desktop", () => {
+      const row = document.querySelector<HTMLButtonElement>(
+        '[data-row="isolate"]',
+      )!;
+      // aria-disabled and in the tab order, like the desktop Isolate button,
+      // rather than `disabled` in the sheet alone
+      expect(row.getAttribute("aria-disabled")).toBe("true");
+      expect(row.disabled).toBe(false);
+      row.click();
+      expect(app.pathSelection.toggleIsolateSelection).not.toHaveBeenCalled();
     });
 
     it("resets the view from the sheet and closes it", () => {
@@ -681,6 +738,32 @@ describe("MobileBar", () => {
       app.isReset.mockReturnValue(false);
       app.store.set("heatmapVisible", false);
       expect(row.getAttribute("aria-disabled")).toBe("false");
+    });
+
+    it("leaves the actions that need data alone during the first load", () => {
+      // Reset view here used to switch the year under the load that was
+      // still running, and the map ended on another year than the dropdown
+      app.isInitializing = true;
+      app.selectedPathIds.add(1);
+      dismissSheet();
+      tab("more").click();
+
+      const reset = document.querySelector<HTMLElement>(
+        '[data-row="reset-view"]',
+      )!;
+      expect(reset.getAttribute("aria-disabled")).toBe("true");
+      reset.click();
+      document.querySelector<HTMLElement>('[data-row="isolate"]')!.click();
+      document.querySelector<HTMLElement>('[data-row="replay"]')!.click();
+      tab("more").click();
+      document.querySelector<HTMLElement>('[data-row="export"]')!.click();
+      tab("wrapped").click();
+
+      expect(app.resetView).not.toHaveBeenCalled();
+      expect(app.pathSelection.toggleIsolateSelection).not.toHaveBeenCalled();
+      expect(app.toggleReplay).not.toHaveBeenCalled();
+      expect(app.uiToggles.exportMap).not.toHaveBeenCalled();
+      expect(app.loadWrapped).not.toHaveBeenCalled();
     });
 
     it("exports and shares", () => {
