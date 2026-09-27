@@ -119,6 +119,16 @@ const CLOUD_SIGMA_MOST = 3;
 const CLOUD_REACH = 3;
 
 /**
+ * How far the glow of a stretch reaches on the screen at the middle of the
+ * map at the map zoom `zoom`, in CSS pixels: the 21 px of CLOUD_STOPS out
+ * to 9.5, 7.5 px from 13 in. The readout of the cloud under the pointer is
+ * for about as far (ui/cloudReadout.ts).
+ */
+export function cloudReachPx(zoom: number): number {
+  return CLOUD_REACH * cloudLook(zoom).sigmaPx;
+}
+
+/**
  * Near the ground a glow is pulled further, to where the ground in front
  * of each corner of its quad lies, as the ground there rises into the
  * view the steeper, the flatter the view: it cut the glow of a runway in a

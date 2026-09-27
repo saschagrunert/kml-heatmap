@@ -802,6 +802,43 @@ body.profile-open .toast-stack {
 }
 
 /* ==========================================================================
+   Readout of the heat cloud under the pointer (ui/cloudReadout.ts)
+   ========================================================================== */
+/* The box of the map's popups, without their tip, placed by a transform
+   beside the pointer. It takes no pointer events, so the map under it
+   keeps its hover, clicks and drags. */
+.cloud-readout {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: var(--z-map-popup);
+  pointer-events: none;
+  max-width: min(18rem, calc(100% - 2 * var(--space-sm)));
+  padding: var(--space-xs) var(--space-sm);
+  background-color: var(--color-bg-secondary);
+  color: var(--color-text-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-panel);
+  box-shadow: var(--shadow-panel);
+  font-size: var(--text-sm);
+  line-height: 1.4;
+}
+.cloud-readout[hidden] {
+  display: none;
+}
+/* The time, over the flights and the heights */
+.cloud-readout b {
+  display: block;
+  color: var(--color-text);
+  font-weight: 600;
+}
+@media (prefers-contrast: more) {
+  .cloud-readout {
+    border-width: 2px;
+  }
+}
+
+/* ==========================================================================
    Reduced motion
    ========================================================================== */
 @media (prefers-reduced-motion: reduce) {

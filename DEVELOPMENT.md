@@ -882,10 +882,11 @@ is restored, where they are tried again (the replay of all flights alike);
 what fails while the context is lost (`isContextLost`: every GL object is
 null and no shader compiles) is no failure (`LayerGl`). It only
 draws: a custom layer has no features for `queryRenderedFeatures`, and the
-ribbons stay what is hovered and clicked. An exported image has it, without
-its pulses, since the canvas is read in the frame that drew it
-(`withMapStill`). It is drawn in the world copy of the flights only, where
-the flat map shows several.
+ribbons stay what is hovered and clicked (the readout below works out what
+the cloud under the pointer is made of from the segments instead). An
+exported image has it, without its pulses, since the canvas is read in the
+frame that drew it (`withMapStill`). It is drawn in the world copy of the
+flights only, where the flat map shows several.
 
 The band of heights (`heightBand` in the store, `h` in the link, the text
 `500-3000` or `1000-` of `calculations/heightBand.ts`, empty for every
@@ -1000,6 +1001,133 @@ the bar is drawn on a scale of those steps from the ramp's own colours
 (`heatLegend`), shifted so that the colour under a label is the one its
 count is drawn in: the labels stay round numbers and the ramp moves under
 them.
+
+**The readout of the heat cloud:**
+
+Pointing at the cloud (a resting mouse, or a tap) shows a box beside the
+pointer with the time spent around the place (with Routes, the distance
+flown there), the flights that were there and the 400 ft band of height
+above the ground most of it was in. `ui/cloudReadout.ts` (feature bundle, started by `followHeatCloud`)
+listens to the map's pointer events only while the 3D view draws the cloud
+(`threeDVisible` and `heatCloud`, the Heatmap switch on, no replay, not in
+Wrapped or its intro's `forcedHeatCloud`) and looks once per frame at most
+(`frameCoalescer`); with the 3D view off it holds nothing but its store
+subscription, and lets go of what it kept. `calculations/cloudReadout.ts`
+is the maths:
+
+- Under the pointer means along the line of sight through it. The cloud
+  adds up every glow on a pixel, so the pixel shows every flight the line
+  passes near, at any height; the ground under the pointer alone would miss
+  the glow pointed at in a tilted view, where a flight stands up the screen
+  from its ground. `sightLine` samples the line from the ground up to the
+  highest flight (15,000 ft above the ground at most), a point at a height
+  standing on the ground `liftOffsetPx` further down the screen, the
+  approximation `PathHover` takes a ribbon down by, at most every radius on
+  the screen and 48 times at most. A segment is measured against the place
+  of its own height, interpolated between the samples. Looking straight
+  down, or with the flights flat from `z` 18 in, it is one place. The
+  relief is not asked whether it hides a flight from the pointer.
+- A sample is on the ground only where `project` takes the place
+  `unproject` gave back to within half a radius of the sample: MapLibre
+  answers the sky of a tilted map with ground behind the camera, and the
+  space beside the globe with its rim. Neither is a longitude past 180,
+  in a world copy the cloud is not drawn in. The pointer on no ground has
+  no readout, and the line ends at the first sample on none. It ends too
+  where two samples are more than 8 radii apart (`SIGHT_MAX_GAP_RADII`),
+  towards the horizon of a steeply tilted map, and has no readout if that
+  is the first pair: a radius spans a few pixels there, and the reach of
+  the search below grows with the gap. Without the checks a pointer just
+  above the horizon searched 2,000 km for 3.7 s per frame (130,000
+  synthetic segments, Node).
+- The radius is a round one (`READOUT_RADII_M`, 100 m to 50 km) nearest to
+  the reach of a stretch's glow in the middle of the map (`cloudReachPx`:
+  21 CSS px out to `z` 9.5, narrowing with `CLOUD_STOPS` to 7.5 px from 13
+  in), so the box can say "within 1 km".
+- The time is the cloud's: the heat of each segment in seconds as
+  `heatWeight` weighs it for the Routes and Airborne switches (by time at
+  most 120 s, a track without times at a cruise; by Routes its length at
+  `ROUTE_SPEED_MS`), times the part of it within the circle
+  (`insideFraction`), times the part of it the band of heights draws
+  (`heightBandEdgesFt`, the fade of the cloud's shaders, at the height of
+  the segment). With Routes the box says the distance flown, the seconds
+  at `ROUTE_SPEED_MS`. A segment of no heat (what Airborne leaves out)
+  counts for nothing, as the cloud draws nothing of it, and a place with
+  none has no readout. The flights are the path ids with any heat within,
+  of those the cloud draws (filters, Isolate, band of heights). The
+  heights are above the ground the cloud stands on (`groundProfilesFt` at
+  the relief level: the sampled ground on the relief, the line between the
+  fields on the globe), added up in 100 ft bins; the box names the run of
+  four with the most of it, "mostly" from half of it on. The exposure never
+  enters it: the box speaks of time or distance, not of heat. A change of
+  the switches tells a resting pointer anew.
+- The segments near a place come from a grid made per dataset the first
+  time a radius is asked for (`segmentGrid`, a `WeakMap` on
+  `path_segments`, let go with the 3D view), its cells twice the radius. A
+  segment goes into the cells of points along it at most half a cell
+  apart, so a query looks in the cells within its reach and one more, and
+  visits each segment once (a stamp per segment). The grids of the three
+  radii asked for last are kept: the finer the grid, the more cells a
+  segment is in, and for 130,000 segments the one of 100 m took 13 MB and
+  the one of 1 km 2.3 MB. The seconds and the heights are kept alike, the
+  seconds per weighing (`heatWeight` gives one function per switches), the
+  heights per relief level. On 100,000 synthetic segments around one
+  field, the grid took 12 to 16 ms to make and a readout 0.5 ms at 500 m
+  and 1.6 ms at 5 km (Node, desktop CPU); the 49 `unproject` calls of a
+  line of sight took 0.3 ms over the relief in Chrome.
+
+With a colour layer on, the 3D view draws the flights as ribbons, and
+around a busy field the ribbons are within `PathHover`'s few pixels of nearly every point: at
+`z` 10.5 around the home field its tooltip showed at 39 of 77 points of a
+grid 40 px apart, and a readout that stepped aside for it showed at 5. So
+the two show together, and the box goes where it leaves the values of a
+flight in sight (`place`): below and to the right of the pointer, then
+the other corners, then beside the tooltip or the tapped popup (a
+`.segment-tooltip` or `.segment-popup` in the map's container; a
+`MutationObserver` places the box again as one opens or closes later,
+after a look on idle), and clear of the panels over the map (the control
+columns, the selection chip, the flight profile, the phone's bar and the
+floating band of heights) where it can, within the map. With it the
+readout showed at 44 of the 77 points, at each of the 39 with the tooltip
+too, and never over it. It hides over a marker (the event's target is not
+the canvas), while a button is held or the map moves, and after Escape
+until the pointer moves 8 px; a change of what it is worked out from
+(filters, Isolate, the band, the relief) tells a resting pointer anew.
+
+A click or a tap on the map, handled after the app's own click handler,
+shows the box there, on a flight as well: a tap on the ribbons of a busy
+field nearly always hits one, which selects it and opens its values, and
+a readout that left those taps alone never showed on a phone around the
+home field. It is read out once (`announceStatus`) unless the click
+changed the selection (counted from the `mousedown` or `touchstart`
+before it), which the app reads out itself in the same status region,
+where the last word is the one heard; the box itself is `aria-hidden`, so
+a hover says nothing. A tap is a click less than a second after a
+`touchstart` on the map (the browser's mouse events for it are left
+alone), and puts the box above the finger; the flight profile that a
+selection opens moves the map, and the box of a tap follows the place
+tapped. The box takes no pointer events. It is an element of its own in
+the map's container, styled like the popups in `features.css`, not a
+MapLibre popup, so no spec that counts the popups finds it.
+
+The flat heatmap has no readout. The code comes with the feature bundle,
+which a visit that never turns on the 3D view, replay, the satellite
+imagery or a single selection does not fetch: in 2D it would be fetched on
+every first visit, or add about 3 KB gzipped to a first visit that has no
+room left. The flat map's heat lines already show where the time was spent
+from `z` 12 in. The feature bundle grew by 8.2 KB raw and 3.3 KB gzipped;
+the first visit by a few bytes, the export of `ROUTE_SPEED_MS`: otherwise
+the readout imports only what the shared chunk exports already (each new
+import from it adds to its export list). `cloud-readout.spec.ts` turns
+the altitude colours on and enters the 3D view by its button near the
+home field (the button leaves the heatmap alone, which it draws as the
+cloud), and rests the pointer on a place a flight passed low over, with
+the ribbons and the markers on; it
+checks the shape of the words, not the numbers, which the unit tests
+check, and that the box covers neither the pointer nor a tooltip. It
+waits for the map to stand tilted, not for `map.loaded()`, and points at
+the place anew until the box shows, since the relief may land later; a
+look into the page took up to 26 s in software WebGL on CI, so every check
+after the 3D view comes on has the relief's minute.
 
 **The satellite imagery:**
 
