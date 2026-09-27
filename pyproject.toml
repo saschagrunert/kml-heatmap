@@ -86,8 +86,13 @@ addopts = [
     "--strict-markers",
 ]
 # A deprecation in lxml or the next Python release fails the suite instead
-# of scrolling past
-filterwarnings = ["error"]
+# of scrolling past. Hypothesis warns about its own generator when it sets
+# it up, sometimes (a guess from its reference count, which Python 3.14
+# counts differently), and that failed a round trip test at random.
+filterwarnings = [
+    "error",
+    "ignore:It looks like `register_random` was passed an object:hypothesis.errors.HypothesisWarning",
+]
 
 [tool.coverage.run]
 branch = true

@@ -28,16 +28,19 @@ import {
 } from "./helpers";
 import {
   airportPosition,
+  canvasGlow,
   centerOnAirport,
   coveredMarkers,
   dragRotate,
   expectHeatmapPainted,
   heatCloudOnMap,
   heatmapOnMap,
+  homeField,
   focusAirportMarker,
   getOrientation,
   jumpToView,
   libraryOrientationControls,
+  mapIsIdle,
   mapMarkers,
   mapPopup,
   mapSurface,
@@ -433,6 +436,43 @@ test.describe("Map orientation", () => {
       expect(
         await page.evaluate(() => window.mapApp!.store.get("terrainActive")),
       ).toBe(false);
+    });
+
+    // What the layer reports is what it asked GL to draw: a shader, a
+    // layout or a buffer that went wrong still counts its stretches. So the
+    // canvas itself is read, with the Heatmap on and off in the same view,
+    // once the map has drawn everything (canvasGlow). The suite runs with
+    // reduced motion, so the cloud's pulses rest and the frames with and
+    // without it differ by the cloud alone. The thresholds are a sixth of
+    // what software WebGL drew over the home field of data/: a third of
+    // the middle of the map glowed with the cloud, a thousandth without.
+    test("the 3D view's cloud glows on the canvas over the home field, and goes with the Heatmap", async ({
+      page,
+    }) => {
+      test.setTimeout(RELIEF_TEST_TIMEOUT_MS);
+      await page.setViewportSize(RELIEF_VIEWPORT);
+      await waitForPathData(page);
+      await jumpToView(page, await homeField(page), 10);
+      await page.locator("#three-d-btn").click();
+      await reliefExpect
+        .poll(async () => (await heatCloudOnMap(page)).drawn)
+        .toBeGreaterThan(0);
+      // The glow is the cloud's alone: the flat heatmap has stepped aside
+      expect(await heatmapOnMap(page)).toBe(false);
+      await reliefExpect.poll(() => mapIsIdle(page)).toBe(true);
+      const on = await canvasGlow(page);
+
+      await toggleLayer(page, "heatmap");
+      await reliefExpect
+        .poll(async () => (await heatCloudOnMap(page)).drawn)
+        .toBe(0);
+      await reliefExpect.poll(() => mapIsIdle(page)).toBe(true);
+      const off = await canvasGlow(page);
+
+      expect(on.glow - off.glow, JSON.stringify({ on, off })).toBeGreaterThan(
+        0.05,
+      );
+      expect(on.luminance - off.luminance).toBeGreaterThan(3);
     });
 
     test.describe("with motion", () => {

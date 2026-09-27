@@ -10,8 +10,9 @@ flights that only change on purpose, into visual-site/.
 Everything else that varies between builds is pinned here as well: the build
 stamp of the statistics panel, the airport and runway databases and the tile
 API key. The ground under the flights is left out (--no-terrain): sampling it
-would fetch elevation tiles, and none of the snapshots shows the 3D view it
-is for, so a flat or fixture model would only add a download to avoid. Run
+would fetch elevation tiles, and the one snapshot of the 3D view it is for,
+the heat cloud's, is as fixed without it, with each flight on a line between
+its airfields over the flat elevation tiles of the e2e fixture. Run
 `npm run build` first; the generator needs the bundles.
 """
 

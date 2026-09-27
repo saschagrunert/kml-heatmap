@@ -21,35 +21,117 @@ import {
 
 test.use({ reducedMotion: "no-preference" });
 
-/** Open Wrapped from its button, as a user does, which plays the intro */
+/**
+ * The dialog counts as hidden once its fade has run, and with motion on that
+ * takes three or four frames of the map, each of which software WebGL on a
+ * busy CI runner can take seconds to hand back (a close took 6.6 s there)
+ */
+const CLOSED = { timeout: 20_000 };
+
+/**
+ * Open Wrapped from its button, as a user does, which plays the intro.
+ *
+ * The button fetches the heat cloud's code as the pointer comes onto it
+ * (prepareWrappedIntro), and the intro waits for that code only so long
+ * (INTRO_WAIT_MS, a second) before Wrapped opens without it. A click at
+ * once raced that fetch, which on a busy CI runner took longer, and the
+ * intro then never flew. So the pointer rests on the button until the
+ * feature bundle and its stylesheet are in, the way a user's pointer
+ * does on its way to the click. Polled from here: waitForFunction takes a
+ * promise for a truthy answer and stops at once, whatever it resolves to.
+ */
 async function openWithIntro(page: Page) {
-  await page.locator("#wrapped-btn").click();
+  const button = page.locator("#wrapped-btn");
+  await button.hover();
+  await expect
+    .poll(
+      () =>
+        page.evaluate(async (bundle) => {
+          // The module the app imports, under the same URL, so the same
+          // module, run once: resolved once it has been fetched and run
+          await import(bundle);
+          // The stylesheet the app adds for it has a sheet once loaded
+          // (services/stylesheet.ts)
+          return !!document.querySelector<HTMLLinkElement>(
+            'link[data-href="./features.css"]',
+          )?.sheet;
+        }, "./features.bundle.js"),
+      { timeout: 15000 },
+    )
+    .toBe(true);
+  await button.click();
   const modal = page.locator("#wrapped-modal");
   await expect(modal).toBeVisible({ timeout: 5000 });
   return modal;
 }
 
+/** What the page saw as it pressed Skip in the middle of the flight */
+interface SkippedMidFlight {
+  /** The camera was moving, and the flights played underneath */
+  flying: boolean;
+  replayAll: boolean;
+  /** The intro's globe and cloud were up */
+  globe: boolean;
+  forcedHeatCloud: boolean;
+  /** Skip was shown, and a pointer at its middle would have hit it */
+  visible: boolean;
+  hit: boolean;
+}
+
 /**
- * Press Skip the moment the intro offers it. A click from here waits for the
- * button to hold still over two frames, and in software WebGL those frames
- * are slow enough for the flight to end first and take Skip away. Resolves
- * to whether the intro was playing when Skip was pressed.
+ * Press Skip once the camera has set off: in the task that starts the
+ * flight (WrappedIntro.fly), which takes the dark off the map while the
+ * dialog is still in its intro, and where the flights of the year start
+ * to play underneath. From here a click would wait for Skip to hold still
+ * over two frames, and in software WebGL those are slow enough for the
+ * flight to end first and take Skip away; pressed from the page in the
+ * same task, the intro is certain to be flying. A DOM click skips the
+ * checks a pointer gets, so the page makes them itself: Skip is visible
+ * and nothing covers its middle. Resolves to what the page saw, once it
+ * has pressed Skip.
  */
-async function skipOnceOffered(page: Page) {
+async function skipMidFlight(page: Page) {
   await page.evaluate(() => {
     const skip = document.getElementById("wrapped-skip-btn")!;
     const modal = document.getElementById("wrapped-modal")!;
-    const seen = window as unknown as { skippedIntro?: boolean };
+    const container = document.getElementById("wrapped-map-container")!;
+    const seen = window as unknown as { skippedMidFlight?: SkippedMidFlight };
     new MutationObserver((_, observer) => {
-      if (skip.hidden) return;
+      // The end of the intro takes the dark away as well, and the intro
+      // with it
+      if (
+        !modal.classList.contains("is-intro") ||
+        container.classList.contains("is-dark")
+      ) {
+        return;
+      }
       observer.disconnect();
-      seen.skippedIntro = modal.classList.contains("is-intro");
+      const app = window.mapApp!;
+      const map = app.map!;
+      const box = skip.getBoundingClientRect();
+      const hit = document.elementFromPoint(
+        box.left + box.width / 2,
+        box.top + box.height / 2,
+      );
+      seen.skippedMidFlight = {
+        flying: map.isMoving(),
+        replayAll: !!map.getLayer("replay-all"),
+        globe: app.globeVisible,
+        forcedHeatCloud: app.store.get("forcedHeatCloud"),
+        visible: skip.checkVisibility({
+          opacityProperty: true,
+          visibilityProperty: true,
+        }),
+        hit: !!hit && skip.contains(hit),
+      };
       skip.click();
-    }).observe(skip, { attributes: true, attributeFilter: ["hidden"] });
+    }).observe(container, { attributes: true, attributeFilter: ["class"] });
   });
   return () =>
     page.evaluate(
-      () => (window as unknown as { skippedIntro?: boolean }).skippedIntro,
+      () =>
+        (window as unknown as { skippedMidFlight?: SkippedMidFlight })
+          .skippedMidFlight ?? null,
     );
 }
 
@@ -61,15 +143,24 @@ test.describe("Wrapped's intro", () => {
     await setOrientation(page, { bearing: 30, pitch: 20 });
   });
 
-  test("is skipped, and the view comes back as the dialog closes", async ({
+  test("is skipped in the middle of its flight, and the view comes back as the dialog closes", async ({
     page,
   }) => {
+    // The flight sets off once the far view is drawn, which takes seconds
+    // of software WebGL on a loaded runner
+    test.setTimeout(60000);
     const zoom = await getZoom(page);
-    const skipped = await skipOnceOffered(page);
+    const skipped = await skipMidFlight(page);
     const modal = await openWithIntro(page);
     const skip = page.locator("#wrapped-skip-btn");
-    // Offered from the moment the dialog opens until the camera settles
-    await expect.poll(skipped).toBe(true);
+    await expect.poll(skipped, { timeout: 30000 }).toEqual({
+      flying: true,
+      replayAll: true,
+      globe: true,
+      forcedHeatCloud: true,
+      visible: true,
+      hit: true,
+    });
 
     // Wrapped as it opens without the intro: the cards, the flat overview
     // north up, no globe and no cloud
@@ -94,7 +185,7 @@ test.describe("Wrapped's intro", () => {
     await expect(modal.locator(".close-btn")).toBeFocused();
 
     await modal.locator(".close-btn").click();
-    await expect(modal).toBeHidden();
+    await expect(modal).toBeHidden(CLOSED);
     await expect
       .poll(() => getOrientation(page))
       .toMatchObject({ bearing: 30, pitch: 20, projection: "mercator" });
@@ -131,7 +222,7 @@ test.describe("Wrapped's intro", () => {
     expect(link.has("d")).toBe(false);
 
     await modal.locator(".close-btn").click();
-    await expect(modal).toBeHidden();
+    await expect(modal).toBeHidden(CLOSED);
     await expect
       .poll(() => getOrientation(page))
       .toMatchObject({ bearing: 30, pitch: 20, projection: "mercator" });

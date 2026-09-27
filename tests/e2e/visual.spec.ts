@@ -18,9 +18,10 @@
  * differ, which the flights of data/ needed, a missing control row passed
  * and so did three stale snapshots.
  *
- * The map itself is hidden rather than masked: it is live data over stubbed
- * tiles, so comparing it would make every one of these flaky, and a mask
- * over a full-viewport element covers the chrome along with it.
+ * The map itself is hidden rather than masked in the snapshots of the
+ * chrome: a mask over a full-viewport element covers the chrome along with
+ * it. One snapshot is of the map instead, the heat cloud of the 3D view,
+ * whose own shaders nothing else compares (see the last describe).
  */
 import { test, expect } from "./fixtures";
 import {
@@ -28,9 +29,18 @@ import {
   openWrapped,
   settleAnimations,
   toggleStatsPanel,
+  waitForPathData,
   waitForWrappedMap,
 } from "./helpers";
-import { hideMapData } from "./map";
+import {
+  heatCloudOnMap,
+  hideChrome,
+  hideMapData,
+  homeField,
+  jumpToView,
+  mapIsIdle,
+  waitForMapIdleEvent,
+} from "./map";
 
 /**
  * The year every snapshot is taken with. The fixture has a later year as
@@ -84,5 +94,36 @@ test.describe("visual", () => {
     await settleAnimations(dialog);
 
     await expect(dialog).toHaveScreenshot("wrapped-dialog.png", EXACT);
+  });
+});
+
+test.describe("visual, on the map", () => {
+  // The heat cloud of the 3D view over the home field of the fixture, with
+  // the flights on it. Everything in it is fixed: the fixture's flights,
+  // the stubbed base map (a background colour) and flat elevation tiles
+  // (fixtures.ts), the view, and a cloud without its pulses under the
+  // reduced motion the suite asks for, drawn in the image's software
+  // WebGL. The chrome is hidden (hideChrome): its own snapshot covers it,
+  // and a change to it should not call for this one to be taken again.
+  test("the heat cloud of the 3D view", async ({ page }) => {
+    // Each wait may be on the elevation tiles of the tilted view, each a
+    // pass of software WebGL, while the other snapshots are taken beside it
+    test.setTimeout(150000);
+    await gotoApp(page, `/?y=${PINNED_YEAR}`);
+    await expect(page.locator("#year-select")).toHaveValue(String(PINNED_YEAR));
+    await waitForPathData(page);
+    await jumpToView(page, await homeField(page), 10);
+    const threeD = page.locator("#three-d-btn");
+    await threeD.click();
+    await expect(threeD).toHaveAttribute("aria-pressed", "true");
+    await expect
+      .poll(async () => (await heatCloudOnMap(page)).drawn, { timeout: 60000 })
+      .toBeGreaterThan(0);
+    await expect.poll(() => mapIsIdle(page), { timeout: 60000 }).toBe(true);
+    await waitForMapIdleEvent(page);
+    await hideChrome(page);
+    await settleAnimations(page);
+
+    await expect(page).toHaveScreenshot("heat-cloud-3d.png", EXACT);
   });
 });
