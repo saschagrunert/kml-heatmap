@@ -33,6 +33,7 @@ import {
 import { FEET_TO_METERS } from "../utils/constants";
 import { segmentSeconds } from "./heatLines";
 import { liftExaggeration } from "./lift";
+import { chainTimes, flightClockOf } from "./flightClock";
 import type { SmoothedFlights } from "./smoothing";
 
 /**
@@ -84,10 +85,10 @@ export const CLOUD_POINT_FLOATS = 6;
  * - the heat of the stretch from it to the next point: the seconds spent
  *   on the segments merged into it. The last point of a flight has none,
  *   and the stretch from it to the next flight's first is not drawn;
- * - its time: the seconds into its flight at which it was flown, as the
- *   heat lines count them (segmentSeconds), from 0 at the flight's first
- *   fix and on across a gap in its log, so the time runs the way the
- *   flight went.
+ * - its time: the seconds into its flight at which it was flown, by the
+ *   clock replay all plays the flights by (see flightClock), from 0 at the
+ *   flight's first fix and on across a gap in its log, so the pulses run
+ *   the way the flight went, in step with replay all.
  */
 export interface CloudPoints {
   points: Float32Array;
@@ -142,18 +143,13 @@ export function cloudPoints(
   // The cells of heat, in Mercator units, and the heat per metre in each
   const cell = CLOUD_CELL_PX / (TILE_SIZE_PX * 2 ** (level + 0.5));
   const cells = new Map<number, number>();
-  // The flight the clock runs for, and its seconds up to the chain of `i`
-  let clockOf = -1;
-  let clock = 0;
+  // The time of the points, as replay all plays them
+  const clock = flightClockOf(segments);
   let i = 0;
   while (i < count) {
     // The segments of the chain of `i`, one after the other
     let end = i + 1;
     while (end < count && chainOf[end] === chainOf[i]) end++;
-    if (segments[i]!.path_id !== clockOf) {
-      clockOf = segments[i]!.path_id;
-      clock = 0;
-    }
     const chain = chains[chainOf[i]!];
     if (chain && chain.points.length > 1 && keep(segments[i]!.path_id)) {
       const { points, heights, ground } = chain;
@@ -180,6 +176,7 @@ export function cloudPoints(
             total > 0 ? (spent * lengths[j]!) / total : spent / pieces;
         }
       }
+      const times = chainTimes(flights, clock, i, end, lengths);
       const heightAt = (j: number): number => (ground?.[j] ?? 0) + heights[j]!;
       let along = 0;
       let heat = 0;
@@ -192,7 +189,7 @@ export function cloudPoints(
         east = Math.max(east, x);
         north = Math.min(north, y);
         south = Math.max(south, y);
-        values.push(x, y, ground?.[j] ?? 0, heights[j]!, 0, clock);
+        values.push(x, y, ground?.[j] ?? 0, heights[j]!, 0, times[j]!);
         keptFt = heightAt(j);
         keptX = x;
         keptY = y;
@@ -202,7 +199,6 @@ export function cloudPoints(
       for (let j = 1; j <= last; j++) {
         along += lengths[j]!;
         heat += seconds[j]!;
-        clock += seconds[j]!;
         if (
           j === last ||
           along >= stepM ||
@@ -236,12 +232,47 @@ export function cloudPoints(
     points[k + CLOUD_POINT_FLOATS] = values[k]! - origin[0];
     points[k + CLOUD_POINT_FLOATS + 1] = values[k + 1]! - origin[1];
   }
-  const busy = Float64Array.from(cells.values()).sort();
+  const busy = Float64Array.from(cells.values());
   return {
     points,
     count: values.length / CLOUD_POINT_FLOATS,
     origin,
     busiest:
-      busy[Math.floor(CLOUD_BUSIEST_PERCENTILE * (busy.length - 1))] ?? 0,
+      busy.length > 0
+        ? nthSmallest(
+            busy,
+            Math.floor(CLOUD_BUSIEST_PERCENTILE * (busy.length - 1)),
+          )
+        : 0,
   };
+}
+
+/**
+ * The value that would be at `n` (from 0) of `values` sorted, which it
+ * reorders: Hoare's selection, since sorting every cell of the cloud for
+ * one of them was a third of the work of cloudPoints
+ */
+export function nthSmallest(values: Float64Array, n: number): number {
+  let low = 0;
+  let high = values.length - 1;
+  while (low < high) {
+    const pivot = values[(low + high) >>> 1]!;
+    let i = low;
+    let j = high;
+    while (i <= j) {
+      while (values[i]! < pivot) i++;
+      while (values[j]! > pivot) j--;
+      if (i <= j) {
+        const swap = values[i]!;
+        values[i++] = values[j]!;
+        values[j--] = swap;
+      }
+    }
+    // Below j none is greater than the pivot, from i none is less, and
+    // between the two all are the pivot
+    if (n <= j) high = j;
+    else if (n >= i) low = i;
+    else return pivot;
+  }
+  return values[n]!;
 }

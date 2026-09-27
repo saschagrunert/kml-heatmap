@@ -12,9 +12,9 @@
  * (segmentSeconds), and a segment with neither takes no time at all. The
  * heat stops counting at two minutes a segment, so a long stand does not
  * outshine the rest; a clock that did would fly a long leg in two minutes,
- * and it stops at MAX_CLOCK_STEP_S instead. The heat cloud's flow
- * animation wants the same seconds along the same curves; the two share
- * this module.
+ * and it stops at MAX_CLOCK_STEP_S instead. The pulses of the heat cloud
+ * (calculations/heatCloud.ts) run by the same clock along the same curves,
+ * so they and the replay agree on where each flight is when.
  */
 import type { PathSegment } from "../types";
 import type { SmoothedFlights } from "./smoothing";
@@ -77,21 +77,36 @@ export function flightClock(segments: readonly PathSegment[]): FlightClock {
   return { start, spent, duration };
 }
 
+/** The clock of each array of segments, worked out once */
+const clocks = new WeakMap<readonly PathSegment[], FlightClock>();
+
+/** flightClock of `segments`, worked out once for the replay and the cloud */
+export function flightClockOf(segments: readonly PathSegment[]): FlightClock {
+  let clock = clocks.get(segments);
+  if (!clock) {
+    clock = flightClock(segments);
+    clocks.set(segments, clock);
+  }
+  return clock;
+}
+
 /**
  * The seconds into its flight at each point of the curve of the chain the
  * segments `first` to `end` (exclusive) are smoothed into (see
  * smoothFlights): a point between two fixes is as far into its segment's
- * time as it is along its piece of the curve.
+ * time as it is along its piece of the curve. `lengths` are the metres
+ * from each point of the curve to the one before (see pieceLengths), where
+ * the caller has them already.
  */
 export function chainTimes(
   flights: SmoothedFlights,
   clock: FlightClock,
   first: number,
   end: number,
+  lengths: Float64Array = pieceLengths(flights, first, end),
 ): Float64Array {
   const { chains, chainOf, from, to } = flights;
-  const points = chains[chainOf[first]!]!.points;
-  const times = new Float64Array(points.length);
+  const times = new Float64Array(chains[chainOf[first]!]!.points.length);
   for (let m = first; m < end; m++) {
     const a = from[m]!;
     const b = to[m]!;
@@ -99,15 +114,33 @@ export function chainTimes(
     const spent = clock.spent[m]!;
     times[a] = begins;
     let total = 0;
-    for (let j = a + 1; j <= b; j++) {
-      total += planarMetres(points[j - 1]!, points[j]!);
-    }
+    for (let j = a + 1; j <= b; j++) total += lengths[j]!;
     let along = 0;
     for (let j = a + 1; j <= b; j++) {
-      along += planarMetres(points[j - 1]!, points[j]!);
+      along += lengths[j]!;
       times[j] =
         begins + spent * (total > 0 ? along / total : (j - a) / (b - a));
     }
   }
   return times;
+}
+
+/**
+ * The metres from each point of the curve of the chain the segments
+ * `first` to `end` (exclusive) are smoothed into to the point before it
+ */
+function pieceLengths(
+  flights: SmoothedFlights,
+  first: number,
+  end: number,
+): Float64Array {
+  const { chains, chainOf, from, to } = flights;
+  const points = chains[chainOf[first]!]!.points;
+  const lengths = new Float64Array(points.length);
+  for (let m = first; m < end; m++) {
+    for (let j = from[m]! + 1; j <= to[m]!; j++) {
+      lengths[j] = planarMetres(points[j - 1]!, points[j]!);
+    }
+  }
+  return lengths;
 }

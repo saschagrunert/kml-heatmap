@@ -10,8 +10,13 @@ import {
   CLOUD_STEP_PX,
   cloudPoints,
   mercatorOf,
+  nthSmallest,
   type CloudPoints,
 } from "../../../../kml_heatmap/frontend/calculations/heatCloud";
+import {
+  chainTimes,
+  flightClock,
+} from "../../../../kml_heatmap/frontend/calculations/flightClock";
 import { levelGroundFt } from "../../../../kml_heatmap/frontend/calculations/groundProfile";
 import { segmentSeconds } from "../../../../kml_heatmap/frontend/calculations/heatLines";
 import { liftFt } from "../../../../kml_heatmap/frontend/calculations/lift";
@@ -380,12 +385,33 @@ function runningSum(seconds: number[]): number[] {
   return [0, ...seconds.map((s) => (sum += s))];
 }
 
+/** The seconds of every segment by the clock replay all plays them by */
+function clockSecondsOf(segments: PathSegment[]): number[] {
+  return Array.from(flightClock(segments).spent);
+}
+
 describe("the time of the cloud's points", () => {
   it("is the seconds into its flight each was flown at, from 0 at the first fix", () => {
     const segments = flight(1, line(4), undefined, 7);
     const points = pointsOf(cloudOf(segments, everything, [0, 0, 0], 11));
     expect(points.map((p) => p.time)).toEqual(
-      runningSum(secondsOf(segments)).map((s) => Math.fround(s)),
+      runningSum(clockSecondsOf(segments)).map((s) => Math.fround(s)),
+    );
+  });
+
+  it("is replay all's clock: a long step of the log counts in full, where the heat stops at two minutes", () => {
+    const segments = flight(1, line(4), undefined, 300);
+    const points = pointsOf(cloudOf(segments, everything, [0, 0, 0], 11));
+    expect(points.map((p) => p.time).slice(0, 3)).toEqual([0, 300, 600]);
+    expect(points[0]!.heat).toBe(120);
+    const flights = smoothFlights(segments, (i) => segments[i]!.altitude_ft, {
+      groundOf: () => 0,
+    });
+    const times = chainTimes(flights, flightClock(segments), 0, 3);
+    expect(points.map((p) => p.time)).toEqual(
+      [flights.from[0]!, flights.to[0]!, flights.to[1]!, flights.to[2]!].map(
+        (j) => Math.fround(times[j]!),
+      ),
     );
   });
 
@@ -397,7 +423,7 @@ describe("the time of the cloud's points", () => {
     const points = pointsOf(
       cloudOf(segments, everything, new Array(segments.length).fill(0), 11),
     );
-    const seconds = secondsOf(segments);
+    const seconds = clockSecondsOf(segments);
     const times = points.map((p) => p.time);
     // The first path's two chains on one clock, the second chain from
     // where the first ended, and the second path on its own
@@ -436,11 +462,13 @@ describe("the time of the cloud's points", () => {
     const times = points.map((p) => p.time);
     expect(times[0]).toBe(0);
     for (let k = 1; k < times.length; k++) {
-      // The time of a point is the one before and the heat between them
+      // The time of a point is the one before and the seconds between them
       expect(times[k]).toBeCloseTo(times[k - 1]! + points[k - 1]!.heat, 3);
     }
-    const total = secondsOf(segments).reduce((sum, t) => sum + t, 0);
-    expect(times[times.length - 1]).toBeCloseTo(total, 3);
+    expect(times[times.length - 1]).toBeCloseTo(
+      flightClock(segments).duration.get(1)!,
+      3,
+    );
   });
 
   it("is the log's own time where it has one, from chain to chain", () => {
@@ -543,5 +571,35 @@ describe("the busiest heat of the cloud", () => {
     const alone = cruise(1);
     expect(busiest(apart, 6) / busiest(alone, 6)).toBeCloseTo(2, 1);
     expect(busiest(apart, 11) / busiest(alone, 11)).toBeCloseTo(1, 1);
+  });
+});
+
+describe("nthSmallest", () => {
+  it("is the value at that place of the values sorted, with repeats and all", () => {
+    let seed = 7;
+    const random = (): number => {
+      seed = (seed * 16807) % 2147483647;
+      return seed / 2147483647;
+    };
+    for (const size of [1, 2, 3, 10, 101, 1000]) {
+      for (const spread of [3, 1000]) {
+        const values = Float64Array.from({ length: size }, () =>
+          Math.floor(random() * spread),
+        );
+        const sorted = Float64Array.from(values).sort();
+        const places = [0, size >> 1, Math.floor(0.99 * (size - 1)), size - 1];
+        for (const n of places) {
+          expect(nthSmallest(Float64Array.from(values), n)).toBe(sorted[n]);
+        }
+      }
+    }
+  });
+
+  it("finds its value in values sorted either way, or all alike", () => {
+    const up = Float64Array.from({ length: 50 }, (_, i) => i);
+    expect(nthSmallest(up, 49)).toBe(49);
+    const down = Float64Array.from({ length: 50 }, (_, i) => 50 - i);
+    expect(nthSmallest(down, 0)).toBe(1);
+    expect(nthSmallest(new Float64Array(20).fill(2), 13)).toBe(2);
   });
 });

@@ -17,11 +17,11 @@ import {
   CLOUD_STOPS,
   cloudExposure,
   cloudLook,
-  cloudMatrix,
   HEAT_CLOUD_LAYER,
   HeatCloudLayer,
   type HeatCloudStyle,
 } from "../../../../kml_heatmap/frontend/ui/heatCloudLayer";
+import { cloudMatrix } from "../../../../kml_heatmap/frontend/ui/glLayer";
 import {
   cloudPoints,
   type CloudPoints,

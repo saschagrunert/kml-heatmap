@@ -24,7 +24,7 @@ import {
   REPLAY_ALL_POINT_FLOATS,
   type ReplayAllPoints,
 } from "../calculations/replayAll";
-import { cloudMatrix } from "./heatCloudLayer";
+import { LayerGl, setProjection } from "./glLayer";
 
 /** The id of the layer on the map */
 export const REPLAY_ALL_LAYER = "replay-all";
@@ -161,12 +161,8 @@ const ATTRIBUTES = [
   "a_endClock",
 ] as const;
 
+/** The uniforms besides those of the projection */
 const UNIFORMS = [
-  "u_projection_matrix",
-  "u_projection_tile_mercator_coords",
-  "u_projection_clipping_plane",
-  "u_projection_transition",
-  "u_projection_fallback_matrix",
   "u_heights",
   "u_viewport",
   "u_depth",
@@ -174,20 +170,30 @@ const UNIFORMS = [
   "u_size",
 ] as const;
 
-interface Program {
-  program: WebGLProgram;
-  uniforms: Record<(typeof UNIFORMS)[number], WebGLUniformLocation | null>;
-}
-
-/** The GL objects of the layer, made for one context */
-interface Resources {
-  gl: WebGL2RenderingContext;
-  corners: WebGLBuffer;
-  points: WebGLBuffer;
-  vao: WebGLVertexArrayObject;
-  /** By MapLibre's shader variant, one per projection; null did not work */
-  programs: Map<string, Program | null>;
-  uploaded: ReplayAllPoints | null;
+/**
+ * A stretch is the point it starts from and the one after it: where each
+ * is, then its time and whether it joins the next
+ */
+function layout(gl: WebGL2RenderingContext): void {
+  const stride = REPLAY_ALL_POINT_FLOATS * 4;
+  for (let point = 0; point < 2; point++) {
+    for (const [slot, size, offset] of [
+      [1, 4, 0],
+      [2, 2, 16],
+    ] as const) {
+      const location = slot + 2 * point;
+      gl.enableVertexAttribArray(location);
+      gl.vertexAttribPointer(
+        location,
+        size,
+        gl.FLOAT,
+        false,
+        stride,
+        point * stride + offset,
+      );
+      gl.vertexAttribDivisor(location, 1);
+    }
+  }
 }
 
 export class ReplayAllLayer implements CustomLayerInterface {
@@ -198,7 +204,8 @@ export class ReplayAllLayer implements CustomLayerInterface {
   frames = 0;
   time = 0;
   private map: MapLibreMap | null = null;
-  private resources: Resources | null = null;
+  /** Its GL objects, made as it first draws (see LayerGl) */
+  private readonly objects: LayerGl<(typeof UNIFORMS)[number]>;
   private flights: ReplayAllPoints | null = null;
 
   /**
@@ -208,7 +215,19 @@ export class ReplayAllLayer implements CustomLayerInterface {
   constructor(
     private readonly style: () => ReplayAllStyle | null,
     private readonly failed: (error: unknown) => void,
-  ) {}
+  ) {
+    this.objects = new LayerGl(
+      {
+        owner: "the replay's",
+        vertex: VERTEX_SHADER,
+        fragment: FRAGMENT_SHADER,
+        attributes: ATTRIBUTES,
+        uniforms: UNIFORMS,
+        layout,
+      },
+      this.failed,
+    );
+  }
 
   /** Draw the points `flights` from the next frame on, or none */
   setPoints(flights: ReplayAllPoints | null): void {
@@ -216,27 +235,15 @@ export class ReplayAllLayer implements CustomLayerInterface {
     this.map?.triggerRepaint();
   }
 
-  private readonly lost = (): void => {
-    this.resources = null;
-  };
-
   onAdd(map: MapLibreMap): void {
     this.map = map;
-    map.on("webglcontextlost", this.lost);
+    map.on("webglcontextlost", this.objects.lost);
   }
 
   onRemove(map: MapLibreMap, gl: WebGL2RenderingContext): void {
-    const resources = this.resources;
-    this.resources = null;
     this.map = null;
-    map.off("webglcontextlost", this.lost);
-    if (!resources || resources.gl !== gl || gl.isContextLost()) return;
-    gl.deleteBuffer(resources.corners);
-    gl.deleteBuffer(resources.points);
-    gl.deleteVertexArray(resources.vao);
-    for (const program of resources.programs.values()) {
-      if (program) gl.deleteProgram(program.program);
-    }
+    map.off("webglcontextlost", this.objects.lost);
+    this.objects.release(gl);
   }
 
   render(gl: WebGL2RenderingContext, options: CustomRenderMethodInput): void {
@@ -244,42 +251,11 @@ export class ReplayAllLayer implements CustomLayerInterface {
     const flights = this.flights;
     const style = this.style();
     if (!map || !flights || flights.count < 2 || !style) return;
-    const resources = this.resourcesOf(gl);
-    const program = resources && this.program(resources, options);
-    if (!resources || !program) return;
+    const ready = this.objects.begin(gl, options, flights);
+    if (!ready) return;
 
-    if (resources.uploaded !== flights) {
-      gl.bindBuffer(gl.ARRAY_BUFFER, resources.points);
-      gl.bufferData(gl.ARRAY_BUFFER, flights.points, gl.STATIC_DRAW);
-      resources.uploaded = flights;
-    }
-
-    const u = program.uniforms;
-    const data = options.defaultProjectionData;
-    const globe = options.shaderData.define.includes("GLOBE");
-    const mercator = cloudMatrix(
-      globe ? data.fallbackMatrix : data.mainMatrix,
-      flights.origin,
-      map.getCenter().lat,
-    );
-    gl.useProgram(program.program);
-    gl.uniformMatrix4fv(
-      u.u_projection_matrix,
-      false,
-      globe ? new Float32Array(data.mainMatrix) : mercator,
-    );
-    if (globe) {
-      gl.uniformMatrix4fv(u.u_projection_fallback_matrix, false, mercator);
-      gl.uniform4f(
-        u.u_projection_tile_mercator_coords,
-        flights.origin[0],
-        flights.origin[1],
-        1,
-        1,
-      );
-      gl.uniform4fv(u.u_projection_clipping_plane, data.clippingPlane);
-      gl.uniform1f(u.u_projection_transition, data.projectionTransition);
-    }
+    const u = ready.program.uniforms;
+    setProjection(gl, u, options, flights.origin, map.getCenter().lat);
     const height = gl.drawingBufferHeight;
     const ratio = map.getPixelRatio();
     gl.uniform2f(u.u_heights, style.groundM, style.liftM);
@@ -294,7 +270,7 @@ export class ReplayAllLayer implements CustomLayerInterface {
     );
     gl.uniform2f(u.u_size, TRAIL_HALF_WIDTH_PX * ratio, HEAD_RADIUS_PX * ratio);
 
-    gl.bindVertexArray(resources.vao);
+    gl.bindVertexArray(ready.vao);
     gl.enable(gl.BLEND);
     // Premultiplied, over what the map has drawn
     gl.blendFuncSeparate(
@@ -317,116 +293,4 @@ export class ReplayAllLayer implements CustomLayerInterface {
     this.frames++;
     this.time = style.time;
   }
-
-  /** The GL objects for the context `gl`, made the first time */
-  private resourcesOf(gl: WebGL2RenderingContext): Resources | null {
-    if (this.resources?.gl === gl) return this.resources;
-    this.resources = null;
-    try {
-      this.resources = makeResources(gl);
-    } catch (error) {
-      this.failed(error);
-    }
-    return this.resources;
-  }
-
-  /** The program for the projection of the frame, compiled on first use */
-  private program(
-    resources: Resources,
-    options: CustomRenderMethodInput,
-  ): Program | null {
-    const { variantName, vertexShaderPrelude, define } = options.shaderData;
-    const held = resources.programs.get(variantName);
-    if (held !== undefined) return held;
-    let program: Program | null = null;
-    try {
-      program = compile(
-        resources.gl,
-        `#version 300 es\n${vertexShaderPrelude}\n${define}\n${VERTEX_SHADER}`,
-      );
-    } catch (error) {
-      this.failed(error);
-    }
-    resources.programs.set(variantName, program);
-    return program;
-  }
-}
-
-/** The buffers of a context: a quad's corners and the points */
-function makeResources(gl: WebGL2RenderingContext): Resources {
-  const corners = gl.createBuffer();
-  const points = gl.createBuffer();
-  const vao = gl.createVertexArray();
-  if (!corners || !points || !vao) {
-    throw new Error("the replay's buffers could not be made");
-  }
-  gl.bindVertexArray(vao);
-  gl.bindBuffer(gl.ARRAY_BUFFER, corners);
-  gl.bufferData(
-    gl.ARRAY_BUFFER,
-    new Float32Array([-1, -1, -1, 1, 1, -1, 1, 1]),
-    gl.STATIC_DRAW,
-  );
-  gl.enableVertexAttribArray(0);
-  gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
-  gl.bindBuffer(gl.ARRAY_BUFFER, points);
-  const stride = REPLAY_ALL_POINT_FLOATS * 4;
-  // A stretch is the point it starts from and the one after it: where each
-  // is, then its time and whether it joins the next
-  for (let point = 0; point < 2; point++) {
-    for (const [slot, size, offset] of [
-      [1, 4, 0],
-      [2, 2, 16],
-    ] as const) {
-      const location = slot + 2 * point;
-      gl.enableVertexAttribArray(location);
-      gl.vertexAttribPointer(
-        location,
-        size,
-        gl.FLOAT,
-        false,
-        stride,
-        point * stride + offset,
-      );
-      gl.vertexAttribDivisor(location, 1);
-    }
-  }
-  gl.bindVertexArray(null);
-  gl.bindBuffer(gl.ARRAY_BUFFER, null);
-  return { gl, corners, points, vao, programs: new Map(), uploaded: null };
-}
-
-/** Compile and link the program of `vertex` and the fragment shader */
-function compile(gl: WebGL2RenderingContext, vertex: string): Program {
-  const program = gl.createProgram();
-  for (const [type, source] of [
-    [gl.VERTEX_SHADER, vertex],
-    [gl.FRAGMENT_SHADER, FRAGMENT_SHADER],
-  ] as const) {
-    const shader = gl.createShader(type);
-    if (!shader) throw new Error("the replay's shaders could not be made");
-    gl.shaderSource(shader, source);
-    gl.compileShader(shader);
-    if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
-      const log = gl.getShaderInfoLog(shader);
-      gl.deleteShader(shader);
-      gl.deleteProgram(program);
-      throw new Error(`the replay's shader did not compile: ${log}`);
-    }
-    gl.attachShader(program, shader);
-    gl.deleteShader(shader);
-  }
-  ATTRIBUTES.forEach((name, location) =>
-    gl.bindAttribLocation(program, location, name),
-  );
-  gl.linkProgram(program);
-  if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
-    const log = gl.getProgramInfoLog(program);
-    gl.deleteProgram(program);
-    throw new Error(`the replay's program did not link: ${log}`);
-  }
-  const uniforms = Object.fromEntries(
-    UNIFORMS.map((name) => [name, gl.getUniformLocation(program, name)]),
-  ) as Program["uniforms"];
-  return { program, uniforms };
 }
