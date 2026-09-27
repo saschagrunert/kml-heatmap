@@ -28,7 +28,11 @@ import {
   mercatorOf,
   type CloudPoints,
 } from "../../../../kml_heatmap/frontend/calculations/heatCloud";
-import { liftExaggeration } from "../../../../kml_heatmap/frontend/calculations/lift";
+import {
+  LIFT_MAX_ZOOM,
+  liftExaggeration,
+  RELIEF_MAX_LEVEL,
+} from "../../../../kml_heatmap/frontend/calculations/lift";
 import {
   FULL_BAND,
   heightBandEdgesFt,
@@ -64,8 +68,14 @@ vi.mock("../../../../kml_heatmap/frontend/utils/logger", async (original) => ({
   logError: logger.logError,
 }));
 
-/** Counts the cuts of the cloud's points, which it otherwise leaves alone */
-const cuts = vi.hoisted(() => ({ count: 0 }));
+/**
+ * Counts the cuts of the cloud's points, which it otherwise leaves alone,
+ * and keeps the relief level, the zoom level and the box of the last
+ */
+const cuts = vi.hoisted(() => ({
+  count: 0,
+  last: [] as unknown[],
+}));
 vi.mock(
   "../../../../kml_heatmap/frontend/calculations/heatCloud",
   async (original) => {
@@ -77,6 +87,7 @@ vi.mock(
       ...actual,
       cloudPoints: (...args: Parameters<typeof actual.cloudPoints>) => {
         cuts.count++;
+        cuts.last = args.slice(3);
         return actual.cloudPoints(...args);
       },
     };
@@ -153,6 +164,8 @@ describe("the heat cloud", () => {
     });
     setPoints = vi.spyOn(HeatCloudLayer.prototype, "setPoints");
     logger.logError.mockClear();
+    // Over the flights, which a view two degrees across takes in
+    map().setCenter({ lng: 11.02, lat: 48 });
   });
 
   afterEach(() => {
@@ -468,6 +481,144 @@ describe("the heat cloud", () => {
     expect(style()!.liftM).toBe(metres);
   });
 
+  describe("cut around the view, and closer in than the last relief level", () => {
+    /** The move of the map coming to rest, and the task that follows it */
+    const rest = async (event?: object): Promise<void> => {
+      map().emit("moveend", event);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    };
+
+    beforeEach(() => {
+      app.store.batch(() => {
+        app.threeDVisible = true;
+        app.reliefLevel = RELIEF_MAX_LEVEL;
+      });
+      map().setZoom(14.3);
+    });
+
+    it("is cut for the zoom's own level, on the ground of the last relief level, as the map comes to rest", async () => {
+      await follow();
+      const [level, detail, box] = cuts.last;
+      expect([level, detail]).toEqual([RELIEF_MAX_LEVEL, 14]);
+      expect(box).not.toBeNull();
+      expect(latitudesOf(drawn())).toEqual([47, 48, 49]);
+
+      // Not while a zoom goes on
+      map().setZoom(16.2);
+      expect(cuts.last[1]).toBe(14);
+      await rest();
+      expect(cuts.last.slice(0, 2)).toEqual([RELIEF_MAX_LEVEL, 16]);
+      // No closer than where the flights are drawn flat
+      map().setZoom(18.5);
+      await rest();
+      expect(cuts.last[1]).toBe(LIFT_MAX_ZOOM);
+      // And the relief level's own further out
+      app.reliefLevel = 9;
+      expect(cuts.last.slice(0, 2)).toEqual([9, 9]);
+    });
+
+    it("is cut again once the view leaves the part of the map it was cut for, not for a move within it nor for the replay's camera", async () => {
+      await follow();
+      const count = cuts.count;
+      const cut = drawn();
+      map().setCenter({ lng: 11.2, lat: 48.1 });
+      await rest();
+      expect(cuts.count).toBe(count);
+      expect(drawn()).toBe(cut);
+      // Nor for a pan of almost a whole view (the view is two degrees
+      // across, see the mock's getBounds)
+      map().setCenter({ lng: 12.9, lat: 48 });
+      await rest();
+      expect(cuts.count).toBe(count);
+
+      map().setCenter({ lng: 16, lat: 48 });
+      await rest(REPLAY_CAMERA_MOVE);
+      expect(cuts.count).toBe(count);
+      await rest();
+      expect(cuts.count).toBe(count + 1);
+      expect(latitudesOf(drawn())).toEqual([]);
+      // Back where it was cut for a moment ago, from the cut kept for it
+      // no more: a level keeps the cut of its last view only
+      map().setCenter({ lng: 11.02, lat: 48 });
+      await rest();
+      expect(cuts.count).toBe(count + 2);
+      expect(latitudesOf(drawn())).toEqual([47, 48, 49]);
+    });
+
+    it("keeps the exposure of all the flights at the relief level, wherever the view is and at every zoom level", async () => {
+      await follow();
+      const busiest = drawn()!.busiest;
+      expect(busiest).toBeGreaterThan(0);
+      // Handed on to the next cuts, which go through the flights that
+      // reach the view alone
+      map().setCenter({ lng: 16, lat: 48 });
+      await rest();
+      expect(latitudesOf(drawn())).toEqual([]);
+      expect(cuts.last[3]).toBe(busiest);
+      expect(drawn()!.busiest).toBe(busiest);
+      map().setZoom(16.5);
+      await rest();
+      expect(cuts.last.slice(1, 2)).toEqual([16]);
+      expect(drawn()!.busiest).toBe(busiest);
+      // And made anew with what the points are made of
+      app.selectedYear = "2026";
+      expect(cuts.last[3]).toBeUndefined();
+    });
+
+    it("is cut once for a few moves in a row, as the last comes to rest, and not while the map moves on", async () => {
+      await follow();
+      const count = cuts.count;
+      map().setCenter({ lng: 16, lat: 48 });
+      map().emit("moveend");
+      map().setCenter({ lng: 17, lat: 48 });
+      map().emit("moveend");
+      map().isMoving.mockReturnValue(true);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(cuts.count).toBe(count);
+      map().isMoving.mockReturnValue(false);
+      await rest();
+      expect(cuts.count).toBe(count + 1);
+    });
+
+    it("is cut for the relief level, all of the map, while a replay runs", async () => {
+      await follow();
+      app.replayActive = true;
+      expect(cuts.last.slice(0, 3)).toEqual([
+        RELIEF_MAX_LEVEL,
+        RELIEF_MAX_LEVEL,
+        null,
+      ]);
+      // Its camera comes to rest nowhere
+      map().setCenter({ lng: 16, lat: 48 });
+      await rest(REPLAY_CAMERA_MOVE);
+      expect(latitudesOf(drawn())).toEqual([47, 48, 49]);
+    });
+
+    it("is cut around the view again, for the zoom's own level, once a replay ends", async () => {
+      await follow();
+      app.replayActive = true;
+      expect(cuts.last[2]).toBeNull();
+      map().setCenter({ lng: 16, lat: 48 });
+      await rest(REPLAY_CAMERA_MOVE);
+
+      app.replayActive = false;
+      const [level, detail, box] = cuts.last;
+      expect([level, detail]).toEqual([RELIEF_MAX_LEVEL, 14]);
+      expect(box).not.toBeNull();
+      // Where the replay left the view, away from the flights
+      expect(latitudesOf(drawn())).toEqual([]);
+    });
+
+    it("leaves the cloud alone while it does not show", async () => {
+      await follow();
+      const count = cuts.count;
+      app.heatmapVisible = false;
+      map().setCenter({ lng: 16, lat: 48 });
+      await rest();
+      expect(cuts.count).toBe(count);
+    });
+  });
+
   it("goes back where it belongs after a new base style", async () => {
     app.threeDVisible = true;
     await follow();
@@ -768,6 +919,55 @@ describe("the heat cloud", () => {
       map().emit("zoomend");
       expect(drawn()).not.toBe(seven);
       expect(style()!.liftM).toBeCloseTo(liftM(9), 9);
+      expect(cuts.count).toBe(2);
+    });
+
+    it("is cut for the zoom's own level closer in than the last relief level, around the view the map came to rest at", async () => {
+      await follow();
+      app.forcedHeatCloud = true;
+      // The overview, where the map comes to rest untagged
+      map().setZoom(13.4);
+      map().emit("zoomend");
+      const [level, detail, box] = cuts.last;
+      expect([level, detail]).toEqual([RELIEF_MAX_LEVEL, 13]);
+      expect(box).not.toBeNull();
+      expect(latitudesOf(drawn())).toEqual([47, 48, 49]);
+      expect(style()!.liftM).toBeCloseTo(liftM(RELIEF_MAX_LEVEL), 9);
+
+      // The intro's camera closer in, tagged, changes nothing, nor does
+      // what the cloud follows in the store meanwhile
+      const count = cuts.count;
+      map().setZoom(15.2);
+      map().emit("zoomend", REPLAY_CAMERA_MOVE);
+      map().emit("moveend", REPLAY_CAMERA_MOVE);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      app.altitudeVisible = true;
+      expect(cuts.count).toBe(count);
+
+      // Where it comes to rest there, the zoom's level
+      map().emit("zoomend");
+      map().emit("moveend");
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(cuts.last.slice(0, 2)).toEqual([RELIEF_MAX_LEVEL, 15]);
+    });
+
+    it("draws the points cut ahead of time for a zoom beyond the last relief level without cutting them again", async () => {
+      await follow();
+      prepareHeatCloud(asMapApp(app), [12, 13]);
+      expect(cuts.count).toBe(2);
+      // Of all the map, with the exposure the first worked out
+      expect(cuts.last.slice(0, 3)).toEqual([RELIEF_MAX_LEVEL, 13, null]);
+      expect(cuts.last[3]).toBeGreaterThan(0);
+
+      map().setZoom(13.4);
+      map().emit("zoomend");
+      app.forcedHeatCloud = true;
+      expect(cuts.count).toBe(2);
+      expect(latitudesOf(drawn())).toEqual([47, 48, 49]);
+      // And from anywhere on the map, as they are of all of it
+      map().setCenter({ lng: 16, lat: 48 });
+      map().emit("moveend");
+      await new Promise((resolve) => setTimeout(resolve, 0));
       expect(cuts.count).toBe(2);
     });
 

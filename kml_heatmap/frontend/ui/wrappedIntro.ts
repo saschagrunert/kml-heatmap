@@ -30,7 +30,7 @@ import type { MapApp } from "../mapApp";
 import type { FeatureModule } from "../features";
 import type { ReplayAllPlayer } from "./replayAll";
 import { datasetIndex } from "../calculations/datasetIndex";
-import { reliefLevel } from "../calculations/lift";
+import { ribbonWidthZoom } from "../calculations/lift";
 import { loadFeatures } from "../services/featureLoader";
 import { domCache } from "../utils/domCache";
 import { logError } from "../utils/logger";
@@ -159,7 +159,7 @@ function whenIdle(work: () => void): void {
  * pointer's event, one level at a time: 99 to 152 ms there held up
  * whatever the pointer did next. A dialog open by then cuts them itself.
  * The overview fits the dialog's map panel, narrower than the page's map,
- * so its level is the page's or one less.
+ * so its zoom level is the page's or one less.
  */
 export function prepareWrappedIntro(app: MapApp): void {
   const map = app.map;
@@ -180,15 +180,17 @@ export function prepareWrappedIntro(app: MapApp): void {
         padding: FIT_PADDING,
       });
       if (!camera?.zoom) return;
-      const level = reliefLevel(camera.zoom);
+      // The whole zoom level, which the cloud is cut for (see cloudDetail
+      // in ui/heatCloud.ts)
+      const zoom = ribbonWidthZoom(camera.zoom);
       whenIdle(() => {
         if (app.wrappedVisible || app.signal.aborted) return;
-        features.prepareHeatCloud(app, [level]);
+        features.prepareHeatCloud(app, [zoom]);
         // The other one in a task of its own, as the pointer may be on its
         // way
         whenIdle(() => {
           if (app.wrappedVisible || app.signal.aborted) return;
-          features.prepareHeatCloud(app, [Math.max(level - 1, 0), level]);
+          features.prepareHeatCloud(app, [Math.max(zoom - 1, 0), zoom]);
         });
       });
     })

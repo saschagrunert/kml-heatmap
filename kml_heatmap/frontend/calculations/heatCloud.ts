@@ -30,18 +30,21 @@ import {
   type Coordinate,
 } from "../utils/geometry";
 import { FEET_TO_METERS } from "../utils/constants";
+import { overlaps, type Box } from "../utils/viewBox";
 import { liftExaggeration } from "./lift";
 import { chainPieces, flightClockOf } from "./flightClock";
 import type { SmoothedFlights } from "./smoothing";
 
 /**
  * The points of a flight's curve are kept this many pixels apart at most,
- * in the middle of the relief level the cloud is cut for: closer ones are
- * merged into the stretch between the ones kept, and their heat with it.
- * The glow of a stretch is wider (see CLOUD_STOPS in
- * ui/heatCloudLayer.ts), so a stretch is a chord of the curve that no one
- * tells from it, and zoomed out a year's flights are a few thousand
- * stretches instead of a hundred thousand.
+ * in the middle of the zoom level the cloud is cut for (see cloudPoints):
+ * closer ones are merged into the step between the ones kept, and their
+ * heat with it. The glow of a step is wider (see CLOUD_STOPS in
+ * ui/heatCloudLayer.ts), so a step is a chord of the curve that no one
+ * tells from it, and zoomed out a year's flights are a few thousand steps
+ * instead of a hundred thousand. Closer in the level is the zoom's, so the
+ * cloud follows a taxiway or the corner of a circuit as the flat heat
+ * lines do.
  */
 export const CLOUD_STEP_PX = 6;
 
@@ -51,6 +54,41 @@ export const CLOUD_STEP_PX = 6;
  * climb stays a climb and does not turn into a slope to the next fix kept.
  */
 const CLOUD_HEIGHT_STEP_PX = 1;
+
+/**
+ * The steps along a flight that lie on a straight line are merged into one
+ * stretch, as long as it strays from none of the points on the way by more
+ * than this many pixels of the level: across, in height or on the ground
+ * under it, a seventh of the glow zoomed out and under half of it close
+ * in, where it is narrowest (see CLOUD_STOPS in ui/heatCloudLayer.ts).
+ * Every stretch is a quad that reaches three glows past either end, and
+ * those of steps of a few pixels lay ten deep along every track: on a
+ * phone's screen that was over 100 million pixels of glow a frame.
+ */
+export const CLOUD_MERGE_PX = 1;
+
+/**
+ * How far from a point merged over the pulses may run by the time it was
+ * flown at, in pixels of the level: a pulse fades along 90 of them (see
+ * CLOUD_FLOW_SPACING_PX in ui/heatCloudLayer.ts), and the layer runs them
+ * along a stretch at an even speed.
+ */
+const CLOUD_MERGE_TIME_PX = 3;
+
+/**
+ * The longest a merged stretch gets, in pixels of the level: in a tilted
+ * view the layer eases the blur and the pulses from one end of a stretch
+ * to the other in a straight line on the screen, which is further off the
+ * view's own perspective the longer the stretch is.
+ */
+export const CLOUD_MERGE_MAX_PX = 64;
+
+/**
+ * How many times the heat per metre of one of the steps merged into a
+ * stretch the heat of another may be: a stretch glows alike along its
+ * length, where a slower bit of a track glows brighter.
+ */
+export const CLOUD_MERGE_HEAT = 1.5;
 
 /** The least heat a stretch carries, in seconds */
 const MIN_HEAT_S = 0.01;
@@ -96,10 +134,11 @@ export interface CloudPoints {
   origin: readonly [number, number];
   /**
    * The heat per metre where the cloud is busiest: of the cells of
-   * CLOUD_CELL_PX the heat of the stretches in them is added up in, the
-   * one CLOUD_BUSIEST_PERCENTILE of the others are below, its heat over
-   * its width, in seconds per metre; 0 without any. The layer sets its
-   * exposure by it (see cloudExposure in ui/heatCloudLayer.ts).
+   * CLOUD_CELL_PX the heat of the steps of the relief level in them is
+   * added up in, the one CLOUD_BUSIEST_PERCENTILE of the others are
+   * below, its heat over its width, in seconds per metre; 0 without any.
+   * The layer sets its exposure by it (see cloudExposure in
+   * ui/heatCloudLayer.ts).
    */
   busiest: number;
 }
@@ -113,22 +152,245 @@ export function mercatorOf([lat, lng]: Readonly<Coordinate>): [number, number] {
   ];
 }
 
+/** A point to a Chord: where it is, its height and the ground, and its time */
+type ChordPoint<T> = (
+  x: number,
+  y: number,
+  height: number,
+  ground: number,
+  time: number,
+) => T;
+
+/**
+ * A stretch of the cloud from a point on (`from`), and whether it can go
+ * on straight to another (`reaches`): a straight line on to it has to pass
+ * every point on the way (`pass`) within CLOUD_MERGE_PX, across, in height
+ * and on the ground under it, within CLOUD_MERGE_TIME_PX of where the time
+ * at each puts it, and must not turn back. Each point passed narrows what
+ * the line may be: the directions from the start within the tolerance of
+ * it (the sector of Zhao and Saalfeld), and the slopes of the height, of
+ * the ground and of the time over the distance, so a test costs the same
+ * however many points the stretch is merged over. Everything is in pixels
+ * of the level but the time, in seconds.
+ */
+interface Chord {
+  from: ChordPoint<void>;
+  reaches: ChordPoint<boolean>;
+  pass: ChordPoint<void>;
+}
+
+/** A Chord */
+function chord(): Chord {
+  let x0 = 0;
+  let y0 = 0;
+  let height0 = 0;
+  let ground0 = 0;
+  let time0 = 0;
+  /** The direction of the first point passed further than the tolerance */
+  let ahead = NaN;
+  /** How far the furthest point passed is */
+  let reach = 0;
+  /**
+   * The least and the most a line may take of the turn from `ahead`, of
+   * the slope of the height, of the ground and of the time
+   */
+  const low = new Float64Array(4);
+  const high = new Float64Array(4);
+  const narrow = (k: number, least: number, most: number): void => {
+    low[k] = Math.max(low[k]!, least);
+    high[k] = Math.min(high[k]!, most);
+  };
+  const within = (k: number, value: number): boolean =>
+    value >= low[k]! && value <= high[k]!;
+  return {
+    from(x, y, height, ground, time) {
+      x0 = x;
+      y0 = y;
+      height0 = height;
+      ground0 = ground;
+      time0 = time;
+      ahead = NaN;
+      reach = 0;
+      low.fill(-Infinity);
+      high.fill(Infinity);
+    },
+    reaches(x, y, height, ground, time) {
+      const dx = x - x0;
+      const dy = y - y0;
+      const distance = Math.hypot(dx, dy);
+      return (
+        distance > 0 &&
+        distance <= CLOUD_MERGE_MAX_PX &&
+        distance >= reach - CLOUD_MERGE_PX &&
+        (Number.isNaN(ahead) ||
+          within(0, turnRad(Math.atan2(dy, dx) - ahead))) &&
+        within(1, (height - height0) / distance) &&
+        within(2, (ground - ground0) / distance) &&
+        within(3, (time - time0) / distance)
+      );
+    },
+    pass(x, y, height, ground, time) {
+      const dx = x - x0;
+      const dy = y - y0;
+      const distance = Math.hypot(dx, dy);
+      const off = CLOUD_MERGE_PX;
+      reach = Math.max(reach, distance);
+      if (distance > off) {
+        const direction = Math.atan2(dy, dx);
+        if (Number.isNaN(ahead)) ahead = direction;
+        const turn = turnRad(direction - ahead);
+        const spread = Math.asin(off / distance);
+        narrow(0, turn - spread, turn + spread);
+      }
+      if (distance > 0) {
+        const rise = height - height0;
+        const slope = ground - ground0;
+        narrow(1, (rise - off) / distance, (rise + off) / distance);
+        narrow(2, (slope - off) / distance, (slope + off) / distance);
+      }
+      // Where the time puts the point on the line, from the time at either
+      // end, is within the tolerance of where it is
+      const spent = time - time0;
+      const late = CLOUD_MERGE_TIME_PX;
+      narrow(
+        3,
+        spent / (distance + late),
+        distance > late ? spent / (distance - late) : Infinity,
+      );
+    },
+  };
+}
+
+/** An angle in radians turned into the half turns either way */
+function turnRad(angle: number): number {
+  return angle - 2 * Math.PI * Math.round(angle / (2 * Math.PI));
+}
+
+/** Whether the `[lat, lng]` point is in `box`, in any copy of the world */
+function inBox(box: Box, [lat, lng]: Readonly<Coordinate>): boolean {
+  return overlaps(box, [lng, lat, lng, lat]);
+}
+
+/**
+ * Whether the straight line between the `[lat, lng]` points `a` and `b`
+ * may cross `box`: whether the box around the two overlaps it. A step of a
+ * flight logged a kilometre or more apart crosses the view close in
+ * without an end in it.
+ */
+function crosses(
+  box: Box,
+  [latA, lngA]: Readonly<Coordinate>,
+  [latB, lngB]: Readonly<Coordinate>,
+): boolean {
+  return overlaps(box, [
+    Math.min(lngA, lngB),
+    Math.min(latA, latB),
+    Math.max(lngA, lngB),
+    Math.max(latA, latB),
+  ]);
+}
+
+/** Whether any of the curve `points` may reach into `box` */
+function reaches(box: Box, points: readonly Readonly<Coordinate>[]): boolean {
+  let west = Infinity;
+  let east = -Infinity;
+  let south = Infinity;
+  let north = -Infinity;
+  for (let k = 0; k < points.length; k++) {
+    const point = points[k]!;
+    const lat = point[0];
+    const lng = point[1];
+    if (lng < west) west = lng;
+    if (lng > east) east = lng;
+    if (lat < south) south = lat;
+    if (lat > north) north = lat;
+  }
+  return overlaps(box, [west, south, east, north]);
+}
+
+/**
+ * The heat of the steps of the cloud added up by cell (see CLOUD_CELL_PX),
+ * in a table of its own: in a Map, keyed by a number made of the column
+ * and the row, the cells were a third of the work of cloudPoints. Most
+ * steps go into the cell of the step before.
+ */
+function cellHeat(): {
+  add(column: number, row: number, heat: number): void;
+  heats(): Float64Array;
+} {
+  let columns = new Int32Array(1 << 12);
+  let rows = new Int32Array(1 << 12);
+  /** The heat of each cell, none where there is no cell */
+  let heats = new Float64Array(1 << 12);
+  let size = 0;
+  /** Where the cell added to last is in the table, -1 for none */
+  let last = -1;
+  /** Add `heat`, more than none, to the cell at `column` and `row` */
+  const add = (column: number, row: number, heat: number): void => {
+    let k = last;
+    if (k < 0 || columns[k] !== column || rows[k] !== row) {
+      const mask = heats.length - 1;
+      const hash = Math.imul(Math.imul(column, 0x9e3779b1) ^ row, 0x85ebca6b);
+      k = (hash ^ (hash >>> 15)) & mask;
+      while (heats[k]! > 0 && (columns[k] !== column || rows[k] !== row)) {
+        k = (k + 1) & mask;
+      }
+      if (heats[k] === 0 && ++size * 2 > heats.length) {
+        // Twice as many places for the cells
+        const [before, beforeRows, beforeHeats] = [columns, rows, heats];
+        columns = new Int32Array(before.length * 2);
+        rows = new Int32Array(before.length * 2);
+        heats = new Float64Array(before.length * 2);
+        size = 0;
+        last = -1;
+        beforeHeats.forEach((h, n) => {
+          if (h > 0) add(before[n]!, beforeRows[n]!, h);
+        });
+        add(column, row, heat);
+        return;
+      }
+      columns[k] = column;
+      rows[k] = row;
+      last = k;
+    }
+    heats[k] = heats[k]! + heat;
+  };
+  return { add, heats: () => heats.filter((heat) => heat > 0) };
+}
+
 /**
  * The points of the cloud of the flights `keep` accepts, along their curves
  * `flights`, smoothed on their ground at the relief level `level` (see
  * groundedFlights): the curve the ribbons are cut from, at the heights
- * they have, so the cloud lies on them. A point of the curve is kept where
- * it is CLOUD_STEP_PX on from the last one kept, or its height has changed
- * by CLOUD_HEIGHT_STEP_PX, and at either end of a flight. The seconds of a
- * segment (segmentSeconds) are spread over the stretches of the curve
- * along it by their length, and a stretch of the cloud carries those of
- * the curve it is merged from, and the time its first point was flown at.
+ * they have, so the cloud lies on them. It is cut for the zoom level
+ * `detail`: the relief level's own, and closer in than the last relief
+ * level the zoom's (see ui/heatCloud.ts). With a `box` only the stretches
+ * that reach into it are kept (see viewBox), as the 3D view does around
+ * the view from CULL_FROM_ZOOM on.
+ *
+ * A point of the curve is kept where it is CLOUD_STEP_PX of the level on
+ * from the last one kept, or its height has changed by CLOUD_HEIGHT_STEP_PX,
+ * and at either end of a flight: the steps of the cloud. The seconds of a
+ * segment (segmentSeconds) are spread over the pieces of the curve along it
+ * by their length, and a step carries those of the curve it is merged
+ * from. The steps along a straight run are merged into one stretch (see
+ * CLOUD_MERGE_PX), which carries their heat and the time its first point
+ * was flown at; steps out of the box are neither merged nor written.
+ *
+ * The exposure (CloudPoints.busiest) adds up the heat of the steps of the
+ * relief level, of every flight, in the box or not, so it is the same
+ * wherever the view is and at every zoom level beyond the last relief
+ * level. Where it is known already, `busiest` hands it on, and the flights
+ * that do not reach the box are left alone.
  */
 export function cloudPoints(
   segments: readonly PathSegment[],
   flights: SmoothedFlights,
   keep: (pathId: number) => boolean,
   level: number,
+  detail = level,
+  box: Box | null = null,
+  busiest?: number,
 ): CloudPoints {
   const exaggeration = liftExaggeration(level);
   const values: number[] = [];
@@ -138,27 +400,36 @@ export function cloudPoints(
   let south = -Infinity;
   const { chains, chainOf } = flights;
   const count = segments.length;
-  // The cells of heat, in Mercator units, and the heat per metre in each
+  // Mercator units in pixels of the level
+  const worldPx = TILE_SIZE_PX * 2 ** (detail + 0.5);
+  // The cells of heat, in Mercator units, and the heat per metre in each,
+  // unless the exposure is known
   const cell = CLOUD_CELL_PX / (TILE_SIZE_PX * 2 ** (level + 0.5));
-  const cells = new Map<number, number>();
+  const cells = busiest === undefined ? cellHeat() : null;
   // The time of the points, as replay all plays them
   const clock = flightClockOf(segments);
+  const straight = chord();
   let i = 0;
   while (i < count) {
     // The segments of the chain of `i`, one after the other
     let end = i + 1;
     while (end < count && chainOf[end] === chainOf[i]) end++;
     const chain = chains[chainOf[i]!];
-    if (chain && chain.points.length > 1 && keep(segments[i]!.path_id)) {
+    if (
+      chain &&
+      chain.points.length > 1 &&
+      keep(segments[i]!.path_id) &&
+      (cells || !box || reaches(box, chain.points))
+    ) {
       const { points, heights, ground } = chain;
       const [lat] = points[0]!;
-      const pixelM =
-        metresPerPixel(level + 0.5) * Math.cos(lat * DEGREES_TO_RADIANS);
+      const cosLat = Math.cos(lat * DEGREES_TO_RADIANS);
+      const pixelM = metresPerPixel(detail + 0.5) * cosLat;
       const stepM = CLOUD_STEP_PX * pixelM;
-      const cellM = CLOUD_CELL_PX * pixelM;
-      const heightStepFt =
-        (CLOUD_HEIGHT_STEP_PX * pixelM) / exaggeration / FEET_TO_METERS;
-      // The length, the seconds and the time of each stretch of the curve,
+      // The pixels of the level a foot of height is drawn as
+      const pixelsPerFt = (FEET_TO_METERS * exaggeration) / pixelM;
+      const heightStepFt = CLOUD_HEIGHT_STEP_PX / pixelsPerFt;
+      // The length, the seconds and the time of each piece of the curve,
       // the same at every level (see chainPieces)
       const { lengths, seconds, times } = chainPieces(
         segments,
@@ -167,50 +438,160 @@ export function cloudPoints(
         end,
         clock,
       );
-      const heightAt = (j: number): number => (ground?.[j] ?? 0) + heights[j]!;
-      let along = 0;
-      let heat = 0;
-      let keptFt = heightAt(0);
-      let keptX = 0;
-      let keptY = 0;
-      const push = (j: number): void => {
-        const [x, y] = mercatorOf(points[j]!);
+      const groundAt = (j: number): number => (ground ? ground[j]! : 0);
+      const heightAt = (j: number): number => groundAt(j) + heights[j]!;
+
+      // The point the last step ended at, `prev`: whether it is in the
+      // box, and where it is, its height and the ground under it in
+      // pixels once they are `known`, which they need not be where no
+      // stretch starts from it
+      let prev = 0;
+      let prevIn = !box || inBox(box, points[0]!);
+      let prevX = 0;
+      let prevY = 0;
+      let prevHeight = 0;
+      let prevGround = 0;
+      let known = false;
+      // The stretch being merged, from the point `first` of the curve to
+      // `prev`, none before its first step (`merging`): where `first` is,
+      // the heat of the stretch, and the least and the most heat per metre
+      // of its steps. Each has an end in the box, or crosses it.
+      let merging = false;
+      let first = 0;
+      let firstX = 0;
+      let firstY = 0;
+      let merged = 0;
+      let least = 0;
+      let most = 0;
+      /** Whether the last point written goes on to the next */
+      let open = false;
+      const write = (j: number, x: number, y: number, heat: number): void => {
         west = Math.min(west, x);
         east = Math.max(east, x);
         north = Math.min(north, y);
         south = Math.max(south, y);
-        values.push(x, y, ground?.[j] ?? 0, heights[j]!, 0, times[j]!);
-        keptFt = heightAt(j);
-        keptX = x;
-        keptY = y;
+        values.push(x, y, groundAt(j), heights[j]!, heat, times[j]!);
       };
-      push(0);
-      const last = points.length - 1;
-      for (let j = 1; j <= last; j++) {
+      /** Write the stretch merged so far, which ends at `prev` */
+      const flush = (): void => {
+        if (open) values[values.length - 2] = merged;
+        else write(first, firstX, firstY, merged);
+        write(prev, prevX, prevY, 0);
+        open = true;
+      };
+      /** The step to `j`, of `heat` over `metres`, merged on or not */
+      const step = (j: number, heat: number, metres: number): void => {
+        const point = points[j]!;
+        const inside = !box || inBox(box, point);
+        if (!inside && !prevIn && !crosses(box, points[prev]!, point)) {
+          // Out of the box from end to end: neither drawn nor merged, and
+          // a stretch starts anew where it ends
+          if (merging) flush();
+          merging = false;
+          open = false;
+          prev = j;
+          prevIn = false;
+          known = false;
+          return;
+        }
+        if (!known) {
+          [prevX, prevY] = mercatorOf(points[prev]!);
+          prevHeight = heightAt(prev) * pixelsPerFt;
+          prevGround = groundAt(prev) * pixelsPerFt;
+        }
+        const [x, y] = mercatorOf(point);
+        const height = heightAt(j) * pixelsPerFt;
+        const under = groundAt(j) * pixelsPerFt;
+        const density = heat / metres;
+        const prevPx = prevX * worldPx;
+        const prevPy = prevY * worldPx;
+        if (merging) {
+          straight.pass(prevPx, prevPy, prevHeight, prevGround, times[prev]!);
+        }
+        const low = Math.min(least, density);
+        const high = Math.max(most, density);
+        if (
+          merging &&
+          high <= low * CLOUD_MERGE_HEAT &&
+          straight.reaches(x * worldPx, y * worldPx, height, under, times[j]!)
+        ) {
+          merged += heat;
+          least = low;
+          most = high;
+        } else {
+          if (merging) flush();
+          first = prev;
+          firstX = prevX;
+          firstY = prevY;
+          straight.from(prevPx, prevPy, prevHeight, prevGround, times[prev]!);
+          merging = true;
+          merged = heat;
+          least = density;
+          most = density;
+        }
+        prev = j;
+        prevIn = inside;
+        prevX = x;
+        prevY = y;
+        prevHeight = height;
+        prevGround = under;
+        known = true;
+      };
+
+      // The steps of the relief level, whose heat goes into the cells: the
+      // point kept last, where it is, and the metres and seconds since
+      const cellPixelM = metresPerPixel(level + 0.5) * cosLat;
+      const cellStepM = CLOUD_STEP_PX * cellPixelM;
+      const cellHeightStepFt =
+        (CLOUD_HEIGHT_STEP_PX * cellPixelM) / exaggeration / FEET_TO_METERS;
+      const cellM = CLOUD_CELL_PX * cellPixelM;
+      let [cellX, cellY] = cells ? mercatorOf(points[0]!) : [0, 0];
+      let cellFt = heightAt(0);
+      let cellAlong = 0;
+      let cellSeconds = 0;
+
+      let along = 0;
+      let heat = 0;
+      let keptFt = heightAt(0);
+      const final = points.length - 1;
+      for (let j = 1; j <= final; j++) {
         along += lengths[j]!;
         heat += seconds[j]!;
+        if (cells) {
+          cellAlong += lengths[j]!;
+          cellSeconds += seconds[j]!;
+          if (
+            j === final ||
+            cellAlong >= cellStepM ||
+            Math.abs(heightAt(j) - cellFt) >= cellHeightStepFt
+          ) {
+            // Into the cell it starts in, over as many metres as it spans
+            cells.add(
+              Math.floor(cellX / cell),
+              Math.floor(cellY / cell),
+              Math.max(cellSeconds, MIN_HEAT_S) / Math.max(cellAlong, cellM),
+            );
+            [cellX, cellY] = mercatorOf(points[j]!);
+            cellFt = heightAt(j);
+            cellAlong = 0;
+            cellSeconds = 0;
+          }
+        }
         if (
-          j === last ||
+          j === final ||
           along >= stepM ||
           Math.abs(heightAt(j) - keptFt) >= heightStepFt
         ) {
-          // The heat of the stretch goes on the point it starts from; a
-          // stretch of none (a track without times or speeds) gets a trace,
-          // since none is no stretch at all to the layer
-          const stretch = Math.max(heat, MIN_HEAT_S);
-          values[values.length - 2] = stretch;
-          // Into the cell it starts in, over as many metres as it spans
-          const key =
-            Math.floor(keptX / cell) * 2 ** 26 + Math.floor(keptY / cell);
-          cells.set(
-            key,
-            (cells.get(key) ?? 0) + stretch / Math.max(along, cellM),
-          );
-          push(j);
+          // The heat of the step goes on the point it starts from; a step
+          // of none (a track without times or speeds) gets a trace, since
+          // none is no stretch at all to the layer
+          step(j, Math.max(heat, MIN_HEAT_S), along);
+          keptFt = heightAt(j);
           along = 0;
           heat = 0;
         }
       }
+      if (merging) flush();
     }
     i = end;
   }
@@ -222,13 +603,14 @@ export function cloudPoints(
     points[k + CLOUD_POINT_FLOATS] = values[k]! - origin[0];
     points[k + CLOUD_POINT_FLOATS + 1] = values[k + 1]! - origin[1];
   }
-  const busy = Float64Array.from(cells.values());
+  const busy = cells?.heats();
   return {
     points,
     count: values.length / CLOUD_POINT_FLOATS,
     origin,
-    busiest:
-      busy.length > 0
+    busiest: !busy
+      ? busiest!
+      : busy.length > 0
         ? nthSmallest(
             busy,
             Math.floor(CLOUD_BUSIEST_PERCENTILE * (busy.length - 1)),

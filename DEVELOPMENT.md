@@ -639,10 +639,14 @@ style of its own: the flights of the year and aircraft filters on flat
 ground (it is on the globe), at full strength, whatever the switch,
 Isolate, a colour layer or a selection say, and the switches are not
 touched. Its button cuts those points ahead of time, in idle callbacks
-rather than in the pointer's event, with that key and with the flights
+rather than in the pointer's event, for the whole zoom level of the
+overview and the one below (closer in than the last relief level the cloud
+is cut for the zoom's own level, see below), of all the map, with that key and with the flights
 smoothed aside rather than in `groundedFlights`, whose curves the ribbons
 stand on, and kept apart from the 3D view's (shared where both stand on
-flat ground with nothing isolated), and the intro fits the overview in one
+flat ground with nothing isolated and the other's cut is of the same zoom
+level and reaches as far as the view; each cloud keeps its own exposures),
+and the intro fits the overview in one
 update with the cloud and the globe, so the end of that zoom finds them
 rather than cutting the cloud and the ribbons for the relief the globe
 leaves out. Points the cloud does not draw (cut ahead, left while the
@@ -652,9 +656,17 @@ style layer draws a glow at a height: `heatmap` lies on the ground,
 kilobytes for one layer.
 
 `calculations/heatCloud.ts` makes the data, once per dataset, filter,
-isolated selection, relief level and relief on or off (the points of the
-last four levels are kept, so a zoom back into one takes no work), along the
-curves the
+isolated selection, zoom level and relief on or off, and from
+`CULL_FROM_ZOOM` in (`z` 9) for the part of the map around the view, as the
+ribbons are (`viewBox`) but a whole view to each side of it rather than a
+quarter (`CLOUD_VIEW_SPARE`: a pan of a view, or a zoom out of one and a
+half levels, shows no edge of it before the map comes to rest; the GPU time
+is the same, as the stretches out of the view are dropped before a pixel is
+drawn), and again once the map comes to rest with the view out of it, in a
+task after the frame the move ends in (the points of the last four zoom
+levels are kept, so a zoom back into one takes no work; during a replay,
+whose camera moves on its own, they are the relief level's of all the
+map), along the curves the
 ribbons are cut from: every flight smoothed through its fixes on its ground
 at the relief level (`groundedFlights` in `calculations/groundProfile.ts`,
 which keeps the last for both; the layer manager lets go of it when no
@@ -666,7 +678,23 @@ what smoothing on that ground gave; the metres, the seconds and the clock
 times of each curve's pieces are worked out once as well (`chainPieces` in
 `calculations/flightClock.ts`, shared with replay all). The points of a curve are
 merged where they are closer than `CLOUD_STEP_PX` (6 px in the middle of the
-level) unless the height changed by a pixel, and kept as x and y in Mercator
+zoom level) unless the height changed by a pixel. The zoom level is the
+relief level, and closer in than the last one (`z` 12) the zoom's own up to
+`LIFT_MAX_ZOOM`, on the ground and at the exaggeration of the last relief
+level: cut for its pixels, the cloud crossed the corners of a circuit and
+the taxiways in chords of about 110 m, 270 px long at `z` 18, where the heat
+lines follow them. These steps are merged again along straight runs into
+stretches of up to `CLOUD_MERGE_MAX_PX` (64 px) that pass every step on the
+way within `CLOUD_MERGE_PX` (1 px) across, in height and on the ground, and
+within `CLOUD_MERGE_TIME_PX` (3 px) of where its time puts the pulses, and
+whose steps carry a heat per metre within `CLOUD_MERGE_HEAT` (1.5) times of
+each other: a quad reaches three blurs past both ends of its stretch, and
+those of the steps lay 35 to 55 deep on every pixel the cloud lights at `z`
+8 to 10, 100 million pixels of glow a frame on a phone's screen. Merged,
+there are a third of the stretches and 2.5 times fewer pixels of glow out to
+`z` 10; closer in, where the steps follow the turns of the taxiing, about as
+many as before, and a fifth more than the chords had. The points are kept as
+x and y in Mercator
 units from an origin in the middle of them (so 32-bit floats hold them to a
 fraction of a pixel), the ground under the point and the height above it in
 feet, and the seconds spent on the stretch to the next point: those of each
@@ -675,18 +703,30 @@ the heatmap does, left a cruise logged at an uneven pace in beads), spread
 over the stretches of the curve along it by their length, and the time
 into its flight the point was flown at (the same seconds added up from 0 at
 the flight's first fix, on across a gap in its log; `CLOUD_POINT_FLOATS`,
-6). On the way the heat of each stretch over its length is added up in
-cells of `CLOUD_CELL_PX` (16 px of the level), and `busiest` is the 99th
-percentile of the cells with any. The heights are the ribbons': the
-smoothed altitude above the ground of the flight at the relief level, never
-below it, on the relief standing on that ground, and exaggerated by the
-relief's own exaggeration (`map.getTerrain()`), or by the level's without a
-relief. A custom layer cannot read the relief MapLibre
+6). A stretch is kept where either end is around the view, or where it
+crosses it with neither (a fix logged a kilometre or more after the last
+does, close in). On the way the heat of each step of the relief level
+(whatever zoom level the points are cut for) over its length is added up in
+cells of `CLOUD_CELL_PX` (16 px of the relief level), those of every flight
+the heatmap shows whether they are around the view or not, and `busiest` is
+the 99th percentile of the cells with any, so the exposure is the same
+wherever the view is and at every zoom level beyond the last relief level.
+It is kept by relief level with the points, and a cut that has it goes
+through the flights that reach the view alone: a cut after a move around
+the home field takes 25 to 35 ms on a desktop and 100 to 130 ms at a
+quarter of its speed, where one that added up the cells again took 35 to 60
+and 145 to 215 ms, and came after twice as many moves. The heights are the
+ribbons': the smoothed altitude above the ground of the flight at the
+relief level, never below it, on the relief standing on that ground, and
+exaggerated by the relief's own exaggeration (`map.getTerrain()`), or by
+the level's without a relief. A custom layer cannot read the relief MapLibre
 draws, so where the ribbons stand on the elevation tiles of the level drawn
 under them (see above), the cloud stands on the ground the build sampled,
 smoothed for the level: within about a pixel of them, and a flight whose
 ground is not known stands on the line between its fields. All years at `z`
-12 are about 100,000 points (2 MB), at `z` 6 about 5,000.
+12 are about 45,000 points (1 MB; 104,000 before the steps were merged), at
+`z` 6 about 2,300, and around the view of the home field tilted by 60
+degrees 51,000 to 56,000 from `z` 14 to 17.
 
 The layer draws every stretch between two points as one instance of a quad
 on the screen, reaching three blurs around it (`CLOUD_STOPS`: 7 CSS px in

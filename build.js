@@ -334,10 +334,15 @@ const BUDGET_APP = { raw: 156 * 1024, gzip: 54 * 1024 };
 // (the shadow kept at its brightest, cheaper and left out while dimmed, the
 // glow near the ground pulled clear of the ground in front, the dimmed cloud
 // filled towards its strength, pulses that fade where they would comb, rest
-// sooner and hold still for an export, far lines that fade):
-// 87.06 KB raw and 31.06 KB gzipped before, 89.3 KB raw and 31.9 KB gzipped
-// after, in a local build, about 32.03 KB in CI going by the 0.4 % above.
-const BUDGET_FEATURES = { raw: 91.5 * 1024, gzip: 33 * 1024 };
+// sooner and hold still for an export, far lines that fade), and for the
+// cloud cut close in for the zoom's own level and around the view, its steps
+// merged along straight runs and its heat added up in a table of its own
+// (calculations/heatCloud.ts): 87.06 KB raw and 31.06 KB gzipped before
+// both, 89.3 KB raw and 31.9 KB gzipped after the first (90.34 KB and
+// 32.35 KB with the flights smoothed once), 93.47 KB raw and 33.82 KB
+// gzipped after both, in a local build, about 33.96 KB in CI going by the
+// 0.4 % above.
+const BUDGET_FEATURES = { raw: 94 * 1024, gzip: 34.25 * 1024 };
 
 // The Wrapped bundle is fetched only when the Wrapped dialog or the
 // statistics panel is first opened, and not with replay's code or replay

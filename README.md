@@ -885,9 +885,10 @@ that left the input are removed with it.
   at its height as the 3D view draws it, along the same curve as its
   ribbon, and brighter the more time was spent there; from `z` 10.5 in the
   glow narrows to a crisp line along each track, so the roads and place
-  names stay readable. A route flown once is a faint blue, the circuits
-  and the climbs out of a busy field glow white, and a ridge in front of a
-  flight hides its glow. Where so many flights overlap that more than a
+  names stay readable, and close in it follows the taxiways and the
+  corners of a circuit as the heat lines do. A route flown once is a faint
+  blue, the circuits and the climbs out of a busy field glow white, and a
+  ridge in front of a flight hides its glow. Where so many flights overlap that more than a
   hundredth of the cloud would glow past white, the whole cloud is drawn
   darker; it is never drawn brighter. A faint copy of the glow on the ground
   under the flights shows how high they were, and pulses run along every

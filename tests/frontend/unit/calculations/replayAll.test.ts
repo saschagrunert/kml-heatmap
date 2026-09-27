@@ -160,6 +160,35 @@ describe("replayAllPoints", () => {
     expect(points.origin[0]).toBeCloseTo((11.02 + 180) / 360, 6);
   });
 
+  it("takes a flight across the antimeridian the short way", () => {
+    const segments = Array.from({ length: 20 }, (_, i) => {
+      const lng = (k: number): number => {
+        const east = 179.95 + k * 0.005;
+        return east > 180 ? east - 360 : east;
+      };
+      return {
+        path_id: 1,
+        coords: [
+          [10, lng(i)],
+          [10, lng(i + 1)],
+        ] as [[number, number], [number, number]],
+        altitude_ft: 3000,
+        groundspeed_knots: 100,
+        time: i * 5,
+      };
+    });
+    for (const detail of [4, 12, 16]) {
+      const points = build(segments, { detail });
+      const xs = column(points, 0);
+      expect(xs.length).toBeGreaterThan(1);
+      const steps = xs.slice(1).map((x, k) => Math.abs(x - xs[k]!));
+      expect(Math.max(...steps)).toBeLessThan(0.2 / 360);
+      // On past 180 rather than back round the world
+      expect(points.bounds![0]).toBeCloseTo(179.95, 6);
+      expect(points.bounds![2]).toBeCloseTo(180.05, 6);
+    }
+  });
+
   it("has nothing to play without flights", () => {
     const points = build([]);
 
