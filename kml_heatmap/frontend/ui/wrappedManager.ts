@@ -5,7 +5,7 @@ import type { FitBoundsOptions, LngLatBoundsLike } from "maplibre-gl";
 import type { MapApp } from "../mapApp";
 import type { Airport, MapCenter } from "../types";
 import { domCache, hideControls, restoreControls } from "../utils/domCache";
-import { toBounds, toLngLat } from "../utils/mapHelpers";
+import { toLngLat } from "../utils/mapHelpers";
 import { prefersReducedMotion } from "../utils/motion";
 import {
   TOAST_ALERT_ID,
@@ -24,7 +24,7 @@ import {
   findFurthestAirport,
   generateFunFacts,
 } from "../features/wrapped";
-import { segmentBounds, type Coordinate } from "../utils/geometry";
+import type { Coordinate } from "../utils/geometry";
 import {
   calculateFilteredStatistics,
   filterStatisticsInSlices,
@@ -41,6 +41,13 @@ import {
 } from "../utils/wrappedHtml";
 import { watchScrollEnd, type ScrollEndWatcher } from "../utils/scrollFade";
 import { siteData } from "../state/siteData";
+import {
+  FIT_PADDING,
+  followDestinationHover,
+  overviewBounds,
+  startWrappedIntro,
+  type WrappedIntro,
+} from "./wrappedIntro";
 
 /**
  * Elements that stay out of the inert set while the dialog is open: the
@@ -64,18 +71,19 @@ const MAP_RESTORE_DELAY_MS = 100;
  */
 const MAP_REVEAL_TIMEOUT_MS = 1200;
 
-/** Padding in pixels around the data when the dialog fits the map to it */
-const FIT_PADDING = 80;
-
 /**
- * The user's map view: app-shaped center, zoom in the map's own unit. The
- * projection is not part of it: the overview keeps the one the user chose.
+ * The user's map view: app-shaped center, zoom in the map's own unit, and
+ * the globe and 3D switches, which the intro changes while the dialog is
+ * open (see ui/wrappedIntro.ts). Without the intro the overview keeps the
+ * projection the user chose.
  */
 export interface UserMapView {
   center: MapCenter;
   zoom: number;
   bearing: number;
   pitch: number;
+  globeVisible: boolean;
+  threeDVisible: boolean;
 }
 
 const coordinatesByAirports = new WeakMap<Airport[], Map<string, Coordinate>>();
@@ -134,6 +142,18 @@ export class WrappedManager {
   private statsAbort: AbortController | null = null;
   private destroyed = false;
   private unsubscribeData: () => void;
+  /** Counts the openings, so a late answer knows its own */
+  private opened = 0;
+  /** The intro while it plays (see ui/wrappedIntro.ts) */
+  private intro: WrappedIntro | null = null;
+  /** Where the dialog fits the map to, while it is open */
+  private overview: LngLatBoundsLike | null = null;
+  /** The airports of the destinations card, in the order of its rows */
+  private destinations: string[] = [];
+  /** Takes the listeners of the dialog's own controls off */
+  private readonly listening = new AbortController();
+  /** Drops a flight to a destination still waiting for the pointer */
+  private readonly cancelHover: () => void = () => {};
 
   /**
    * The user's own map view while the dialog holds the map fitted to all
@@ -156,6 +176,29 @@ export class WrappedManager {
     this.unsubscribeData = app.store.subscribe("currentData", () => {
       if (app.wrappedVisible) this.fillCards();
     });
+
+    const signal = this.listening.signal;
+    domCache
+      .get("wrapped-skip-btn")
+      ?.addEventListener("click", () => this.intro?.skip(), { signal });
+    // Hovering a destination flies the map there, once the intro is over
+    const grid = domCache.get("wrapped-airports-grid");
+    if (grid) {
+      this.cancelHover = followDestinationHover(
+        app,
+        grid,
+        (row) => {
+          const rows = [...grid.querySelectorAll(".destination")];
+          const name = this.destinations[rows.indexOf(row)];
+          return name ? airportCoordinates().get(name) : undefined;
+        },
+        () =>
+          this.overview && !this.intro && app.wrappedVisible
+            ? { bounds: this.overview, options: this.fitOptions() }
+            : null,
+        signal,
+      );
+    }
   }
 
   private setWrappedVisible(visible: boolean): void {
@@ -182,7 +225,10 @@ export class WrappedManager {
    * Moving the map in takes two frames; its tiles take as long as the
    * network does, and the panel showed a black rectangle for all of it.
    */
-  private revealMapWhenPainted(container: HTMLElement): void {
+  private revealMapWhenPainted(
+    container: HTMLElement,
+    revealed?: () => void,
+  ): void {
     const map = this.app.map;
     const reveal = (): void => {
       if (this.mapRevealTimer !== null) {
@@ -192,6 +238,7 @@ export class WrappedManager {
       map?.off("idle", reveal);
       this.revealMap = null;
       container.classList.remove("is-awaiting-map");
+      revealed?.();
     };
 
     // Nothing in flight and nothing moving: no `idle` is coming, because the
@@ -212,23 +259,12 @@ export class WrappedManager {
   }
 
   /**
-   * What the dialog fits the map to: the flights it describes. The exported
-   * bounds cover the whole dataset, so a single year or aircraft used to be
-   * shown as a speck in the middle of every flight ever made.
+   * The home base of the flights the dialog describes, where the intro
+   * flies to, if it is known
    */
-  private fitTarget(): LngLatBoundsLike {
-    const { selectedYear, selectedAircraft, currentData } = this.app;
-    if (
-      (selectedYear === "all" && selectedAircraft === "all") ||
-      !currentData
-    ) {
-      return toBounds(this.app.config.bounds);
-    }
-    const view = datasetIndex(currentData).filter(
-      selectedYear,
-      selectedAircraft,
-    );
-    return toBounds(segmentBounds(view.segments()) ?? this.app.config.bounds);
+  private homeBase(): Coordinate | null {
+    const home = findHomeBase(this.filterView()?.airportCounts() ?? {});
+    return home ? (airportCoordinates().get(home) ?? null) : null;
   }
 
   /**
@@ -246,7 +282,11 @@ export class WrappedManager {
     };
   }
 
-  showWrapped(): void {
+  /**
+   * Open the dialog, with the intro when `intro` asks for it (its button
+   * does, a restored state does not) and motion is welcome
+   */
+  showWrapped(intro = false): void {
     if (!this.app.map || this.app.wrappedVisible) return;
     // Replay owns the map while it runs; its control is disabled then, and
     // this covers every other way in (the mobile tab, a restored state)
@@ -255,6 +295,7 @@ export class WrappedManager {
     // A close that is still settling must not remeasure a map that is about
     // to move back into the dialog
     this.cancelPendingMapTimers();
+    const opened = ++this.opened;
 
     this.fillCards();
 
@@ -284,10 +325,25 @@ export class WrappedManager {
         zoom: this.app.map.getZoom(),
         bearing: this.app.map.getBearing(),
         pitch: this.app.map.getPitch(),
+        globeVisible: this.app.globeVisible,
+        threeDVisible: this.app.threeDVisible,
       };
     }
-    const fitTarget = this.fitTarget();
-    this.app.map.fitBounds(fitTarget, this.fitOptions());
+    const fitTarget = overviewBounds(this.app);
+    this.overview = fitTarget;
+    const home = intro && !prefersReducedMotion() ? this.homeBase() : null;
+    if (home) {
+      this.intro = startWrappedIntro(
+        this.app,
+        home,
+        { bounds: fitTarget, options: this.fitOptions() },
+        () => {
+          this.intro = null;
+        },
+      );
+    } else {
+      this.app.map.fitBounds(fitTarget, this.fitOptions());
+    }
 
     // Hide controls in wrapped view FIRST
     this.savedControlDisplays = hideControls();
@@ -343,8 +399,28 @@ export class WrappedManager {
         this.mapResizeTimer = null;
         if (!this.app.map || !this.app.wrappedVisible) return;
         this.app.map.resize();
-        this.app.map.fitBounds(fitTarget, this.fitOptions());
-        this.revealMapWhenPainted(wrappedMapContainer);
+        const intro = this.intro;
+        if (!intro) {
+          this.app.map.fitBounds(fitTarget, this.fitOptions());
+          this.revealMapWhenPainted(wrappedMapContainer);
+          return;
+        }
+        // The far view is drawn before the camera sets off from it; a
+        // skip while the intro waited has fitted the map already
+        void intro.begin().then((plays) => {
+          // Closed or torn down meanwhile, and perhaps opened again since
+          if (
+            this.destroyed ||
+            !this.app.wrappedVisible ||
+            this.opened !== opened
+          ) {
+            return;
+          }
+          this.revealMapWhenPainted(
+            wrappedMapContainer,
+            plays ? () => intro.fly() : undefined,
+          );
+        });
       }, 100);
     }, 50);
   }
@@ -509,6 +585,7 @@ export class WrappedManager {
     if (fleetEl) fleetEl.innerHTML = "";
     if (topAirportsEl) topAirportsEl.innerHTML = "";
     if (gridEl) gridEl.innerHTML = "";
+    this.destinations = [];
 
     // Build aircraft fleet section using year-filtered data
     if (yearStats.aircraft_list && yearStats.aircraft_list.length > 0) {
@@ -538,6 +615,8 @@ export class WrappedManager {
           airportCoordinates(),
         );
 
+        // The rows of the card, in order, for the hover over them
+        this.destinations = [...grouped.values()].flat();
         const destinationsHtml = generateDestinationsHtml(grouped, {
           countryName: countryDisplayName,
           flagSrc: countryFlagSrc,
@@ -683,6 +762,9 @@ export class WrappedManager {
   /** Drop every pending timer and listener; the dialog stays as it is */
   destroy(): void {
     this.destroyed = true;
+    this.intro?.stop();
+    this.listening.abort();
+    this.cancelHover();
     this.stopStats();
     this.unsubscribeData();
     this.cancelPendingMapTimers();
@@ -697,6 +779,20 @@ export class WrappedManager {
   }
 
   closeWrapped(): void {
+    // Before the timers: the reveal they cancel would start its flight
+    this.intro?.stop();
+    this.cancelHover();
+    this.overview = null;
+    // The globe and the 3D view go back with the view, before the map is
+    // measured again; the cloud the intro drew goes with them
+    const view = this.savedView;
+    this.app.store.batch(() => {
+      if (view) {
+        this.app.globeVisible = view.globeVisible;
+        this.app.threeDVisible = view.threeDVisible;
+      }
+      this.app.forcedHeatCloud = false;
+    });
     // Cards nobody will see are not worked out any further
     this.stopStats();
     this.cancelPendingMapTimers();

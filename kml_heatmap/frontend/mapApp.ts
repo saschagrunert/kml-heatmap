@@ -936,6 +936,33 @@ export class MapApp {
     this.store.subscribe("statsPanelVisible", apply);
   }
 
+  /**
+   * Get Wrapped and its intro ready while its button is pointed at or
+   * focused, on either layout (see prepareWrappedIntro). Not under reduced
+   * motion, where no intro plays: Wrapped's code comes with the click, as
+   * it always has.
+   */
+  private prepareWrappedOnIntent(): void {
+    const prepare = (event: Event): void => {
+      const id = (event.target as Partial<Element>).id;
+      if (
+        (id === "wrapped-btn" || id === "mobile-tab-wrapped") &&
+        !prefersReducedMotion()
+      ) {
+        loadWrapped()
+          .then((wrapped) => wrapped?.prepareWrappedIntro(this))
+          .catch(logError);
+      }
+    };
+    // Neither event bubbles; both reach a listener that captures
+    for (const type of ["pointerenter", "focus"]) {
+      document.addEventListener(type, prepare, {
+        capture: true,
+        signal: this.signal,
+      });
+    }
+  }
+
   private initializeManagers(): void {
     this.dataManager = new DataManager(this);
     this.layerManager = new LayerManager(this);
@@ -949,6 +976,7 @@ export class MapApp {
     followSatelliteSwitch(this);
     followSelectionHighlight(this);
     followStatsPanel(this);
+    this.prepareWrappedOnIntent();
     this.followReplayAvailability();
     this.followFlightProfile();
     this.store.subscribeKeys(

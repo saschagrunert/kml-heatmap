@@ -897,6 +897,8 @@ describe("WrappedManager dialog", () => {
         zoom: 12,
         bearing: 0,
         pitch: 0,
+        globeVisible: false,
+        threeDVisible: false,
       };
       mockApp.map!.getCenter.mockReturnValue(new LngLat(11.6, 48.1));
       mockApp.map!.getZoom.mockReturnValue(12);

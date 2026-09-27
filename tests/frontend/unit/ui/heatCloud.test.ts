@@ -13,7 +13,10 @@ import {
   type MockInstance,
 } from "vitest";
 import type { StyleSpecification } from "maplibre-gl";
-import { followHeatCloud } from "../../../../kml_heatmap/frontend/ui/heatCloud";
+import {
+  followHeatCloud,
+  prepareHeatCloud,
+} from "../../../../kml_heatmap/frontend/ui/heatCloud";
 import {
   HEAT_CLOUD_LAYER,
   HeatCloudLayer,
@@ -32,6 +35,7 @@ import {
   releaseGroundProfiles,
 } from "../../../../kml_heatmap/frontend/calculations/groundProfile";
 import { setBaseStyle } from "../../../../kml_heatmap/frontend/mapLayers";
+import { REPLAY_CAMERA_MOVE } from "../../../../kml_heatmap/frontend/utils/mapHelpers";
 import {
   FEET_TO_METERS,
   MAP_LAYERS,
@@ -52,6 +56,25 @@ vi.mock("../../../../kml_heatmap/frontend/utils/logger", async (original) => ({
   ...(await original<object>()),
   logError: logger.logError,
 }));
+
+/** Counts the cuts of the cloud's points, which it otherwise leaves alone */
+const cuts = vi.hoisted(() => ({ count: 0 }));
+vi.mock(
+  "../../../../kml_heatmap/frontend/calculations/heatCloud",
+  async (original) => {
+    const actual =
+      await original<
+        typeof import("../../../../kml_heatmap/frontend/calculations/heatCloud")
+      >();
+    return {
+      ...actual,
+      cloudPoints: (...args: Parameters<typeof actual.cloudPoints>) => {
+        cuts.count++;
+        return actual.cloudPoints(...args);
+      },
+    };
+  },
+);
 
 /** A flight of `path_id`: `count` fixes along the latitude `lat` */
 function flight(path_id: number, lat: number, count = 6): PathSegment[] {
@@ -407,6 +430,133 @@ describe("the heat cloud", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  describe("forced on with the 3D view off, as Wrapped's intro does", () => {
+    const liftM = (level: number): number =>
+      liftExaggeration(level) * FEET_TO_METERS;
+
+    beforeEach(() => {
+      map().setZoom(7.4);
+      cuts.count = 0;
+    });
+
+    it("is on the map in place of the heatmap, on flat ground, until the store lets go", async () => {
+      await follow();
+      app.forcedHeatCloud = true;
+
+      expect(map().getLayer(HEAT_CLOUD_LAYER)).toBeDefined();
+      expect(app.store.get("heatCloud")).toBe(true);
+      expect(latitudesOf(drawn())).toEqual([47, 48, 49]);
+      // Pulsing as in the 3D view: the intro's replay-all is no replay of
+      // the map, which would dim it
+      expect(style()).toMatchObject({
+        groundM: 0,
+        liftM: liftM(7),
+        opacity: 1,
+        flow: true,
+      });
+      // It is the heatmap still: its switch hides it
+      app.heatmapVisible = false;
+      expect(style()).toBeNull();
+      app.heatmapVisible = true;
+
+      app.forcedHeatCloud = false;
+      expect(map().getLayer(HEAT_CLOUD_LAYER)).toBeUndefined();
+      expect(app.store.get("heatCloud")).toBe(false);
+      expect(drawn()).toBeNull();
+    });
+
+    it("is cut for the zoom the map comes to rest at, not for the moves of a scripted camera", async () => {
+      await follow();
+      app.forcedHeatCloud = true;
+      const seven = drawn();
+
+      // The intro's flight: far out and back, tagged
+      map().setZoom(1.2);
+      map().emit("zoomend", REPLAY_CAMERA_MOVE);
+      map().setZoom(9.3);
+      map().emit("zoomend", REPLAY_CAMERA_MOVE);
+      expect(drawn()).toBe(seven);
+      expect(style()!.liftM).toBeCloseTo(liftM(7), 9);
+
+      // Where it comes to rest
+      map().emit("zoomend");
+      expect(drawn()).not.toBe(seven);
+      expect(style()!.liftM).toBeCloseTo(liftM(9), 9);
+      expect(cuts.count).toBe(2);
+    });
+
+    it("leaves the level to the 3D view while that is on", async () => {
+      app.store.batch(() => {
+        app.threeDVisible = true;
+        app.reliefLevel = 5;
+      });
+      await follow();
+      app.forcedHeatCloud = true;
+      map().emit("zoomend");
+      expect(style()!.liftM).toBeCloseTo(liftM(5), 9);
+      // Turning the force off leaves the 3D view's cloud where it is
+      app.forcedHeatCloud = false;
+      expect(map().getLayer(HEAT_CLOUD_LAYER)).toBeDefined();
+    });
+
+    it("draws points cut ahead of time without cutting them again, for as long as what they are of stays", async () => {
+      await follow();
+      prepareHeatCloud(asMapApp(app), [6, 7]);
+      expect(cuts.count).toBe(2);
+      // Nothing drawn meanwhile, and a change of what does not make them
+      // keeps them
+      expect(setPoints).not.toHaveBeenCalled();
+      app.altitudeVisible = true;
+
+      app.forcedHeatCloud = true;
+      expect(cuts.count).toBe(2);
+      expect(latitudesOf(drawn())).toEqual([47, 48, 49]);
+
+      // Another year makes them anew
+      app.forcedHeatCloud = false;
+      prepareHeatCloud(asMapApp(app), [7]);
+      app.selectedYear = "2026";
+      app.forcedHeatCloud = true;
+      expect(latitudesOf(drawn())).toEqual([48, 49]);
+    });
+
+    it("keeps the points it drew once the store lets go, for the next opening, but not those of the 3D view", async () => {
+      await follow();
+      app.forcedHeatCloud = true;
+      const seven = drawn();
+      app.forcedHeatCloud = false;
+      // Wrapped's button asks for them again as the dialog closes
+      prepareHeatCloud(asMapApp(app), [7]);
+      expect(cuts.count).toBe(1);
+      app.forcedHeatCloud = true;
+      expect(drawn()).toBe(seven);
+      app.forcedHeatCloud = false;
+
+      app.store.batch(() => {
+        app.threeDVisible = true;
+        app.reliefLevel = 7;
+      });
+      expect(cuts.count).toBe(1);
+      app.threeDVisible = false;
+      prepareHeatCloud(asMapApp(app), [7]);
+      expect(cuts.count).toBe(2);
+    });
+
+    it("prepares nothing before it is followed, and is followed once", async () => {
+      prepareHeatCloud(asMapApp(app), [7]);
+      expect(cuts.count).toBe(0);
+      await follow();
+      followHeatCloud(asMapApp(app));
+      await app.mapReady;
+      app.forcedHeatCloud = true;
+      expect(
+        map().addLayer.mock.calls.filter(
+          ([spec]) => (spec as { id: string }).id === HEAT_CLOUD_LAYER,
+        ),
+      ).toHaveLength(1);
+    });
   });
 
   it("stops following the store and the map with the app", async () => {

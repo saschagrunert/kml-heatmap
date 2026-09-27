@@ -24,7 +24,7 @@ import "./mapApp";
 import { ReplayManager } from "./ui/replayManager";
 import { followTerrain } from "./ui/terrain";
 import { followSatellite } from "./ui/satellite";
-import { followHeatCloud } from "./ui/heatCloud";
+import { followHeatCloud, prepareHeatCloud } from "./ui/heatCloud";
 import { followSelectionRibbons } from "./ui/selectionRibbons";
 import { ReplayAllPlayer, toggleReplayAll } from "./ui/replayAll";
 import { followFlightProfile } from "./ui/flightProfile";
@@ -34,6 +34,7 @@ export interface FeatureModule {
   followTerrain: typeof followTerrain;
   followSatellite: typeof followSatellite;
   followHeatCloud: typeof followHeatCloud;
+  prepareHeatCloud: typeof prepareHeatCloud;
   followSelectionRibbons: typeof followSelectionRibbons;
   ReplayAllPlayer: typeof ReplayAllPlayer;
   toggleReplayAll: typeof toggleReplayAll;
@@ -45,6 +46,7 @@ export {
   followTerrain,
   followSatellite,
   followHeatCloud,
+  prepareHeatCloud,
   followSelectionRibbons,
   ReplayAllPlayer,
   toggleReplayAll,

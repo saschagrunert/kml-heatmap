@@ -71,6 +71,7 @@
   display: flex;
   justify-content: flex-end;
   align-items: center;
+  gap: var(--space-sm);
   padding: calc(var(--space-md) + var(--safe-top)) var(--wrapped-gutter)
     var(--space-md);
   background: transparent;
@@ -146,6 +147,32 @@
   min-width: 400px;
   opacity: 0;
   animation: fadeInUp 0.8s ease-out 0.9s forwards;
+}
+
+/* Wrapped's intro (ui/wrappedIntro.ts): the cards wait for the camera to
+   settle, the map shows at once, and it starts dark and brightens as the
+   camera flies in. Stacked, the map has the dialog to itself while it
+   plays, and the cards come in above it. */
+#wrapped-modal.is-intro .wrapped-square-card,
+#wrapped-modal.is-intro .wrapped-square-card * {
+  animation-play-state: paused;
+}
+#wrapped-modal.is-intro #wrapped-map-container {
+  animation-delay: 0s;
+}
+#wrapped-modal.is-intro #wrapped-map-container::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background: rgba(10, 10, 20, 0.92);
+  opacity: 0;
+  transition: opacity 2.4s ease-in;
+}
+#wrapped-modal.is-intro #wrapped-map-container.is-dark::before {
+  opacity: 1;
+  transition: none;
 }
 
 /* Cards column - left side */
@@ -421,7 +448,8 @@
   text-transform: uppercase;
   letter-spacing: 0.08em;
 }
-#wrapped-header .close-btn {
+#wrapped-header .close-btn,
+#wrapped-skip-btn:not([hidden]) {
   background: transparent;
   border: none;
   color: rgba(var(--color-text-rgb), 0.6);
@@ -439,11 +467,13 @@
   gap: var(--space-sm);
   letter-spacing: 0.04em;
 }
-#wrapped-header .close-btn:hover {
+#wrapped-header .close-btn:hover,
+#wrapped-skip-btn:hover {
   background-color: rgba(var(--color-text-rgb), 0.08);
   color: rgba(var(--color-text-rgb), 0.9);
 }
-#wrapped-header .close-btn:focus-visible {
+#wrapped-header .close-btn:focus-visible,
+#wrapped-skip-btn:focus-visible {
   outline: 2px solid var(--color-accent-blue);
   outline-offset: 2px;
   color: var(--color-text);
@@ -929,6 +959,9 @@
     width: 100%;
     height: 100%;
   }
+  #wrapped-modal.is-intro #wrapped-cards-column {
+    display: none;
+  }
 }
 
 /* ==========================================================================
@@ -945,7 +978,8 @@
     padding: calc(var(--space-sm) + var(--safe-top)) var(--wrapped-gutter)
       var(--space-sm);
   }
-  #wrapped-header .close-btn {
+  #wrapped-header .close-btn,
+  #wrapped-skip-btn {
     font-size: var(--text-md);
     padding: var(--space-xs) var(--space-sm);
   }

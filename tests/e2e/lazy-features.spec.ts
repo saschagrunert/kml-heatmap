@@ -9,7 +9,8 @@
  * first visit fetches none of them, and a feature only works if both of its
  * files arrive when it is opened, so both halves are checked here. Opening
  * Wrapped says nothing about replay, so it must not fetch replay's files
- * either.
+ * either: not under the reduced motion the suite runs with, where Wrapped
+ * plays no intro over the heat cloud of the feature bundle.
  */
 import { test, expect } from "./fixtures";
 import {

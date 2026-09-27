@@ -21,6 +21,14 @@
  * under the pointer in a custom layer, and the ribbons of the colour
  * layers stay what is hovered and clicked. It comes with the feature
  * bundle, with the relief, the first time the 3D view is on.
+ *
+ * Wrapped's intro flies over the cloud with the 3D view off
+ * (forcedHeatCloud in the store). There the cloud stands on flat ground and
+ * is cut for the level of the zoom the map last came to rest at, which the
+ * layer manager only follows in the 3D view. It pulses as in the 3D view,
+ * woken by the flight and resting when the map does: the replay of all
+ * flights that plays under the intro is no replay of the app's
+ * (replayActive), which would dim it.
  */
 import type { MapApp } from "../mapApp";
 import type { StoreState } from "../state/store";
@@ -28,10 +36,18 @@ import type { KMLDataset } from "../types";
 import { cloudPoints, type CloudPoints } from "../calculations/heatCloud";
 import { groundedFlights } from "../calculations/groundProfile";
 import { datasetIndex } from "../calculations/datasetIndex";
-import { isLiftedAt, liftExaggeration } from "../calculations/lift";
+import {
+  isLiftedAt,
+  liftExaggeration,
+  reliefLevel,
+} from "../calculations/lift";
 import { FEET_TO_METERS, MAP_LAYERS } from "../utils/constants";
 import { logError } from "../utils/logger";
-import { hasLostContext, whenContextRestored } from "../utils/mapHelpers";
+import {
+  hasLostContext,
+  isReplayCameraMove,
+  whenContextRestored,
+} from "../utils/mapHelpers";
 import { dimmedHeatmapOpacity } from "./dataManager";
 import { dimsHeatmap } from "./layerVisibility";
 import {
@@ -58,6 +74,7 @@ const CLOUD_REPLAY_OPACITY = 0.25;
 /** The keys the cloud follows */
 const CLOUD_KEYS: readonly (keyof StoreState)[] = [
   "threeDVisible",
+  "forcedHeatCloud",
   "heatmapVisible",
   "replayActive",
   "currentData",
@@ -107,12 +124,29 @@ function sameKey(a: unknown[] | null, b: unknown[]): boolean {
 const CLOUD_LEVELS_KEPT = 4;
 
 /**
- * Draw the heat of the 3D view as a cloud while the 3D view is on, from
- * now on, for as long as the app lives
+ * The apps whose cloud is followed, each with what cuts its points ahead
+ * of time (see prepareHeatCloud)
+ */
+const followed = new WeakMap<MapApp, (levels: readonly number[]) => void>();
+
+/**
+ * Cut the points of the cloud for the relief `levels` ahead of time, once
+ * followHeatCloud follows it: Wrapped does while its button is pointed at,
+ * so that its intro does not stall on them. They are kept like the points
+ * of the levels drawn last.
+ */
+export function prepareHeatCloud(app: MapApp, levels: readonly number[]): void {
+  followed.get(app)?.(levels);
+}
+
+/**
+ * Draw the heat of the 3D view as a cloud while the 3D view is on, or the
+ * store forces it (forcedHeatCloud), from now on, for as long as the app
+ * lives. A second call for the same app does nothing.
  */
 export function followHeatCloud(app: MapApp): void {
   const map = app.map;
-  if (!map) return;
+  if (!map || followed.has(app)) return;
   /** The shaders did not work in the map's context: the heatmap stays */
   let broken = false;
   /** How strongly the cloud is drawn, as the heatmap would be */
@@ -125,23 +159,35 @@ export function followHeatCloud(app: MapApp): void {
   let lifted = isLiftedAt(map.getZoom());
   /** What the points kept by level were made of */
   let made: unknown[] | null = null;
-  /** The points by relief level, the one drawn last at the end */
+  /** The points by relief level, the one asked for last at the end */
   const byLevel = new Map<number, CloudPoints>();
+  /** The points handed to the layer */
+  let drawn: CloudPoints | null = null;
   /** Let go of the points of every level */
   const forget = (): void => {
     made = null;
     byLevel.clear();
   };
+  /**
+   * The relief level of the zoom the map last came to rest at, which the
+   * cloud is cut for outside the 3D view, where the layer manager follows
+   * no level (see LayerManager.syncTerrain)
+   */
+  let atRest = reliefLevel(map.getZoom());
+  /** The relief level the cloud is cut for and lifted as */
+  const level = (): number => (app.threeDVisible ? app.reliefLevel : atRest);
 
-  const shown = (): boolean =>
-    app.threeDVisible && app.heatmapVisible && !broken;
+  /** Whether the layer is on the map */
+  const wanted = (): boolean =>
+    (app.threeDVisible || app.forcedHeatCloud) && !broken;
+  const shown = (): boolean => wanted() && app.heatmapVisible;
 
   const style = (): HeatCloudStyle | null => {
     if (!shown()) return null;
     // The relief's own exaggeration, which it switches as a zoom ends (see
     // ui/terrain.ts), or the level's where the map draws none
     const exaggeration =
-      map.getTerrain()?.exaggeration ?? liftExaggeration(app.reliefLevel);
+      map.getTerrain()?.exaggeration ?? liftExaggeration(level());
     const metres = exaggeration * FEET_TO_METERS;
     return {
       groundM: app.terrainActive ? metres : 0,
@@ -159,34 +205,42 @@ export function followHeatCloud(app: MapApp): void {
     setTimeout(sync, 0);
   });
 
-  /** The points of what the heatmap shows, when that changed */
-  const updatePoints = (): void => {
+  /** Hand the layer `points`, unless it has them already */
+  const draw = (points: CloudPoints | null): void => {
+    if (points === drawn) return;
+    drawn = points;
+    layer.setPoints(points);
+  };
+
+  /**
+   * The points of what the heatmap shows cut for the level `at`: those kept
+   * for it while nothing they were made of changed, or cut now
+   */
+  const pointsAt = (at: number): CloudPoints | null => {
     const data = app.currentData;
     const key = pointsKey(app);
     if (!sameKey(made, key)) {
       forget();
       made = key;
     }
-    if (!data) {
-      layer.setPoints(null);
-      return;
-    }
-    const level = app.reliefLevel;
-    let points = byLevel.get(level);
-    // Drawn already: the last one kept
-    if (points && [...byLevel.keys()].pop() === level) return;
+    if (!data) return null;
+    let points = byLevel.get(at);
     if (points) {
-      byLevel.delete(level);
+      byLevel.delete(at);
     } else {
-      points = makePoints(data, level);
+      points = makePoints(data, at);
       const oldest = byLevel.keys().next();
       if (!oldest.done && byLevel.size >= CLOUD_LEVELS_KEPT) {
         byLevel.delete(oldest.value);
       }
     }
-    byLevel.set(level, points);
-    layer.setPoints(points);
+    byLevel.set(at, points);
+    return points;
   };
+
+  /** The points of what the heatmap shows, when that changed */
+  const updatePoints = (): void => draw(pointsAt(level()));
+  followed.set(app, (levels) => levels.forEach(pointsAt));
 
   /** The points of the flights the heatmap shows, cut for `level` */
   const makePoints = (data: KMLDataset, level: number): CloudPoints => {
@@ -208,9 +262,8 @@ export function followHeatCloud(app: MapApp): void {
   /** Put the layer where it belongs, or take it off */
   const place = (): void => {
     if (hasLostContext(map)) return;
-    const wanted = app.threeDVisible && !broken;
     const on = !!map.getLayer(HEAT_CLOUD_LAYER);
-    if (!wanted) {
+    if (!wanted()) {
       if (on) map.removeLayer(HEAT_CLOUD_LAYER);
       return;
     }
@@ -228,15 +281,23 @@ export function followHeatCloud(app: MapApp): void {
     }
   };
 
+  /** The 3D switch as the last sync found it */
+  let threeD = app.threeDVisible;
+
   const sync = (): void => {
     if (app.signal.aborted) return;
     place();
     // The flat heatmap steps aside while the layer is there to draw
-    app.heatCloud = app.threeDVisible && !broken;
-    if (!app.threeDVisible) {
-      // Nothing to hold on to until the 3D view is back
-      forget();
-      layer.setPoints(null);
+    app.heatCloud = wanted();
+    const left3D = threeD && !app.threeDVisible;
+    threeD = app.threeDVisible;
+    if (!app.heatCloud) {
+      // Nothing to hold on to until the 3D view is back. Those Wrapped drew
+      // or had cut ahead of time (prepareHeatCloud) are kept for its next
+      // opening, while what they were made of stays: its button asks for
+      // them again as soon as the closing dialog hands it the focus back.
+      if (left3D) forget();
+      draw(null);
       return;
     }
     opacity = app.replayActive
@@ -253,14 +314,25 @@ export function followHeatCloud(app: MapApp): void {
     const signal = app.signal;
     if (signal.aborted) return;
     const unsubscribe = app.store.subscribeKeys(CLOUD_KEYS, sync);
-    const zoomed = map.on("zoomend", () => {
+    const zoomed = map.on("zoomend", (event: object) => {
+      // Outside the 3D view the cloud follows the level itself, where the
+      // map comes to rest: not on every jump of the replay's camera, nor
+      // on the moves of Wrapped's intro (see REPLAY_CAMERA_MOVE)
+      const at = reliefLevel(map.getZoom());
+      if (!isReplayCameraMove(event) && at !== atRest) {
+        atRest = at;
+        if (!app.threeDVisible && shown()) {
+          updatePoints();
+          map.triggerRepaint();
+        }
+      }
       if (lifted === isLiftedAt(map.getZoom())) return;
       lifted = !lifted;
       map.triggerRepaint();
     });
     // A new base style, or one made anew, may have left the layer out
     const styled = map.on("styledata", () => {
-      if (app.threeDVisible) place();
+      if (wanted()) place();
     });
     // The style that comes back after a lost WebGL context has none of the
     // custom layers of before (MapLibre warns of it at the loss), and the

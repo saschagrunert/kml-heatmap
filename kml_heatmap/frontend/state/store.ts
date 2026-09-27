@@ -50,6 +50,13 @@ export interface StoreState extends ToggleFlags {
    */
   heatCloud: boolean;
   /**
+   * Whether the heat cloud is drawn with the 3D view off as well: for
+   * Wrapped's intro (ui/wrappedIntro.ts), which flies over it without
+   * lifting the flights, until the intro is skipped or the dialog closes
+   * (WrappedManager.closeWrapped). Neither saved nor carried by a link.
+   */
+  forcedHeatCloud: boolean;
+  /**
    * Whether the 3D view draws the lines of a selection as ribbons at their
    * height, for which the flat lines step aside (see ui/selectionRibbons.ts,
    * its only writer)
@@ -94,6 +101,7 @@ export const STORE_ACCESSOR_KEYS = [
   "reliefShaded",
   "reliefLevel",
   "heatCloud",
+  "forcedHeatCloud",
   "selectionRibbons",
   "replayActive",
   "currentData",
@@ -138,6 +146,7 @@ export function createDefaultState(): StoreState {
     reliefShaded: false,
     reliefLevel: 0,
     heatCloud: false,
+    forcedHeatCloud: false,
     selectionRibbons: false,
     replayActive: false,
     currentData: null,

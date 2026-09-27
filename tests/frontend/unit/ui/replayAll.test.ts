@@ -34,6 +34,24 @@ import {
 } from "../../testHelpers";
 
 const toast = vi.hoisted(() => ({ showToast: vi.fn() }));
+/** Every cut of the curves, counted */
+const cuts = vi.hoisted(() => ({ count: 0 }));
+vi.mock(
+  "../../../../kml_heatmap/frontend/calculations/replayAll",
+  async (original) => {
+    const module =
+      await original<
+        typeof import("../../../../kml_heatmap/frontend/calculations/replayAll")
+      >();
+    return {
+      ...module,
+      replayAllPoints: (...args: Parameters<typeof module.replayAllPoints>) => {
+        cuts.count++;
+        return module.replayAllPoints(...args);
+      },
+    };
+  },
+);
 vi.mock("../../../../kml_heatmap/frontend/utils/toast", async (original) => ({
   ...(await original<object>()),
   showToast: toast.showToast,
@@ -365,6 +383,59 @@ describe("the replay of all flights", () => {
       // The cut of zoom 14 again, as it was
       expect(drawn).toHaveBeenCalledTimes(3);
       expect(drawn.mock.calls[2]![0]).toBe(drawn.mock.calls[0]![0]);
+    });
+
+    it("cuts the curves ahead for the zoom a camera on its way sets out for, and draws them as it comes near", () => {
+      // A camera setting off from far out for zoom 9
+      map().setZoom(1);
+      cuts.count = 0;
+      void player.start({ zoom: 9 });
+      // For where it is, and ahead for where it goes
+      expect(cuts.count).toBe(2);
+      const drawn = vi.spyOn(layer()!, "setPoints");
+
+      // Far out it draws the curves cut for far out
+      map().setZoom(5);
+      map().emit("zoom");
+      expect(drawn).not.toHaveBeenCalled();
+      // Near, those cut ahead, cut no more
+      map().setZoom(7.1);
+      map().emit("zoom");
+      map().setZoom(8);
+      map().emit("zoom");
+      expect(drawn).toHaveBeenCalledOnce();
+      expect(cuts.count).toBe(2);
+      // Where it comes to rest: the same
+      map().setZoom(9.4);
+      map().emit("zoomend", REPLAY_CAMERA_MOVE);
+      expect(drawn).toHaveBeenCalledOnce();
+      expect(cuts.count).toBe(2);
+      // From there on the map's zoom, as without it
+      map().setZoom(3);
+      map().emit("zoom");
+      expect(drawn).toHaveBeenCalledOnce();
+      map().emit("zoomend");
+      expect(drawn).toHaveBeenCalledTimes(2);
+    });
+
+    it("cuts the curves once for a run that sets out near its zoom, and for the map's alone without one", () => {
+      map().setZoom(8);
+      cuts.count = 0;
+      void player.start({ zoom: 9 });
+      expect(cuts.count).toBe(1);
+      player.stop();
+
+      map().setZoom(1);
+      cuts.count = 0;
+      void player.start();
+      expect(cuts.count).toBe(1);
+      const drawn = vi.spyOn(layer()!, "setPoints");
+      // Nothing is cut while the map zooms, only as it comes to rest
+      map().setZoom(9.4);
+      map().emit("zoom");
+      expect(drawn).not.toHaveBeenCalled();
+      map().emit("zoomend");
+      expect(drawn).toHaveBeenCalledOnce();
     });
 
     it("draws at the heights of the 3D view, and flat without it", () => {
