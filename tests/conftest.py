@@ -3,7 +3,8 @@
 The cache directory is redirected to a session-private directory through the
 production ``KML_HEATMAP_CACHE_DIR`` setting, a small fixture airports.csv is
 installed there so no test needs the network, and any attempt to download the
-airport database or an elevation tile fails loudly.
+airport database or an elevation tile fails loudly. ``KML_HEATMAP_SITE_URL``
+is cleared for every test.
 """
 
 import json
@@ -133,6 +134,15 @@ def no_network(monkeypatch):
 
     monkeypatch.setattr("kml_heatmap.airport_lookup.urlopen", _refuse)
     monkeypatch.setattr("kml_heatmap.terrain.urlopen", _refuse)
+
+
+@pytest.fixture(autouse=True)
+def no_site_url(monkeypatch):
+    """No site URL from the shell: with one, every build would draw images.
+
+    The tests of the link previews set their own.
+    """
+    monkeypatch.delenv("KML_HEATMAP_SITE_URL", raising=False)
 
 
 @pytest.fixture(autouse=True)

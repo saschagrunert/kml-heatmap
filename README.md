@@ -237,6 +237,8 @@ Variables:
 - `HOST_BIND` - Address `make serve` binds on the host (default: `127.0.0.1`; use `0.0.0.0` for the local network)
 - `PORT` - Host port for `make serve` (default: `8000`)
 - `CARTO_API_KEY` - Tile API key (passed by name, never printed)
+- `KML_HEATMAP_SITE_URL` - The address the site is published at, for the
+  link preview images (see `--site-url`)
 
 Targets (`make help` prints this list with the current variable values):
 
@@ -328,7 +330,7 @@ wrapper.
 ### Command-Line Options
 
 ```
-kml-heatmap [--output-dir DIR] [--debug] [--obfuscate-inputs] [--no-terrain] [--force] [--version] path [path ...]
+kml-heatmap [--output-dir DIR] [--debug] [--obfuscate-inputs] [--no-terrain] [--force] [--site-url URL] [--version] path [path ...]
 ```
 
 - `path` - KML files and/or directories. Directories are scanned with their
@@ -358,6 +360,12 @@ kml-heatmap [--output-dir DIR] [--debug] [--obfuscate-inputs] [--no-terrain] [--
   airfields
 - `--force` - Replace the files of a site in the output directory that no
   earlier run wrote (see `--output-dir`)
+- `--site-url URL` - The address the site is published at, such as
+  `https://example.org/flights` (default: `KML_HEATMAP_SITE_URL`). A link
+  preview names its image by an absolute URL, which the build cannot know by
+  itself: with the address the site, each year and each flight get a preview
+  image (see [Link previews](#link-previews)), without it the previews go
+  without one. CI fills it in from the Pages configuration.
 - `--version` - Show the version and exit
 
 Every file is written into a hidden staging directory inside the output first
@@ -701,6 +709,8 @@ Kept in the site:
   `EDAQ Halle-Oppin`), and the airports of a route name (`Home strip - Aunt
 farm`)
 - The aircraft registration and type of a file name (`1_DEHYL_DA40.kml`)
+- The same again in the link preview pages of each year and flight (their
+  year, airports and aircraft), and images of the tracks
 
 Removed from the site:
 
@@ -762,6 +772,9 @@ output-dir/
 │   ├── maplibre-gl.css
 │   └── html-to-image.mjs        # Imported on the first image export
 ├── flags/                 # One SVG per country the flights touched
+├── preview.png            # Link preview of the site (with --site-url)
+├── y/                     # Link preview of each year: 2025.html, 2025.png
+├── f/                     # Link preview of each flight, by its id
 └── data/
     ├── airports.json      # Airport markers
     ├── metadata.json      # Years, file sizes, speed range, models, flags
@@ -827,6 +840,28 @@ so the downloads start together with the bundles rather than after them. It
 preloads CARTO's style and the index of its tiles as well (with the API key
 when the site has one), which the map would otherwise only ask for one after
 the other once it has started.
+
+### Link previews
+
+A link shared in a chat or a post unfolds from the Open Graph tags of the page
+it points to. Scrapers run no JavaScript and ignore the query string, so a
+link to a year or a flight (`?y=2025&p=...`) could only ever show the site's
+preview. Every year and every flight therefore gets a small page of its own,
+`y/2025.html` and `f/<id>.html` (the id as the page writes it into a link),
+with its own title, description and image, which sends a browser on to the
+map with that year or flight selected. Link to those pages to share one.
+
+The images are 1200 by 630 pixels: the tracks as a glow, brighter where more
+time was spent, in the colours of the 3D view's heat cloud, exposed so that
+the busiest half percent of the lit pixels are white. They are drawn in
+Python alone, without a browser, and only with `--site-url`, since an
+`og:image` has to be an absolute URL. A flight's image depends on nothing
+but its track, and the images are kept in `previews/` of the cache
+directory (see [Airport Database](#airport-database)) under a hash of what
+they draw, so a run draws only what changed; entries unused for 30 days are
+removed. The images show no text, no dates and no build
+stamp, only exported flights are drawn, and the page and image of a flight
+that left the input are removed with it.
 
 ## Map Features
 

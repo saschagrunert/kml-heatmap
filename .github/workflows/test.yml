@@ -768,6 +768,10 @@ jobs:
     if: needs.publishable.outputs.publish == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    # pages: read for the address of the site, see "Look up the address"
+    permissions:
+      contents: read
+      pages: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -805,6 +809,21 @@ jobs:
           path: ~/.cache/kml-heatmap/terrain
           key: terrain-${{ hashFiles('data/*.kml') }}
           restore-keys: terrain-
+      # The link preview images, cached under a hash of what each one draws
+      # and of the module that draws them (kml_heatmap/previews.py), so the
+      # latest cache has every image that did not change
+      - name: Cache the link preview images
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/kml-heatmap/previews
+          key: previews-${{ hashFiles('data/*.kml', 'kml_heatmap/*.py') }}
+          restore-keys: previews-
+      # Where the site is published: the link previews name their images by
+      # absolute URLs, which the build cannot know by itself. Only reads the
+      # Pages configuration; the deploy job below publishes.
+      - name: Look up the address of the site
+        id: pages
+        uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
       # The deployed site must not lose the ground of a flight to a failed
       # tile download: the build fails instead of publishing without it.
       # GitHub Pages derives the ETags from the modification times, which
@@ -816,6 +835,7 @@ jobs:
           KML_HEATMAP_REQUIRE_AIRPORT_DB: "1"
           KML_HEATMAP_REQUIRE_TERRAIN: "1"
           KML_HEATMAP_STABLE_MTIMES: "1"
+          KML_HEATMAP_SITE_URL: ${{ steps.pages.outputs.base_url }}
           CARTO_API_KEY: ${{ secrets.CARTO_API_KEY }}
       - name: Upload the site
         uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0

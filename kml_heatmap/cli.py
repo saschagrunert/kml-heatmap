@@ -142,6 +142,7 @@ def _generate(
     obfuscate_inputs: bool,
     terrain: bool = True,
     force: bool = False,
+    site_url: str | None = None,
 ) -> None:
     """Generate the site into ``output_dir``.
 
@@ -149,6 +150,9 @@ def _generate(
     tiles of AWS (see ``kml_heatmap.terrain``), which are downloaded once
     into the cache directory. ``force`` replaces the files of a site that
     no earlier run wrote (see ``renderer.foreign_output_error``).
+    ``site_url`` is where the site is published, which its link preview
+    images are named by (see ``kml_heatmap.previews``); None takes it from
+    ``KML_HEATMAP_SITE_URL``.
 
     The generated site never carries a flight date finer than the year,
     whatever the inputs hold: the exported paths keep their year, their
@@ -156,6 +160,15 @@ def _generate(
     inputs is therefore not needed to publish safely and is not done unless
     ``obfuscate_inputs`` asks for it, because it cannot be undone.
     """
+    from .previews import SITE_URL_ENV, normalize_site_url
+
+    try:
+        site_url = normalize_site_url(
+            site_url if site_url is not None else os.environ.get(SITE_URL_ENV)
+        )
+    except ValueError as e:
+        _fatal(str(e))
+
     kml_files = _collect_kml_files(paths)
 
     if not kml_files:
@@ -201,6 +214,9 @@ def _generate(
         aircraft_files=aircraft_files,
         terrain=TerrariumTiles() if terrain else None,
         force=force,
+        # "" rather than None: resolved above, the environment is not read
+        # a second time
+        site_url=site_url or "",
     )
 
     if not success:
@@ -293,6 +309,16 @@ output directory untouched. An output directory with files of another site
         ),
     )
     parser.add_argument(
+        "--site-url",
+        metavar="URL",
+        help=(
+            "the address the site is published at, such as "
+            "https://example.org/flights (default: $KML_HEATMAP_SITE_URL); "
+            "with it every year and flight gets a link preview image, "
+            "which needs an absolute URL"
+        ),
+    )
+    parser.add_argument(
         "--version",
         action="version",
         version=f"%(prog)s {__version__}",
@@ -310,6 +336,7 @@ output directory untouched. An output directory with files of another site
             args.obfuscate_inputs,
             args.terrain,
             args.force,
+            args.site_url,
         )
     except (KMLHeatmapError, OSError) as e:
         # Expected failures (an unwritable output directory, a missing airport

@@ -191,6 +191,9 @@ class ExportResult:
     #: ISO codes of the countries the exported airports are in, for the
     #: flags the site publishes
     countries: list[str] = field(default_factory=list)
+    #: The id of every exported path, by its index in the input (see
+    #: ``assign_path_ids``), for the link previews
+    path_ids: dict[int, int] = field(default_factory=dict)
 
 
 @dataclass
@@ -1058,4 +1061,4 @@ def export_all_data(
     total_size = airports_bytes + metadata_bytes + sum(year_file_bytes.values())
     logger.info("  Total data size: %.1f KB", total_size / 1024)
 
-    return ExportResult(years=years, countries=countries)
+    return ExportResult(years=years, countries=countries, path_ids=path_ids)

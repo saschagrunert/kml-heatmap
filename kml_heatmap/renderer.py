@@ -27,9 +27,11 @@ from .data_exporter import (
     is_exportable_path,
 )
 from .exceptions import KMLHeatmapError, KMLParseError
+from .export_writers import exported_airport_names
 from .logger import logger
 from .parser import load_cached_kml, parse_kml_file
 from .parser_cache import prune_stale_cache_entries
+from .previews import SITE_URL_ENV, normalize_site_url, write_previews
 from .site_assets import (
     SITE_FILE_PATTERNS,
     SITE_FILES,
@@ -444,12 +446,14 @@ def _export_site(
     data_dir: Path,
     aircraft_data: dict[str, str] | None = None,
     terrain: TileSource | None = None,
+    site_url: str | None = None,
 ) -> ExportResult:
     """Export the data, render the page and package its assets.
 
     Everything is staged first and published at the end (see ``SiteOutput``),
     so a failure at any step leaves the previous site in the output as it was.
-    ``terrain`` is handed to ``export_all_data``.
+    ``terrain`` is handed to ``export_all_data``, ``site_url`` (normalized,
+    see ``previews.normalize_site_url``) to the link previews.
     """
     all_path_groups, all_path_metadata = _drop_paths_without_year(
         all_path_groups, all_path_metadata
@@ -496,12 +500,21 @@ def _export_site(
             site.site_stage / output_file.name,
             data_dir_name,
             max(result.years, default=None),
+            site_url,
         )
         package_assets(
             site.site_stage,
             extent.as_map_bounds(),
             data_dir_name,
             result.countries,
+        )
+        write_previews(
+            site.site_stage,
+            all_path_groups,
+            all_path_metadata,
+            result.path_ids,
+            exported_airport_names(unique_airports),
+            site_url,
         )
 
         logger.info("\nPublishing the site to %s", output_file.parent)
@@ -536,6 +549,7 @@ def create_progressive_heatmap(
     aircraft_files: list[Path] | None = None,
     terrain: TileSource | None = None,
     force: bool = False,
+    site_url: str | None = None,
 ) -> bool:
     """Create a progressive-loading heatmap with external data files.
 
@@ -550,8 +564,20 @@ def create_progressive_heatmap(
     An output directory with files of a site that no earlier run wrote (an
     ``index.html`` of its own, see ``foreign_output_error``) is refused
     unless ``force`` is set.
+
+    ``site_url`` is the public address of the site, which its link preview
+    images are named by (see ``previews``); None takes it from
+    ``KML_HEATMAP_SITE_URL``, and without either the pages go without
+    images.
     """
     aircraft_files = aircraft_files or []
+    try:
+        site_url = normalize_site_url(
+            site_url if site_url is not None else os.environ.get(SITE_URL_ENV)
+        )
+    except ValueError as e:
+        logger.error("%s", e)
+        return False
 
     # Stage 0: Refuse output directories that overlap with the inputs, a data
     # directory the page could not reach, and a run that could only produce a
@@ -620,6 +646,7 @@ def create_progressive_heatmap(
                 Path(data_dir),
                 aircraft_data=aircraft_data,
                 terrain=terrain,
+                site_url=site_url,
             )
         except (ValueError, RuntimeError, OSError, KMLHeatmapError) as e:
             logger.error("Export failed: %s", e)

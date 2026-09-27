@@ -14,11 +14,13 @@ from typing import cast
 from unittest.mock import patch
 
 import pytest
+from lxml import html as lxml_html
 
 import kml_heatmap.cache as cache_module
 import kml_heatmap.data_exporter as exporter_module
 from kml_heatmap.data_exporter import STAGING_PREFIX
 from kml_heatmap.exceptions import KMLHeatmapError
+from kml_heatmap.previews import encode_path_id
 from kml_heatmap.renderer import (
     CoordinateExtent,
     ParsedFile,
@@ -990,3 +992,180 @@ class TestCreateProgressiveHeatmap:
         assert removed.endswith("1_DEAGJ_DA20.kml")
         del before[12.1]
         assert after == before
+
+
+@pytest.mark.usefixtures("bundle")
+class TestLinkPreviews:
+    SITE = "https://example.org/flights"
+
+    @pytest.fixture(autouse=True)
+    def _previews(self, tmp_path_factory, monkeypatch):
+        """A cache of its own, no pool, and images that take no time."""
+        monkeypatch.setattr(
+            "kml_heatmap.previews.PREVIEW_CACHE_DIR",
+            tmp_path_factory.mktemp("previews") / "cache",
+        )
+        monkeypatch.setattr(os, "process_cpu_count", lambda: 1)
+        monkeypatch.setattr(
+            "kml_heatmap.previews.render_preview",
+            lambda tracks: b"\x89PNG " + str(len(tracks)).encode(),
+        )
+
+    @staticmethod
+    def _inputs(tmp_path):
+        return [
+            _write_kml(
+                tmp_path / "input" / f"{index + 1}_DEAGJ_DA20.kml",
+                year,
+                TRACK_KML.replace("12.5 51.4", f"12.{index + 1} 51.4"),
+            )
+            for index, year in enumerate((2025, 2026))
+        ]
+
+    @staticmethod
+    def _previews_of(out):
+        return sorted(
+            path.relative_to(out).as_posix()
+            for pattern in ("y/*", "f/*", "preview.png")
+            for path in out.glob(pattern)
+        )
+
+    @staticmethod
+    def _meta(page, key):
+        tree = lxml_html.fromstring(page.read_text())
+        return [
+            element.get("content")
+            for element in tree.iter("meta")
+            if key in (element.get("property"), element.get("name"))
+        ]
+
+    @staticmethod
+    def _ids(out, parse_data):
+        """The flights of each year, as their pages are named."""
+        return {
+            data_file.parent.name: [
+                encode_path_id(info["id"])
+                for info in parse_data(data_file)["path_info"]
+            ]
+            for data_file in sorted((out / "data").glob("*/data.json"))
+        }
+
+    def test_a_page_and_an_image_for_the_site_every_year_and_flight(
+        self, tmp_path, parse_data
+    ):
+        out = tmp_path / "out"
+
+        assert create_progressive_heatmap(
+            self._inputs(tmp_path),
+            str(out / "index.html"),
+            str(out / "data"),
+            site_url=self.SITE,
+        )
+
+        ids = self._ids(out, parse_data)
+        flights = [*ids["2025"], *ids["2026"]]
+        assert self._previews_of(out) == sorted(
+            [
+                "preview.png",
+                "y/2025.html",
+                "y/2025.png",
+                "y/2026.html",
+                "y/2026.png",
+                *(f"f/{flight}.html" for flight in flights),
+                *(f"f/{flight}.png" for flight in flights),
+            ]
+        )
+        # Every flight alone, every year and the site with all of them
+        assert (out / "f" / f"{flights[0]}.png").read_bytes() == b"\x89PNG 1"
+        assert (out / "preview.png").read_bytes() == b"\x89PNG 2"
+        index = out / "index.html"
+        assert self._meta(index, "og:image") == [f"{self.SITE}/preview.png"]
+        assert self._meta(index, "og:url") == [f"{self.SITE}/"]
+        assert self._meta(index, "twitter:card") == ["summary_large_image"]
+        stub = (out / "f" / f"{ids['2026'][0]}.html").read_text()
+        assert f"url=../?y=2026&amp;p={ids['2026'][0]}&amp;sv=4" in stub
+
+    def test_the_site_url_comes_from_the_environment(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("KML_HEATMAP_SITE_URL", f"{self.SITE}/")
+        out = tmp_path / "out"
+
+        assert create_progressive_heatmap(
+            self._inputs(tmp_path)[:1], str(out / "index.html"), str(out / "data")
+        )
+
+        assert self._meta(out / "index.html", "og:image") == [
+            f"{self.SITE}/preview.png"
+        ]
+        assert (out / "preview.png").is_file()
+
+    def test_without_a_site_url_the_pages_go_without_images(self, tmp_path):
+        out = tmp_path / "out"
+
+        assert create_progressive_heatmap(
+            self._inputs(tmp_path), str(out / "index.html"), str(out / "data")
+        )
+
+        files = self._previews_of(out)
+        assert len(files) == 4
+        assert all(name.endswith(".html") for name in files)
+        index = out / "index.html"
+        assert self._meta(index, "og:image") == []
+        assert self._meta(index, "og:url") == []
+        assert self._meta(index, "twitter:card") == ["summary"]
+
+    def test_a_removed_flight_takes_its_page_and_image_along(
+        self, tmp_path, parse_data
+    ):
+        out = tmp_path / "out"
+        inputs = self._inputs(tmp_path)
+        assert create_progressive_heatmap(
+            inputs, str(out / "index.html"), str(out / "data"), site_url=self.SITE
+        )
+        (gone,) = self._ids(out, parse_data)["2026"]
+        (out / "notes.txt").write_text("mine")
+
+        assert create_progressive_heatmap(
+            inputs[:1], str(out / "index.html"), str(out / "data"), site_url=self.SITE
+        )
+
+        (kept,) = self._ids(out, parse_data)["2025"]
+        assert gone != kept
+        assert self._previews_of(out) == sorted(
+            [
+                "preview.png",
+                "y/2025.html",
+                "y/2025.png",
+                f"f/{kept}.html",
+                f"f/{kept}.png",
+            ]
+        )
+        assert (out / "notes.txt").read_text() == "mine"
+
+    def test_dropping_the_site_url_removes_the_images(self, tmp_path):
+        out = tmp_path / "out"
+        inputs = self._inputs(tmp_path)
+        assert create_progressive_heatmap(
+            inputs, str(out / "index.html"), str(out / "data"), site_url=self.SITE
+        )
+
+        assert create_progressive_heatmap(
+            inputs, str(out / "index.html"), str(out / "data"), site_url=""
+        )
+
+        files = self._previews_of(out)
+        assert len(files) == 4
+        assert all(name.endswith(".html") for name in files)
+
+    def test_a_relative_site_url_fails_before_any_work(self, tmp_path, capsys):
+        out = tmp_path / "out"
+
+        ok = create_progressive_heatmap(
+            self._inputs(tmp_path),
+            str(out / "index.html"),
+            str(out / "data"),
+            site_url="flights/",
+        )
+
+        assert ok is False
+        assert "absolute http(s) address" in capsys.readouterr().err
+        assert not out.exists()

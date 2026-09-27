@@ -7,6 +7,11 @@
 CARTO_API_KEY ?=
 export CARTO_API_KEY
 
+# The address the site is published at; the link preview images are only
+# drawn with it (see --site-url)
+KML_HEATMAP_SITE_URL ?=
+export KML_HEATMAP_SITE_URL
+
 # The commit the site is stamped with and the remote it is in; the image
 # carries no .git to ask. Evaluated once, not for every recipe line.
 ifndef KML_HEATMAP_COMMIT
@@ -63,6 +68,7 @@ help: ## Show available targets and variables
 	@echo "  HOST_BIND=$(HOST_BIND)"
 	@echo "  PORT=$(PORT)"
 	@echo "  CARTO_API_KEY (value is not printed)"
+	@echo "  KML_HEATMAP_SITE_URL=$(KML_HEATMAP_SITE_URL)"
 
 require-runtime:
 	@test -n "$(CONTAINER_RUNTIME)" || { \
@@ -85,7 +91,7 @@ build: require-runtime ## Build the image and generate OUTPUT_DIR from INPUT_DIR
 	$(CONTAINER_RUNTIME) build -t $(IMAGE_NAME) .
 	mkdir -p "$(CACHE_DIR)" "$(OUTPUT_DIR)"
 	$(CONTAINER_RUNTIME) run --rm $(RUN_AS_USER) -e HOME=/tmp \
-	  -e CARTO_API_KEY \
+	  -e CARTO_API_KEY -e KML_HEATMAP_SITE_URL \
 	  -e KML_HEATMAP_COMMIT -e KML_HEATMAP_REPOSITORY -e SOURCE_DATE_EPOCH \
 	  -v "$(abspath $(INPUT_DIR)):$(INPUT_MOUNT)" \
 	  -v "$(abspath $(OUTPUT_DIR)):$(OUTPUT_MOUNT)" \
