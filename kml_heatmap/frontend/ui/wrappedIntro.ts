@@ -133,11 +133,33 @@ export function overviewBounds(app: MapApp): LngLatBoundsLike {
 }
 
 /**
+ * Longest a cut ahead of time waits for the page to have a moment
+ * (whenIdle)
+ */
+const PREPARE_IDLE_MS = 500;
+
+/**
+ * Run `work` in a task of its own once the page has a moment, as far as
+ * the browser tells (requestIdleCallback, which Safari lacks), and not in
+ * the task of the event that asked for it
+ */
+function whenIdle(work: () => void): void {
+  if (typeof requestIdleCallback === "function") {
+    requestIdleCallback(work, { timeout: PREPARE_IDLE_MS });
+  } else {
+    setTimeout(work, 0);
+  }
+}
+
+/**
  * Get the intro ready ahead of the click: the heat cloud's code, and its
  * points for the overview. They took 50 to 90 ms per level of relief for
  * two years of flights, which the first frames of the intro would stall
- * on. The overview fits the dialog's map panel, narrower than the page's
- * map, so its level is the page's or one less.
+ * on, and they are cut once the page has a moment rather than in the
+ * pointer's event, one level at a time: 99 to 152 ms there held up
+ * whatever the pointer did next. A dialog open by then cuts them itself.
+ * The overview fits the dialog's map panel, narrower than the page's map,
+ * so its level is the page's or one less.
  */
 export function prepareWrappedIntro(app: MapApp): void {
   const map = app.map;
@@ -159,13 +181,16 @@ export function prepareWrappedIntro(app: MapApp): void {
       });
       if (!camera?.zoom) return;
       const level = reliefLevel(camera.zoom);
-      features.prepareHeatCloud(app, [level]);
-      // The other one in a task of its own, as the pointer may be on its way
-      setTimeout(() => {
-        if (!app.wrappedVisible) {
+      whenIdle(() => {
+        if (app.wrappedVisible || app.signal.aborted) return;
+        features.prepareHeatCloud(app, [level]);
+        // The other one in a task of its own, as the pointer may be on its
+        // way
+        whenIdle(() => {
+          if (app.wrappedVisible || app.signal.aborted) return;
           features.prepareHeatCloud(app, [Math.max(level - 1, 0), level]);
-        }
-      }, 0);
+        });
+      });
     })
     .catch(logError);
 }
@@ -289,11 +314,15 @@ export function startWrappedIntro(
       }
       features = found;
       // The overview first, untagged: the cloud is cut for the zoom the
-      // map comes to rest at (ui/heatCloud.ts)
-      fit({ animate: false });
+      // map comes to rest at (ui/heatCloud.ts). In one update with the
+      // cloud and the globe, which leaves the relief out: in the 3D view
+      // the end of that zoom cut the cloud and the ribbons for the relief of
+      // the overview on the way, and the cloud dropped what it had cut ahead
+      // of time for the intro (prepareWrappedIntro).
       app.store.batch(() => {
         app.globeVisible = true;
         app.forcedHeatCloud = true;
+        fit({ animate: false });
       });
       const [lat, lng] = home;
       map.jumpTo(

@@ -1,5 +1,5 @@
 /**
- * Map Orientation - the compass and the globe switch
+ * Map Orientation - the compass, the globe switch and the 3D switch
  *
  * The map turns and tilts by gesture (right drag or ctrl drag, two fingers
  * on touch, shift with the arrow keys), and these two controls are the way
@@ -16,7 +16,7 @@ import type { MapApp } from "../mapApp";
 import { domCache } from "../utils/domCache";
 import { DEGREES_TO_RADIANS } from "../utils/geometry";
 import { isReplayCameraMove } from "../utils/mapHelpers";
-import { showToast } from "../utils/toast";
+import { dismissToast, showToast } from "../utils/toast";
 
 /**
  * The tilt the 3D view turns a flatter map to, and what counts as flat
@@ -24,6 +24,14 @@ import { showToast } from "../utils/toast";
  */
 const THREE_D_PITCH = 50;
 const THREE_D_MIN_PITCH = 20;
+
+/**
+ * The tilt past which a flat map tilted by hand offers the 3D view, once a
+ * visit: tilting does not turn it on, as a tilt is also just a look at the
+ * map (see onPitchEnd)
+ */
+const THREE_D_HINT_PITCH = 30;
+export const THREE_D_HINT_MESSAGE = "Turn on 3D to lift the flights";
 
 /**
  * The compass in the control column, and the one that floats over the map
@@ -41,8 +49,38 @@ export class MapOrientation {
   /** Set once the style has loaded, before which no projection can be set */
   private styled: MapLibreMap | null = null;
   private globeToastShown = false;
+  /** The 3D view was offered (onPitchEnd), or used, in this visit */
+  private threeDHinted: boolean;
+  private readonly unsubscribe: () => void;
 
   private readonly onTurn = (): void => this.syncCompass();
+
+  /**
+   * A flat map tilted past THREE_D_HINT_PITCH by the user: a gesture, which
+   * MapLibre passes its `originalEvent` along with, and none of the app's
+   * own camera moves (the 3D button, Reset view, a replay, Wrapped). Not
+   * during a replay or Wrapped, which own the map.
+   */
+  private readonly onPitchEnd = (event: { originalEvent?: unknown }): void => {
+    const app = this.app;
+    if (
+      this.threeDHinted ||
+      !event.originalEvent ||
+      app.threeDVisible ||
+      app.replayActive ||
+      app.wrappedVisible ||
+      (app.map?.getPitch() ?? 0) < THREE_D_HINT_PITCH
+    ) {
+      return;
+    }
+    this.threeDHinted = true;
+    showToast(THREE_D_HINT_MESSAGE, "info", {
+      label: "3D",
+      run: () => {
+        if (!app.threeDVisible) this.toggleThreeD();
+      },
+    });
+  };
 
   /**
    * A marker that went behind the globe while it had focus. Hidden like the
@@ -63,6 +101,13 @@ export class MapOrientation {
 
   constructor(app: MapApp) {
     this.app = app;
+    this.threeDHinted = app.threeDVisible;
+    // Used another way, the 3D view needs no offer
+    this.unsubscribe = app.store.subscribe("threeDVisible", (on) => {
+      if (!on) return;
+      this.threeDHinted = true;
+      dismissToast(THREE_D_HINT_MESSAGE);
+    });
     const map = app.map;
     if (!map) return;
 
@@ -71,6 +116,7 @@ export class MapOrientation {
     map.on("rotate", this.onTurn);
     map.on("pitch", this.onTurn);
     map.on("moveend", this.onMoveEnd);
+    map.on("pitchend", this.onPitchEnd);
     this.syncCompass();
 
     app.store.subscribe("globeVisible", () => this.applyProjection());
@@ -87,11 +133,13 @@ export class MapOrientation {
   }
 
   destroy(): void {
+    this.unsubscribe();
     const map = this.app.map;
     if (!map) return;
     map.off("rotate", this.onTurn);
     map.off("pitch", this.onTurn);
     map.off("moveend", this.onMoveEnd);
+    map.off("pitchend", this.onPitchEnd);
   }
 
   /** Turn the map north up and lay it flat, the way every view starts */
@@ -111,16 +159,21 @@ export class MapOrientation {
 
   /**
    * Lift the flights to their altitude, or put them back on the ground.
-   * Lifted, they only show on a tilted map, so a flat one is tilted; and
-   * they are the colour layers lifted, so without one the altitude colours
-   * come on.
+   * Lifted, they only show on a tilted map, so a flat one is tilted. The
+   * layers are left as they are: the heatmap lifts as the cloud, the colour
+   * layers as ribbons. Only with all three off, where nothing would be
+   * lifted, the altitude colours come on.
    */
   toggleThreeD(): void {
     const entering = !this.app.threeDVisible;
     this.app.threeDVisible = entering;
     if (!entering) return;
     const map = this.app.map;
-    if (!this.app.altitudeVisible && !this.app.airspeedVisible) {
+    if (
+      !this.app.heatmapVisible &&
+      !this.app.altitudeVisible &&
+      !this.app.airspeedVisible
+    ) {
       this.app.uiToggles.toggleAltitude();
     }
     if (map && map.getPitch() < THREE_D_MIN_PITCH) {

@@ -148,8 +148,14 @@ export class ReplayAllPlayer {
       // Out of the frame it failed in
       setTimeout(() => this.stop(), 0);
     });
-    // The style that comes back after a lost context has no custom layers
-    if (app.map) whenContextRestored(app.map, () => this.place());
+    // The style that comes back after a lost context has no custom layers,
+    // and the shaders are tried again in the new context
+    if (app.map) {
+      whenContextRestored(app.map, () => {
+        this.broken = false;
+        this.place();
+      });
+    }
     // A destroyed app leaves the map as it is, but no frame runs on for it
     app.signal.addEventListener("abort", () => {
       this.pause();

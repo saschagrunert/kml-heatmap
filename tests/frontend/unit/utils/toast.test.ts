@@ -256,6 +256,29 @@ describe("showToast", () => {
     });
   });
 
+  it("keeps a hint with an action, spoken politely, until it is acted on or dismissed by its message", () => {
+    const run = vi.fn();
+    showToast("Turn on 3D to lift the flights", "info", { label: "3D", run });
+    showToast("Drag to spin the globe");
+    vi.advanceTimersByTime(60_000);
+
+    const hint = document.querySelector<HTMLElement>(".toast-info")!;
+    expect(hint.classList.contains("toast-visible")).toBe(true);
+    // Its buttons are reachable, not hidden with a picture of the message
+    expect(hint.getAttribute("aria-hidden")).toBeNull();
+    expect(document.getElementById(TOAST_STATUS_ID)).not.toBeNull();
+    expect(document.getElementById(TOAST_ALERT_ID)).toBeNull();
+    const [action] = hint.querySelectorAll<HTMLButtonElement>("button");
+    expect(action!.textContent).toBe("3D");
+
+    // Every error toast goes without a message, not a hint
+    dismissToast();
+    expect(hint.classList.contains("toast-visible")).toBe(true);
+    dismissToast("Turn on 3D to lift the flights");
+    expect(hint.classList.contains("toast-visible")).toBe(false);
+    expect(run).not.toHaveBeenCalled();
+  });
+
   it("removes toast via fallback timeout when transitionend does not fire", () => {
     showToast("Fallback removal");
 

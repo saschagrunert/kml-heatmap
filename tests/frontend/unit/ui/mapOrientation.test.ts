@@ -1,5 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { MapOrientation } from "../../../../kml_heatmap/frontend/ui/mapOrientation";
+import {
+  MapOrientation,
+  THREE_D_HINT_MESSAGE,
+} from "../../../../kml_heatmap/frontend/ui/mapOrientation";
 import { REPLAY_CAMERA_MOVE } from "../../../../kml_heatmap/frontend/utils/mapHelpers";
 import {
   asMapApp,
@@ -7,9 +10,14 @@ import {
   mountElements,
   type MockApp,
 } from "../../testHelpers";
-import { showToast } from "../../../../kml_heatmap/frontend/utils/toast";
+import {
+  dismissToast,
+  showToast,
+  type ToastAction,
+} from "../../../../kml_heatmap/frontend/utils/toast";
 
 vi.mock("../../../../kml_heatmap/frontend/utils/toast", () => ({
+  dismissToast: vi.fn(),
   showToast: vi.fn(),
 }));
 
@@ -219,14 +227,28 @@ describe("MapOrientation", () => {
   describe("3D", () => {
     beforeEach(() => vi.mocked(showToast).mockClear());
 
-    it("tilts a flat map and brings the altitude colours on", () => {
+    it("tilts a flat map and leaves the heatmap alone to be lifted as the cloud", () => {
       app.map!.jumpTo({ zoom: 12, pitch: 0 });
+      app.heatmapVisible = true;
+      app.altitudeVisible = false;
+      app.airspeedVisible = false;
 
       orientation.toggleThreeD();
 
       expect(app.threeDVisible).toBe(true);
       expect(app.map!.easeTo).toHaveBeenCalledWith({ pitch: 50 });
-      // The ribbons are the colour layers lifted: without one, nothing shows
+      expect(app.uiToggles.toggleAltitude).not.toHaveBeenCalled();
+    });
+
+    it("brings the altitude colours on where nothing would be lifted", () => {
+      app.heatmapVisible = false;
+      app.altitudeVisible = false;
+      app.airspeedVisible = false;
+
+      orientation.toggleThreeD();
+
+      expect(app.threeDVisible).toBe(true);
+      // The ribbons are the colour layers lifted, the cloud the heatmap
       expect(app.uiToggles.toggleAltitude).toHaveBeenCalledOnce();
     });
 
@@ -248,6 +270,83 @@ describe("MapOrientation", () => {
 
       expect(app.threeDVisible).toBe(false);
       expect(app.map!.easeTo).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("the offer of the 3D view", () => {
+    beforeEach(() => {
+      vi.mocked(showToast).mockClear();
+      vi.mocked(dismissToast).mockClear();
+    });
+
+    /** Tilt the map to `pitch` and end it as a gesture or `eventData` does */
+    function tilt(pitch: number, eventData: object = {}): void {
+      app.map!.jumpTo({ pitch });
+      app.map!.emit("pitchend", eventData);
+    }
+    const byHand = { originalEvent: new MouseEvent("mouseup") };
+    const offers = (): unknown[][] =>
+      vi
+        .mocked(showToast)
+        .mock.calls.filter(([message]) => message === THREE_D_HINT_MESSAGE);
+
+    it("comes once a visit, as a flat map is tilted by hand past 30 degrees", () => {
+      tilt(25, byHand);
+      expect(offers()).toHaveLength(0);
+
+      tilt(35, byHand);
+      expect(offers()).toHaveLength(1);
+      expect(offers()[0]![1]).toBe("info");
+
+      tilt(0, byHand);
+      tilt(40, byHand);
+      expect(offers()).toHaveLength(1);
+    });
+
+    it("does not come for the app's own camera moves", () => {
+      tilt(50);
+      tilt(50, REPLAY_CAMERA_MOVE);
+      expect(offers()).toHaveLength(0);
+    });
+
+    it("does not come in the 3D view, a replay or Wrapped, nor once 3D was used", () => {
+      for (const key of ["replayActive", "wrappedVisible"] as const) {
+        app[key] = true;
+        tilt(45, byHand);
+        app[key] = false;
+      }
+      app.threeDVisible = true;
+      tilt(45, byHand);
+      app.threeDVisible = false;
+      tilt(45, byHand);
+      expect(offers()).toHaveLength(0);
+    });
+
+    it("turns the 3D view on as the 3D button does, and goes when 3D comes on", () => {
+      tilt(45, byHand);
+      const action = offers()[0]![2] as ToastAction;
+      expect(action.label).toBe("3D");
+
+      action.run();
+      expect(app.threeDVisible).toBe(true);
+      expect(dismissToast).toHaveBeenCalledWith(THREE_D_HINT_MESSAGE);
+      // Run again with the 3D view on, it leaves it on
+      action.run();
+      expect(app.threeDVisible).toBe(true);
+    });
+
+    it("goes when the 3D view comes on another way", () => {
+      tilt(45, byHand);
+      app.threeDVisible = true;
+      expect(dismissToast).toHaveBeenCalledWith(THREE_D_HINT_MESSAGE);
+    });
+
+    it("lets go of the store and the map when destroyed", () => {
+      orientation.destroy();
+      tilt(45, byHand);
+      app.threeDVisible = true;
+      expect(offers()).toHaveLength(0);
+      expect(dismissToast).not.toHaveBeenCalled();
     });
   });
 

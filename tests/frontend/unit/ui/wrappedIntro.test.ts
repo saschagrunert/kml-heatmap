@@ -185,6 +185,19 @@ describe("Wrapped's intro", () => {
     expect(map().easeTo).toHaveBeenCalledOnce();
   });
 
+  it("fits the overview with the cloud and the globe on, so the end of that zoom cuts nothing for the relief the globe leaves out", async () => {
+    const seen: unknown[] = [];
+    map().fitBounds.mockImplementation(() => {
+      seen.push([
+        mockApp.store.get("forcedHeatCloud"),
+        mockApp.store.get("globeVisible"),
+      ]);
+      return map();
+    });
+    await openWithIntro();
+    expect(seen).toEqual([[true, true]]);
+  });
+
   it("puts the user's globe, 3D view and view back as the dialog closes", async () => {
     mockApp.store.set("threeDVisible", true);
     map().setZoom(11);
@@ -448,20 +461,72 @@ describe("Wrapped's intro", () => {
   });
 
   describe("prepared from the button", () => {
-    it("fetches the cloud's code and cuts its points for the overview, and the level below in a task of its own", async () => {
+    it("fetches the cloud's code and cuts its points for the overview, and the level below, each in a task of its own and not in the pointer's", async () => {
       map().cameraForBounds.mockReturnValue({
         center: { lng: 9, lat: 49 },
         zoom: 6.6,
         bearing: 0,
       } as never);
       prepareWrappedIntro(asMapApp(mockApp));
-      await vi.advanceTimersByTimeAsync(0);
-
+      // The code has arrived, and the task that asked for it is over
+      for (let i = 0; i < 5; i++) await Promise.resolve();
       expect(features.followHeatCloud).toHaveBeenCalledWith(mockApp);
+      expect(features.prepareHeatCloud).not.toHaveBeenCalled();
+
+      await vi.advanceTimersToNextTimerAsync();
+      expect(features.prepareHeatCloud.mock.calls).toEqual([[mockApp, [6]]]);
+      await vi.advanceTimersToNextTimerAsync();
       expect(features.prepareHeatCloud.mock.calls).toEqual([
         [mockApp, [6]],
         [mockApp, [5, 6]],
       ]);
+    });
+
+    it("cuts them once the page has a moment, where the browser tells", async () => {
+      const idle: [() => void, { timeout?: number } | undefined][] = [];
+      vi.stubGlobal(
+        "requestIdleCallback",
+        (work: () => void, options?: { timeout?: number }) =>
+          idle.push([work, options]),
+      );
+      try {
+        map().cameraForBounds.mockReturnValue({
+          center: { lng: 9, lat: 49 },
+          zoom: 6.6,
+          bearing: 0,
+        } as never);
+        prepareWrappedIntro(asMapApp(mockApp));
+        await vi.runAllTimersAsync();
+        expect(features.prepareHeatCloud).not.toHaveBeenCalled();
+        expect(idle).toHaveLength(1);
+        // Not held back for long by a busy page
+        expect(idle[0]![1]!.timeout).toBeGreaterThan(0);
+
+        idle[0]![0]();
+        expect(features.prepareHeatCloud.mock.calls).toEqual([[mockApp, [6]]]);
+        expect(idle).toHaveLength(2);
+        idle[1]![0]();
+        expect(features.prepareHeatCloud.mock.calls).toEqual([
+          [mockApp, [6]],
+          [mockApp, [5, 6]],
+        ]);
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    });
+
+    it("cuts nothing ahead once the dialog is open by then, which cuts its points itself", async () => {
+      map().cameraForBounds.mockReturnValue({
+        center: { lng: 9, lat: 49 },
+        zoom: 6.6,
+        bearing: 0,
+      } as never);
+      prepareWrappedIntro(asMapApp(mockApp));
+      for (let i = 0; i < 5; i++) await Promise.resolve();
+      mockApp.store.set("wrappedVisible", true);
+      await vi.runAllTimersAsync();
+
+      expect(features.prepareHeatCloud).not.toHaveBeenCalled();
     });
 
     it("prepares nothing under reduced motion, while open, or without data", async () => {

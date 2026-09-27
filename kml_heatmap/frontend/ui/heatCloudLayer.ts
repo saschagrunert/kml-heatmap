@@ -205,7 +205,7 @@ export interface HeatCloudStyle {
    */
   groundM: number;
   liftM: number;
-  /** How strongly the cloud is drawn, from 0 to 1 (see dimsHeatmap) */
+  /** How strongly the cloud is drawn, from 0 to 1 (see dimsHeatCloud) */
   opacity: number;
   /** Whether its pulses may run (see CLOUD_FLOW_SPACING_PX) */
   flow: boolean;

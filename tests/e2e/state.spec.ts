@@ -31,6 +31,13 @@ import {
 } from "./map";
 
 /**
+ * How long a step of a spec in the 3D view waits in software WebGL, where
+ * every frame of the heat cloud holds the page up for seconds (see the
+ * spec of the band of heights)
+ */
+const CLOUD_STEP_TIMEOUT_MS = 30000;
+
+/**
  * Whether Reset view offers itself: its button, or on a phone the row of
  * the More sheet, which is only there while the sheet is open
  */
@@ -613,10 +620,13 @@ test.describe("State Persistence", () => {
     // The 3D view in software WebGL, as in the Reset view spec above, and
     // without the relief, which this spec does not look at. A frame of the
     // cloud takes 0.6 to 2.3 s there and holds up every step of the page
-    // meanwhile, so each change of the band costs seconds: two of them,
-    // and the link is loaded without the 3D view (the unit tests restore
-    // the band with it)
-    test.setTimeout(60000);
+    // meanwhile, and the machine with it: on CI a single look at the page
+    // took up to 8 s, and a wait of 5 s timed out with the band already
+    // drawn. So every wait in the 3D view has CLOUD_STEP_TIMEOUT_MS, and the
+    // link is loaded without the 3D view (the unit tests restore the band
+    // with it)
+    test.setTimeout(180000);
+    const cloudExpect = expect.configure({ timeout: CLOUD_STEP_TIMEOUT_MS });
     await holdElevationTiles(page);
     const mobile = await usesMobileBar(page);
     await recordHeightBandUniform(page);
@@ -632,9 +642,11 @@ test.describe("State Persistence", () => {
     await toggleThreeD(page, mobile);
 
     // Every height at first, which the link leaves out
-    await expect(band).toBeVisible();
-    await expect(band).toContainText("All heights");
-    await expect.poll(() => drawnHeightBand(page)).toEqual([-2, -1, 1e6, 2e6]);
+    await cloudExpect(band).toBeVisible();
+    await cloudExpect(band).toContainText("All heights");
+    await cloudExpect
+      .poll(() => drawnHeightBand(page))
+      .toEqual([-2, -1, 1e6, 2e6]);
     expect(new URL(page.url()).searchParams.has("h")).toBe(false);
 
     // The bottom as a drag leaves it (`fill` sets the value of a range
@@ -642,14 +654,14 @@ test.describe("State Persistence", () => {
     await low.fill("4");
     await high.focus();
     await page.keyboard.press("ArrowLeft");
-    await expect(low).toHaveAttribute("aria-valuetext", "500 ft");
-    await expect(high).toHaveAttribute("aria-valuetext", "10,000 ft");
-    await expect(band).toContainText("500 to 10,000 ft");
-    await expect
+    await cloudExpect(low).toHaveAttribute("aria-valuetext", "500 ft");
+    await cloudExpect(high).toHaveAttribute("aria-valuetext", "10,000 ft");
+    await cloudExpect(band).toContainText("500 to 10,000 ft");
+    await cloudExpect
       .poll(() => new URL(page.url()).searchParams.get("h"))
       .toBe("500-10000");
     // Faded in from 425 ft and out up to 11,500 ft
-    await expect
+    await cloudExpect
       .poll(() => drawnHeightBand(page))
       .toEqual([425, 500, 10000, 11500]);
 

@@ -628,12 +628,28 @@ lines; the Heatmap switch, its button, the sheet row, the saved state and
 the link are the heatmap's as before. It draws what the heatmap would: the
 flights the year and aircraft filters keep, the selected ones alone while
 isolated, nothing while the switch is off, at the heatmap's dimmed opacity
-under a colour layer, the aviation chart or a selection's lines
-(`dimsHeatmap`), and at a quarter (`CLOUD_REPLAY_OPACITY`) and without its
-pulses while a replay runs, where the flat heatmap is hidden. No style
-layer draws a glow at a height: `heatmap` lies on the ground, `circle` has
-no depth, and deck.gl or three.js would be several hundred kilobytes for
-one layer.
+under the aviation chart or a selection's lines (`dimsHeatCloud`; not under
+a colour layer as the flat heatmap, since the ribbons are drawn in front of
+the cloud, which dimmed for them was a faint halo round the flights),
+and at a quarter (`CLOUD_REPLAY_OPACITY`) and without its pulses while a
+replay runs, where the flat heatmap is hidden; the Heatmap button stays
+pressed then (`heatCloud` and `heatmapVisible`), and disabled as for every
+replay. Wrapped's intro forces the cloud on (`forcedHeatCloud`) with a
+style of its own: the flights of the year and aircraft filters on flat
+ground (it is on the globe), at full strength, whatever the switch,
+Isolate, a colour layer or a selection say, and the switches are not
+touched. Its button cuts those points ahead of time, in idle callbacks
+rather than in the pointer's event, with that key and with the flights
+smoothed aside rather than in `groundedFlights`, whose curves the ribbons
+stand on, and kept apart from the 3D view's (shared where both stand on
+flat ground with nothing isolated), and the intro fits the overview in one
+update with the cloud and the globe, so the end of that zoom finds them
+rather than cutting the cloud and the ribbons for the relief the globe
+leaves out. Points the cloud does not draw (cut ahead, left while the
+switch is off, or the other cloud's) go after `CLOUD_IDLE_MS` (15 s). No
+style layer draws a glow at a height: `heatmap` lies on the ground,
+`circle` has no depth, and deck.gl or three.js would be several hundred
+kilobytes for one layer.
 
 `calculations/heatCloud.ts` makes the data, once per dataset, filter,
 isolated selection, relief level and relief on or off (the points of the
@@ -730,7 +746,10 @@ takes up the state of its context anew after a custom layer; a lost context
 drops them (`webglcontextlost`), and the style MapLibre gets back has no
 custom layers, so `ui/heatCloud.ts` adds the layer again on `style.load`,
 and on `styledata` after a new base style. Shaders that do not compile turn
-it off for good with one logged error, and the flat heatmap stays. It only
+it off with one logged error, and the flat heatmap stays, until the context
+is restored, where they are tried again (the replay of all flights alike);
+what fails while the context is lost (`isContextLost`: every GL object is
+null and no shader compiles) is no failure (`LayerGl`). It only
 draws: a custom layer has no features for `queryRenderedFeatures`, and the
 ribbons stay what is hovered and clicked. An exported image has it, since
 the canvas is read in the frame that drew it (`withMapStill`). It is drawn
