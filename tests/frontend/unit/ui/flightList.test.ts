@@ -32,6 +32,9 @@ const pathInfo: PathInfo[] = [
     start_airport: "EDAQ Halle-Oppin",
     end_airport: "EDDP Leipzig",
     max_altitude_ft: 3500,
+    landings: 1,
+    touch_and_goes: 3,
+    go_arounds: 0,
   },
   {
     id: 12,
@@ -47,6 +50,9 @@ const pathInfo: PathInfo[] = [
     year: 2025,
     start_airport: "EDDP Leipzig",
     end_airport: "Somewhere <b>odd</b>",
+    landings: 2,
+    touch_and_goes: 1,
+    go_arounds: 0,
   },
 ];
 
@@ -137,10 +143,11 @@ describe("FlightList", () => {
 
   it("lists every flight of the filter in file order, year only", () => {
     expect(cells()).toEqual([
-      ["EDAQ → EDDP", "D-EAGJ", "2025", "0:20", "11", "3,500"],
-      ["EDDP → EDAQ", "D-ESST", "2024", "—", "38", "5,200"],
+      ["EDAQ → EDDP", "D-EAGJ", "2025", "0:20", "11", "3,500", "1"],
+      // No times, so no landings either
+      ["EDDP → EDAQ", "D-ESST", "2024", "—", "38", "5,200", "—"],
       // No code, no aircraft, no segments: the stand-ins, and escaped
-      ["EDDP → Somewhere <b>odd</b>", "—", "2025", "—", "—", "—"],
+      ["EDDP → Somewhere <b>odd</b>", "—", "2025", "—", "—", "—", "2"],
     ]);
     expect(panel().querySelector("tbody b")).toBeNull();
     expect(count()).toBe("3 flights");
@@ -149,6 +156,40 @@ describe("FlightList", () => {
 
     expect(routes()).toEqual(["EDAQ → EDDP", "EDDP → Somewhere <b>odd</b>"]);
     expect(count()).toBe("2 flights");
+  });
+
+  it("says the touch-and-goes with the full stops", () => {
+    const landings = COLUMNS.findIndex((column) => column.key === "landings");
+    const titles = rows().map((row) =>
+      row.children[landings]!.getAttribute("title"),
+    );
+
+    expect(titles).toEqual([
+      "1 full stop, 3 touch-and-goes",
+      null,
+      "2 full stops, 1 touch-and-go",
+    ]);
+    expect(
+      header("landings").querySelector("button")!.getAttribute("title"),
+    ).toBe("Full-stop landings");
+  });
+
+  it("sorts by the landings, the flights without them last", () => {
+    const button = header("landings").querySelector("button")!;
+
+    button.click();
+    expect(routes()).toEqual([
+      "EDAQ → EDDP",
+      "EDDP → Somewhere <b>odd</b>",
+      "EDDP → EDAQ",
+    ]);
+
+    button.click();
+    expect(routes()).toEqual([
+      "EDDP → Somewhere <b>odd</b>",
+      "EDAQ → EDDP",
+      "EDDP → EDAQ",
+    ]);
   });
 
   it("has a column header with a sort button for every column", () => {
@@ -358,10 +399,25 @@ describe("FlightList", () => {
 
 describe("the list's rows", () => {
   const paths: PathInfo[] = [
-    { id: 1, aircraft_registration: "D-B", max_altitude_ft: 2000 },
-    { id: 2, aircraft_registration: "D-a", max_altitude_ft: 900 },
+    {
+      id: 1,
+      aircraft_registration: "D-B",
+      max_altitude_ft: 2000,
+      landings: 2,
+    },
+    {
+      id: 2,
+      aircraft_registration: "D-a",
+      max_altitude_ft: 900,
+      landings: 0,
+    },
     { id: 3, max_altitude_ft: 2000 },
-    { id: 4, aircraft_registration: "D-10", aircraft_type: "C172" },
+    {
+      id: 4,
+      aircraft_registration: "D-10",
+      aircraft_type: "C172",
+      landings: 1,
+    },
   ];
   const all = flightRows(paths, new Map([[1, { km: 5 }]]));
   const ids = (rows: typeof all): number[] => rows.map((row) => row.path.id);
@@ -382,6 +438,13 @@ describe("the list's rows", () => {
     // Text case-insensitively, digits by their value
     expect(ids(sortRows(all, { key: "aircraft", descending: false }))).toEqual([
       4, 2, 1, 3,
+    ]);
+    // No landing is a figure; a flight without timestamps has none
+    expect(ids(sortRows(all, { key: "landings", descending: false }))).toEqual([
+      2, 4, 1, 3,
+    ]);
+    expect(ids(sortRows(all, { key: "landings", descending: true }))).toEqual([
+      1, 4, 2, 3,
     ]);
     expect(sortRows(all, null)).toBe(all);
     expect(sortRows(all, { key: "nothing", descending: false })).toBe(all);

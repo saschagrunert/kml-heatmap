@@ -4,6 +4,7 @@ import contextlib
 import csv
 import hashlib
 import http.client
+import math
 import os
 import re
 import ssl
@@ -40,10 +41,13 @@ _ROUTE_DATE_SUFFIX = re.compile(rf"\s+-\s+{DATE_PATTERN.pattern}\s*$")
 __all__ = [
     "REQUIRE_DATABASE_ENV",
     "AirportNames",
+    "AirportRecord",
+    "RunwayEnd",
     "airport_icao_code",
     "database_fingerprint",
     "extract_icao_codes_from_name",
     "load_airport_database",
+    "load_runway_database",
     "lookup_airport_coordinates",
     "lookup_airport_country",
     "lookup_airport_elevation",
@@ -73,6 +77,18 @@ REQUIRED_COLUMNS = ("ident", "name", "latitude_deg", "longitude_deg")
 # Set to "1" to fail instead of running without airport names (CI, deploys)
 REQUIRE_DATABASE_ENV = "KML_HEATMAP_REQUIRE_AIRPORT_DB"
 
+# The runways of the same database, cached the same way: the landing
+# detector (kml_heatmap.landings) snaps the track of a touchdown to them
+RUNWAYS_URL = "https://davidmegginson.github.io/ourairports-data/runways.csv"
+RUNWAYS_CACHE_FILE = CACHE_DIR / "runways.csv"
+RUNWAYS_LOCK_FILE = CACHE_DIR / "runways.lock"
+RUNWAYS_DOWNLOAD_FAILED_MARKER = CACHE_DIR / "runways.download-failed"
+# The list has about 48,000 rows
+MIN_RUNWAY_ROWS = 20_000
+RUNWAY_COLUMNS = ("airport_ident", "le_ident", "he_ident", "closed")
+# A runway designator: a number from 01 to 36, and a letter for parallels
+_DESIGNATOR = re.compile(r"^(0?[1-9]|[12][0-9]|3[0-6])([LCR]?)$")
+
 
 class AirportRecord(NamedTuple):
     """One airport of the database; the elevation is missing for some."""
@@ -84,14 +100,61 @@ class AirportRecord(NamedTuple):
     elevation_m: float | None = None
 
 
+class RunwayEnd(NamedTuple):
+    """One end of a runway: its designator ("29", "08L") and true heading."""
+
+    designator: str
+    heading: float
+
+
+class _CsvDatabase(NamedTuple):
+    """A file of OurAirports, where it comes from and where it is cached."""
+
+    name: str
+    url: str
+    cache_file: Path
+    lock_file: Path
+    failed_marker: Path
+    min_rows: int
+    columns: tuple[str, ...]
+
+
+def _airports_csv() -> _CsvDatabase:
+    """airports.csv, from the module's settings as they are now."""
+    return _CsvDatabase(
+        "airport database",
+        OURAIRPORTS_URL,
+        CACHE_FILE,
+        CACHE_LOCK_FILE,
+        DOWNLOAD_FAILED_MARKER,
+        MIN_DOWNLOAD_ROWS,
+        REQUIRED_COLUMNS,
+    )
+
+
+def _runways_csv() -> _CsvDatabase:
+    """runways.csv, from the module's settings as they are now."""
+    return _CsvDatabase(
+        "runway database",
+        RUNWAYS_URL,
+        RUNWAYS_CACHE_FILE,
+        RUNWAYS_LOCK_FILE,
+        RUNWAYS_DOWNLOAD_FAILED_MARKER,
+        MIN_RUNWAY_ROWS,
+        RUNWAY_COLUMNS,
+    )
+
+
 # Global cache for parsed airport data
 _airport_cache: dict[str, AirportRecord] | None = None
+# The runway ends of every airport, by its ident
+_runway_cache: dict[str, tuple[RunwayEnd, ...]] | None = None
 
 # Thread lock for database loading (prevents race conditions within a single process)
 _cache_lock = threading.Lock()
 
 
-def _is_valid_csv_file(path: Path) -> bool:
+def _is_valid_csv_file(path: Path, columns: tuple[str, ...] = REQUIRED_COLUMNS) -> bool:
     """Check that a CSV file is non-empty, complete and has the required header."""
     try:
         if path.stat().st_size == 0:
@@ -103,60 +166,69 @@ def _is_valid_csv_file(path: Path) -> bool:
         if last_byte != b"\n":
             return False  # truncated download
         header = header_line.decode("utf-8", errors="replace").strip()
-        columns = next(csv.reader([header]))
+        header_columns = next(csv.reader([header]))
     except OSError, csv.Error, StopIteration, UnicodeDecodeError:
         return False
 
-    return all(column in columns for column in REQUIRED_COLUMNS)
+    return all(column in header_columns for column in columns)
 
 
-def _is_cache_valid() -> bool:
-    """Check if cached airport data is present, recent and well-formed."""
-    if not CACHE_FILE.exists():
+def _is_cache_valid(database: _CsvDatabase | None = None) -> bool:
+    """Check if a cached database is present, recent and well-formed.
+
+    ``database`` is airports.csv unless it names another file.
+    """
+    database = database or _airports_csv()
+    if not database.cache_file.exists():
         return False
 
-    file_age_seconds = time.time() - CACHE_FILE.stat().st_mtime
+    file_age_seconds = time.time() - database.cache_file.stat().st_mtime
     file_age_days = file_age_seconds / (24 * 3600)
     if file_age_days >= CACHE_MAX_AGE_DAYS:
         return False
 
-    return _is_valid_csv_file(CACHE_FILE)
+    return _is_valid_csv_file(database.cache_file, database.columns)
 
 
-def _recent_download_failure() -> bool:
+def _recent_download_failure(database: _CsvDatabase | None = None) -> bool:
     """True when a download failed less than DOWNLOAD_RETRY_SECONDS ago."""
+    database = database or _airports_csv()
     try:
-        age = time.time() - DOWNLOAD_FAILED_MARKER.stat().st_mtime
+        age = time.time() - database.failed_marker.stat().st_mtime
     except OSError:
         return False
     return 0 <= age < DOWNLOAD_RETRY_SECONDS
 
 
-def _record_download_failure() -> None:
+def _record_download_failure(database: _CsvDatabase | None = None) -> None:
+    database = database or _airports_csv()
     with contextlib.suppress(OSError):
-        DOWNLOAD_FAILED_MARKER.touch()
+        database.failed_marker.touch()
 
 
-def _clear_download_failure() -> None:
+def _clear_download_failure(database: _CsvDatabase | None = None) -> None:
+    database = database or _airports_csv()
     with contextlib.suppress(OSError):
-        DOWNLOAD_FAILED_MARKER.unlink()
+        database.failed_marker.unlink()
 
 
-def _fetch_airport_database(cache_dir: Path) -> bool:
-    """Download the database into the cache; False on any failure."""
+def _fetch_database(cache_dir: Path, database: _CsvDatabase) -> bool:
+    """Download a database into the cache; False on any failure."""
     tmp_path: Path | None = None
+    name = database.name
     try:
-        logger.info("📥 Downloading OurAirports database...")
+        logger.info("📥 Downloading the OurAirports %s...", name)
         context = ssl.create_default_context()
-        with urlopen(  # nosec B310
-            OURAIRPORTS_URL, timeout=DOWNLOAD_TIMEOUT_SECONDS, context=context
+        with urlopen(  # noqa: S310 # nosec B310
+            database.url, timeout=DOWNLOAD_TIMEOUT_SECONDS, context=context
         ) as response:
             data = response.read(MAX_DOWNLOAD_BYTES + 1)
             content_length = response.headers.get("Content-Length")
 
         if len(data) > MAX_DOWNLOAD_BYTES:
             logger.warning(
-                "✗ Airport database exceeds %d MB, refusing to cache it",
+                "✗ The %s exceeds %d MB, refusing to cache it",
+                name,
                 MAX_DOWNLOAD_BYTES // (1024 * 1024),
             )
             return False
@@ -169,36 +241,41 @@ def _fetch_airport_database(cache_dir: Path) -> bool:
             and len(data) != int(content_length)
         ):
             logger.warning(
-                "✗ Airport database download is incomplete (%d of %s bytes)",
+                "✗ The %s download is incomplete (%d of %s bytes)",
+                name,
                 len(data),
                 content_length,
             )
             return False
         rows = data.count(b"\n")
-        if rows < MIN_DOWNLOAD_ROWS:
+        if rows < database.min_rows:
             logger.warning(
-                "✗ Airport database download has only %d rows, expected at least %d",
+                "✗ The %s download has only %d rows, expected at least %d",
+                name,
                 rows,
-                MIN_DOWNLOAD_ROWS,
+                database.min_rows,
             )
             return False
 
         with tempfile.NamedTemporaryFile(
-            dir=cache_dir, prefix="airports.", suffix=".tmp", delete=False
+            dir=cache_dir,
+            prefix=database.cache_file.stem + ".",
+            suffix=".tmp",
+            delete=False,
         ) as tmp:
             tmp_path = Path(tmp.name)
             tmp.write(data)
 
-        if not _is_valid_csv_file(tmp_path):
-            logger.warning("✗ Downloaded airport database is empty or invalid")
+        if not _is_valid_csv_file(tmp_path, database.columns):
+            logger.warning("✗ The downloaded %s is empty or invalid", name)
             return False
 
         # NamedTemporaryFile creates the file with mode 0600; a shared cache
         # directory (a build container, a CI runner) needs it readable
         os.chmod(tmp_path, REGULAR_FILE_MODE)
-        os.replace(tmp_path, CACHE_FILE)
+        os.replace(tmp_path, database.cache_file)
         tmp_path = None
-        logger.info("✓ Downloaded %.1f MB airport database", len(data) / 1024 / 1024)
+        logger.info("✓ Downloaded the %.1f MB %s", len(data) / 1024 / 1024, name)
         return True
 
     # http.client.IncompleteRead (a connection dropped mid-body) is no OSError
@@ -208,7 +285,7 @@ def _fetch_airport_database(cache_dir: Path) -> bool:
         http.client.HTTPException,
         ValueError,
     ) as e:
-        logger.warning("✗ Failed to download airport database: %s", e)
+        logger.warning("✗ Failed to download the %s: %s", name, e)
         return False
     finally:
         if tmp_path is not None:
@@ -216,14 +293,16 @@ def _fetch_airport_database(cache_dir: Path) -> bool:
                 tmp_path.unlink()
 
 
-def _download_airport_database() -> bool:
+def _download_airport_database(database: _CsvDatabase | None = None) -> bool:
     """Download the OurAirports database into the cache atomically.
 
-    A failed attempt is remembered in the cache directory and not retried
-    for DOWNLOAD_RETRY_SECONDS, so an offline run pays the timeout once
-    instead of once per worker process.
+    ``database`` is airports.csv unless it names another file. A failed
+    attempt is remembered in the cache directory and not retried for
+    DOWNLOAD_RETRY_SECONDS, so an offline run pays the timeout once instead
+    of once per worker process.
     """
-    cache_dir = CACHE_FILE.parent
+    database = database or _airports_csv()
+    cache_dir = database.cache_file.parent
     try:
         cache_dir.mkdir(parents=True, exist_ok=True)
     except OSError as e:
@@ -234,19 +313,19 @@ def _download_airport_database() -> bool:
         logger.warning("✗ Airport cache directory is not writable: %s", cache_dir)
         return False
 
-    if _recent_download_failure():
+    if _recent_download_failure(database):
         logger.debug(
-            "Skipping airport database download: the last attempt failed less "
-            "than %d s ago",
+            "Skipping the %s download: the last attempt failed less than %d s ago",
+            database.name,
             DOWNLOAD_RETRY_SECONDS,
         )
         return False
 
-    if _fetch_airport_database(cache_dir):
-        _clear_download_failure()
+    if _fetch_database(cache_dir, database):
+        _clear_download_failure(database)
         return True
 
-    _record_download_failure()
+    _record_download_failure(database)
     return False
 
 
@@ -278,14 +357,16 @@ def _read_airport_csv(path: Path) -> dict[str, AirportRecord]:
     return airports
 
 
-def _ensure_cache_file() -> None:
+def _ensure_cache_file(database: _CsvDatabase | None = None) -> None:
     """Download the database when the cache is stale, under a file lock.
 
     The lock coordinates the processes of one run (Unix only). A cache
     directory that cannot be written (read-only mount, foreign owner) only
     disables the lock; loading continues. Only the download runs under the
     lock: parsing the CSV is per process and must not serialize the workers.
+    ``database`` is airports.csv unless it names another file.
     """
+    database = database or _airports_csv()
     try:
         CACHE_DIR.mkdir(parents=True, exist_ok=True)
     except OSError as e:
@@ -294,10 +375,12 @@ def _ensure_cache_file() -> None:
     lock_file = None
     if HAS_FCNTL:
         try:
-            lock_file = open(CACHE_LOCK_FILE, "w", encoding="utf-8")  # noqa: SIM115
+            lock_file = open(database.lock_file, "w", encoding="utf-8")  # noqa: SIM115
             fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
         except OSError as e:
-            logger.debug("Cannot lock %s, continuing without: %s", CACHE_LOCK_FILE, e)
+            logger.debug(
+                "Cannot lock %s, continuing without: %s", database.lock_file, e
+            )
             if lock_file is not None:
                 lock_file.close()
             lock_file = None
@@ -305,9 +388,9 @@ def _ensure_cache_file() -> None:
     try:
         # Check again after acquiring the lock: another process might have
         # downloaded the database while we waited
-        if not _is_cache_valid():
-            logger.debug("Airport database cache is stale, missing or invalid")
-            _download_airport_database()
+        if not _is_cache_valid(database):
+            logger.debug("The %s cache is stale, missing or invalid", database.name)
+            _download_airport_database(database)
     finally:
         if lock_file:
             try:
@@ -378,6 +461,121 @@ def use_airport_database(airports: dict[str, AirportRecord]) -> None:
     """Use a database another process loaded instead of loading it here."""
     global _airport_cache
     _airport_cache = airports
+
+
+def _designator(ident: str | None) -> str | None:
+    """A runway end's designator with two digits ("08L"), None for a pad."""
+    match = _DESIGNATOR.match((ident or "").strip().upper())
+    if match is None:
+        return None
+    return f"{int(match.group(1)):02d}{match.group(2)}"
+
+
+def _float(text: str | None) -> float | None:
+    try:
+        value = float(text or "")
+    except ValueError:
+        return None
+    return value if math.isfinite(value) else None
+
+
+def _true_bearing(lat0: float, lon0: float, lat1: float, lon1: float) -> float:
+    dx = (lon1 - lon0) * math.cos(math.radians((lat0 + lat1) / 2))
+    return math.degrees(math.atan2(dx, lat1 - lat0)) % 360
+
+
+def _runway_ends(row: dict[str, str]) -> list[RunwayEnd]:
+    """The two ends of a runway row with their true headings.
+
+    The heading of an end is the one the list gives, else the bearing from
+    its threshold to the other one, else its designator: that one is
+    magnetic, off by the variation, which still tells the ends of most
+    fields apart.
+    """
+    low = _designator(row.get("le_ident"))
+    high = _designator(row.get("he_ident"))
+    designated = low or high
+    if designated is None:
+        return []
+    low_heading = _float(row.get("le_heading_degT"))
+    high_heading = _float(row.get("he_heading_degT"))
+    coordinates = [
+        _float(row.get(key))
+        for key in (
+            "le_latitude_deg",
+            "le_longitude_deg",
+            "he_latitude_deg",
+            "he_longitude_deg",
+        )
+    ]
+    if low_heading is None and None not in coordinates:
+        lat0, lon0, lat1, lon1 = (value or 0.0 for value in coordinates)
+        if (lat0, lon0) != (lat1, lon1):
+            low_heading = _true_bearing(lat0, lon0, lat1, lon1)
+    if low_heading is None and high_heading is not None:
+        low_heading = high_heading + 180
+    if low_heading is None:
+        low_heading = int(designated[:2]) * 10 + (0 if low else 180)
+    if high_heading is None:
+        high_heading = low_heading + 180
+    return [
+        RunwayEnd(designator, heading % 360)
+        for designator, heading in ((low, low_heading), (high, high_heading))
+        if designator is not None
+    ]
+
+
+def _read_runway_csv(path: Path) -> dict[str, tuple[RunwayEnd, ...]]:
+    """The ends of the open runways of every airport, by its ident."""
+    runways: dict[str, list[RunwayEnd]] = {}
+    with open(path, encoding="utf-8") as f:
+        for row in csv.DictReader(f):
+            ident = (row.get("airport_ident") or "").strip().upper()
+            if len(ident) != 4 or (row.get("closed") or "0").strip() == "1":
+                continue
+            ends = _runway_ends(row)
+            if ends:
+                runways.setdefault(ident, []).extend(ends)
+    return {ident: tuple(ends) for ident, ends in runways.items()}
+
+
+def load_runway_database() -> dict[str, tuple[RunwayEnd, ...]]:
+    """The runway ends of every airport, from the cache like the airports.
+
+    Downloaded like ``load_airport_database`` does it, and required under
+    the same ``KML_HEATMAP_REQUIRE_AIRPORT_DB``. Without it the landings
+    are still counted, without their runways.
+
+    Raises:
+        AirportDatabaseError: When the database is required and could not be
+            loaded.
+    """
+    global _runway_cache
+    if _runway_cache is not None:
+        return _runway_cache
+    with _cache_lock:
+        if _runway_cache is not None:
+            return _runway_cache
+        database = _runways_csv()
+        _ensure_cache_file(database)
+        required = _database_required()
+        runways: dict[str, tuple[RunwayEnd, ...]] = {}
+        if database.cache_file.exists() and (
+            not required or _is_valid_csv_file(database.cache_file, database.columns)
+        ):
+            try:
+                runways = _read_runway_csv(database.cache_file)
+            except (OSError, csv.Error, ValueError, UnicodeDecodeError) as e:
+                logger.warning("Failed to load the runway cache: %s", e)
+        if required and not runways:
+            raise AirportDatabaseError(
+                f"The OurAirports runways could not be loaded from "
+                f"{database.cache_file}, and {REQUIRE_DATABASE_ENV}=1 requires them"
+            )
+        if not runways:
+            logger.warning("Runway database unavailable - touchdowns get no runway")
+        _runway_cache = runways
+        return runways
 
 
 # The last fingerprint computed in this process, keyed by the file's path

@@ -1545,16 +1545,23 @@
 body:has(.mobile-bar) .kh-flights-scroll {
   padding-bottom: 0;
 }
+/* Seven columns, one of them with its sort arrow, fit the 316 px rail in
+   the small size with 3 px on either side of a cell; the phone's sheet is
+   wider and keeps the panel's size */
 .kh-flights {
   width: 100%;
   border-collapse: collapse;
+  font-size: var(--text-xs);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+}
+body:has(.mobile-bar) .kh-flights {
+  font-size: inherit;
 }
 .kh-flights th,
 .kh-flights td {
   height: 28px;
-  padding: 0 var(--space-xs);
+  padding: 0 3px;
   text-align: left;
   font-weight: 400;
 }

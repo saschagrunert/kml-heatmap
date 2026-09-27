@@ -138,16 +138,18 @@ jobs:
       - name: Compute the weekly cache key
         id: week
         run: echo "week=$(date +%G-%V)" >> "$GITHUB_OUTPUT"
-      # Only the CSV: a failed download leaves a marker file behind that
+      # Only the CSVs: a failed download leaves a marker file behind that
       # suppresses retries for an hour, and a cache saved with it would hand
       # that to every job restoring it. During an outage the build falls back
       # to an earlier week's copy.
       - name: Cache the OurAirports database
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: ~/.cache/kml-heatmap/airports.csv
-          key: airports-${{ steps.week.outputs.week }}
-          restore-keys: airports-
+          path: |
+            ~/.cache/kml-heatmap/airports.csv
+            ~/.cache/kml-heatmap/runways.csv
+          key: ourairports-${{ steps.week.outputs.week }}
+          restore-keys: ourairports-
       # The elevation tiles the ground under the flights is sampled from
       # (kml_heatmap/terrain.py), with the decoded pixels of each beside it
       # (.pixels): about 90 MB for data/, half of it each. A tile never
@@ -259,17 +261,18 @@ jobs:
           echo "source maps shipped: $maps"
           test "$maps" = "False"
       # Loads the parser, the minifiers, the renderer and the templates, which
-      # `--version` alone never imports. The airport fixture stands in for
-      # the OurAirports download, and `--no-terrain` keeps the elevation
-      # tiles from being fetched on every run: the sampling has tests of
-      # its own, and the image below builds without a network.
+      # `--version` alone never imports. The airport and runway fixtures
+      # stand in for the OurAirports downloads, and `--no-terrain` keeps the
+      # elevation tiles from being fetched on every run: the sampling has
+      # tests of its own, and the image below builds without a network.
       - name: Generate a site with the installed package
         working-directory: ${{ runner.temp }}
         env:
           KML_HEATMAP_CACHE_DIR: ${{ runner.temp }}/smoke/cache
         run: |
           mkdir -p smoke/input smoke/cache
-          cp "$GITHUB_WORKSPACE/tests/fixtures/airports.csv" smoke/cache/
+          cp "$GITHUB_WORKSPACE/tests/fixtures/airports.csv" \
+            "$GITHUB_WORKSPACE/tests/fixtures/runways.csv" smoke/cache/
           kml=("$GITHUB_WORKSPACE"/data/*.kml)
           cp "${kml[@]:0:3}" smoke/input/
           "$RUNNER_TEMP/wheel-venv/bin/kml-heatmap" --version
@@ -282,6 +285,7 @@ jobs:
           done
           # Still the fixture, so nothing was downloaded
           cmp "$GITHUB_WORKSPACE/tests/fixtures/airports.csv" smoke/cache/airports.csv
+          cmp "$GITHUB_WORKSPACE/tests/fixtures/runways.csv" smoke/cache/runways.csv
 
   # The sites the e2e jobs test, built once for all of them. The published
   # site has a tile API key and a default build has none, so there are two:
@@ -323,9 +327,11 @@ jobs:
       - name: Cache the OurAirports database
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: ~/.cache/kml-heatmap/airports.csv
-          key: airports-${{ steps.week.outputs.week }}
-          restore-keys: airports-
+          path: |
+            ~/.cache/kml-heatmap/airports.csv
+            ~/.cache/kml-heatmap/runways.csv
+          key: ourairports-${{ steps.week.outputs.week }}
+          restore-keys: ourairports-
       # The elevation tiles, see the unit job
       - name: Cache the elevation tiles
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -520,8 +526,8 @@ jobs:
   # snapshots were generated in (see CONTRIBUTING.md). The snapshots allow no
   # differing pixel, so the site is not the one of data/, whose figures move
   # with every flight, but the fixture site of scripts/build_visual_site.py:
-  # a few committed flights, the airport fixture in place of the OurAirports
-  # download and a fixed build stamp. The unit job builds it, since the
+  # a few committed flights, the airport and runway fixtures in place of the
+  # OurAirports downloads and a fixed build stamp. The unit job builds it, since the
   # package needs a Python the image does not carry.
   #
   # The image tag has to match the
@@ -650,15 +656,15 @@ jobs:
       # The image itself is not published
       - name: Build the container image
         run: docker build -t kml-heatmap .
-      # Runs the image the way the Makefile does, with the airport fixture in
-      # place of the OurAirports download. Without a network the elevation
+      # Runs the image the way the Makefile does, with the airport and runway
+      # fixtures in place of the OurAirports downloads. Without a network the elevation
       # tiles cannot be fetched either, which the build has to get through
       # with the ground left out.
       - name: Generate a site with the image
         run: |
           smoke="$RUNNER_TEMP/smoke"
           mkdir -p "$smoke/input" "$smoke/site" "$smoke/cache"
-          cp tests/fixtures/airports.csv "$smoke/cache/"
+          cp tests/fixtures/airports.csv tests/fixtures/runways.csv "$smoke/cache/"
           kml=(data/*.kml)
           cp "${kml[@]:0:3}" "$smoke/input/"
           docker run --rm --network none --user "$(id -u):$(id -g)" -e HOME=/tmp \
@@ -672,6 +678,7 @@ jobs:
           done
           # Still the fixture, and without a network nothing else was fetched
           cmp tests/fixtures/airports.csv "$smoke/cache/airports.csv"
+          cmp tests/fixtures/runways.csv "$smoke/cache/runways.csv"
       # The same run as the image's own user (USER app, no home directory),
       # which the --user flag above bypasses. The mounts are world-writable
       # because that user exists only inside the image.
@@ -679,7 +686,7 @@ jobs:
         run: |
           smoke="$RUNNER_TEMP/smoke-app"
           mkdir -p "$smoke/input" "$smoke/site" "$smoke/cache"
-          cp tests/fixtures/airports.csv "$smoke/cache/"
+          cp tests/fixtures/airports.csv tests/fixtures/runways.csv "$smoke/cache/"
           kml=(data/*.kml)
           cp "${kml[@]:0:3}" "$smoke/input/"
           chmod -R a+rwX "$smoke"
@@ -799,9 +806,11 @@ jobs:
       - name: Cache the OurAirports database
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: ~/.cache/kml-heatmap/airports.csv
-          key: airports-${{ steps.week.outputs.week }}
-          restore-keys: airports-
+          path: |
+            ~/.cache/kml-heatmap/airports.csv
+            ~/.cache/kml-heatmap/runways.csv
+          key: ourairports-${{ steps.week.outputs.week }}
+          restore-keys: ourairports-
       # The elevation tiles, see the unit job
       - name: Cache the elevation tiles
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0

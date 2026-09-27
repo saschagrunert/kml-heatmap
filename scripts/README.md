@@ -107,9 +107,10 @@ Builds `visual-site/`, the site the visual snapshots are compared against
 (see the "Visual snapshots" section of `CONTRIBUTING.md`), from the fixture
 flights in `tests/fixtures/visual/`. The snapshots allow no differing pixel,
 so the script pins what would otherwise vary from build to build: the build
-time and commit the statistics panel prints, the airport database
-(`tests/fixtures/airports.csv` in a throwaway cache directory, so nothing is
-downloaded) and the tile API key. Run `npm run build` first.
+time and commit the statistics panel prints, the airport and runway databases
+(`tests/fixtures/airports.csv` and `runways.csv` in a throwaway cache
+directory, so nothing is downloaded) and the tile API key. Run
+`npm run build` first.
 
 ```bash
 python scripts/build_visual_site.py

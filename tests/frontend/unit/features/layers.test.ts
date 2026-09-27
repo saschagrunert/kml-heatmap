@@ -81,7 +81,7 @@ describe("layers feature", () => {
 
   describe("calculateAltitudeRange with exact path ranges", () => {
     it("widens the rounded segment range to the exact per-path values", () => {
-      // Segments carry 100 ft steps; path_info carries what was measured
+      // Segments carry 20 ft steps; path_info carries what was measured
       const range = calculateAltitudeRange(
         [segmentOf({ path_id: 1, altitude_ft: 10400 })],
         { min: 0, max: 10000 },

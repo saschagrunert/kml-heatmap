@@ -3,7 +3,10 @@
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import type { Popup } from "maplibre-gl";
-import { listFlights } from "../../../../kml_heatmap/frontend/ui/airportFlights";
+import {
+  listFlights,
+  runwayUse,
+} from "../../../../kml_heatmap/frontend/ui/airportFlights";
 import type { PathInfo } from "../../../../kml_heatmap/frontend/types";
 import {
   asMapApp,
@@ -182,6 +185,41 @@ describe("listFlights", () => {
     expect(pressed()).toEqual(["false", "false", "true"]);
   });
 
+  it("shows the runways the flights of the filter touched down on", () => {
+    mockApp.currentData = createDataset([
+      { ...pathInfo[0]!, touchdowns: [["EDDP", "26R"]] },
+      {
+        ...pathInfo[1]!,
+        touchdowns: [
+          ["EDDP", "08L"],
+          ["EDDP", "26R"],
+          ["EDAQ", "29"],
+        ],
+      },
+      pathInfo[2]!,
+    ]);
+    const { popup, container } = openPopup();
+
+    listFlights(asMapApp(mockApp), popup, "EDDP Leipzig");
+
+    const labels = [...container.querySelectorAll(".popup-section-label")];
+    expect(labels.map((label) => label.textContent)).toEqual([
+      "Runways",
+      "Select a flight",
+    ]);
+    const runways = labels[0]!.nextElementSibling!;
+    expect(runways.className).toBe("kh-popup-runways");
+    expect(runways.textContent).toBe("RWY 26R · 67%, RWY 08L · 33%");
+  });
+
+  it("shows no runways where no flight has them", () => {
+    const { popup, container } = openPopup();
+
+    listFlights(asMapApp(mockApp), popup, "EDDP Leipzig");
+
+    expect(container.textContent).not.toContain("Runways");
+  });
+
   it("closes on Escape from anywhere inside the popup", () => {
     const { popup, mock, container } = openPopup();
     listFlights(asMapApp(mockApp), popup, "EDDP Leipzig");
@@ -197,5 +235,37 @@ describe("listFlights", () => {
     );
     expect(mock.isOpen()).toBe(false);
     expect(mock.remove).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("runwayUse", () => {
+  const flights: PathInfo[] = [
+    {
+      id: 1,
+      touchdowns: [
+        ["EDAQ", "29"],
+        ["EDAQ", "29"],
+        ["EDAQ", null],
+      ],
+    },
+    {
+      id: 2,
+      touchdowns: [
+        ["EDAQ", "11"],
+        ["EDDP", "26R"],
+      ],
+    },
+    { id: 3 },
+  ];
+
+  it("names the runways of one airport, the most used first", () => {
+    expect(runwayUse(flights, "EDAQ")).toBe("RWY 29 · 67%, RWY 11 · 33%");
+    expect(runwayUse(flights, "EDDP")).toBe("RWY 26R · 100%");
+  });
+
+  it("is empty without a code or without touchdowns there", () => {
+    expect(runwayUse(flights, undefined)).toBe("");
+    expect(runwayUse(flights, "LOWW")).toBe("");
+    expect(runwayUse([], "EDAQ")).toBe("");
   });
 });

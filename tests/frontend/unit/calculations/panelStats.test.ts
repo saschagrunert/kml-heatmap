@@ -11,6 +11,7 @@ import {
   calculateFilteredStatistics,
   filterStatistics,
   filterStatisticsInSlices,
+  landingTotals,
 } from "../../../../kml_heatmap/frontend/calculations/panelStats";
 import { calculateTotalDistance } from "../../../../kml_heatmap/frontend/calculations/statistics";
 import { datasetIndex } from "../../../../kml_heatmap/frontend/calculations/datasetIndex";
@@ -205,7 +206,7 @@ describe("panel statistics", () => {
     it("counts no climb of its own from the rounded segments (regression)", () => {
       // The exporter writes the gain of every path with an altitude, from
       // the unrounded altitudes (altitude_gain_m in Python). A second
-      // estimate from 100 ft steps here only ever disagreed with it.
+      // estimate from the rounded steps here only ever disagreed with it.
       const segments: PathSegment[] = [1000, 3000, 2000, 3500].map(
         (altitude_ft) => segmentOf({ path_id: 1, altitude_ft }),
       );
@@ -855,5 +856,77 @@ describe("panel statistics", () => {
 
       await expect(pending).resolves.toBe(direct);
     });
+  });
+});
+
+describe("landingTotals", () => {
+  const circuits: PathInfo = {
+    id: 1,
+    landings: 1,
+    touch_and_goes: 3,
+    go_arounds: 1,
+    touchdowns: [
+      ["EDAQ", "29"],
+      ["EDAQ", "29"],
+      ["EDAQ", "11"],
+      ["EDAQ", null],
+    ],
+  };
+  const trip: PathInfo = {
+    id: 2,
+    landings: 2,
+    touch_and_goes: 0,
+    go_arounds: 0,
+    touchdowns: [
+      ["EDDP", "26R"],
+      ["EDAQ", "29"],
+    ],
+  };
+
+  it("adds up the landings of the flights", () => {
+    expect(landingTotals([circuits, trip, { id: 3 }])).toEqual({
+      landings: 3,
+      touchAndGoes: 3,
+      goArounds: 1,
+      mostTouchAndGoes: 3,
+      // Three of the four touchdowns with a runway at EDAQ
+      busiestRunway: { airport: "EDAQ", runway: "29", share: 0.75 },
+    });
+  });
+
+  it("is undefined when no flight carries its landings", () => {
+    expect(landingTotals([{ id: 3 }])).toBeUndefined();
+    expect(landingTotals([])).toBeUndefined();
+  });
+
+  it("counts a flight without a touchdown, and names no runway", () => {
+    const none: PathInfo = {
+      id: 4,
+      landings: 0,
+      touch_and_goes: 0,
+      go_arounds: 0,
+      touchdowns: [],
+    };
+
+    expect(landingTotals([none])).toEqual({
+      landings: 0,
+      touchAndGoes: 0,
+      goArounds: 0,
+      mostTouchAndGoes: 0,
+    });
+  });
+
+  it("is part of the statistics of a filter", () => {
+    const stats = calculateFilteredStatistics({
+      pathInfo: [
+        { ...circuits, year: 2025 },
+        { ...trip, year: 2024 },
+      ],
+      segments: [segmentOf({ path_id: 1 }), segmentOf({ path_id: 2 })],
+      year: "2025",
+    });
+
+    expect(stats.landings?.landings).toBe(1);
+    expect(stats.landings?.touchAndGoes).toBe(3);
   });
 });

@@ -399,13 +399,21 @@ both files. Recordings without times are not compared.
 
 **Year file format and the ground column:**
 
-The year files are data format 4 (`FORMAT_VERSION` in
+The year files are data format 5 (`FORMAT_VERSION` in
 `kml_heatmap/segment_codec.py`, `DATA_FORMAT_VERSION` in
 `services/yearDecode.ts`; bump both together, the page refuses any other).
+Format 5 writes the altitudes in steps of 20 ft instead of 100 ft, which
+costs about 4 % more gzipped year files on `data/`, and adds the landings of
+every flight with timestamps to its `path_info`: `landings`,
+`touch_and_goes`, `go_arounds` and the `touchdowns` as `[airport, runway]`.
+`kml_heatmap/landings.py` reads them in the main process of the export from
+the full-precision track, with the fields and the runways of the OurAirports
+database (`load_runway_database` caches `runways.csv` next to
+`airports.csv`); the page only adds them up.
 The speed column is written in tenths of a knot, but the exporter rounds the
 speeds to whole knots (`exported_knots` in `kml_heatmap/export_pipeline.py`),
 which takes an eighth off the compressed year files: the format and the
-decoder are the same, so the version stayed 4. Times stay at a tenth of a
+decoder were the same, so the version stayed 4. Times stay at a tenth of a
 second, which the replay needs for fixes less than a second apart.
 Format 4 added a `ground` column per path: the ground under every row in
 steps of 10 ft, as differences like the other columns, left out for a path

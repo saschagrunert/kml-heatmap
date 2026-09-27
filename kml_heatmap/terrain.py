@@ -876,7 +876,7 @@ def ground_profile_ft(
 
     The taxiing rows then stand on the ground as they do without a model,
     since the ground under them is their own altitudes up to the relief of
-    the field, and the altitudes are rounded to 100 ft anyway.
+    the field, and the altitudes are rounded to 20 ft anyway.
 
     None when the path has no rows or a row without an elevation: a ground
     with a hole in it would be worse than the line between the fields.

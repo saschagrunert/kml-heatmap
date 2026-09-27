@@ -705,6 +705,8 @@ Kept in the site:
 
 - Coordinates, altitudes, distances, groundspeeds
 - Airport visit counts
+- Per flight, the number of full-stop landings, touch-and-goes and
+  go-arounds, and the field and runway of each touchdown, without a time
 - Flight time per year and per aircraft
 - Airport names: a placemark name that holds an ICAO code (`EDDS`,
   `EDAQ Halle-Oppin`), and the airports of a route name (`Home strip - Aunt
@@ -791,7 +793,11 @@ format of the rows, which the page checks before reading them so a file
 written by another version is refused rather than misread. `path_info` lists
 the flights in input order, each with its id, year, airports, aircraft,
 exact altitude range and total climb (`altitude_gain_ft`), the last three written together for every flight with an altitude; where a flight starts and ends is read from its
-segments. `segments` maps a path id to
+segments. A flight with timestamps also has its `landings` (full stops),
+`touch_and_goes`, `go_arounds` (low approaches included, which GPS cannot
+tell apart from them) and `touchdowns`, one `[airport, runway]` per full stop
+and touch-and-go in the order flown, with `null` for a runway the build could
+not tell (see [Airport Database](#airport-database)). `segments` maps a path id to
 `{"start": [lat, lon], "columns": [lats, lons, altitudes, speeds, times], "ground": [...]}`,
 one row per segment, written column by column: the n-th entry of each column
 is the n-th row's latitude, longitude, altitude in feet, groundspeed in whole
@@ -813,8 +819,8 @@ Every value above is written as an integer difference to the row before it
 rather than as the number itself (`kml_heatmap/segment_codec.py`, mirrored by
 `decodeYear` in `services/yearDecode.ts`, which the page runs in a worker).
 The exporter has already rounded each column to a fixed step (1e-5 degrees,
-100 ft, 1 kt, 0.1 s and 10 ft of ground), so counting in the step of the
-format (1e-5 degrees, 100 ft, 0.1 kt, 0.1 s and 10 ft) is exact, and neighbouring rows barely differ: the encoding is lossless and roughly halves
+20 ft, 1 kt, 0.1 s and 10 ft of ground), so counting in the step of the
+format (1e-5 degrees, 20 ft, 0.1 kt, 0.1 s and 10 ft) is exact, and neighbouring rows barely differ: the encoding is lossless and roughly halves
 a year file. Writing the rows column by column puts the repeating
 differences of one quantity next to each other, which takes another sixth
 off the compressed download. The numbers the page works with are the ones
@@ -920,7 +926,7 @@ that left the input are removed with it.
 
 ### Controls
 
-- **Stats** - View statistics (distance, altitude, airports, flight time). Flight time runs from the first to the last recorded point that moved at the exported precision (about 1 m), so standing perfectly still before and after is not counted, while GPS noise on the ground still is. The panel's Flights tab lists every flight of the year and aircraft filter with its route, aircraft, year, flight time, distance and highest altitude (a year, never a date). The rows start in the order of the flight files; a column header sorts by it, up, down and back. The search keeps the flights whose airports (code or name), registration or type match every word typed. A click on a row selects that flight alone, and Ctrl or Shift adds it to the selection or takes it out; during a replay the selection stays as it is. The arrow keys move between the two tabs. On a phone the same tabs are inside the statistics sheet
+- **Stats** - View statistics (distance, altitude, landings, airports, flight time). Flight time runs from the first to the last recorded point that moved at the exported precision (about 1 m), so standing perfectly still before and after is not counted, while GPS noise on the ground still is. The panel's Flights tab lists every flight of the year and aircraft filter with its route, aircraft, year, flight time, distance, highest altitude and full-stop landings (a year, never a date); the landings cell names the touch-and-goes as well when the pointer rests on it, and flights without timestamps have no landings. The rows start in the order of the flight files; a column header sorts by it, up, down and back. The search keeps the flights whose airports (code or name), registration or type match every word typed. A click on a row selects that flight alone, and Ctrl or Shift adds it to the selection or takes it out; during a replay the selection stays as it is. The arrow keys move between the two tabs. On a phone the same tabs are inside the statistics sheet
 - **Export** - Save the current map view as a JPG image
 - **Copy link** - Copy the current URL to the clipboard. On a phone, where there is a native share dialog, the More sheet's row says **Share link** and opens that instead
 - **Wrapped** - View the year-in-review summary; Escape closes it
@@ -942,7 +948,7 @@ that left the input are removed with it.
 - **Year Filter** - View flights from specific years or all years combined
 - **Aircraft Filter** - Filter by aircraft registration to see flights per aircraft
 - **Path Selection** - Click paths to highlight and view detailed statistics. A chip at the top of the map says how many flights are selected and clears them again. With neither colour layer on, the selected flights are drawn as thin light lines over the heatmap, which steps back while they show, at every zoom level; in the 3D view they are lifted to their height with the heat cloud
-- **Airport Selection** - Click an airport marker to select all flights that visited it; click the map to clear the selection. The airport popup lists those flights (route, aircraft and year), each a button that selects that one flight, so a single flight and Replay are reachable from the keyboard: Tab to a marker, Enter opens the popup and moves focus into it, Escape closes it and returns focus to the marker
+- **Airport Selection** - Click an airport marker to select all flights that visited it; click the map to clear the selection. The airport popup shows how the flights of the filter used its runways ("RWY 29 · 65%, RWY 11 · 35%") and lists those flights (route, aircraft and year), each a button that selects that one flight, so a single flight and Replay are reachable from the keyboard: Tab to a marker, Enter opens the popup and moves focus into it, Escape closes it and returns focus to the marker
 - **Solo Mode** - Isolate selected paths, hiding all other paths and heatmap data
 
 ### Shareable URLs
@@ -1027,10 +1033,20 @@ parse cache (`kml/`) keyed by file name and content, the parser code and the
 airport database, so unchanged KML files are not parsed again; entries unused
 for 30 days are removed.
 
+The runways of the same database (`runways.csv`, cached the same way) name
+the runway of every touchdown. The build reads the landings from the logs at
+their full precision (`kml_heatmap/landings.py`): a touchdown is a fix within
+60 ft of a field's ground (its published elevation plus how far the logger
+read above it while taxiing) at 35 kt or more, a full stop one that slows
+below 25 kt there, a touch-and-go one that climbs 300 ft without stopping,
+and a go-around an approach below 400 ft on a runway's line that climbs
+away without touching down. The runway is the track over the last 30
+seconds, snapped to the nearest runway end of the field.
+
 Without the database the site is still generated, with the airport names as
-the KML files spell them and without countries. Set
+the KML files spell them, without countries and without landings. Set
 `KML_HEATMAP_REQUIRE_AIRPORT_DB=1` to fail instead, as CI does for the
-published site.
+published site; it requires the runways as well.
 
 ### Elevation Data
 

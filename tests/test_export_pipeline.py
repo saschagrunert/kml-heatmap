@@ -18,6 +18,7 @@ from kml_heatmap.export_pipeline import (
 )
 from kml_heatmap.helpers import parse_timestamp_epoch
 from kml_heatmap.segment_calculator import SegmentSpeed, SpeedWindow
+from kml_heatmap.segment_codec import ALTITUDE_STEP
 from kml_heatmap.types import PathMetadata, TrackPoint
 
 
@@ -407,14 +408,22 @@ class TestProcessPathSegments:
         # The kept row is the segment that starts at the last standstill point
         assert rows[0][4] == 2.0
 
-    def test_altitude_rounded_to_100ft(self):
+    def test_altitude_rounded_to_20ft(self):
         path = [
             TrackPoint(50.0, 8.5, 1523.5, None),
             TrackPoint(50.1, 8.6, 1523.5, None),
         ]
         _, rows = process_path_segments(path, 60.0)
+        # 4998.4 ft
         assert rows[0][2] == 5000
-        assert rows[0][2] % 100 == 0
+        path = [
+            TrackPoint(50.0, 8.5, 1000.0, None),
+            TrackPoint(50.1, 8.6, 1000.0, None),
+        ]
+        _, rows = process_path_segments(path, 60.0)
+        # 3280.8 ft, which the 100 ft of format 4 rounded to 3300
+        assert rows[0][2] == 3280
+        assert rows[0][2] % ALTITUDE_STEP == 0
 
     def test_missing_altitude_on_one_end_uses_the_other(self):
         path = [TrackPoint(50.0, 8.5, None, None), TrackPoint(50.1, 8.6, 304.8, None)]
@@ -432,7 +441,7 @@ class TestProcessPathSegments:
         assert start == [50.0, 8.5]
         assert [row[:2] for row in rows] == [[50.1, 8.6], [50.2, 8.7]]
         assert rows[0][2] == 0.0  # no altitude known yet
-        assert rows[1][2] == 300  # 100 m rounded to the nearest 100 ft
+        assert rows[1][2] == 320  # 100 m rounded to the nearest 20 ft
 
     def test_groundspeed_rounded(self):
         _, rows = process_path_segments(_make_path(timed=True), 540.0)
@@ -529,7 +538,7 @@ class TestProcessPathSegmentsProperties:
 
         assert len(start) == (2 if rows else 0)
         for row in rows:
-            assert row[2] % 100 == 0
+            assert row[2] % ALTITUDE_STEP == 0
             assert row[3] >= 0
         exported = [[round(p.lat, 5), round(p.lon, 5)] for p in path]
         assert [row[:2] for row in rows] == [

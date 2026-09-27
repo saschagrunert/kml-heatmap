@@ -32,6 +32,7 @@ import type {
   AltitudeStats,
   SpeedStats,
   FilteredStatistics,
+  LandingTotals,
 } from "../types";
 
 /**
@@ -46,6 +47,53 @@ export function collectAirports(pathInfo: PathInfo[]): Set<string> {
     if (path.end_airport) airports.add(path.end_airport);
   }
   return airports;
+}
+
+/**
+ * The landings of the flights, from their path info: the build reads them
+ * from the full-precision logs (kml_heatmap/landings.py). Undefined when no
+ * flight carries them, as on a site built from logs without timestamps.
+ * @param paths - The flights
+ */
+export function landingTotals(paths: PathInfo[]): LandingTotals | undefined {
+  let counted = false;
+  const totals: LandingTotals = {
+    landings: 0,
+    touchAndGoes: 0,
+    goArounds: 0,
+    mostTouchAndGoes: 0,
+  };
+  // Touchdowns by field, then by runway
+  const byField = new Map<string, Map<string, number>>();
+  for (const path of paths) {
+    if (path.landings === undefined) continue;
+    counted = true;
+    const touchAndGoes = path.touch_and_goes ?? 0;
+    totals.landings += path.landings;
+    totals.touchAndGoes += touchAndGoes;
+    totals.goArounds += path.go_arounds ?? 0;
+    totals.mostTouchAndGoes = Math.max(totals.mostTouchAndGoes, touchAndGoes);
+    for (const [airport, runway] of path.touchdowns ?? []) {
+      if (!runway) continue;
+      const runways = byField.get(airport) ?? new Map<string, number>();
+      runways.set(runway, (runways.get(runway) ?? 0) + 1);
+      byField.set(airport, runways);
+    }
+  }
+  if (!counted) return undefined;
+
+  // The first runway to reach the most touchdowns wins a tie
+  let most = 0;
+  for (const [airport, runways] of byField) {
+    let atField = 0;
+    for (const count of runways.values()) atField += count;
+    for (const [runway, count] of runways) {
+      if (count <= most) continue;
+      most = count;
+      totals.busiestRunway = { airport, runway, share: count / atField };
+    }
+  }
+  return totals;
 }
 
 /**
@@ -323,8 +371,8 @@ function* statisticsSteps(
       totalTimeHours > 0 ? totalDistanceNm / totalTimeHours : undefined;
   }
 
-  // Most common cruise height, in 100 ft bins: that is the precision the
-  // exported segment altitudes carry (see export_pipeline.py)
+  // Most common cruise height, in 100 ft bins: the altitudes are exported
+  // in 20 ft steps (see export_pipeline.py), finer than a cruise holds
   let mostCommonCruiseAltitudeFt: number | undefined;
   let mostCommonCruiseAltitudeM: number | undefined;
   if (cruiseSegments.length > 0) {
@@ -379,6 +427,7 @@ function* statisticsSteps(
     total_flight_time_str: flightTimeStr,
     most_common_cruise_altitude_ft: mostCommonCruiseAltitudeFt,
     most_common_cruise_altitude_m: mostCommonCruiseAltitudeM,
+    landings: landingTotals(filteredPaths),
   };
 }
 

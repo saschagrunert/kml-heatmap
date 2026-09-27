@@ -95,6 +95,17 @@ test.describe("Keyboard", () => {
     expect(await airportMarkerIsFocused(page, airport.name)).toBe(true);
   });
 
+  test("an airport popup names the runways its flights used", async ({
+    page,
+  }) => {
+    await focusBusiestAirport(page);
+    await page.keyboard.press("Enter");
+
+    const popup = mapPopup(page);
+    await expect(popup).toContainText("Runways");
+    await expect(popup).toContainText(/RWY \d{2}[LCR]? · \d+%/);
+  });
+
   test("Escape on a focused marker closes its popup", async ({ page }) => {
     const airport = await focusBusiestAirport(page);
     await openAirportPopup(page, airport.name);

@@ -173,7 +173,7 @@ class TestBuildVisualSite:
         ]
         assert call["cwd"] == build_visual_site.ROOT
         assert call["check"] is False
-        assert call["cached"] == ["airports.csv"]
+        assert call["cached"] == ["airports.csv", "runways.csv"]
         env = call["env"]
         assert env["CARTO_API_KEY"] == ""
         assert env["SOURCE_DATE_EPOCH"] == "1735689600"

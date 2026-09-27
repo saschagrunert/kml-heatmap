@@ -454,6 +454,27 @@ function altitudeMetrics(stats: FilteredStatistics): Metric[] {
   return metrics;
 }
 
+/**
+ * Landing rows: the full stops, touch-and-goes and go-arounds the build
+ * found in the logs (kml_heatmap/landings.py), none for a filter whose
+ * flights carry none
+ */
+function landingMetrics(stats: FilteredStatistics): Metric[] {
+  const landings = stats.landings;
+  if (!landings) return [];
+  const count = (label: string, value: number): Metric => ({
+    label,
+    value: formatNumber(value),
+    unit: "",
+  });
+  return [
+    count("Full-Stop Landings", landings.landings),
+    count("Touch-and-Goes", landings.touchAndGoes),
+    // Low approaches among them: GPS cannot tell the two apart
+    count("Go-Arounds", landings.goArounds),
+  ];
+}
+
 export class StatsManager {
   private app: MapApp;
   /** Markup of the last render; an identical result is not written again */
@@ -634,6 +655,7 @@ export class StatsManager {
     html += metricSection("distance", "Distance", distanceMetrics(stats));
     html += metricSection("speed", "Speed", speedMetrics(stats));
     html += metricSection("altitude", "Altitude", altitudeMetrics(stats));
+    html += metricSection("airport", "Landings", landingMetrics(stats));
     html += aircraftSection(stats);
     html += airportsSection(stats);
 

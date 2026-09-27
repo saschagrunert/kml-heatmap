@@ -157,7 +157,7 @@ class TestYearFile:
         assert entry["start"] == [5000000, 800000]
         lats, lons, altitudes, _, times = entry["columns"]
         assert (lats[0], lons[0]) == (10000, 10000)
-        assert altitudes[0] == 5
+        assert altitudes[0] == 25
         assert times == [0, 3000]
         start, rows = decoded_segments(entry)
         assert start == [50.0, 8.0]

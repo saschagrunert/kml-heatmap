@@ -53,6 +53,8 @@ interface Column {
   value(row: FlightRow): string | number | undefined;
   /** The cell's plain text */
   text(row: FlightRow): string;
+  /** More about the cell, as its title */
+  detail?(row: FlightRow): string | undefined;
 }
 
 /** Stands in for a figure the flight's log does not have */
@@ -68,6 +70,18 @@ function flightTime(seconds: number | undefined): string {
   if (seconds === undefined) return MISSING;
   const minutes = Math.round(seconds / 60);
   return Math.floor(minutes / 60) + ":" + String(minutes % 60).padStart(2, "0");
+}
+
+/** "3 full stops, 12 touch-and-goes"; none for a flight without landings */
+function landingDetail(row: FlightRow): string | undefined {
+  const { landings, touch_and_goes: touchAndGoes = 0 } = row.path;
+  if (landings === undefined) return undefined;
+  return (
+    formatNumber(landings) +
+    (landings === 1 ? " full stop, " : " full stops, ") +
+    formatNumber(touchAndGoes) +
+    (touchAndGoes === 1 ? " touch-and-go" : " touch-and-goes")
+  );
 }
 
 /** Nautical miles of a flight */
@@ -123,6 +137,16 @@ export const COLUMNS: readonly Column[] = [
     numeric: true,
     value: (row) => row.path.max_altitude_ft,
     text: (row) => figure(row.path.max_altitude_ft),
+  },
+  {
+    // Written for flights with timestamps only; the others sort last
+    key: "landings",
+    label: "Ldg",
+    title: "Full-stop landings",
+    numeric: true,
+    value: (row) => row.path.landings,
+    text: (row) => figure(row.path.landings),
+    detail: landingDetail,
   },
 ];
 
@@ -211,6 +235,7 @@ function rowsHtml(rows: FlightRow[]): string {
     html += "<tr>";
     for (const [i, column] of COLUMNS.entries()) {
       const text = escapeHtml(column.text(row));
+      const detail = column.detail?.(row);
       html +=
         i === 0
           ? '<th scope="row"><button type="button" class="kh-flight" data-path-id="' +
@@ -220,6 +245,7 @@ function rowsHtml(rows: FlightRow[]): string {
             "</button></th>"
           : "<td" +
             (column.numeric ? ' class="kh-num"' : "") +
+            (detail ? ' title="' + escapeHtml(detail) + '"' : "") +
             ">" +
             text +
             "</td>";

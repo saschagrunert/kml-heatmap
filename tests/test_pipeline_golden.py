@@ -21,6 +21,7 @@ from kml_heatmap.geometry import haversine_distance
 from kml_heatmap.obfuscate import obfuscate_kml_files
 from kml_heatmap.renderer import create_progressive_heatmap
 from kml_heatmap.segment_codec import (
+    ALTITUDE_STEP,
     COORDINATE_SCALE,
     FORMAT_VERSION,
     GROUND_STEP,
@@ -64,15 +65,19 @@ GOLDEN = {
     "distance_km": {2025: 387.5, 2026: 1176.2},
     "flight_seconds": {2025: 12338.5, 2026: 23987.6},
     # Paths with a ground, and its lowest, highest and mean, over Hills
-    "ground_ft": {2025: (4, 30.0, 550.0, 364.3), 2026: (4, -60.0, 980.0, 430.1)},
+    "ground_ft": {2025: (4, 50.0, 510.0, 328.7), 2026: (4, -50.0, 950.0, 403.5)},
     # Whole knots, and a positive speed at 1 kt at least
     "groundspeed_knots": (1.0, 167.0),
+    # Full stops, touch-and-goes and go-arounds. The flight to EDVM lands
+    # at a field the fixture database does not have, and counts no landing
+    "landings": {2025: (4, 19, 0), 2026: (3, 2, 0)},
     "path_count": 8,
     "path_ids": {
         2025: [411100833082, 642456146975, 336383306180, 68245584272],
         2026: [197972773580, 210679907966, 714877417394, 750385786302],
     },
     "segment_rows": {2025: 4070, 2026: 5609},
+    "touchdowns": {"EDAQ 11": 1, "EDAQ 29": 27},
 }
 
 
@@ -151,9 +156,21 @@ def _observed_values(data_dir):
     distance_km = {}
     flight_seconds = {}
     ground_ft = {}
+    landings = {}
+    touchdowns: dict[str, int] = {}
     for year in metadata["available_years"]:
         data = _load_js(data_dir / str(year) / "data.json")
         path_ids[year] = [info["id"] for info in data["path_info"]]
+        # Full stops, touch-and-goes and go-arounds, and the touchdowns by
+        # field and runway (see kml_heatmap.landings)
+        landings[year] = tuple(
+            sum(info.get(key, 0) for info in data["path_info"])
+            for key in ("landings", "touch_and_goes", "go_arounds")
+        )
+        for info in data["path_info"]:
+            for airport, runway in info.get("touchdowns", []):
+                key = f"{airport} {runway}"
+                touchdowns[key] = touchdowns.get(key, 0) + 1
         entries = data["segments"].values()
         segment_rows[year] = sum(len(entry["columns"][0]) for entry in entries)
         # The rows are scaled integers stored as differences; decoding them
@@ -197,9 +214,11 @@ def _observed_values(data_dir):
             metadata["min_groundspeed_knots"],
             metadata["max_groundspeed_knots"],
         ),
+        "landings": landings,
         "path_count": sum(len(ids) for ids in path_ids.values()),
         "path_ids": path_ids,
         "segment_rows": segment_rows,
+        "touchdowns": dict(sorted(touchdowns.items())),
     }
 
 
@@ -328,8 +347,21 @@ def test_year_data_shape_and_unique_ids(golden_output):
                 "min_altitude_ft",
                 "max_altitude_ft",
                 "altitude_gain_ft",
+                "landings",
+                "touch_and_goes",
+                "go_arounds",
+                "touchdowns",
             }
             assert None not in info.values()
+            # The sample flights are all timed, and the landings of a timed
+            # flight are written together: one touchdown for every full stop
+            # and touch-and-go, never a time
+            assert len(info["touchdowns"]) == (
+                info["landings"] + info["touch_and_goes"]
+            )
+            for airport, runway in info["touchdowns"]:
+                assert isinstance(airport, str)
+                assert runway is None or isinstance(runway, str)
             assert info["year"] == year
             registrations.add(info.get("aircraft_registration"))
 
@@ -344,7 +376,7 @@ def test_year_data_shape_and_unique_ids(golden_output):
                 assert len(column) == len(encoded[0])
                 assert all(isinstance(value, int) for value in column)
             for row in decode_rows(entry["start"], encoded):
-                assert row[2] % 100 == 0
+                assert row[2] % ALTITUDE_STEP == 0
                 assert row[3] >= 0
             # The ground is optional, and covers every row where it is written
             assert set(entry) <= {"start", "columns", "ground"}

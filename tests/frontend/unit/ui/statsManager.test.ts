@@ -230,6 +230,39 @@ describe("StatsManager", () => {
       most_common_cruise_altitude_m: 1676,
     };
 
+    it("lists the landings the flights carry", () => {
+      statsManager.updateStatsPanel(
+        {
+          ...mockStats,
+          landings: {
+            landings: 115,
+            touchAndGoes: 1179,
+            goArounds: 5,
+            mostTouchAndGoes: 16,
+          },
+        },
+        false,
+      );
+
+      const section = [...statsPanel.querySelectorAll("section")].find(
+        (candidate) => candidate.textContent?.includes("Landings"),
+      );
+      const rows = [...section!.querySelectorAll(".kh-stats-metric")].map(
+        (row) => row.textContent,
+      );
+      expect(rows).toEqual([
+        "Full-Stop Landings115",
+        "Touch-and-Goes1,179",
+        "Go-Arounds5",
+      ]);
+    });
+
+    it("leaves the landings out where the flights carry none", () => {
+      statsManager.updateStatsPanel(mockStats, false);
+
+      expect(statsPanel.textContent).not.toContain("Touch-and-Goes");
+    });
+
     it("says when the panel has more below it than it can show", () => {
       // The fade at the bottom edge is what says so; it has to go once the
       // panel is scrolled to the end, and the class it keys off is set

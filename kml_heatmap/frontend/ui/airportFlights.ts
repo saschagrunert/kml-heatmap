@@ -8,9 +8,11 @@
  * somebody flew.
  *
  * AirportManager adds it whenever the popup is open with new content (see
- * listPopupFlights), and lays the popup out again afterwards. It is part of
- * the app rather than of the feature bundle: fetching that bundle, and its
- * stylesheet, for the first popup cost far more than the list itself.
+ * listPopupFlights), and lays the popup out again afterwards. The runways
+ * the flights of the filter touched down on go above it, with their share.
+ * It is part of the app rather than of the feature bundle: fetching that
+ * bundle, and its stylesheet, for the first popup cost far more than the
+ * list itself.
  */
 import type { Popup } from "maplibre-gl";
 import type { MapApp } from "../mapApp";
@@ -75,6 +77,20 @@ export function listFlights(app: MapApp, popup: Popup, name: string): void {
   }
   if (!html) return;
 
+  const use = runwayUse(
+    datasetIndex(data).filter(app.selectedYear, app.selectedAircraft).paths,
+    airportCode(name),
+  );
+  if (use) {
+    const label = document.createElement("div");
+    label.className = "popup-section-label kh-popup-flights-label";
+    label.textContent = "Runways";
+    const runways = document.createElement("div");
+    runways.className = "kh-popup-runways";
+    runways.textContent = use;
+    host.append(label, runways);
+  }
+
   const title = document.createElement("div");
   title.className = "popup-section-label kh-popup-flights-label";
   title.textContent = "Select a flight";
@@ -104,6 +120,33 @@ export function listFlights(app: MapApp, popup: Popup, name: string): void {
     following.add(app);
     app.store.subscribe("selectedPathIds", () => markSelected(app));
   }
+}
+
+/**
+ * The runways the flights touched down on at an airport, the most used
+ * first, each with its share of the touchdowns there that have a runway
+ * (PathInfo.touchdowns): "RWY 29 · 65%, RWY 11 · 35%". Empty for none.
+ * @param paths - The flights of the filter
+ * @param code - The airport's ICAO code
+ */
+export function runwayUse(paths: PathInfo[], code?: string): string {
+  const counts: Record<string, number> = {};
+  let total = 0;
+  for (const path of paths) {
+    for (const [airport, runway] of path.touchdowns ?? []) {
+      if (airport === code && runway) {
+        counts[runway] = (counts[runway] ?? 0) + 1;
+        total++;
+      }
+    }
+  }
+  return Object.entries(counts)
+    .sort((a, b) => b[1] - a[1])
+    .map(
+      ([runway, count]) =>
+        `RWY ${runway} · ${Math.round((count * 100) / total)}%`,
+    )
+    .join(", ");
 }
 
 /** Mark the listed flights that are part of the selection */

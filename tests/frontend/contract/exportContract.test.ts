@@ -94,6 +94,41 @@ function isCoordinatePair(value: unknown): value is number[] {
   );
 }
 
+/** A touchdown of path_info: the field's code and the runway, or null */
+function isTouchdown(value: unknown): boolean {
+  return (
+    Array.isArray(value) &&
+    value.length === 2 &&
+    isString(value[0]) &&
+    (value[1] === null || isString(value[1]))
+  );
+}
+
+/** A count of path_info's landings: a whole number, never negative */
+function isCount(value: unknown): value is number {
+  return isInteger(value) && value >= 0;
+}
+
+/**
+ * The landings of a flight (kml_heatmap/landings.py): all four keys or
+ * none, and one touchdown for every full stop and touch-and-go
+ */
+function hasLandings(value: Json): boolean {
+  const keys = ["landings", "touch_and_goes", "go_arounds", "touchdowns"];
+  const written = keys.filter((key) => value[key] !== undefined).length;
+  if (written === 0) return true;
+  const { landings, touch_and_goes, go_arounds, touchdowns } = value;
+  return (
+    written === keys.length &&
+    isCount(landings) &&
+    isCount(touch_and_goes) &&
+    isCount(go_arounds) &&
+    Array.isArray(touchdowns) &&
+    touchdowns.length === landings + touch_and_goes &&
+    touchdowns.every(isTouchdown)
+  );
+}
+
 function isPathInfo(value: unknown): value is PathInfo {
   if (!isRecord(value)) return false;
   const id = value["id"];
@@ -124,6 +159,7 @@ function isPathInfo(value: unknown): value is PathInfo {
   if (!optional(gain, isFiniteNumber) || (gain !== undefined && gain < 0)) {
     return false;
   }
+  if (!hasLandings(value)) return false;
   // null values are omitted by the exporter: optional means absent or typed
   return (
     optional(value["aircraft_registration"], isString) &&
@@ -281,11 +317,11 @@ function isMetadata(value: unknown): value is Metadata {
 
 /**
  * Column scales of the wire format, mirroring kml_heatmap/segment_codec.py
- * (the altitude column counts hundreds of feet). The sample is written in
+ * (the altitude column counts steps of 20 ft). The sample is written in
  * the units a reader thinks in and encoded here, so the guards and the
  * loader are checked against an encoder that is not the one under test.
  */
-const SCALES = [1e5, 1e5, 1 / 100, 10, 10];
+const SCALES = [1e5, 1e5, 1 / 20, 10, 10];
 
 /** Tens of feet, GROUND_STEP of kml_heatmap/segment_codec.py */
 const GROUND_SCALE = 1 / 10;
@@ -369,6 +405,13 @@ const sampleYear2025: RawYearData = {
       min_altitude_ft: 2950.5,
       max_altitude_ft: 4010,
       altitude_gain_ft: 1059.5,
+      landings: 1,
+      touch_and_goes: 1,
+      go_arounds: 0,
+      touchdowns: [
+        ["EDDM", "26L"],
+        ["EDDM", null],
+      ],
     },
     // A path without airports, aircraft or altitudes has only an id and a year
     { id: 5, year: 2025 },
@@ -563,6 +606,35 @@ describe("export contract (inline new-format sample)", () => {
     expect(isPathInfo({ ...full, altitude_gain_ft: "100" })).toBe(false);
   });
 
+  it("requires the landings together, a touchdown for each", () => {
+    const [full] = sampleYear2025.path_info;
+    const { touchdowns: _touchdowns, ...withoutTouchdowns } = full!;
+    expect(isPathInfo(withoutTouchdowns)).toBe(false);
+    const {
+      landings: _landings,
+      touch_and_goes: _touchAndGoes,
+      go_arounds: _goArounds,
+      ...withoutLandings
+    } = withoutTouchdowns;
+    // A flight without timestamps has none of them
+    expect(isPathInfo(withoutLandings)).toBe(true);
+    expect(isPathInfo({ ...full, landings: 2 })).toBe(false);
+    expect(isPathInfo({ ...full, go_arounds: -1 })).toBe(false);
+    expect(isPathInfo({ ...full, landings: 0.5 })).toBe(false);
+    expect(
+      isPathInfo({
+        ...full,
+        touchdowns: [
+          ["EDDM", 26],
+          ["EDDM", null],
+        ],
+      }),
+    ).toBe(false);
+    expect(isPathInfo({ ...full, touchdowns: [["EDDM"], ["EDDM"]] })).toBe(
+      false,
+    );
+  });
+
   it("rejects path info with removed fields or an id out of range", () => {
     const [full] = sampleYear2025.path_info;
     for (const key of REMOVED_PATH_INFO_KEYS) {
@@ -738,9 +810,9 @@ describe("export contract (docs/data)", () => {
           if (!Number.isFinite(lon) || Math.abs(lon) > 180) {
             bad.push(`path ${segment.path_id}: longitude ${lon}`);
           }
-          // process_path_segments quantises altitude to 100 ft.
-          // Math.abs, because -0 % 100 is -0 and a negative altitude is legal
-          if (Math.abs(altitude % 100) !== 0) {
+          // process_path_segments quantises altitude to 20 ft.
+          // Math.abs, because -0 % 20 is -0 and a negative altitude is legal
+          if (Math.abs(altitude % 20) !== 0) {
             bad.push(`path ${segment.path_id}: altitude ${altitude}`);
           }
           // metadata.json carries the groundspeed range, which the Python side
@@ -772,10 +844,10 @@ describe("export contract (docs/data)", () => {
           if (info.min_altitude_ft === undefined) continue;
           const range = seen.get(info.id);
           expect(range, `path ${info.id} has no segments`).toBeDefined();
-          // The rows are quantised to 100 ft, so they may sit one step
+          // The rows are quantised to 20 ft, so they may sit one step
           // outside the exact range that path_info reports
-          expect(range!.min).toBeGreaterThanOrEqual(info.min_altitude_ft - 100);
-          expect(range!.max).toBeLessThanOrEqual(info.max_altitude_ft! + 100);
+          expect(range!.min).toBeGreaterThanOrEqual(info.min_altitude_ft - 20);
+          expect(range!.max).toBeLessThanOrEqual(info.max_altitude_ft! + 20);
         }
       }
 
