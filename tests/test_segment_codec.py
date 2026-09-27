@@ -68,19 +68,19 @@ class TestEncoding:
         start = [50.0, 8.0]
         encoded = encode_rows(start, [[50.00001, 8.00002, 500.0, 1.5, 2.0]])
 
-        assert encoded == [[1], [2], [5], [15], [20]]
+        assert encoded == [[1], [2], [25], [15], [20]]
 
     def test_rows_are_written_column_by_column(self):
         """A column of repeating differences is what gzip compresses best."""
         path_rows = [
             [50.00001, 8.0, 500.0, 90.0, 1.0],
-            [50.00002, 8.0, 600.0, 90.0, 2.0],
-            [50.00003, 8.0, 700.0, 90.0, 3.0],
+            [50.00002, 8.0, 520.0, 90.0, 2.0],
+            [50.00003, 8.0, 540.0, 90.0, 3.0],
         ]
 
         encoded = encode_rows([50.0, 8.0], path_rows)
 
-        assert encoded == [[1, 1, 1], [0, 0, 0], [5, 1, 1], [900, 0, 0], [10] * 3]
+        assert encoded == [[1, 1, 1], [0, 0, 0], [25, 1, 1], [900, 0, 0], [10] * 3]
 
     def test_a_still_aircraft_encodes_to_zeros(self):
         """Repetition is what makes the format small."""
@@ -117,9 +117,9 @@ class TestEncoding:
         assert encoded[4] == [100, None, 200]
         assert decode_rows(encode_start([50.0, 8.0]), encoded) == path_rows
 
-    def test_an_altitude_off_the_100_ft_grid_is_refused(self):
-        """The altitude column is written in hundreds of feet."""
-        with pytest.raises(ValueError, match="multiple of 100"):
+    def test_an_altitude_off_the_20_ft_grid_is_refused(self):
+        """The altitude column is written in steps of 20 ft."""
+        with pytest.raises(ValueError, match="multiple of 20"):
             encode_rows([50.0, 8.0], [[50.1, 8.1, 550.0, 1.0]])
 
     @pytest.mark.parametrize("value", [0.0, -0.00001, 179.99999, -179.99999])
@@ -133,7 +133,7 @@ class TestEncoding:
 
 def test_the_format_version_is_pinned():
     """Bumping it is a deliberate act; the frontend checks the same number."""
-    assert FORMAT_VERSION == 4
+    assert FORMAT_VERSION == 5
 
 
 grounds = st.lists(

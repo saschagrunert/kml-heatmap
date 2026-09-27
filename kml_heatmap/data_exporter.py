@@ -62,6 +62,7 @@ from .export_writers import (
     exported_airport_names,
     exported_country_codes,
 )
+from .landings import detect_landings
 from .logger import logger
 from .segment_codec import FORMAT_VERSION, encode_ground, encode_rows, encode_start
 from .site_assets import available_country_flags
@@ -84,6 +85,7 @@ except ImportError:  # pragma: no cover - Windows has no fcntl
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping, Sequence
 
+    from .landings import FlightLandings
     from .terrain import PointElevations, TileSource
     from .types import (
         AirportData,
@@ -205,6 +207,9 @@ class _ChunkPlan:
     path_ids: list[int | None]
     # One entry per path index: the ground under its points, see terrain
     elevations: list[PointElevations | None]
+    # One entry per path index: its landings, see landings.detect_landings;
+    # empty for none at all
+    landings: list[FlightLandings | None] = field(default_factory=list)
 
 
 def is_exportable_path(path: FlightPath) -> bool:
@@ -356,6 +361,7 @@ def process_year_chunk(
     index: int = 0,
     airport_names: frozenset[str] | None = None,
     path_elevations: Sequence[PointElevations | None] | None = None,
+    path_landings: Sequence[FlightLandings | None] | None = None,
 ) -> ChunkResult:
     """Export a chunk of a year's paths into JSON fragments.
 
@@ -364,7 +370,9 @@ def process_year_chunk(
     airport markers (see ``export_pipeline.build_path_info``).
     ``path_elevations`` holds the ground under the points of each path, in
     their order (see ``terrain.sample_path_elevations``), None for a path
-    without; a path gets a ground column when they cover every row of it. Writes
+    without; a path gets a ground column when they cover every row of it.
+    ``path_landings`` holds the landings of each path (see
+    ``landings.detect_landings``), None for a path without. Writes
     ``<output_dir>/<year>/.data.<index>.info.part`` (the path_info entries,
     comma separated) and ``.data.<index>.segments.part`` (the
     ``"<id>":{...}`` entries of the segments object, comma separated). The
@@ -378,19 +386,28 @@ def process_year_chunk(
 
     if path_elevations is None:
         path_elevations = [None] * len(path_ids)
+    if not path_landings:
+        path_landings = [None] * len(path_ids)
     path_count = 0
     with (
         open(info_part, "w", encoding="utf-8") as info_out,
         open(segments_part, "w", encoding="utf-8") as segments_out,
     ):
-        for path, metadata, path_id, elevations in zip(
-            year_path_groups, year_path_metadata, path_ids, path_elevations, strict=True
+        for path, metadata, path_id, elevations, landings in zip(
+            year_path_groups,
+            year_path_metadata,
+            path_ids,
+            path_elevations,
+            path_landings,
+            strict=True,
         ):
             if path_id is None:
                 continue
 
             start, rows = process_path_segments(path, path_duration(metadata))
-            info = build_path_info(path, metadata, path_id, year, airport_names)
+            info = build_path_info(
+                path, metadata, path_id, year, airport_names, landings
+            )
 
             # json.dumps rather than json.dump: only the one-shot encoder is
             # the C implementation, dumping to a file uses the Python one
@@ -540,15 +557,18 @@ def _plan_chunks(
     path_ids: Mapping[int, int],
     max_workers: int,
     elevations: Mapping[int, PointElevations] | None = None,
+    landings: Mapping[int, FlightLandings] | None = None,
 ) -> list[_ChunkPlan]:
     """Cut the years into chunks, in input order, and hand each its path ids.
 
     ``path_ids`` are the ids of the exported paths by input index (see
     ``assign_path_ids``); the chunk boundaries do not change them.
     ``elevations`` are the ground under the points of the paths, by input
-    index (see ``terrain.sample_path_elevations``).
+    index (see ``terrain.sample_path_elevations``), and ``landings`` what
+    the paths did at the fields, likewise (see ``landings.detect_landings``).
     """
     elevations = elevations or {}
+    landings = landings or {}
     plans: list[_ChunkPlan] = []
     for year in sorted(paths_by_year):
         indices = paths_by_year[year]
@@ -557,9 +577,15 @@ def _plan_chunks(
         for index, start in enumerate(range(0, max(1, len(indices)), size)):
             chunk_indices = indices[start : start + size]
             chunk_ids = [path_ids.get(i) for i in chunk_indices]
-            chunk_elevations = [elevations.get(i) for i in chunk_indices]
             plans.append(
-                _ChunkPlan(year, index, chunk_indices, chunk_ids, chunk_elevations)
+                _ChunkPlan(
+                    year,
+                    index,
+                    chunk_indices,
+                    chunk_ids,
+                    [elevations.get(i) for i in chunk_indices],
+                    [landings.get(i) for i in chunk_indices],
+                )
             )
     return plans
 
@@ -580,6 +606,7 @@ def _run_chunk(
         plan.index,
         airport_names,
         plan.elevations,
+        plan.landings,
     )
 
 
@@ -661,6 +688,7 @@ def _export_chunks(
                             plan.index,
                             airport_names,
                             plan.elevations,
+                            plan.landings,
                         )
                     ] = plan
 
@@ -1018,8 +1046,14 @@ def export_all_data(
         if terrain is not None and path_ids
         else None
     )
+    # Here as well: the export workers have no airport database
+    landings = (
+        detect_landings({index: all_path_groups[index] for index in path_ids})
+        if path_ids
+        else {}
+    )
     max_workers = os.process_cpu_count() or 4
-    plans = _plan_chunks(paths_by_year, path_ids, max_workers, elevations)
+    plans = _plan_chunks(paths_by_year, path_ids, max_workers, elevations, landings)
 
     logger.info(
         "\n  Processing %d year(s) in %d chunk(s)...", len(paths_by_year), len(plans)

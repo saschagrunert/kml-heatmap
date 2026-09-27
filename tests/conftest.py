@@ -1,10 +1,10 @@
 """Pytest configuration and shared fixtures for kml-heatmap tests.
 
 The cache directory is redirected to a session-private directory through the
-production ``KML_HEATMAP_CACHE_DIR`` setting, a small fixture airports.csv is
-installed there so no test needs the network, and any attempt to download the
-airport database or an elevation tile fails loudly. ``KML_HEATMAP_SITE_URL``
-is cleared for every test.
+production ``KML_HEATMAP_CACHE_DIR`` setting, a small fixture airports.csv
+and the runways.csv of its airports are installed there so no test needs the
+network, and any attempt to download either database or an elevation tile
+fails loudly. ``KML_HEATMAP_SITE_URL`` is cleared for every test.
 """
 
 import json
@@ -27,6 +27,7 @@ settings.load_profile("no-deadline")
 _TEST_CACHE_DIR: Path | None = None
 
 FIXTURE_AIRPORTS_CSV = Path(__file__).parent / "fixtures" / "airports.csv"
+FIXTURE_RUNWAYS_CSV = Path(__file__).parent / "fixtures" / "runways.csv"
 
 
 def parse_kml_coordinates(kml_file):
@@ -111,13 +112,17 @@ def pytest_unconfigure(config):
 
 @pytest.fixture(scope="session", autouse=True)
 def airport_fixture_csv():
-    """Install the fixture airports.csv as the (fresh) airport cache."""
-    from kml_heatmap.airport_lookup import CACHE_FILE
+    """Install the fixture airports.csv and runways.csv as the (fresh) cache."""
+    from kml_heatmap.airport_lookup import CACHE_FILE, RUNWAYS_CACHE_FILE
 
     CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copyfile(FIXTURE_AIRPORTS_CSV, CACHE_FILE)
     now = time.time()
-    os.utime(CACHE_FILE, (now, now))
+    for fixture, cached in (
+        (FIXTURE_AIRPORTS_CSV, CACHE_FILE),
+        (FIXTURE_RUNWAYS_CSV, RUNWAYS_CACHE_FILE),
+    ):
+        shutil.copyfile(fixture, cached)
+        os.utime(cached, (now, now))
     return CACHE_FILE
 
 
@@ -167,11 +172,17 @@ def reset_airport_cache():
     """
     import kml_heatmap.airport_lookup as airport_lookup_module
 
-    airport_lookup_module._airport_cache = None
-    airport_lookup_module._clear_download_failure()
+    def reset():
+        airport_lookup_module._airport_cache = None
+        airport_lookup_module._runway_cache = None
+        airport_lookup_module._clear_download_failure()
+        airport_lookup_module._clear_download_failure(
+            airport_lookup_module._runways_csv()
+        )
+
+    reset()
     yield
-    airport_lookup_module._airport_cache = None
-    airport_lookup_module._clear_download_failure()
+    reset()
 
 
 def parse_data(path):

@@ -32,7 +32,11 @@ from kml_heatmap.renderer import (
     create_progressive_heatmap,
 )
 from kml_heatmap.types import PathMetadata, TrackPoint
-from tests.conftest import FIXTURE_AIRPORTS_CSV, decoded_segments
+from tests.conftest import (
+    FIXTURE_AIRPORTS_CSV,
+    FIXTURE_RUNWAYS_CSV,
+    decoded_segments,
+)
 
 BOUNDS = {
     "center_lat": 51.0,
@@ -423,6 +427,7 @@ class TestParseKmlFiles:
         cache_dir = tmp_path / "cache"
         cache_dir.mkdir()
         shutil.copyfile(FIXTURE_AIRPORTS_CSV, cache_dir / "airports.csv")
+        shutil.copyfile(FIXTURE_RUNWAYS_CSV, cache_dir / "runways.csv")
         # Nor does it see the stand-in bundle, which it gets as an argument
         run_cli = (
             "import sys; from pathlib import Path; import kml_heatmap.renderer as r; "

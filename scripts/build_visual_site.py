@@ -8,11 +8,11 @@ rail and of Wrapped; this builds tests/fixtures/visual/ instead, a handful of
 flights that only change on purpose, into visual-site/.
 
 Everything else that varies between builds is pinned here as well: the build
-stamp of the statistics panel, the airport database and the tile API key. The
-ground under the flights is left out (--no-terrain): sampling it would fetch
-elevation tiles, and none of the snapshots shows the 3D view it is for, so a
-flat or fixture model would only add a download to avoid. Run `npm run build`
-first; the generator needs the bundles.
+stamp of the statistics panel, the airport and runway databases and the tile
+API key. The ground under the flights is left out (--no-terrain): sampling it
+would fetch elevation tiles, and none of the snapshots shows the 3D view it
+is for, so a flat or fixture model would only add a download to avoid. Run
+`npm run build` first; the generator needs the bundles.
 """
 
 import os
@@ -25,6 +25,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 FIXTURE_DIR = ROOT / "tests" / "fixtures" / "visual"
 AIRPORTS = ROOT / "tests" / "fixtures" / "airports.csv"
+RUNWAYS = ROOT / "tests" / "fixtures" / "runways.csv"
 SITE_DIR = ROOT / "visual-site"
 
 # The statistics panel prints when and from which commit the site was built.
@@ -47,11 +48,12 @@ def main() -> int:
     # this build no longer writes
     shutil.rmtree(SITE_DIR, ignore_errors=True)
     # The cache directory holds the airport database and the parser cache. A
-    # fresh one with a fresh copy of the fixture database keeps the build
+    # fresh one with fresh copies of the fixture databases keeps the build
     # offline (a copy older than 30 days would be downloaded again) and
     # independent of what earlier builds left in the user's cache.
     with tempfile.TemporaryDirectory(prefix="kml-heatmap-visual-") as cache_dir:
         shutil.copy(AIRPORTS, cache_dir)
+        shutil.copy(RUNWAYS, cache_dir)
         env = {**os.environ, **BUILD_ENVIRONMENT, "KML_HEATMAP_CACHE_DIR": cache_dir}
         return subprocess.run(  # noqa: S603 # nosec B603
             [

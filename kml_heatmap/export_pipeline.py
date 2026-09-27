@@ -14,11 +14,13 @@ from .segment_calculator import (
     calculate_fallback_groundspeed,
     extract_segment_speeds,
 )
+from .segment_codec import ALTITUDE_STEP
 from .types import COORDINATE_DECIMALS
 
 if TYPE_CHECKING:
     from collections.abc import Collection, Sequence
 
+    from .landings import FlightLandings
     from .types import FlightPath, PathInfo, PathMetadata, SegmentRow
 
 
@@ -79,10 +81,13 @@ def build_path_info(
     path_id: int,
     year: int,
     airport_names: Collection[str] | None = None,
+    landings: FlightLandings | None = None,
 ) -> PathInfo:
     """Build the path info entry of an exported path.
 
-    Keys without a value are omitted from the entry.
+    Keys without a value are omitted from the entry. ``landings`` are what
+    ``landings.detect_landings`` found for the path, None for a path it
+    could not read (no timestamps, no airport database).
 
     ``airport_names`` are the names of the exported airport markers. An end
     of a path counts as an airport if and only if it has a marker: the
@@ -114,9 +119,9 @@ def build_path_info(
 
     info: PathInfo = {"id": path_id, "year": year}
 
-    # Segment altitudes are rounded to 100 ft for rendering, so the exact
-    # range and climb are carried per path to keep the frontend statistics
-    # accurate
+    # Segment altitudes are rounded to ALTITUDE_STEP for rendering, so the
+    # exact range and climb are carried per path to keep the frontend
+    # statistics accurate
     altitudes_m = [point.alt for point in path if point.alt is not None]
     if altitudes_m:
         info["min_altitude_ft"] = round(min(altitudes_m) * METERS_TO_FEET, 1)
@@ -137,6 +142,12 @@ def build_path_info(
     aircraft_type = strip_dates(metadata.get("aircraft_type"))
     if aircraft_type:
         info["aircraft_type"] = aircraft_type
+
+    if landings is not None:
+        info["landings"] = landings.landings
+        info["touch_and_goes"] = landings.touch_and_goes
+        info["go_arounds"] = landings.go_arounds
+        info["touchdowns"] = list(landings.touchdowns)
 
     return info
 
@@ -231,7 +242,9 @@ def process_path_segments(
         altitudes = [alt for alt in (p1.alt, p2.alt) if alt is not None]
         if altitudes:
             avg_alt_m = sum(altitudes) / len(altitudes)
-            altitude_ft = round(avg_alt_m * METERS_TO_FEET / 100) * 100
+            altitude_ft = (
+                round(avg_alt_m * METERS_TO_FEET / ALTITUDE_STEP) * ALTITUDE_STEP
+            )
         else:
             # Flight paths only carry points with a known altitude (see
             # types.FlightPath), so this is unreachable in practice. Carry the

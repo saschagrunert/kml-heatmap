@@ -394,6 +394,51 @@ describe("wrapped feature", () => {
       ],
     };
 
+    it("tells the touch-and-goes, and the most of them in one flight", () => {
+      const facts = generateFunFacts(
+        yearStats,
+        {
+          landings: {
+            landings: 115,
+            touchAndGoes: 179,
+            goArounds: 5,
+            mostTouchAndGoes: 16,
+            busiestRunway: { airport: "EDAQ", runway: "29", share: 0.652 },
+          },
+        },
+        "2025",
+      );
+
+      const landings = facts.filter((f) => f.category === "landings");
+      expect(landings.map((f) => f.text)).toEqual([
+        "<strong>179 touch-and-goes</strong> in 2025, <strong>16</strong> of them in one flight.",
+        "Favourite runway: <strong>RWY 29</strong> at EDAQ, 65% of the touchdowns there.",
+      ]);
+    });
+
+    it("leaves out what a single flight or runway would make trivial", () => {
+      const facts = generateFunFacts(yearStats, {
+        landings: {
+          landings: 1,
+          touchAndGoes: 7,
+          goArounds: 0,
+          mostTouchAndGoes: 7,
+          busiestRunway: { airport: "EDAQ", runway: "29", share: 1 },
+        },
+      });
+
+      const landings = facts.filter((f) => f.category === "landings");
+      expect(landings.map((f) => f.text)).toEqual([
+        "<strong>7 touch-and-goes</strong> in total.",
+      ]);
+    });
+
+    it("tells nothing of landings the flights do not carry", () => {
+      const facts = generateFunFacts(yearStats, { landings: undefined });
+
+      expect(facts.some((f) => f.category === "landings")).toBe(false);
+    });
+
     it("generates distance facts", () => {
       const facts = generateFunFacts(yearStats);
 

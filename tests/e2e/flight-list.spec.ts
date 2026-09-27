@@ -113,6 +113,31 @@ test.describe("Flight list", () => {
     await expect(header).not.toHaveAttribute("aria-sort");
   });
 
+  test("sorts by the full-stop landings, touch-and-goes in the title", async ({
+    page,
+  }) => {
+    const panel = await openFlightList(page);
+    const header = panel.locator('th[data-sort="landings"]');
+    const landings = 6;
+
+    await header.locator("button").click();
+    await header.locator("button").click();
+    await expect(header).toHaveAttribute("aria-sort", "descending");
+    const down = await columnFigures(panel, landings);
+    expect(down.length).toBeGreaterThan(1);
+    expect(down).toEqual([...down].sort((a, b) => b - a));
+    // Flights without timestamps have no landings and come last
+    const texts = await columnText(panel, landings);
+    expect(texts.slice(down.length).every((text) => text === "—")).toBe(true);
+    await expect(
+      panel
+        .locator("tbody tr")
+        .first()
+        .locator("td")
+        .nth(landings - 1),
+    ).toHaveAttribute("title", /^\d+ full stops?, \d+ touch-and-go(es)?$/);
+  });
+
   test("searches the registrations and the airports", async ({ page }) => {
     const panel = await openFlightList(page);
     const total = await panel.locator("tbody tr").count();

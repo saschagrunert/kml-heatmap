@@ -86,6 +86,13 @@ class PathInfo(TypedDict):
     min_altitude_ft: NotRequired[float]
     max_altitude_ft: NotRequired[float]
     altitude_gain_ft: NotRequired[float]
+    # What the flight did at the fields it came to (see kml_heatmap.landings),
+    # written together for a flight with timestamps. A touchdown is the
+    # ICAO code of its field and the runway, None where it cannot be told
+    landings: NotRequired[int]
+    touch_and_goes: NotRequired[int]
+    go_arounds: NotRequired[int]
+    touchdowns: NotRequired[list[tuple[str, str | None]]]
 
 
 class YearFileHeader(TypedDict):

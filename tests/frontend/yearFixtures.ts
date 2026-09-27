@@ -62,11 +62,11 @@ export class FakeYearWorker {
 
 /**
  * Column scales of the wire format, mirroring kml_heatmap/segment_codec.py
- * (the altitude column counts hundreds of feet). The helpers below take rows
+ * (the altitude column counts steps of 20 ft). The helpers below take rows
  * in the units a reader thinks in and encode them, so a test says what it
  * means and the decoder is still checked against an independent encoder.
  */
-const SCALES = [1e5, 1e5, 1 / 100, 10, 10];
+const SCALES = [1e5, 1e5, 1 / 20, 10, 10];
 
 /**
  * One path's exported segments, given as plain `[lat, lon, ft, kt, s?]` rows,

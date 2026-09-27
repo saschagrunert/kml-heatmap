@@ -268,7 +268,7 @@ export function pathsById(paths: PathInfo[]): Map<number, PathInfo> {
  * Altitude range in feet of the paths the segments belong to.
  *
  * Taken from path_info, which carries the exact range of every path with an
- * altitude: segment altitudes are rounded to 100 ft and can land on either
+ * altitude: segment altitudes are rounded to 20 ft and can land on either
  * side of the exact value (1,291 ft rounds to 1,300 ft). The exporter writes
  * the range of every path whose points have an altitude, and a path without
  * one has no segment altitudes either (see the export contract test). Paths
@@ -309,8 +309,8 @@ const GROUND_LEVEL_PERCENTILE = 0.01;
  * so the first percentile skips the one and still lands on the other.
  */
 export function groundLevelsFt(segments: PathSegment[]): Map<number, number> {
-  // Altitudes are rounded to 100 ft, so a histogram per path holds a few
-  // dozen entries where sorting every sample would copy all of them
+  // Altitudes are rounded to 20 ft, so a histogram per path holds a few
+  // hundred entries where sorting every sample would copy all of them
   const histograms = new Map<number, Map<number, number>>();
   let pathId = NaN;
   let histogram: Map<number, number> | undefined;

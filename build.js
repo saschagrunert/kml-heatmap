@@ -281,7 +281,13 @@ function analyzeBundleComposition(metafile, fileName) {
 // left stale, a mode that shows during a camera move drawn at its end, the
 // flights isolate mode hides left as they are, one toast per lazy file):
 // 145.44 KB raw and 49.92 KB gzipped in a local build, about 50.12 KB in CI.
-const BUDGET_APP = { raw: 147.5 * 1024, gzip: 51.25 * 1024 };
+// Raised from 147.5 KB and 51.25 KB for the features that land together:
+// the landings, the flight list, the flight profile, replay of all flights,
+// the Wrapped intro and the heatmap weighed by time with its switches for
+// routes, airborne and new areas. The heatmap alone comes to 148.3 KB raw
+// and 50.96 KB gzipped in a local build; all of them together are about
+// 150.2 KB raw and 51.5 KB gzipped.
+const BUDGET_APP = { raw: 152 * 1024, gzip: 52.5 * 1024 };
 // The feature bundle is fetched only when replay is opened, the relief, the
 // heat cloud and the ribbons of a selection of the 3D view are first drawn
 // or the Satellite switch is first on, so it is

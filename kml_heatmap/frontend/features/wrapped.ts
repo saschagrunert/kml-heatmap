@@ -63,6 +63,7 @@ export function findFurthestAirport(
 /** The statistics of the selected year and aircraft the fun facts draw on */
 type FunFactStats = Pick<
   FilteredStatistics,
+  | "landings"
   | "total_altitude_gain_ft"
   | "total_flight_time_seconds"
   | "cruise_speed_knots"
@@ -398,6 +399,8 @@ export function generateFunFacts(
       });
     }
 
+    landingFacts(facts, filteredStats, period);
+
     // Time facts (lower priority - time is shown in stats cards above)
     if (filteredStats.total_flight_time_seconds) {
       const seconds = filteredStats.total_flight_time_seconds;
@@ -440,6 +443,42 @@ export function generateFunFacts(
 
   // Select diverse facts
   return selectDiverseFacts(facts);
+}
+
+/**
+ * The facts of the landings: the touch-and-goes of the period, the most of
+ * them in one flight and the runway used most. Counts only: when any of
+ * them happened is nobody's business.
+ */
+function landingFacts(
+  facts: FunFact[],
+  stats: FunFactStats,
+  period: string,
+): void {
+  const landings = stats.landings;
+  if (!landings) return;
+  const { touchAndGoes, mostTouchAndGoes } = landings;
+  if (touchAndGoes > 1) {
+    const inOne =
+      mostTouchAndGoes > 1 && mostTouchAndGoes < touchAndGoes
+        ? `, <strong>${formatNumber(mostTouchAndGoes)}</strong> of them in one flight`
+        : "";
+    facts.push({
+      icon: "airport",
+      text: `<strong>${formatNumber(touchAndGoes)} touch-and-goes</strong> ${period}${inOne}.`,
+      category: "landings",
+      priority: 9,
+    });
+  }
+  const busiest = landings.busiestRunway;
+  if (busiest && busiest.share < 1) {
+    facts.push({
+      icon: "compass",
+      text: `Favourite runway: <strong>RWY ${escapeHtml(busiest.runway)}</strong> at ${escapeHtml(busiest.airport)}, ${Math.round(busiest.share * 100)}% of the touchdowns there.`,
+      category: "landings",
+      priority: 6,
+    });
+  }
 }
 
 /**

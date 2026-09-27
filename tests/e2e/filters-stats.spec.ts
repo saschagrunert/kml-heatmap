@@ -177,6 +177,17 @@ test.describe("Filters and Statistics", () => {
     await expect(panel).toContainText("nm");
   });
 
+  test("stats panel counts the landings", async ({ page }) => {
+    await page.locator("#stats-btn").click();
+    // Its figures, not the loading line of the first opening
+    const panel = await waitForStatsContent(page);
+
+    // The build reads them from the logs, which all have timestamps
+    await expect(panel).toContainText("Full-Stop Landings");
+    await expect(panel).toContainText("Touch-and-Goes");
+    await expect(panel).toContainText("Go-Arounds");
+  });
+
   test("stats panel shows airports and aircraft", async ({ page }) => {
     await page.locator("#stats-btn").click();
     // Its figures, not the loading line of the first opening

@@ -25,12 +25,29 @@ export interface PathInfo {
   year?: number;
   start_airport?: string;
   end_airport?: string;
-  /** Exact altitude range; segment altitudes are rounded to 100 ft */
+  /** Exact altitude range; segment altitudes are rounded to 20 ft */
   min_altitude_ft?: number;
   max_altitude_ft?: number;
   /** Climb in feet from the unrounded altitudes, without level-flight noise */
   altitude_gain_ft?: number;
+  /**
+   * What the flight did at the fields it came to, read by the build from
+   * the full-precision log (kml_heatmap/landings.py). The four are written
+   * together, for a flight with timestamps only; go-arounds include low
+   * approaches, which GPS cannot tell apart from them.
+   */
+  landings?: number;
+  touch_and_goes?: number;
+  go_arounds?: number;
+  /**
+   * Every full stop and touch-and-go in the order flown: the ICAO code of
+   * the field and the runway ("29", "08L"), null where it could not be told
+   */
+  touchdowns?: Touchdown[];
 }
+
+/** A touchdown of PathInfo: field and runway */
+type Touchdown = [airport: string, runway: string | null];
 
 /**
  * Path segment (in-memory shape expanded by the DataLoader), representing a
@@ -59,8 +76,8 @@ export interface PathSegment {
 
 /**
  * Encoded columns of one path, as written by the exporter
- * (kml_heatmap/segment_codec.py): latitude, longitude, altitude in hundreds
- * of feet and groundspeed in tenths of a knot, then the relative time in
+ * (kml_heatmap/segment_codec.py): latitude, longitude, altitude in steps of
+ * 20 ft and groundspeed in tenths of a knot, then the relative time in
  * tenths of a second when any row has one (null for a row without). Each
  * entry is the difference to the row before, as a scaled integer.
  *
@@ -162,6 +179,23 @@ export interface FilteredStatistics {
   total_flight_time_str?: string | undefined;
   most_common_cruise_altitude_ft?: number | undefined;
   most_common_cruise_altitude_m?: number | undefined;
+  /** Undefined when no flight of the filter carries its landings */
+  landings?: LandingTotals | undefined;
+}
+
+/** The landings of the flights of a filter, see landingTotals */
+export interface LandingTotals {
+  /** Full stops */
+  landings: number;
+  touchAndGoes: number;
+  goArounds: number;
+  /** The most touch-and-goes of a single flight */
+  mostTouchAndGoes: number;
+  /**
+   * The runway with the most touchdowns, and its share of the touchdowns
+   * with a runway at its field; undefined without one
+   */
+  busiestRunway?: { airport: string; runway: string; share: number };
 }
 
 /**

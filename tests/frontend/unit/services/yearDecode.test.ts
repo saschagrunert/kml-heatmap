@@ -482,7 +482,7 @@ describe("expandYearData", () => {
     ).toThrow("segments");
   });
 
-  it.each([undefined, 3, 5, "4"])(
+  it.each([undefined, 4, 6, "5"])(
     "refuses a year file written in format %s",
     (format) => {
       expect(() =>

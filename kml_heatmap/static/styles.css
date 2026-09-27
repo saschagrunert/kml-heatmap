@@ -2135,6 +2135,11 @@ body.stats-open #left-buttons {
 .kh-popup-flights-label {
   margin-top: var(--space-sm);
 }
+/* The runways the flights used, above the list, in the type of its rows */
+.kh-popup-runways {
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+}
 .kh-popup-flights {
   display: grid;
   gap: 2px;

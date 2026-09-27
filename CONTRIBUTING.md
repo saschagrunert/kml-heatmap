@@ -171,9 +171,10 @@ dialog print figures computed from the flights, and `data/` grows all the
 time, so the project has a site of its own: `visual-site/`, built from the
 few flights in `tests/fixtures/visual/` (obfuscated like the ones in `data/`,
 which the hooks, `make check-obfuscation` and the `obfuscation` job check
-too), with `tests/fixtures/airports.csv` in place of the OurAirports download
-and a fixed build time and commit. Build it before running the command above,
-outside the container, since the image has no Python the package runs on:
+too), with `tests/fixtures/airports.csv` and `runways.csv` in place of the
+OurAirports downloads and a fixed build time and commit. Build it before
+running the command above, outside the container, since the image has no
+Python the package runs on:
 
 ```sh
 npm run build && python scripts/build_visual_site.py
