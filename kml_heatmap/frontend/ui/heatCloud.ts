@@ -28,7 +28,8 @@
  * (forcedHeatCloud in the store). There the cloud stands on flat ground, as
  * on the globe the intro turns on, and is cut for the level of the zoom the
  * map last came to rest at, which the layer manager only follows in the 3D
- * view. It is the year of the cards: the flights the year and aircraft
+ * view, and closer in than the last relief level for that zoom's own
+ * level. It is the year of the cards: the flights the year and aircraft
  * filters keep, whatever the Heatmap switch, an isolated selection or a
  * colour layer say, at full strength. It pulses as in the 3D view, woken by
  * the flight and resting when the map does: the replay of all flights that
@@ -57,11 +58,21 @@ import {
 } from "../calculations/heightBand";
 import {
   isLiftedAt,
+  LIFT_MAX_ZOOM,
   liftExaggeration,
+  RELIEF_MAX_LEVEL,
   reliefLevel,
+  ribbonWidthZoom,
 } from "../calculations/lift";
 import { FEET_TO_METERS, MAP_LAYERS } from "../utils/constants";
 import { logError } from "../utils/logger";
+import {
+  CULL_FROM_ZOOM,
+  leavesBox,
+  ribbonsTopM,
+  viewBox,
+  type Box,
+} from "../utils/viewBox";
 import {
   hasLostContext,
   isReplayCameraMove,
@@ -132,7 +143,7 @@ function onReliefIn(app: MapApp, forced: boolean): boolean {
 /**
  * What the points of the cloud were made of, as a key: the dataset, the
  * filter, the isolated selection, and the ground they stand on, in the
- * 3D view's cloud or in Wrapped's (`forced`); the relief level they are cut
+ * 3D view's cloud or in Wrapped's (`forced`); the zoom level they are cut
  * for is kept apart (see CLOUD_LEVELS_KEPT)
  */
 function pointsKey(app: MapApp, forced: boolean): unknown[] {
@@ -153,29 +164,79 @@ function sameKey(a: unknown[] | null, b: unknown[]): boolean {
   return !!a && a.every((value, i) => value === b[i]);
 }
 
-/** The points of a cloud kept by relief level (see CLOUD_LEVELS_KEPT) */
+/**
+ * The points of the cloud cut for a zoom level, and the part of the map
+ * they were cut for (see viewBox), null for all of it. From CULL_FROM_ZOOM
+ * on the cloud is cut around the view, as the ribbons are, and again as
+ * the view leaves that: closer in than the last relief level it is cut
+ * for the zoom's own level (see cloudDetail), where the flights of two
+ * years all over the map were 150,000 points.
+ */
+interface Cut {
+  points: CloudPoints;
+  box: Box | null;
+}
+
+/** The points of a cloud kept by zoom level (see CLOUD_LEVELS_KEPT) */
 interface KeptPoints {
   /** What they were made of (pointsKey) */
   made: unknown[] | null;
-  /** By relief level, the one asked for last at the end */
-  byLevel: Map<number, CloudPoints>;
+  /** By the zoom level cut for, the one asked for last at the end */
+  byLevel: Map<number, Cut>;
+  /**
+   * The exposure of the points by relief level (CloudPoints.busiest),
+   * which a cut around the view or for a closer zoom level keeps: it adds
+   * up the heat of every flight at the relief level, and a cut that knows
+   * it goes through the flights that reach the view alone
+   */
+  exposures: Map<number, number>;
 }
 
 /** No points kept yet */
 function keptPoints(): KeptPoints {
-  return { made: null, byLevel: new Map() };
+  return { made: null, byLevel: new Map(), exposures: new Map() };
 }
 
 /**
- * How many relief levels the points of the cloud are kept for, the last
- * ones it was drawn at. The points of a level are cut from every flight
+ * How many zoom levels the points of the cloud are kept for, the last ones
+ * it was drawn at. The points of a level are cut from every flight
  * smoothed on its ground (groundedFlights), which with the heatmap alone
  * was all of the 50 to 90 ms a zoom into another level took for two years
  * of flights; a zoom back, or in and out around one level, takes none. All
- * levels of those two years are about 7.0 MB of points, the four deepest
- * about 6.0.
+ * levels of those two years were about 7.0 MB of points, the four deepest
+ * about 6.0, before the steps were merged into stretches and the points of
+ * a level cut around the view (see Cut).
  */
 const CLOUD_LEVELS_KEPT = 4;
+
+/**
+ * How far around the view the cloud is cut from CULL_FROM_ZOOM on, in
+ * spans of the view (see viewBox): a pan of a whole view, or a zoom out of
+ * one and a half levels, before the map comes to rest shows no edge of it.
+ * The ribbons are cut a quarter of a view around it (VIEW_SPARE), and a
+ * cloud cut as closely ended in a straight edge a quarter of a view into
+ * a pan. It costs little: a cut goes through every flight that reaches
+ * the view however far around it is, and the layer drops the stretches
+ * out of the view before a pixel of them is drawn, so a frame takes the
+ * same GPU time.
+ */
+const CLOUD_VIEW_SPARE = 1;
+
+/**
+ * The zoom level the cloud is cut for at the relief level `level` and the
+ * map zoom `zoom`: the relief level, and closer in than the last one the
+ * zoom's, up to LIFT_MAX_ZOOM, from where the flights are drawn flat. The
+ * relief level stops at the last elevation tiles, and the cloud cut for
+ * its pixels cut across the corners of a circuit and the taxiways in
+ * chords of about 110 m, 270 px long at LIFT_MAX_ZOOM (the app's zoom 18),
+ * where the heat lines of the flat map follow them. The ground and the
+ * exaggeration stay the last relief level's.
+ */
+function cloudDetail(level: number, zoom: number): number {
+  return level < RELIEF_MAX_LEVEL
+    ? level
+    : Math.min(Math.max(ribbonWidthZoom(zoom), level), LIFT_MAX_ZOOM);
+}
 
 /**
  * How long points the cloud does not draw are kept: all of them while it
@@ -195,14 +256,16 @@ export const CLOUD_IDLE_MS = 15_000;
 const followed = new WeakMap<MapApp, (levels: readonly number[]) => void>();
 
 /**
- * Cut the points of Wrapped's cloud (forcedHeatCloud) for the relief
- * `levels` ahead of time, once followHeatCloud follows it: Wrapped does
- * while its button is pointed at, so that its intro does not stall on them.
- * They are kept like the points of the levels drawn last, for
- * CLOUD_IDLE_MS unless the intro draws them.
+ * Cut the points of Wrapped's cloud (forcedHeatCloud) for the map `zooms`
+ * ahead of time, once followHeatCloud follows it: Wrapped does while its
+ * button is pointed at, so that its intro does not stall on them. They are
+ * cut for all of the map, for the zoom level the cloud is drawn at once the
+ * map comes to rest at such a zoom (see cloudDetail), and kept like the
+ * points of the levels drawn last, for CLOUD_IDLE_MS unless the intro draws
+ * them.
  */
-export function prepareHeatCloud(app: MapApp, levels: readonly number[]): void {
-  followed.get(app)?.(levels);
+export function prepareHeatCloud(app: MapApp, zooms: readonly number[]): void {
+  followed.get(app)?.(zooms);
 }
 
 /**
@@ -250,6 +313,7 @@ export function followHeatCloud(app: MapApp): void {
     const cloud = keptOf(forced);
     cloud.made = null;
     cloud.byLevel.clear();
+    cloud.exposures.clear();
     if (forced) aside = null;
   };
   /** Lets go of the points the cloud does not draw (CLOUD_IDLE_MS) */
@@ -260,6 +324,8 @@ export function followHeatCloud(app: MapApp): void {
    * no level (see LayerManager.syncTerrain)
    */
   let atRest = reliefLevel(map.getZoom());
+  /** That zoom, which the cloud is cut for beyond the last relief level */
+  let restZoom = map.getZoom();
   /** The relief level the cloud is cut for and lifted as */
   const level = (): number => (app.threeDVisible ? app.reliefLevel : atRest);
 
@@ -322,12 +388,23 @@ export function followHeatCloud(app: MapApp): void {
     }, CLOUD_IDLE_MS);
   };
 
+  /** How high a flight is drawn at most at the relief level `at` */
+  const topM = (at: number): number => ribbonsTopM(app.altitudeRange.max, at);
+
   /**
-   * The points of what the heatmap shows cut for the level `at`, or of
-   * Wrapped's cloud (`forced`): those kept for it while nothing they were
-   * made of changed, or cut now
+   * The points of what the heatmap shows cut for the relief level `at` and
+   * the zoom level `detail`, or of Wrapped's cloud (`forced`), and with
+   * `around` only those around the view: those kept for it while nothing
+   * they were made of changed and they reach as far as the view, the other
+   * cloud's where they are of the same (both on flat ground, nothing
+   * isolated) and reach as far, or cut now
    */
-  const pointsAt = (at: number, forced: boolean): CloudPoints | null => {
+  const pointsAt = (
+    at: number,
+    forced: boolean,
+    detail = at,
+    around = false,
+  ): CloudPoints | null => {
     const data = app.currentData;
     const key = pointsKey(app, forced);
     const cloud = keptOf(forced);
@@ -337,29 +414,57 @@ export function followHeatCloud(app: MapApp): void {
     }
     const { byLevel } = cloud;
     if (!data) return null;
-    let points = byLevel.get(at);
-    if (points) {
-      byLevel.delete(at);
-    } else {
-      // The other cloud's where they are of the same: both on flat ground,
-      // nothing isolated
-      const other = keptOf(!forced);
-      points =
-        (sameKey(other.made, key) && other.byLevel.get(at)) ||
-        makePoints(data, at, forced);
-      const oldest = byLevel.keys().next();
-      if (!oldest.done && byLevel.size >= CLOUD_LEVELS_KEPT) {
-        byLevel.delete(oldest.value);
+    const view = around ? viewBox(map, topM(at), 0) : null;
+    const fits = (cut: Cut | undefined): cut is Cut =>
+      !!cut && (!cut.box || (!!view && !leavesBox(view, cut.box)));
+    const other = keptOf(!forced);
+    const shared = sameKey(other.made, key);
+    let cut = byLevel.get(detail);
+    if (!fits(cut)) {
+      const theirs = shared ? other.byLevel.get(detail) : undefined;
+      if (fits(theirs)) {
+        cut = theirs;
+      } else {
+        const box = around ? viewBox(map, topM(at), CLOUD_VIEW_SPARE) : null;
+        const exposure =
+          cloud.exposures.get(at) ??
+          (shared ? other.exposures.get(at) : undefined);
+        const points = makePoints(data, at, detail, box, forced, exposure);
+        cloud.exposures.set(at, points.busiest);
+        cut = { points, box };
       }
     }
-    byLevel.set(at, points);
-    return points;
+    byLevel.delete(detail);
+    const oldest = byLevel.keys().next();
+    if (!oldest.done && byLevel.size >= CLOUD_LEVELS_KEPT) {
+      byLevel.delete(oldest.value);
+    }
+    byLevel.set(detail, cut);
+    return cut.points;
   };
 
-  /** The points of what the heatmap shows, when that changed */
-  const updatePoints = (): void => draw(pointsAt(level(), app.forcedHeatCloud));
-  followed.set(app, (levels) => {
-    for (const at of levels) pointsAt(at, true);
+  /**
+   * The points of what the heatmap shows, when that changed or the view
+   * left the part of the map they were cut for. While a replay runs they
+   * are the relief level's, of all the map: its camera moves on its own,
+   * and the map does not come to rest (see isReplayCameraMove).
+   */
+  const updatePoints = (): void => {
+    const at = level();
+    const forced = app.forcedHeatCloud;
+    if (app.replayActive) {
+      draw(pointsAt(at, forced));
+      return;
+    }
+    const zoom = app.threeDVisible ? map.getZoom() : restZoom;
+    const detail = cloudDetail(at, zoom);
+    draw(pointsAt(at, forced, detail, detail >= CULL_FROM_ZOOM));
+  };
+  followed.set(app, (zooms) => {
+    for (const zoom of zooms) {
+      const at = reliefLevel(zoom);
+      pointsAt(at, true, cloudDetail(at, zoom));
+    }
     release();
   });
 
@@ -386,11 +491,19 @@ export function followHeatCloud(app: MapApp): void {
     return aside.flights;
   };
 
-  /** The points of the flights the heatmap shows, cut for `level` */
+  /**
+   * The points of the flights the heatmap shows, or Wrapped's cloud shows
+   * (`forced`), cut for the relief level `level` and the zoom level
+   * `detail`, those in `box` or all of them, with the `exposure` where it is
+   * known
+   */
   const makePoints = (
     data: KMLDataset,
     level: number,
+    detail: number,
+    box: Box | null,
     forced: boolean,
+    exposure: number | undefined,
   ): CloudPoints => {
     const kept = datasetIndex(data).filter(
       app.selectedYear,
@@ -403,7 +516,7 @@ export function followHeatCloud(app: MapApp): void {
       : (pathId: number) => kept.has(pathId);
     const segments = data.path_segments;
     const flights = flightsFor(segments, level, forced);
-    return cloudPoints(segments, flights, keep, level);
+    return cloudPoints(segments, flights, keep, level, detail, box, exposure);
   };
 
   /** Put the layer where it belongs, or take it off */
@@ -473,6 +586,7 @@ export function followHeatCloud(app: MapApp): void {
       // map comes to rest: not on every jump of the replay's camera, nor
       // on the moves of Wrapped's intro (see REPLAY_CAMERA_MOVE)
       const at = reliefLevel(map.getZoom());
+      if (!isReplayCameraMove(event)) restZoom = map.getZoom();
       if (!isReplayCameraMove(event) && at !== atRest) {
         atRest = at;
         if (!app.threeDVisible && shown()) {
@@ -483,6 +597,18 @@ export function followHeatCloud(app: MapApp): void {
       if (lifted === isLiftedAt(map.getZoom())) return;
       lifted = !lifted;
       map.triggerRepaint();
+    });
+    // Cut around the view, or closer in than the last relief level, the
+    // points are cut again for the view the map comes to rest at, in a
+    // task of their own after the frame the move ends in
+    let recut: ReturnType<typeof setTimeout> | undefined;
+    const moved = map.on("moveend", (event: object) => {
+      if (isReplayCameraMove(event) || !shown()) return;
+      clearTimeout(recut);
+      recut = setTimeout(() => {
+        if (signal.aborted || !shown() || map.isMoving()) return;
+        updatePoints();
+      }, 0);
     });
     // A new base style, or one made anew, may have left the layer out
     const styled = map.on("styledata", () => {
@@ -501,6 +627,8 @@ export function followHeatCloud(app: MapApp): void {
       unsubscribe();
       styled.unsubscribe();
       zoomed.unsubscribe();
+      moved.unsubscribe();
+      clearTimeout(recut);
     });
     sync();
   });

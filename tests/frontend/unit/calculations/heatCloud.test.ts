@@ -6,6 +6,9 @@
  */
 import { describe, it, expect } from "vitest";
 import {
+  CLOUD_MERGE_HEAT,
+  CLOUD_MERGE_MAX_PX,
+  CLOUD_MERGE_PX,
   CLOUD_POINT_FLOATS,
   CLOUD_STEP_PX,
   cloudPoints,
@@ -73,6 +76,22 @@ function flight(
     groundspeed_knots: 100,
     time: i * seconds,
   }));
+}
+
+/**
+ * `segments` in runs of `run` flown at the speed of their times and at a
+ * quarter of it by turns: a metre of the one carries four times the heat
+ * of a metre of the other, so no two runs are merged into one stretch
+ * (see CLOUD_MERGE_HEAT), and each shows as it is kept
+ */
+function byTurns(segments: PathSegment[], run = 1, seconds = 5): PathSegment[] {
+  let time = 0;
+  return segments.map((segment, i) => {
+    const slow = Math.floor(i / run) % 2 === 1;
+    const turn = { ...segment, time, groundspeed_knots: slow ? 25 : 100 };
+    time += slow ? 4 * seconds : seconds;
+    return turn;
+  });
 }
 
 /** `count` fixes `stepDeg` of longitude apart along the latitude `lat` */
@@ -143,7 +162,7 @@ describe("cloudPoints", () => {
 
   it("keeps every fix where they are further apart than the step, the first at the start of the first segment", () => {
     const fixes = line(4);
-    const segments = flight(1, fixes);
+    const segments = byTurns(flight(1, fixes));
     const cloud = cloudOf(segments, everything, [0, 0, 0], 11);
     const points = pointsOf(cloud);
     expect(points).toHaveLength(4);
@@ -211,11 +230,11 @@ describe("cloudPoints", () => {
   });
 
   it("carries the seconds spent on a stretch on the point it starts from, and none on the last of a flight", () => {
-    const segments = flight(1, line(4), undefined, 7);
+    const segments = byTurns(flight(1, line(4)), 1, 7);
     const points = pointsOf(cloudOf(segments, everything, [0, 0, 0], 11));
     const seconds = secondsOf(segments);
     // The last segment of a path has no next: it is at its groundspeed
-    expect(seconds.slice(0, 2)).toEqual([7, 7]);
+    expect(seconds.slice(0, 2)).toEqual([7, 28]);
     expect(points.map((p) => p.heat)).toEqual(
       [...seconds, 0].map((s) => Math.fround(s)),
     );
@@ -249,26 +268,36 @@ describe("cloudPoints", () => {
       Math.cos(lat * DEGREES_TO_RADIANS);
     // Fixes a third of a step apart: every third is kept
     const stepDeg = stepM / 3 / (111320 * Math.cos(lat * DEGREES_TO_RADIANS));
-    const segments = flight(1, line(10, lat, 11, stepDeg * 1.0001));
+    const segments = byTurns(flight(1, line(11, lat, 11, stepDeg * 1.0001)), 3);
     const points = pointsOf(
-      cloudOf(segments, everything, new Array(9).fill(0), level),
+      cloudOf(segments, everything, new Array(10).fill(0), level),
     );
-    expect(points).toHaveLength(4);
+    // And the last, at the end of the flight
+    expect(points).toHaveLength(5);
   });
 
   it("keeps a climb a climb: a fix where the height has changed by a pixel since the last kept", () => {
-    const fixes = line(21, 47, 11, 0.004);
+    // Far enough apart to climb as steeply as they do (see MAX_SLOPE in
+    // smoothing.ts)
+    const fixes = line(21, 47, 11, 0.02);
     const level = 4;
     const flat = flight(1, fixes);
+    // Up by 800 ft a fix, then level at the top
     const climbing = flight(
       1,
       fixes,
-      fixes.slice(1).map((_, i) => 1000 + 800 * i),
+      fixes.slice(1).map((_, i) => 1000 + 800 * Math.min(i, 10)),
     );
     const ground = new Array(20).fill(0);
-    const kept = (segments: PathSegment[]): number =>
-      cloudOf(segments, everything, ground, level).count;
-    expect(kept(climbing)).toBeGreaterThan(kept(flat));
+    const cloud = (segments: PathSegment[]): Point[] =>
+      pointsOf(cloudOf(segments, everything, ground, level));
+    // A straight line, level or climbing, is one stretch; the top of the
+    // climb is where it levels off
+    expect(cloud(flat)).toHaveLength(2);
+    const lifts = cloud(climbing).map((p) => p.lift);
+    expect(lifts.length).toBeGreaterThan(2);
+    expect(lifts).toContain(9000);
+    expect(lifts.filter((lift) => lift > 1000 && lift < 9000)).toEqual([]);
   });
 
   it("follows the filter, flight by flight", () => {
@@ -279,7 +308,8 @@ describe("cloudPoints", () => {
     ];
     const ground = new Array(segments.length).fill(0);
     const points = pointsOf(cloudOf(segments, (id) => id !== 2, ground, 11));
-    expect(points).toHaveLength(6);
+    // Each a straight line, one stretch
+    expect(points).toHaveLength(4);
     const ys = points.map((p) => p.y);
     expect(
       ys.filter((y) => Math.abs(y - mercatorOf([48, 11])[1]) < 1e-9),
@@ -287,9 +317,9 @@ describe("cloudPoints", () => {
   });
 
   it("starts a flight anew where the next segment does not start where the last ended, or is of another path", () => {
-    const a = flight(1, line(3, 47));
+    const a = byTurns(flight(1, line(3, 47)));
     // The same path again, somewhere else: a gap in the log
-    const b = flight(1, line(3, 47.5));
+    const b = byTurns(flight(1, line(3, 47.5)));
     const c = flight(2, [line(3, 47.5)[2]!, [47.6, 11]]);
     const segments = [...a, ...b, ...c];
     const points = pointsOf(
@@ -379,6 +409,321 @@ describe("cloudPoints", () => {
   });
 });
 
+/** Mercator units in pixels of the zoom level `level`, in its middle */
+const pixelsOf = (level: number): number => 512 * 2 ** (level + 0.5);
+
+/** How far `point` is from the line through `line`, in Mercator units */
+function offLine(point: { x: number; y: number }, line: Point[]): number {
+  let least = Infinity;
+  for (let k = 0; k + 1 < line.length; k++) {
+    const a = line[k]!;
+    const b = line[k + 1]!;
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const length = dx * dx + dy * dy;
+    const t =
+      length > 0
+        ? Math.min(
+            Math.max(((point.x - a.x) * dx + (point.y - a.y) * dy) / length, 0),
+            1,
+          )
+        : 0;
+    least = Math.min(
+      least,
+      Math.hypot(point.x - a.x - t * dx, point.y - a.y - t * dy),
+    );
+  }
+  return least;
+}
+
+/** The curve of the one flight of `segments`, on flat ground */
+function curveOf(segments: PathSegment[]): {
+  flights: ReturnType<typeof smoothFlights>;
+  curve: Coordinate[];
+} {
+  const flights = smoothFlights(segments, (i) => segments[i]!.altitude_ft, {
+    groundOf: () => 0,
+  });
+  return { flights, curve: flights.chains[0]!.points };
+}
+
+/** `count` fixes `metres` apart on a circle of `radius` metres around 47, 11 */
+function circle(count: number, radius: number): Coordinate[] {
+  const perDegree = 111320;
+  return Array.from({ length: count }, (_, i) => {
+    const angle = (2 * Math.PI * i) / count;
+    return [
+      47 + (radius * Math.sin(angle)) / perDegree,
+      11 +
+        (radius * Math.cos(angle)) /
+          (perDegree * Math.cos(47 * DEGREES_TO_RADIANS)),
+    ];
+  });
+}
+
+describe("the stretches of the cloud", () => {
+  it("merges the steps along a straight run into one stretch, with their heat, from the time of its first", () => {
+    const segments = flight(1, line(5));
+    const points = pointsOf(cloudOf(segments, everything, [0, 0, 0, 0], 11));
+    expect(points).toHaveLength(2);
+    const seconds = secondsOf(segments).reduce((sum, s) => sum + s, 0);
+    expect(points[0]!.heat).toBeCloseTo(seconds, 3);
+    expect(points[1]!.heat).toBe(0);
+    expect(points.map((p) => p.time)).toEqual(
+      [0, flightClock(segments).duration.get(1)!].map((s) => Math.fround(s)),
+    );
+  });
+
+  it("is no longer than CLOUD_MERGE_MAX_PX of the level", () => {
+    const level = 11;
+    const points = pointsOf(
+      cloudOf(flight(1, line(41)), everything, new Array(40).fill(0), level),
+    );
+    // 40 fixes 12 px apart
+    expect(points.length).toBeGreaterThanOrEqual(
+      Math.ceil((40 * 12) / CLOUD_MERGE_MAX_PX) + 1,
+    );
+    for (let k = 0; k + 1 < points.length; k++) {
+      const length = Math.hypot(
+        points[k + 1]!.x - points[k]!.x,
+        points[k + 1]!.y - points[k]!.y,
+      );
+      expect(length * pixelsOf(level)).toBeLessThanOrEqual(CLOUD_MERGE_MAX_PX);
+    }
+  });
+
+  it("stays within CLOUD_MERGE_PX of every point of the curve it merges, around a bend", () => {
+    // Six fixes 150 m apart to the east, and six turning off by 30 degrees
+    const metres = 150 / (111320 * Math.cos(47 * DEGREES_TO_RADIANS));
+    const fixes: Coordinate[] = line(6, 47, 11, metres);
+    const turn = 30 * DEGREES_TO_RADIANS;
+    for (let i = 1; i <= 6; i++) {
+      fixes.push([
+        47 + (i * 150 * Math.sin(turn)) / 111320,
+        fixes[5]![1] + i * metres * Math.cos(turn),
+      ]);
+    }
+    const segments = flight(1, fixes);
+    const { flights, curve } = curveOf(segments);
+    // A level where every piece of the curve is a step of its own
+    const level = 13;
+    const points = pointsOf(cloudPoints(segments, flights, everything, level));
+    expect(points.length).toBeLessThan(curve.length);
+    expect(points.length).toBeGreaterThan(3);
+    for (const fix of curve) {
+      const [x, y] = mercatorOf(fix);
+      expect(offLine({ x, y }, points) * pixelsOf(level)).toBeLessThan(
+        CLOUD_MERGE_PX + 1e-3,
+      );
+    }
+  });
+
+  it("does not merge steps whose heat per metre differs by more than CLOUD_MERGE_HEAT", () => {
+    // Two segments alike but for the time spent on the second
+    const kept = (factor: number): number => {
+      const segments = flight(1, line(4)).map((segment, i) => ({
+        ...segment,
+        time: i === 0 ? 0 : 10 + (i - 1) * 10 * factor,
+      }));
+      return cloudOf(segments, everything, [0, 0, 0], 11).count;
+    };
+    expect(kept(CLOUD_MERGE_HEAT * 0.9)).toBe(kept(1));
+    expect(kept(CLOUD_MERGE_HEAT * 1.1)).toBe(kept(1) + 1);
+  });
+
+  it("keeps a point where the pulses would run off it by the time it was flown at, though its heat is alike", () => {
+    // Two minutes of heat each (see segmentSeconds), and the clock in full
+    const kept = (times: number[]): number => {
+      const segments = flight(1, line(4)).map((segment, i) => ({
+        ...segment,
+        time: times[i]!,
+      }));
+      return cloudOf(segments, everything, [0, 0, 0], 11).count;
+    };
+    expect(kept([0, 150, 600])).toBe(kept([0, 150, 300]) + 1);
+  });
+});
+
+describe("the cloud cut for a zoom level, and around the view", () => {
+  it("follows the curve at a closer zoom level than the relief level's, on its ground", () => {
+    // A circuit of a kilometre across, a fix every 130 m
+    const segments = flight(1, circle(25, 500));
+    const { flights, curve } = curveOf(segments);
+    const cut = (detail: number): Point[] =>
+      pointsOf(cloudPoints(segments, flights, everything, 11, detail));
+    // At the relief level's, merged into chords of 6 px of it (110 m)
+    expect(cut(11).length).toBeLessThan(curve.length / 2);
+    // At 15 every point of the curve, a pixel apart at most
+    const close = cut(15);
+    expect(close).toHaveLength(curve.length);
+    for (const fix of curve) {
+      const [x, y] = mercatorOf(fix);
+      expect(offLine({ x, y }, close) * pixelsOf(15)).toBeLessThan(
+        CLOUD_MERGE_PX + 1e-3,
+      );
+    }
+    for (const point of close) {
+      expect(point.ground).toBe(0);
+      expect(point.lift).toBe(3000);
+    }
+  });
+
+  it("keeps only the stretches in the box, on the line of all of them, with the heat there, and the exposure of all of them", () => {
+    const fixes = line(61);
+    const segments = flight(1, fixes);
+    const { flights } = curveOf(segments);
+    const all = cloudPoints(segments, flights, everything, 11);
+    // Around the fixes 25 to 35
+    const box = [fixes[25]![1], 46.9, fixes[35]![1], 47.1] as const;
+    const boxed = cloudPoints(segments, flights, everything, 11, 11, box);
+    const whole = pointsOf(all);
+    const inBox = pointsOf(boxed);
+    expect(inBox.length).toBeGreaterThan(1);
+    expect(inBox.length).toBeLessThan(whole.length);
+    // Across the box and no further than a step beyond it, on the line
+    const [west] = mercatorOf([47, box[0]]);
+    const [east] = mercatorOf([47, box[2]]);
+    const step = (CLOUD_STEP_PX + CLOUD_MERGE_MAX_PX) / pixelsOf(11);
+    expect(inBox[0]!.x).toBeLessThanOrEqual(west);
+    expect(inBox[0]!.x).toBeGreaterThan(west - step);
+    expect(inBox[inBox.length - 1]!.x).toBeGreaterThanOrEqual(east);
+    expect(inBox[inBox.length - 1]!.x).toBeLessThan(east + step);
+    for (const point of inBox) {
+      expect(offLine(point, whole) * pixelsOf(11)).toBeLessThan(1e-3);
+    }
+    // The heat of every second flown between its ends
+    const secondsAt = (x: number): number => {
+      const k = whole.findIndex((p) => p.x >= x - 1e-12);
+      const a = whole[k - 1]!;
+      const b = whole[k]!;
+      return a.time + ((x - a.x) / (b.x - a.x)) * (b.time - a.time);
+    };
+    const heat = inBox.reduce((sum, p) => sum + p.heat, 0);
+    expect(heat).toBeCloseTo(
+      secondsAt(inBox[inBox.length - 1]!.x) - secondsAt(inBox[0]!.x),
+      1,
+    );
+    expect(boxed.busiest).toBe(all.busiest);
+  });
+
+  it("breaks the line where a flight leaves the box, and starts it again where it comes back", () => {
+    // East through the box, far away, and back west through it
+    const out = line(31);
+    const back = line(31, 47.3).reverse();
+    const segments = flight(1, [...out, ...back]);
+    const { flights } = curveOf(segments);
+    const box = [out[10]![1], 46.9, out[20]![1], 47.4] as const;
+    const points = pointsOf(
+      cloudPoints(segments, flights, everything, 11, 11, box),
+    );
+    // Each way through it ends in a point of no heat
+    const ends = points.flatMap((p, k) => (p.heat === 0 ? [k] : []));
+    expect(ends).toEqual([ends[0], points.length - 1]);
+    const [, south] = mercatorOf([47, 11]);
+    const [, north] = mercatorOf([47.3, 11]);
+    points.forEach((point, k) => {
+      expect(point.y).toBeCloseTo(k <= ends[0]! ? south : north, 9);
+    });
+  });
+
+  it("keeps a step that crosses the box with neither end in it", () => {
+    // Fixes two kilometres apart, and a box of a few hundred metres
+    // between two of them, as close in at app zoom 17
+    const fixes = line(4, 47, 11, 0.026);
+    const segments = flight(1, fixes);
+    const { flights } = curveOf(segments);
+    const middle = (fixes[1]![1] + fixes[2]![1]) / 2;
+    const box = [middle - 0.002, 46.998, middle + 0.002, 47.002] as const;
+    const points = pointsOf(
+      cloudPoints(segments, flights, everything, 11, 16, box),
+    );
+    expect(points).toHaveLength(2);
+    expect(points[0]!.x).toBeLessThan(mercatorOf([47, box[0]])[0]);
+    expect(points[1]!.x).toBeGreaterThan(mercatorOf([47, box[2]])[0]);
+    expect(points[0]!.heat).toBeGreaterThan(0);
+  });
+
+  it("has the exposure of the relief level at every zoom level closer in, in a box or not", () => {
+    const segments = [
+      ...flight(1, circle(25, 500)),
+      ...flight(2, line(61, 47.01)),
+    ];
+    const flights = smoothFlights(segments, (i) => segments[i]!.altitude_ft, {
+      groundOf: () => 0,
+    });
+    const at = (
+      detail: number,
+      box: readonly [number, number, number, number] | null = null,
+    ) => cloudPoints(segments, flights, everything, 11, detail, box).busiest;
+    const busiest = at(11);
+    expect(busiest).toBeGreaterThan(0);
+    for (const detail of [12, 14, 17]) expect(at(detail)).toBe(busiest);
+    expect(at(15, [20, 20, 21, 21])).toBe(busiest);
+  });
+
+  it("keeps the exposure it is given, and cuts the flights in the box as it would without it", () => {
+    const circuit = flight(1, circle(25, 500));
+    const away = flight(2, line(61, 48));
+    const segments = [...circuit, ...away];
+    const flights = smoothFlights(segments, (i) => segments[i]!.altitude_ft, {
+      groundOf: () => 0,
+    });
+    // Around the circuit, not the cruise a degree north of it
+    const box = [10.98, 46.98, 11.02, 47.02] as const;
+    const cut = cloudPoints(segments, flights, everything, 11, 15, box);
+    const given = cloudPoints(segments, flights, everything, 11, 15, box, 0.5);
+    expect(given.busiest).toBe(0.5);
+    expect(given.count).toBe(cut.count);
+    expect(pointsOf(given)).toEqual(pointsOf(cut));
+    expect(
+      pointsOf(given).every(
+        (p) => Math.abs(p.y - mercatorOf([47, 11])[1]) < 1e-4,
+      ),
+    ).toBe(true);
+  });
+
+  it("takes a flight across the antimeridian the short way, zoomed out and in, and in a box across it", () => {
+    const fixes: Coordinate[] = Array.from({ length: 21 }, (_, i) => {
+      const lng = 179.95 + i * 0.005;
+      return [10, lng > 180 ? lng - 360 : lng];
+    });
+    const segments = flight(1, fixes);
+    const { flights } = curveOf(segments);
+    const steps = (points: Point[]): number[] =>
+      points.slice(1).map((p, k) => Math.abs(p.x - points[k]!.x));
+    for (const level of [4, 11, 15]) {
+      const points = pointsOf(
+        cloudPoints(segments, flights, everything, level),
+      );
+      expect(points.length).toBeGreaterThan(1);
+      expect(Math.max(...steps(points))).toBeLessThan(0.2 / 360);
+    }
+    const east = pointsOf(
+      cloudPoints(
+        segments,
+        flights,
+        everything,
+        15,
+        15,
+        [179.98, 9.9, 180.02, 10.1],
+      ),
+    );
+    const west = pointsOf(
+      cloudPoints(
+        segments,
+        flights,
+        everything,
+        15,
+        15,
+        [-180.02, 9.9, -179.98, 10.1],
+      ),
+    );
+    expect(east.length).toBeGreaterThan(1);
+    expect(west).toEqual(east);
+    expect(Math.max(...steps(east))).toBeLessThan(0.2 / 360);
+  });
+});
+
 /** The seconds each of `seconds` adds up to, from 0 */
 function runningSum(seconds: number[]): number[] {
   let sum = 0;
@@ -392,7 +737,7 @@ function clockSecondsOf(segments: PathSegment[]): number[] {
 
 describe("the time of the cloud's points", () => {
   it("is the seconds into its flight each was flown at, from 0 at the first fix", () => {
-    const segments = flight(1, line(4), undefined, 7);
+    const segments = byTurns(flight(1, line(4)), 1, 7);
     const points = pointsOf(cloudOf(segments, everything, [0, 0, 0], 11));
     expect(points.map((p) => p.time)).toEqual(
       runningSum(clockSecondsOf(segments)).map((s) => Math.fround(s)),
@@ -402,22 +747,23 @@ describe("the time of the cloud's points", () => {
   it("is replay all's clock: a long step of the log counts in full, where the heat stops at two minutes", () => {
     const segments = flight(1, line(4), undefined, 300);
     const points = pointsOf(cloudOf(segments, everything, [0, 0, 0], 11));
-    expect(points.map((p) => p.time).slice(0, 3)).toEqual([0, 300, 600]);
-    expect(points[0]!.heat).toBe(120);
+    // The two logged steps in one stretch, and the last at its groundspeed
+    expect(points.map((p) => p.time).slice(0, 2)).toEqual([0, 600]);
+    expect(points[0]!.heat).toBe(240);
     const flights = smoothFlights(segments, (i) => segments[i]!.altitude_ft, {
       groundOf: () => 0,
     });
     const times = chainTimes(flights, flightClock(segments), 0, 3);
     expect(points.map((p) => p.time)).toEqual(
-      [flights.from[0]!, flights.to[0]!, flights.to[1]!, flights.to[2]!].map(
-        (j) => Math.fround(times[j]!),
+      [flights.from[0]!, flights.to[1]!, flights.to[2]!].map((j) =>
+        Math.fround(times[j]!),
       ),
     );
   });
 
   it("runs on across a gap in the log, and starts anew with the next flight", () => {
-    const a = flight(1, line(3, 47));
-    const b = flight(1, line(3, 47.5));
+    const a = byTurns(flight(1, line(3, 47)));
+    const b = byTurns(flight(1, line(3, 47.5)));
     const c = flight(2, [line(3, 47.5)[2]!, [47.6, 11]]);
     const segments = [...a, ...b, ...c];
     const points = pointsOf(
@@ -490,9 +836,8 @@ describe("the time of the cloud's points", () => {
     const points = pointsOf(
       cloudOf(segments, everything, new Array(segments.length).fill(0), 11),
     );
-    expect(points.map((p) => p.time).slice(0, 7)).toEqual([
-      0, 5, 10, 10, 20, 20, 25,
-    ]);
+    // Each chain a straight line, one stretch
+    expect(points.map((p) => p.time).slice(0, 5)).toEqual([0, 10, 10, 20, 20]);
   });
 
   it("stands still over a stretch without times or speeds", () => {
@@ -502,7 +847,7 @@ describe("the time of the cloud's points", () => {
       groundspeed_knots: 0,
     }));
     const points = pointsOf(cloudOf(segments, everything, [0, 0], 11));
-    expect(points.map((p) => p.time)).toEqual([0, 0, 0]);
+    expect(points.map((p) => p.time)).toEqual([0, 0]);
   });
 });
 
@@ -545,6 +890,12 @@ describe("the busiest heat of the cloud", () => {
       groundspeed_knots: 50,
     }));
     expect(busiest(slow)).toBeCloseTo(2 * once, 9);
+  });
+
+  it("is as much over thousands of cells as over a few hundred", () => {
+    // A thousand kilometres, some 3,400 cells at level 11
+    const long = busiest(cruise(1, 10000));
+    expect(long / busiest(cruise(1))).toBeCloseTo(1, 2);
   });
 
   it("is not set by the few busiest cells alone", () => {
