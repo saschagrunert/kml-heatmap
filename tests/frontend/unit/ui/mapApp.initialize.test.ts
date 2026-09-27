@@ -14,6 +14,7 @@ import {
   type Map as MockMap,
 } from "../../../mocks/maplibre-gl";
 import { loadWrapped } from "../../../../kml_heatmap/frontend/services/featureLoader";
+import * as motion from "../../../../kml_heatmap/frontend/utils/motion";
 
 // The instances the mocked manager constructors hand out live in the setup
 // module, which is loaded before the mocks are registered
@@ -1025,6 +1026,8 @@ describe("MapApp.initialize", () => {
       // The timer fetches the Wrapped bundle first, so let the promise settle
       await vi.advanceTimersByTimeAsync(500);
       expect(mockWrappedManagerInstance.showWrapped).toHaveBeenCalledTimes(1);
+      // Without the intro, which only its button plays
+      expect(mockWrappedManagerInstance.showWrapped).toHaveBeenCalledWith();
       // From then on the saves write what the store says
       expect(app.savedState).not.toHaveProperty("wrappedVisible");
     });
@@ -1044,6 +1047,36 @@ describe("MapApp.initialize", () => {
       // has to cope with that rather than reach through an undefined
       expect(mockReplayManagerInstance.destroy).not.toHaveBeenCalled();
       expect(mockWrappedManagerInstance.destroy).not.toHaveBeenCalled();
+    });
+
+    it("gets Wrapped's intro ready as its button is pointed at or focused, unless motion is unwelcome", async () => {
+      const prepareWrappedIntro = vi.fn();
+      const bundle = { prepareWrappedIntro } as never;
+      vi.mocked(loadWrapped)
+        .mockResolvedValueOnce(bundle)
+        .mockResolvedValueOnce(bundle);
+      const button = document.createElement("button");
+      button.id = "wrapped-btn";
+      const other = document.createElement("button");
+      document.body.append(button, other);
+      await initializeApp(app);
+
+      button.dispatchEvent(new Event("pointerenter"));
+      button.focus();
+      other.dispatchEvent(new Event("pointerenter"));
+      await vi.waitFor(() =>
+        expect(prepareWrappedIntro).toHaveBeenCalledTimes(2),
+      );
+      expect(prepareWrappedIntro).toHaveBeenCalledWith(app);
+
+      // No intro plays under reduced motion, so nothing is fetched for it
+      vi.mocked(loadWrapped).mockClear();
+      const reduced = vi
+        .spyOn(motion, "prefersReducedMotion")
+        .mockReturnValue(true);
+      button.dispatchEvent(new Event("pointerenter"));
+      reduced.mockRestore();
+      expect(loadWrapped).not.toHaveBeenCalled();
     });
 
     it("restores the map view from saved center and zoom", async () => {

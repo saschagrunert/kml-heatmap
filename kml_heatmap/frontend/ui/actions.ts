@@ -72,7 +72,7 @@ function actionHandlers(app: MapApp) {
     showWrapped: () => {
       void app
         .loadWrapped()
-        .then((manager) => manager?.showWrapped())
+        .then((manager) => manager?.showWrapped(true))
         .catch(logError);
     },
     closeWrapped: () => app.wrappedManager?.closeWrapped(),

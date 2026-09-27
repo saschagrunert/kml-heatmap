@@ -3,7 +3,12 @@
  */
 import type { MapApp } from "../mapApp";
 import type { StoreState } from "../state/store";
-import { TOGGLE_KEYS, TOGGLES, type ToggleKey } from "../state/toggles";
+import {
+  TOGGLE_KEYS,
+  TOGGLES,
+  type ToggleFlags,
+  type ToggleKey,
+} from "../state/toggles";
 import type { MapCenter, SavedState } from "../types";
 import {
   isPathId,
@@ -167,8 +172,11 @@ export class StateManager {
     // keeping is the one the user had before, and so it is while the
     // replay's chase view flies the map along a flight. The `?.` is for
     // both living in lazily loaded bundles: before one has ever been opened
-    // there is no saved view either way.
-    const view = this.app.wrappedManager?.userMapView() ??
+    // there is no saved view either way. Wrapped keeps the user's globe and
+    // 3D switches with it, which its intro changes for a while.
+    const wrapped = this.app.wrappedManager?.userMapView();
+    const kept: Partial<ToggleFlags> = wrapped ?? {};
+    const view = wrapped ??
       this.app.replayManager?.userMapView() ?? {
         center: this.app.map.getCenter(),
         zoom: this.app.map.getZoom(),
@@ -198,7 +206,7 @@ export class StateManager {
       state[toggle.key] =
         "panel" in toggle
           ? this.panelVisible(toggle.key)
-          : this.app[toggle.key];
+          : (kept[toggle.key] ?? this.app[toggle.key]);
     }
     try {
       localStorage.setItem(storageKey(), JSON.stringify(state));

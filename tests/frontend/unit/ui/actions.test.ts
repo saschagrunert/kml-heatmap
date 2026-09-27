@@ -178,6 +178,8 @@ describe("bindActions", () => {
     await vi.waitFor(() =>
       expect(app.wrappedManager.showWrapped).toHaveBeenCalledTimes(1),
     );
+    // The button plays the intro (see ui/wrappedIntro.ts)
+    expect(app.wrappedManager.showWrapped).toHaveBeenCalledWith(true);
     expect(app.wrappedManager.closeWrapped).toHaveBeenCalledTimes(1);
   });
 

@@ -316,7 +316,13 @@ const BUDGET_APP = { raw: 152 * 1024, gzip: 52.5 * 1024 };
 // flight, which the app fetches this bundle for, and its place in the
 // replay panel: 84.88 KB raw and 29.67 KB gzipped in a local build (76.77
 // KB and 26.39 KB before), about 29.8 KB in CI.
-const BUDGET_FEATURES = { raw: 87 * 1024, gzip: 30.75 * 1024 };
+// Raised from 87 KB and 30.75 KB for Wrapped's intro: the heat cloud drawn
+// with the 3D view off and cut ahead of time as its button is pointed at
+// (prepareHeatCloud), and the replay of all flights under its camera, cut
+// ahead for where the camera comes down (ReplayAllRun.zoom): 84.88 KB raw
+// and 29.67 KB gzipped before, 85.78 KB raw and 29.97 KB gzipped after, in
+// a local build.
+const BUDGET_FEATURES = { raw: 88 * 1024, gzip: 31 * 1024 };
 
 // The Wrapped bundle is fetched only when the Wrapped dialog or the
 // statistics panel is first opened, and not with replay's code or replay
@@ -332,8 +338,11 @@ const BUDGET_FEATURES = { raw: 87 * 1024, gzip: 30.75 * 1024 };
 // a local build. Raised from 28 KB and 9.75 KB for the flight list, the
 // Flights tab of the statistics rail with its flight times and distances:
 // 26.83 KB raw and 8.92 KB gzipped before, 32.85 KB raw and 10.94 KB
-// gzipped after, in a local build.
-const BUDGET_WRAPPED = { raw: 35 * 1024, gzip: 12 * 1024 };
+// gzipped after, in a local build. Raised from 35 KB and 12 KB for Wrapped's
+// intro, the flight over the heat cloud before the cards with every
+// flight of the year playing underneath (ui/wrappedIntro.ts): 37.07 KB raw
+// and 12.42 KB gzipped after, in a local build.
+const BUDGET_WRAPPED = { raw: 40 * 1024, gzip: 14 * 1024 };
 
 // The year worker's bundle is fetched by every visit, but next to the first
 // year file rather than ahead of the app, so it holds up nothing on the page.

@@ -170,7 +170,9 @@ ribbons of a selection of the 3D view and the satellite imagery, and
 the statistics panel and the flight list of its Flights tab (the rail
 itself is part of the app, and says it is loading until the bundle is in;
 see `ui/statsPanel.ts`); the page
-imports each of the last two the first time one of its features is opened.
+imports each of the last two the first time one of its features is opened,
+and both as soon as Wrapped's button is pointed at or focused, for its
+intro (`ui/wrappedIntro.ts`), unless the system asks for reduced motion.
 `shared.bundle.js` is the app itself and everything the lazy bundles use of
 it. Their styles are split the same way and travel with them:
 `kml_heatmap/static/styles.css` is linked in the page, `features.css` and

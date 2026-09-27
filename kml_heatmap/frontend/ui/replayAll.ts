@@ -69,6 +69,14 @@ const MAX_DETAIL = 16;
 const CUTS_KEPT = 3;
 
 /**
+ * How many zoom levels short of a run's zoom (ReplayAllRun.zoom) a camera
+ * on its way switches to the curves cut for it: the trails of a few
+ * hundred times real speed are some tens of pixels long there, where a cut
+ * for far out starts to show its corners
+ */
+const ZOOM_AHEAD_LEVELS = 2;
+
+/**
  * The layer the replay is drawn below: the first of the ribbons, next to
  * the heat cloud (see CLOUD_BEFORE in ui/heatCloud.ts), so it does not cut
  * the run of flat layers the relief draws into a texture of it
@@ -93,6 +101,15 @@ export interface ReplayAllRun {
   pathIds?: Iterable<number>;
   /** Seconds of flight a second; REPLAY_ALL_SPEED by default */
   speed?: number;
+  /**
+   * The zoom a camera that is on its way sets out for (Wrapped's intro,
+   * from far out). The curves cut for where it sets off would be straight
+   * spokes by the time it comes down, and those cut for where it comes to
+   * rest too many to draw far out: both are cut as the run starts, and the
+   * second drawn from ZOOM_AHEAD_LEVELS short of this zoom, until the map
+   * first comes to the end of a zoom. By default the map's zoom only.
+   */
+  zoom?: number;
 }
 
 /**
@@ -116,6 +133,13 @@ export class ReplayAllPlayer {
   private readonly layer: ReplayAllLayer;
   private points: ReplayAllPoints | null = null;
   private keep: ((pathId: number) => boolean) | null = null;
+  /**
+   * The zoom the camera is on its way to (ReplayAllRun.zoom), until the
+   * map comes to the end of a zoom, and whether it is near enough to draw
+   * the curves cut for it
+   */
+  private zoomAhead: number | null = null;
+  private aheadDrawn = false;
   /** The cuts of the curves by what they were cut for, the last at the end */
   private readonly cuts = new Map<string, ReplayAllPoints>();
   private frame: number | null = null;
@@ -183,11 +207,26 @@ export class ReplayAllPlayer {
     if (!map || !data || this.broken) return Promise.resolve(false);
     this.keep = keepOf(app, data, run.pathIds);
     this.speed = run.speed ?? REPLAY_ALL_SPEED;
+    this.zoomAhead = run.zoom ?? null;
+    this.aheadDrawn = this.nearAhead();
     this.time = 0;
     this.cut();
     if (this.flights === 0) {
       this.stop();
       return Promise.resolve(false);
+    }
+    const ahead = this.zoomAhead;
+    if (ahead !== null && !this.aheadDrawn) {
+      // Cut now, so that the camera's frames do not wait for it
+      this.pointsFor(ahead);
+      const zooming = map.on("zoom", () => {
+        if (this.zoomAhead === null || this.aheadDrawn || !this.nearAhead()) {
+          return;
+        }
+        this.aheadDrawn = true;
+        this.cut();
+      });
+      this.stopFollowing.push(() => zooming.unsubscribe());
     }
     const store = app.store;
     this.stopFollowing.push(
@@ -198,7 +237,12 @@ export class ReplayAllPlayer {
       // Another dataset is not what was asked to play
       store.subscribe("currentData", () => this.stop()),
     );
-    const zoomed = map.on("zoomend", () => this.cut());
+    const zoomed = map.on("zoomend", () => {
+      // The map's zoom is the one to follow from here on
+      this.zoomAhead = null;
+      this.aheadDrawn = false;
+      this.cut();
+    });
     const styled = map.on("styledata", () => this.place());
     this.stopFollowing.push(
       () => zoomed.unsubscribe(),
@@ -238,6 +282,8 @@ export class ReplayAllPlayer {
     this.pause();
     for (const stop of this.stopFollowing.splice(0)) stop();
     this.keep = null;
+    this.zoomAhead = null;
+    this.aheadDrawn = false;
     this.points = null;
     this.cuts.clear();
     this.layer.setPoints(null);
@@ -331,17 +377,42 @@ export class ReplayAllPlayer {
     };
   };
 
+  /** Whether the camera is near enough the zoom of the run to draw its cut */
+  private nearAhead(): boolean {
+    const map = this.app.map;
+    return (
+      this.zoomAhead !== null &&
+      !!map &&
+      map.getZoom() >= this.zoomAhead - ZOOM_AHEAD_LEVELS
+    );
+  }
+
+  /** Draw the curves cut for the view (see pointsFor) */
+  private cut(): void {
+    const map = this.app.map;
+    if (!map) return;
+    const zoom =
+      this.zoomAhead !== null && this.aheadDrawn
+        ? this.zoomAhead
+        : map.getZoom();
+    const points = this.pointsFor(zoom);
+    if (!points || points === this.points) return;
+    this.points = points;
+    this.layer.setPoints(points);
+  }
+
   /**
    * The curves cut for the view: on the ground and the relief level of the
-   * 3D view, as the heat cloud's, and thinned for the zoom
+   * 3D view, as the heat cloud's, and thinned for the map zoom `zoom`. Those
+   * cut last are kept, and handed out again as long as nothing they were
+   * cut for changed.
    */
-  private cut(): void {
+  private pointsFor(zoom: number): ReplayAllPoints | null {
     const app = this.app;
-    const map = app.map;
     const data = app.currentData;
     const keep = this.keep;
-    if (!map || !data || !keep) return;
-    const detail = Math.min(Math.max(Math.floor(map.getZoom()), 0), MAX_DETAIL);
+    if (!data || !keep) return null;
+    const detail = Math.min(Math.max(Math.floor(zoom), 0), MAX_DETAIL);
     const level = app.threeDVisible ? app.reliefLevel : null;
     const key = `${app.terrainActive}/${level}/${detail}`;
     let points = this.cuts.get(key);
@@ -368,9 +439,7 @@ export class ReplayAllPlayer {
       }
     }
     this.cuts.set(key, points);
-    if (points === this.points) return;
-    this.points = points;
-    this.layer.setPoints(points);
+    return points;
   }
 
   /**

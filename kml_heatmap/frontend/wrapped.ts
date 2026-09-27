@@ -19,10 +19,12 @@
 import "./mapApp";
 import { StatsManager } from "./ui/statsManager";
 import { WrappedManager } from "./ui/wrappedManager";
+import { prepareWrappedIntro } from "./ui/wrappedIntro";
 
 export interface WrappedModule {
   StatsManager: typeof StatsManager;
   WrappedManager: typeof WrappedManager;
+  prepareWrappedIntro: typeof prepareWrappedIntro;
 }
 
-export { StatsManager, WrappedManager };
+export { StatsManager, WrappedManager, prepareWrappedIntro };

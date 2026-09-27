@@ -430,6 +430,33 @@ describe("StateManager", () => {
       expect(mockApp.map!.getBearing).not.toHaveBeenCalled();
     });
 
+    it("saves the user's globe and 3D switches while Wrapped's intro has changed them", () => {
+      // The intro turns the globe on for as long as the dialog is open; a
+      // reload or a shared link must not keep it
+      mockApp.store.set("globeVisible", true);
+      mockApp.store.set("forcedHeatCloud", true);
+      mockApp.wrappedManager.userMapView.mockReturnValue({
+        center: { lat: 48.1, lng: 11.6 },
+        zoom: 12,
+        bearing: 0,
+        pitch: 0,
+        globeVisible: false,
+        threeDVisible: true,
+      });
+
+      stateManager.saveMapState();
+
+      expect(savedState()).toMatchObject({
+        globeVisible: false,
+        threeDVisible: true,
+      });
+      expect(savedState()).not.toHaveProperty("forcedHeatCloud");
+      const url = String(vi.mocked(history.replaceState).mock.calls[0]![2]);
+      const params = new URLSearchParams(url);
+      expect(params.has("g")).toBe(false);
+      expect(params.get("d")).toBe("1");
+    });
+
     it("saves the user's own view while the replay's chase view flies the map", () => {
       // A camera half way along a flight, tilted and turned with it, is no
       // view to come back to

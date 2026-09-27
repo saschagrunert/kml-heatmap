@@ -37,6 +37,7 @@ export function mountWrappedDom(): void {
     <div id="airspeed-legend"></div>
     <div id="loading"></div>
     <div id="wrapped-modal" hidden>
+      <button id="wrapped-skip-btn" hidden>Skip intro</button>
       <button class="close-btn">Close</button>
       <div id="wrapped-content">
         <div id="wrapped-title"></div>
