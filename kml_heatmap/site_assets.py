@@ -30,6 +30,7 @@ import rjsmin
 from .cache import atomic_text_write
 from .exceptions import KMLHeatmapError
 from .logger import logger
+from .previews import PREVIEW_FILE_PATTERNS, PREVIEW_FILES, page_preview_tags
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -146,10 +147,12 @@ SITE_FILES = (
     *(f"{bundle.name}.map" for bundle in BUNDLE_FILES),
     *FAVICON_FILES,
     *(f"vendor/{name}" for name in VENDOR_FILES),
+    *PREVIEW_FILES,
 )
 # Owned files whose names depend on the flights: the flag of every country
-# the export visited. The ones a run does not publish are removed.
-SITE_FILE_PATTERNS = (f"{FLAGS_DIR_NAME}/*.svg",)
+# the export visited, and the link preview of every year and flight (see
+# previews). The ones a run does not publish are removed.
+SITE_FILE_PATTERNS = (f"{FLAGS_DIR_NAME}/*.svg", *PREVIEW_FILE_PATTERNS)
 
 
 def _escape_js_string(value: str) -> str:
@@ -307,13 +310,18 @@ def _carto_preloads(api_key: str) -> str:
 
 
 def render_html(
-    output_file: Path, data_dir_name: str, latest_year: int | None = None
+    output_file: Path,
+    data_dir_name: str,
+    latest_year: int | None = None,
+    site_url: str | None = None,
 ) -> None:
     """Render and minify the HTML template.
 
     ``latest_year`` is the year the page opens on, whose data file is
     preloaded; None preloads nothing. CARTO's style and tile index are
-    preloaded after the site's own files.
+    preloaded after the site's own files. ``site_url`` is where the site is
+    published (see ``previews.normalize_site_url``), which the link preview
+    of the page is named by; None leaves the image out.
     """
     logger.info("\nGenerating progressive HTML...")
 
@@ -329,6 +337,7 @@ def render_html(
         data_dir_name=data_dir,
         year_preload=year_preload,
         base_style_preload=_carto_preloads(_carto_api_key()),
+        link_preview=page_preview_tags(site_url),
     )
 
     logger.info("\nMinifying HTML...")

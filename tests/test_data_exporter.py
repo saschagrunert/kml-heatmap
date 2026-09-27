@@ -1306,7 +1306,12 @@ class TestExportAllData:
 
         result = export_all_data(paths, metadata, [], output_dir=str(tmp_path))
 
-        assert result == ExportResult(years=[2025, 2026], countries=[])
+        # The third path does not move and gets no id
+        assert result == ExportResult(
+            years=[2025, 2026],
+            countries=[],
+            path_ids={0: path_content_id(paths[0]), 1: path_content_id(paths[1])},
+        )
         meta = parse_data(tmp_path / "metadata.json")
         data_2025 = parse_data(tmp_path / "2025" / "data.json")
         data_2026 = parse_data(tmp_path / "2026" / "data.json")

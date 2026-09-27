@@ -108,6 +108,44 @@ class TestTerrain:
         assert "--no-terrain" in capsys.readouterr().out
 
 
+class TestSiteUrl:
+    def test_unset_is_passed_as_none_of_its_own(self, workspace):
+        _, kml, out = workspace
+
+        mock_create = _run([str(kml), "--output-dir", str(out)])
+
+        # Resolved here, so the environment is not read a second time
+        assert mock_create.call_args.kwargs["site_url"] == ""
+
+    def test_the_option_is_normalized(self, workspace, monkeypatch):
+        _, kml, out = workspace
+        monkeypatch.setenv("KML_HEATMAP_SITE_URL", "https://other.example")
+
+        mock_create = _run(
+            [str(kml), "--output-dir", str(out), "--site-url", "https://a.example/b/"]
+        )
+
+        assert mock_create.call_args.kwargs["site_url"] == "https://a.example/b"
+
+    def test_the_environment_is_the_default(self, workspace, monkeypatch):
+        _, kml, out = workspace
+        monkeypatch.setenv("KML_HEATMAP_SITE_URL", "https://a.example")
+
+        mock_create = _run([str(kml), "--output-dir", str(out)])
+
+        assert mock_create.call_args.kwargs["site_url"] == "https://a.example"
+
+    def test_a_relative_url_stops_before_any_work(self, workspace, capsys):
+        _, kml, out = workspace
+
+        with pytest.raises(SystemExit) as exc_info:
+            _run([str(kml), "--output-dir", str(out), "--site-url", "/flights"])
+
+        assert exc_info.value.code == 1
+        assert "absolute http(s) address" in capsys.readouterr().err
+        assert not out.exists()
+
+
 class TestFileCollection:
     def test_single_kml_file(self, workspace):
         _, kml, out = workspace

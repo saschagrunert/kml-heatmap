@@ -136,7 +136,10 @@ class TestRenderHtml:
         assert "my_data_dir" in content
         assert "$data_dir_name" not in content
         substituted = string.Template(load_template()).substitute(
-            data_dir_name="my_data_dir", year_preload="", base_style_preload=""
+            data_dir_name="my_data_dir",
+            year_preload="",
+            base_style_preload="",
+            link_preview="",
         )
         assert len(content) < len(substituted)
 
