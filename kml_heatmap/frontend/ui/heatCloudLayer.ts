@@ -53,6 +53,7 @@ import {
   mercatorOf,
   type CloudPoints,
 } from "../calculations/heatCloud";
+import { LayerGl, MAPLIBRE_EARTH_RADIUS_M, setProjection } from "./glLayer";
 import { prefersReducedMotion } from "../utils/motion";
 
 /** The id of the cloud's layer on the map */
@@ -189,13 +190,6 @@ export function cloudExposure(busiest: number): number {
     most,
   );
 }
-
-/**
- * MapLibre's sphere, whose circumference its Mercator heights are in
- * (mercatorZfromAltitude): the app's EARTH_CIRCUMFERENCE_M is the WGS84
- * equator's
- */
-const MAPLIBRE_EARTH_RADIUS_M = 6371008.8;
 
 /** What the layer asks the app for every frame it draws */
 export interface HeatCloudStyle {
@@ -378,12 +372,6 @@ void main() {
 }
 `;
 
-/** A compiled program and where its uniforms are */
-interface Program {
-  program: WebGLProgram;
-  uniforms: Record<(typeof UNIFORMS)[number], WebGLUniformLocation | null>;
-}
-
 /** The attributes, at locations of their own in every program */
 const ATTRIBUTES = [
   "a_corner",
@@ -396,12 +384,8 @@ const ATTRIBUTES = [
   "a_after",
 ] as const;
 
+/** The uniforms besides those of the projection */
 const UNIFORMS = [
-  "u_projection_matrix",
-  "u_projection_tile_mercator_coords",
-  "u_projection_clipping_plane",
-  "u_projection_transition",
-  "u_projection_fallback_matrix",
   "u_heights",
   "u_centre",
   "u_viewport",
@@ -414,43 +398,37 @@ const UNIFORMS = [
   "u_flowMix",
 ] as const;
 
-/** The GL objects of the layer, made for one context */
-interface Resources {
-  gl: WebGL2RenderingContext;
-  corners: WebGLBuffer;
-  points: WebGLBuffer;
-  vao: WebGLVertexArrayObject;
-  /** By MapLibre's shader variant, one per projection; null did not work */
-  programs: Map<string, Program | null>;
-  /** The points uploaded to `points` */
-  uploaded: CloudPoints | null;
-}
-
 /**
- * The matrix that takes a point of the cloud, as x and y from `origin` in
- * Mercator units and a height in metres, to where `mercator` takes a point
- * in Mercator units with a height in Mercator units at the latitude `lat`
- * (see getProjectionDataForCustomLayer): `mercator` moved to the origin
- * and its heights scaled to metres, in 64 bits, then as 32
+ * A stretch is the point it starts from and the one after it, with the
+ * points on either side of them for the joins, the heat of the stretches
+ * before and after it, and the time at either end
  */
-export function cloudMatrix(
-  mercator: ArrayLike<number>,
-  origin: readonly [number, number],
-  lat: number,
-): Float32Array {
-  const [x, y] = origin;
-  const metre =
-    1 /
-    (2 * Math.PI * MAPLIBRE_EARTH_RADIUS_M * Math.cos((lat * Math.PI) / 180));
-  const m = Array.from(mercator);
-  const out = new Float32Array(16);
-  for (let row = 0; row < 4; row++) {
-    out[row] = m[row]!;
-    out[4 + row] = m[4 + row]!;
-    out[8 + row] = m[8 + row]! * metre;
-    out[12 + row] = m[row]! * x + m[4 + row]! * y + m[12 + row]!;
+function layout(gl: WebGL2RenderingContext): void {
+  const stride = CLOUD_POINT_FLOATS * 4;
+  for (let point = 0; point < 4; point++) {
+    const location = 1 + 2 * point;
+    gl.enableVertexAttribArray(location);
+    gl.vertexAttribPointer(
+      location,
+      4,
+      gl.FLOAT,
+      false,
+      stride,
+      point * stride,
+    );
+    gl.vertexAttribDivisor(location, 1);
+    if (point === 3) continue;
+    gl.enableVertexAttribArray(location + 1);
+    gl.vertexAttribPointer(
+      location + 1,
+      point ? 2 : 1,
+      gl.FLOAT,
+      false,
+      stride,
+      point * stride + 16,
+    );
+    gl.vertexAttribDivisor(location + 1, 1);
   }
-  return out;
 }
 
 export class HeatCloudLayer implements CustomLayerInterface {
@@ -462,7 +440,8 @@ export class HeatCloudLayer implements CustomLayerInterface {
   /** The stretches it drew in the last of them */
   drawn = 0;
   private map: MapLibreMap | null = null;
-  private resources: Resources | null = null;
+  /** Its GL objects, made as it first draws (see LayerGl) */
+  private readonly objects: LayerGl<(typeof UNIFORMS)[number]>;
   private cloud: CloudPoints | null = null;
   /** When the last frame was drawn, and the map last used (performance.now) */
   private drawnAt = 0;
@@ -486,7 +465,19 @@ export class HeatCloudLayer implements CustomLayerInterface {
   constructor(
     private readonly style: () => HeatCloudStyle | null,
     private readonly failed: (error: unknown) => void,
-  ) {}
+  ) {
+    this.objects = new LayerGl(
+      {
+        owner: "the cloud's",
+        vertex: VERTEX_SHADER,
+        fragment: FRAGMENT_SHADER,
+        attributes: ATTRIBUTES,
+        uniforms: UNIFORMS,
+        layout,
+      },
+      this.failed,
+    );
+  }
 
   /** Draw the points `cloud` from the next frame on, or none */
   setPoints(cloud: CloudPoints | null): void {
@@ -507,39 +498,18 @@ export class HeatCloudLayer implements CustomLayerInterface {
     this.map?.triggerRepaint();
   };
 
-  /**
-   * The GL objects of a lost context are gone with it, and a context
-   * restored is the same object: they are made anew in it
-   */
-  private readonly lost = (): void => {
-    this.resources = null;
-  };
-
-  /**
-   * Its GL objects are made as it first draws, in a frame: MapLibre keeps
-   * track of what is bound in its context, and takes it up anew only after
-   * a custom layer has drawn
-   */
   onAdd(map: MapLibreMap): void {
     this.map = map;
     this.usedAt = performance.now();
-    map.on("webglcontextlost", this.lost);
+    map.on("webglcontextlost", this.objects.lost);
     for (const type of CLOUD_FLOW_WAKE) map.on(type, this.wake);
   }
 
   onRemove(map: MapLibreMap, gl: WebGL2RenderingContext): void {
-    const resources = this.resources;
-    this.resources = null;
     this.map = null;
-    map.off("webglcontextlost", this.lost);
+    map.off("webglcontextlost", this.objects.lost);
     for (const type of CLOUD_FLOW_WAKE) map.off(type, this.wake);
-    if (!resources || resources.gl !== gl || gl.isContextLost()) return;
-    gl.deleteBuffer(resources.corners);
-    gl.deleteBuffer(resources.points);
-    gl.deleteVertexArray(resources.vao);
-    for (const program of resources.programs.values()) {
-      if (program) gl.deleteProgram(program.program);
-    }
+    this.objects.release(gl);
   }
 
   render(gl: WebGL2RenderingContext, options: CustomRenderMethodInput): void {
@@ -550,44 +520,12 @@ export class HeatCloudLayer implements CustomLayerInterface {
     if (!map || !cloud || cloud.count < 2) return;
     const style = this.style();
     if (!style || style.opacity <= 0) return;
-    const held = this.resourcesOf(gl);
-    const program = held && this.program(held, options);
-    if (!held || !program) return;
+    const ready = this.objects.begin(gl, options, cloud);
+    if (!ready) return;
 
-    const resources = held;
-    if (resources.uploaded !== cloud) {
-      gl.bindBuffer(gl.ARRAY_BUFFER, resources.points);
-      gl.bufferData(gl.ARRAY_BUFFER, cloud.points, gl.STATIC_DRAW);
-      resources.uploaded = cloud;
-    }
-
-    const u = program.uniforms;
-    const data = options.defaultProjectionData;
+    const u = ready.program.uniforms;
     const center = map.getCenter();
-    const globe = options.shaderData.define.includes("GLOBE");
-    const mercator = cloudMatrix(
-      globe ? data.fallbackMatrix : data.mainMatrix,
-      cloud.origin,
-      center.lat,
-    );
-    gl.useProgram(program.program);
-    gl.uniformMatrix4fv(
-      u.u_projection_matrix,
-      false,
-      globe ? new Float32Array(data.mainMatrix) : mercator,
-    );
-    if (globe) {
-      gl.uniformMatrix4fv(u.u_projection_fallback_matrix, false, mercator);
-      gl.uniform4f(
-        u.u_projection_tile_mercator_coords,
-        cloud.origin[0],
-        cloud.origin[1],
-        1,
-        1,
-      );
-      gl.uniform4fv(u.u_projection_clipping_plane, data.clippingPlane);
-      gl.uniform1f(u.u_projection_transition, data.projectionTransition);
-    }
+    setProjection(gl, u, options, cloud.origin, center.lat);
     const width = gl.drawingBufferWidth;
     const height = gl.drawingBufferHeight;
     const ratio = map.getPixelRatio();
@@ -661,7 +599,7 @@ export class HeatCloudLayer implements CustomLayerInterface {
       (look.gain * this.exposure * CLOUD_REFERENCE_SPEED_MS * ratio) /
         metresPerPixel,
     );
-    gl.bindVertexArray(resources.vao);
+    gl.bindVertexArray(ready.vao);
     gl.enable(gl.BLEND);
     gl.blendFuncSeparate(
       gl.ONE,
@@ -703,129 +641,4 @@ export class HeatCloudLayer implements CustomLayerInterface {
       map.triggerRepaint();
     }
   }
-
-  /**
-   * The GL objects for the context `gl`, made the first time: after a lost
-   * context MapLibre adds the layer again (see ui/heatCloud.ts), and what
-   * was made in the one before is gone with it. Null where they could not
-   * be made, which the layer tells once.
-   */
-  private resourcesOf(gl: WebGL2RenderingContext): Resources | null {
-    if (this.resources?.gl === gl) return this.resources;
-    this.resources = null;
-    try {
-      this.resources = makeResources(gl);
-    } catch (error) {
-      this.failed(error);
-    }
-    return this.resources;
-  }
-
-  /** The program for the projection of the frame, compiled on first use */
-  private program(
-    resources: Resources,
-    options: CustomRenderMethodInput,
-  ): Program | null {
-    const { variantName, vertexShaderPrelude, define } = options.shaderData;
-    const held = resources.programs.get(variantName);
-    if (held !== undefined) return held;
-    let program: Program | null = null;
-    try {
-      program = compile(
-        resources.gl,
-        `#version 300 es\n${vertexShaderPrelude}\n${define}\n${VERTEX_SHADER}`,
-      );
-    } catch (error) {
-      this.failed(error);
-    }
-    resources.programs.set(variantName, program);
-    return program;
-  }
-}
-
-/** The buffers of a context: a quad's corners and the points */
-function makeResources(gl: WebGL2RenderingContext): Resources {
-  const corners = gl.createBuffer();
-  const points = gl.createBuffer();
-  const vao = gl.createVertexArray();
-  if (!corners || !points || !vao) {
-    throw new Error("the cloud's buffers could not be made");
-  }
-  gl.bindVertexArray(vao);
-  gl.bindBuffer(gl.ARRAY_BUFFER, corners);
-  gl.bufferData(
-    gl.ARRAY_BUFFER,
-    new Float32Array([-1, -1, -1, 1, 1, -1, 1, 1]),
-    gl.STATIC_DRAW,
-  );
-  gl.enableVertexAttribArray(0);
-  gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
-  gl.bindBuffer(gl.ARRAY_BUFFER, points);
-  const stride = CLOUD_POINT_FLOATS * 4;
-  // A stretch is the point it starts from and the one after it, with the
-  // points on either side of them for the joins, the heat of the stretches
-  // before and after it, and the time at either end
-  for (let point = 0; point < 4; point++) {
-    const location = 1 + 2 * point;
-    gl.enableVertexAttribArray(location);
-    gl.vertexAttribPointer(
-      location,
-      4,
-      gl.FLOAT,
-      false,
-      stride,
-      point * stride,
-    );
-    gl.vertexAttribDivisor(location, 1);
-    if (point === 3) continue;
-    gl.enableVertexAttribArray(location + 1);
-    gl.vertexAttribPointer(
-      location + 1,
-      point ? 2 : 1,
-      gl.FLOAT,
-      false,
-      stride,
-      point * stride + 16,
-    );
-    gl.vertexAttribDivisor(location + 1, 1);
-  }
-  gl.bindVertexArray(null);
-  gl.bindBuffer(gl.ARRAY_BUFFER, null);
-  return { gl, corners, points, vao, programs: new Map(), uploaded: null };
-}
-
-/** Compile and link the program of `vertex` and the fragment shader */
-function compile(gl: WebGL2RenderingContext, vertex: string): Program {
-  const program = gl.createProgram();
-  const shaders = [
-    [gl.VERTEX_SHADER, vertex],
-    [gl.FRAGMENT_SHADER, FRAGMENT_SHADER],
-  ] as const;
-  for (const [type, source] of shaders) {
-    const shader = gl.createShader(type);
-    if (!shader) throw new Error("the cloud's shaders could not be made");
-    gl.shaderSource(shader, source);
-    gl.compileShader(shader);
-    if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
-      const log = gl.getShaderInfoLog(shader);
-      gl.deleteShader(shader);
-      gl.deleteProgram(program);
-      throw new Error(`the cloud's shader did not compile: ${log}`);
-    }
-    gl.attachShader(program, shader);
-    gl.deleteShader(shader);
-  }
-  ATTRIBUTES.forEach((name, location) =>
-    gl.bindAttribLocation(program, location, name),
-  );
-  gl.linkProgram(program);
-  if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
-    const log = gl.getProgramInfoLog(program);
-    gl.deleteProgram(program);
-    throw new Error(`the cloud's program did not link: ${log}`);
-  }
-  const uniforms = Object.fromEntries(
-    UNIFORMS.map((name) => [name, gl.getUniformLocation(program, name)]),
-  ) as Program["uniforms"];
-  return { program, uniforms };
 }

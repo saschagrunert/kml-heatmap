@@ -17,7 +17,7 @@
 import type { MapApp } from "../mapApp";
 import type { KMLDataset } from "../types";
 import { datasetIndex } from "../calculations/datasetIndex";
-import { flightClock, type FlightClock } from "../calculations/flightClock";
+import { flightClockOf } from "../calculations/flightClock";
 import {
   groundedFlights,
   releaseGroundedFlights,
@@ -82,18 +82,6 @@ const ZOOM_AHEAD_LEVELS = 2;
  * the run of flat layers the relief draws into a texture of it
  */
 const REPLAY_ALL_BEFORE = MAP_LAYERS.pathsAltitudeRibbons;
-
-/** The clock of each dataset's segments, worked out once */
-const clocks = new WeakMap<KMLDataset, FlightClock>();
-
-function clockOf(data: KMLDataset): FlightClock {
-  let clock = clocks.get(data);
-  if (!clock) {
-    clock = flightClock(data.path_segments);
-    clocks.set(data, clock);
-  }
-  return clock;
-}
 
 /** What to play, see ReplayAllPlayer.start */
 export interface ReplayAllRun {
@@ -428,7 +416,7 @@ export class ReplayAllPlayer {
       points = replayAllPoints(
         segments,
         flights,
-        clockOf(data),
+        flightClockOf(segments),
         keep,
         detail,
         level,
