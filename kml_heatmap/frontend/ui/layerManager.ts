@@ -1199,7 +1199,7 @@ export class LayerManager implements PathHitTester {
    * until they are cut for the new level, as wide as it asks. Returns
    * whether the relief came or went, which the caller answers by cutting
    * the flights anew on their other ground; a level that moved on the
-   * relief has the flights smoothed anew for it (see groundedFlights) for
+   * relief has the flights set on its ground (see groundedFlights) for
    * the cut at the end of the zoom, and lets go of the ribbons that cannot
    * stay on the relief until then
    * (see followsLevel) or are out of sight. The globe leaves the relief out
@@ -1246,11 +1246,10 @@ export class LayerManager implements PathHitTester {
     const switched = wanted !== this.app.terrainActive;
     if (!switched && !moved) return false;
     relief.moveTo(level, wanted);
-    // Flights on the relief stand on the ground of its level, and are
-    // smoothed anew for another (see groundedFlights); on the globe, on the
+    // Flights on the relief stand on the ground of its level, and are set
+    // on the ground of another (see groundedFlights); on the globe, on the
     // line between their fields, the same at every level: there a zoom that
-    // ends on another one would smooth every flight again for nothing, a
-    // third of the work of that zoom's end
+    // ends on another one would set every flight on it again for nothing
     if (switched || !followsLevel(was, level)) {
       // Out of sight until the new cut has landed (ui/terrain.ts)
       this.releaseRibbons(false);

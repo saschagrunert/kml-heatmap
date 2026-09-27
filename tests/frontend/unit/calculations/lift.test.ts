@@ -32,6 +32,7 @@ import {
   heldGroundedFlights,
   releaseGroundedFlights,
   releaseGroundProfiles,
+  smoothGrounded,
 } from "../../../../kml_heatmap/frontend/calculations/groundProfile";
 import {
   groundOffsetStepFt,
@@ -1362,6 +1363,101 @@ describe("lift", () => {
       groundedFlights(segments, true, 8);
       releaseGroundProfiles();
       expect(heldGroundedFlights()).toBeNull();
+    });
+
+    describe("smoothed once, and set on the ground of every level", () => {
+      /**
+       * A flight of `count` segments from `lng`, turning as it goes, so its
+       * curve has points between its fixes, over the ground `groundOf` and
+       * climbing out and back, and taxiing at either end
+       */
+      const turning = (
+        path_id: number,
+        lng: number,
+        count: number,
+        groundOf: (i: number) => number | undefined,
+      ): PathSegment[] => {
+        const at = (i: number): [number, number] => [
+          47 + 0.02 * Math.sin(i / 2),
+          lng + 0.01 * i + 0.01 * Math.cos(i / 3),
+        ];
+        return Array.from({ length: count }, (_, i) => {
+          const taxiing = i < 3 || i >= count - 3;
+          return {
+            path_id,
+            coords: [at(i), at(i + 1)],
+            // A dip below the ground on the way, as a glitch of a recorder
+            altitude_ft: taxiing ? 1500 : i === 9 ? 900 : 1500 + 400 * i,
+            groundspeed_knots: taxiing ? 10 : 100,
+            ground_ft: groundOf(i),
+          };
+        });
+      };
+      const dataset: PathSegment[] = [
+        ...turning(1, 11, 24, (i) => 1400 + 700 * Math.sin(i)),
+        // Without a sampled ground, on the line between its fields
+        ...turning(2, 12, 16, () => undefined),
+        // Two chains of one flight, a gap in its log between them
+        ...turning(3, 13, 10, (i) => 1300 + 90 * i),
+        ...turning(3, 13.5, 10, (i) => 2200 - 50 * i),
+      ];
+
+      /** The flights as smoothing on the ground of the level gives them */
+      const onTheirGround = (sampled: boolean, level: number) => {
+        const { ground, offsets } = groundProfilesFt(dataset, sampled, level);
+        return smoothFlights(dataset, (i) => dataset[i]!.altitude_ft, {
+          groundOf: (i) => ground[i]!,
+          offsets,
+        });
+      };
+
+      afterEach(() => releaseGroundProfiles());
+
+      it("are what smoothing them on that ground gives, to the bit", () => {
+        for (const sampled of [true, false]) {
+          for (let level = 0; level <= RELIEF_MAX_LEVEL; level++) {
+            const flights = groundedFlights(dataset, sampled, level);
+            const expected = onTheirGround(sampled, level);
+            expect(flights).toEqual(expected);
+            expect(smoothGrounded(dataset, sampled, level)).toEqual(expected);
+          }
+        }
+        // Points between the fixes, some flights below their ground, and
+        // the ground of the other levels, which all of it runs along
+        const flights = groundedFlights(dataset, true, 8);
+        const [first] = flights.chains;
+        expect(first!.points.length).toBeGreaterThan(first!.vertex.length);
+        expect(first!.heights).toContain(0);
+        expect(first!.offsets).toHaveLength(GROUND_LEVELS.length);
+        expect(flights.chains).toHaveLength(4);
+      });
+
+      it("share the curve and where each segment is on it, which is smoothed once for the dataset", () => {
+        const at8 = groundedFlights(dataset, true, 8);
+        const at9 = groundedFlights(dataset, true, 9);
+        const flat = groundedFlights(dataset, false, 9);
+        for (const other of [at9, flat]) {
+          expect(other).not.toBe(at8);
+          expect(other.chainOf).toBe(at8.chainOf);
+          other.chains.forEach((chain, c) => {
+            expect(chain.points).toBe(at8.chains[c]!.points);
+            expect(chain.vertex).toBe(at8.chains[c]!.vertex);
+          });
+        }
+        // Until the flights are let go of
+        releaseGroundedFlights();
+        expect(groundedFlights(dataset, true, 8).chains[0]!.points).not.toBe(
+          at8.chains[0]!.points,
+        );
+      });
+
+      it("are smoothed anew for a few flights alone, and not held (smoothGrounded)", () => {
+        const flights = groundedFlights(dataset, true, 8);
+        const alone = smoothGrounded(dataset, true, 8);
+        expect(alone).toEqual(flights);
+        expect(alone.chains[0]!.points).not.toBe(flights.chains[0]!.points);
+        expect(groundedFlights(dataset, true, 8)).toBe(flights);
+      });
     });
   });
 });

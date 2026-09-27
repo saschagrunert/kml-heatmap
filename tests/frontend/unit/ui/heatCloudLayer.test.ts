@@ -112,6 +112,7 @@ function mockGl(compiles = true) {
     deleteBuffer: vi.fn(),
     deleteVertexArray: vi.fn(),
     deleteProgram: vi.fn(),
+    isProgram: vi.fn(() => true),
     isContextLost: vi.fn(() => false),
   };
   return gl;
@@ -432,7 +433,7 @@ describe("the heat cloud's layer", () => {
     expect(gl.createShader).toHaveBeenCalledOnce();
   });
 
-  it("lets go of what it made as it is removed", () => {
+  it("lets go of its buffers as it is removed, and keeps its program for its return", () => {
     layer.onAdd(map);
     layer.setPoints(points());
     render();
@@ -440,7 +441,28 @@ describe("the heat cloud's layer", () => {
 
     expect(gl.deleteBuffer).toHaveBeenCalledTimes(2);
     expect(gl.deleteVertexArray).toHaveBeenCalledOnce();
-    expect(gl.deleteProgram).toHaveBeenCalledOnce();
+    expect(gl.deleteProgram).not.toHaveBeenCalled();
+
+    // Back with the 3D view, in the same context
+    layer.onAdd(map);
+    render();
+    expect(gl.createVertexArray).toHaveBeenCalledTimes(2);
+    expect(gl.createProgram).toHaveBeenCalledOnce();
+    expect(gl.drawArraysInstanced).toHaveBeenCalledTimes(2 * PASSES);
+  });
+
+  it("compiles its shaders anew where the context was lost while it was off the map", () => {
+    layer.onAdd(map);
+    layer.setPoints(points());
+    render();
+    layer.onRemove(map, gl as unknown as WebGL2RenderingContext);
+    // Restored as the same object, without the programs of before
+    gl.isProgram.mockReturnValue(false);
+    layer.onAdd(map);
+    render();
+
+    expect(gl.createProgram).toHaveBeenCalledTimes(2);
+    expect(gl.drawArraysInstanced).toHaveBeenCalledTimes(2 * PASSES);
   });
 
   it("does not touch a context that was lost", () => {
@@ -506,6 +528,20 @@ describe("the heat cloud's layer", () => {
     expect(other.createVertexArray).toHaveBeenCalledOnce();
     expect(other.createProgram).toHaveBeenCalledOnce();
     expect(other.bufferData).toHaveBeenCalled();
+    expect(other.drawArraysInstanced).toHaveBeenCalledTimes(PASSES);
+  });
+
+  it("does not take the programs it kept into another context", () => {
+    layer.onAdd(map);
+    layer.setPoints(points());
+    render();
+    layer.onRemove(map, gl as unknown as WebGL2RenderingContext);
+    layer.onAdd(map);
+    const other = mockGl();
+    layer.render(other as unknown as WebGL2RenderingContext, frame());
+
+    expect(other.isProgram).not.toHaveBeenCalled();
+    expect(other.createProgram).toHaveBeenCalledOnce();
     expect(other.drawArraysInstanced).toHaveBeenCalledTimes(PASSES);
   });
 

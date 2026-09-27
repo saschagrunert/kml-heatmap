@@ -8,12 +8,17 @@ import type { PathSegment } from "../types";
 import { planarMetres } from "../utils/geometry";
 import {
   GROUND_LEVELS,
+  liftFt,
   RELIEF_MAX_LEVEL,
   reliefPixelM,
   TERRAIN_TILE_MAX_ZOOM,
 } from "./lift";
 import { groundLevelsFt } from "./statistics";
-import { smoothFlights, type SmoothedFlights } from "./smoothing";
+import {
+  smoothFlights,
+  type SmoothedFlights,
+  type SmoothedLine,
+} from "./smoothing";
 
 /**
  * Groundspeed below which a flight is taken to be taxiing, in knots: a
@@ -76,23 +81,17 @@ export function groundProfileFt(
   sampled = true,
   level = Infinity,
 ): Float64Array {
-  const byPath = new Map<number, number[]>();
-  segments.forEach((segment, index) => {
-    const indices = byPath.get(segment.path_id);
-    if (indices) indices.push(index);
-    else byPath.set(segment.path_id, [index]);
-  });
   const ground = new Float64Array(segments.length);
   let lowest: Map<number, number> | null = null;
-  for (const [pathId, indices] of byPath) {
-    const samples = indices.map((index) => segments[index]!.ground_ft);
-    if (sampled && !samples.includes(undefined)) {
+  for (const [pathId, path] of pathsOf(segments)) {
+    const { indices, samples } = path;
+    if (sampled && samples) {
       const smoothed =
         level > TERRAIN_TILE_MAX_ZOOM
-          ? (samples as number[])
+          ? samples
           : smoothAlong(
-              samples as number[],
-              alongMetres(segments, indices),
+              samples,
+              (path.along ??= alongMetres(segments, indices)),
               reliefPixelM(level, segments[indices[0]!]!.coords[0][0]),
             );
       smoothed.forEach((feet, i) => (ground[indices[i]!] = feet));
@@ -108,7 +107,7 @@ export function groundProfileFt(
     }
     const from = start ?? end!;
     const to = end ?? start!;
-    const along = alongMetres(segments, indices);
+    const along = (path.along ??= alongMetres(segments, indices));
     const total = along[along.length - 1] ?? 0;
     indices.forEach((index, i) => {
       const t = total > 0 ? along[i]! / total : 0;
@@ -116,6 +115,44 @@ export function groundProfileFt(
     });
   }
   return ground;
+}
+
+/** A flight of a dataset, as groundProfileFt stands it on its ground */
+interface GroundPath {
+  /** Its segments, in their order */
+  indices: number[];
+  /** The ground sampled under each, where every one of them has it */
+  samples: number[] | null;
+  /** The metres flown to the end of each, once asked for (alongMetres) */
+  along?: Float64Array;
+}
+
+/**
+ * The flights of each dataset, as groundProfileFt found them the first
+ * time: the same at every level, which only smooths their ground anew.
+ * They go with the 3D view (see releaseGroundProfiles).
+ */
+let groundPaths = new WeakMap<
+  readonly PathSegment[],
+  Map<number, GroundPath>
+>();
+
+/** The flights of `segments` by path id (see groundPaths) */
+function pathsOf(segments: readonly PathSegment[]): Map<number, GroundPath> {
+  let paths = groundPaths.get(segments);
+  if (paths) return paths;
+  paths = new Map();
+  segments.forEach((segment, index) => {
+    const path = paths.get(segment.path_id);
+    if (path) path.indices.push(index);
+    else paths.set(segment.path_id, { indices: [index], samples: null });
+  });
+  for (const path of paths.values()) {
+    const samples = path.indices.map((index) => segments[index]!.ground_ft);
+    if (!samples.includes(undefined)) path.samples = samples as number[];
+  }
+  groundPaths.set(segments, paths);
+  return paths;
 }
 
 /**
@@ -183,8 +220,18 @@ let sampledGround = new WeakMap<
  */
 export function releaseGroundProfiles(): void {
   sampledGround = new WeakMap();
+  groundPaths = new WeakMap();
   releaseGroundedFlights();
 }
+
+/**
+ * The flights of a dataset smoothed at their altitudes, before they stand
+ * on any ground (see smoothedCurves), the last worked out
+ */
+let curves: {
+  segments: readonly PathSegment[];
+  flights: SmoothedFlights;
+} | null = null;
 
 /**
  * The flights of a dataset smoothed on their ground (see groundedFlights),
@@ -197,16 +244,37 @@ let grounded: {
 } | null = null;
 
 /**
+ * Every flight of `segments` smoothed at its altitude (smoothFlights), on
+ * no ground: the curve and its altitudes are the same on every ground and
+ * at every level, since a flight is smoothed at its altitude and only then
+ * set on its ground (see smoothLine). Smoothing every flight of all years
+ * is most of the work of turning the 3D view on, and was all of it again
+ * at every level a zoom ended on; the last dataset's is kept for as long
+ * as its flights are (releaseGroundedFlights).
+ */
+function smoothedCurves(segments: readonly PathSegment[]): SmoothedFlights {
+  if (curves?.segments !== segments) {
+    curves = { segments, flights: smoothAltitudes(segments) };
+  }
+  return curves.flights;
+}
+
+/** Every flight of `segments` smoothed at its altitude, see smoothedCurves */
+function smoothAltitudes(segments: readonly PathSegment[]): SmoothedFlights {
+  return smoothFlights(segments, (i) => segments[i]!.altitude_ft);
+}
+
+/**
  * Every flight of `segments` smoothed at its height above its ground
  * (smoothFlights): the sampled ground of the relief level `level` where
  * `sampled`, with the ground of the levels around it, and otherwise the
  * line between its fields, which is the same at every level. The ribbons
  * of the colour layers are cut from these and the heat cloud is drawn
- * along them (calculations/heatCloud.ts), so the last is kept for both:
- * smoothing every flight of all years is most of the work of turning the
- * 3D view on. It holds a curve point by point, which for all years is tens
- * of megabytes; the layer manager lets go of it once neither needs it
- * (releaseGroundedFlights).
+ * along them (calculations/heatCloud.ts), so the last is kept for both.
+ * The curves are smoothed once for the dataset (smoothedCurves), and only
+ * set on the ground of another level. It holds a curve point by point,
+ * which for all years is tens of megabytes; the layer manager lets go of
+ * it once neither needs it (releaseGroundedFlights).
  */
 export function groundedFlights(
   segments: readonly PathSegment[],
@@ -215,7 +283,10 @@ export function groundedFlights(
 ): SmoothedFlights {
   const held = heldFlights(segments, sampled, level);
   if (held) return held;
-  const flights = smoothGrounded(segments, sampled, level);
+  const flights = onGround(
+    smoothedCurves(segments),
+    groundProfilesFt(segments, sampled, level),
+  );
   grounded = { segments, level: groundedKey(sampled, level), flights };
   return flights;
 }
@@ -254,21 +325,87 @@ export function smoothGrounded(
   // Each flight stands on its own fields (groundProfileFt), and on the
   // relief where it is drawn, as coarse as the level draws it, with the
   // ground of the levels around it
-  const { ground, offsets } = groundProfilesFt(segments, sampled, level);
-  return smoothFlights(segments, (i) => segments[i]!.altitude_ft, {
-    groundOf: (i) => ground[i]!,
-    offsets,
-  });
+  return onGround(
+    smoothAltitudes(segments),
+    groundProfilesFt(segments, sampled, level),
+  );
+}
+
+/**
+ * The flights `curves`, smoothed at their altitudes (smoothAltitudes), on
+ * the ground `ground` under the end of each segment and with the offsets
+ * `offsets` of the levels around it (see groundProfilesFt): as
+ * smoothFlights smooths them on that ground, to the bit. The ground runs
+ * straight along the curve from one fix to the next, as smoothLine lays
+ * it, and a height above it is the altitude over it (liftFt). The points
+ * of the curves and where each segment is on them are shared.
+ */
+function onGround(
+  curves: SmoothedFlights,
+  { ground, offsets }: ReturnType<typeof groundProfilesFt>,
+): SmoothedFlights {
+  const { chainOf } = curves;
+  const count = chainOf.length;
+  const chains = new Array<SmoothedLine>(curves.chains.length);
+  let first = 0;
+  while (first < count) {
+    let end = first + 1;
+    while (end < count && chainOf[end] === chainOf[first]) end++;
+    const chain = curves.chains[chainOf[first]!]!;
+    // A chain's first fix takes the ground of its first segment, and each
+    // fix after it that of the segment it ends
+    const at = (fix: number): number => first + Math.max(fix - 1, 0);
+    const under = alongCurve(chain.vertex, ground, at);
+    const line: SmoothedLine = {
+      points: chain.points,
+      heights: chain.heights.map((feet, j) => liftFt(feet, under[j]!)),
+      vertex: chain.vertex,
+      ground: under,
+    };
+    if (offsets) {
+      line.offsets = offsets.map((level) =>
+        alongCurve(chain.vertex, level, at),
+      );
+    }
+    chains[chainOf[first]!] = line;
+    first = end;
+  }
+  return { chains, chainOf, from: curves.from, to: curves.to };
+}
+
+/**
+ * `values`, by segment, at every point of a curve whose fixes are at
+ * `vertex`, the value of a fix from its segment `at(fix)`: straight from
+ * one fix to the next, worked out as smoothLine does, to the bit
+ */
+function alongCurve(
+  vertex: readonly number[],
+  values: ArrayLike<number>,
+  at: (fix: number) => number,
+): number[] {
+  const out = [values[at(0)]!];
+  for (let i = 0; i + 1 < vertex.length; i++) {
+    const a = values[at(i)]!;
+    const b = values[at(i + 1)]!;
+    const steps = vertex[i + 1]! - vertex[i]!;
+    for (let k = 1; k < steps; k++) out.push(a + ((b - a) * k) / steps);
+    out.push(b);
+  }
+  return out;
 }
 
 /** Whether flights smoothed by groundedFlights are held, and of what */
 export function heldGroundedFlights(): readonly PathSegment[] | null {
-  return grounded?.segments ?? null;
+  return curves?.segments ?? null;
 }
 
-/** Let go of the flights smoothed by groundedFlights */
+/**
+ * Let go of the flights smoothed by groundedFlights, and of their curves
+ * (smoothedCurves)
+ */
 export function releaseGroundedFlights(): void {
   grounded = null;
+  curves = null;
 }
 
 /** Metres flown to the end of each of the segments `indices` of a flight */
@@ -323,17 +460,16 @@ function boxAverage(
       integral[i - 1]! +
       ((values[i]! + values[i - 1]!) / 2) * (along[i]! - along[i - 1]!);
   }
-  // The integral up to `x`, and the point before it, looked for from the
-  // point `i` on: either end of the window only moves on
-  const integralAt = (x: number, i: number): [number, number] => {
-    while (i + 1 < n && along[i + 1]! <= x) i++;
-    if (i + 1 >= n) return [integral[n - 1]!, i];
+  // The integral up to `x` from the point `i` before it
+  const integralAt = (x: number, i: number): number => {
+    if (i + 1 >= n) return integral[n - 1]!;
     const span = along[i + 1]! - along[i]!;
     const t = span > 0 ? (x - along[i]!) / span : 0;
     const v = values[i]! + (values[i + 1]! - values[i]!) * t;
-    return [integral[i]! + ((values[i]! + v) / 2) * (x - along[i]!), i];
+    return integral[i]! + ((values[i]! + v) / 2) * (x - along[i]!);
   };
   const out = new Array<number>(n);
+  // The points before either end of the window, which only move on
   let lower = 0;
   let upper = 0;
   for (let i = 0; i < n; i++) {
@@ -343,11 +479,9 @@ function boxAverage(
       out[i] = values[i]!;
       continue;
     }
-    let from: number;
-    let to: number;
-    [from, lower] = integralAt(a, lower);
-    [to, upper] = integralAt(b, upper);
-    out[i] = (to - from) / (b - a);
+    while (lower + 1 < n && along[lower + 1]! <= a) lower++;
+    while (upper + 1 < n && along[upper + 1]! <= b) upper++;
+    out[i] = (integralAt(b, upper) - integralAt(a, lower)) / (b - a);
   }
   return out;
 }

@@ -57,6 +57,7 @@ function mockGl() {
     deleteVertexArray: vi.fn((_vao: unknown) => undefined),
     deleteProgram: vi.fn((_program: unknown) => undefined),
     isContextLost: vi.fn(() => false),
+    isProgram: vi.fn((_program: unknown) => true),
   };
 }
 
@@ -370,7 +371,7 @@ describe("LayerGl", () => {
   });
 
   describe("release", () => {
-    it("deletes the buffers, the vertex array and every program made", () => {
+    it("deletes the buffers and the vertex array, and keeps the programs for the layer's return", () => {
       begin();
       begin(frame(true));
       objects.release(context());
@@ -384,29 +385,34 @@ describe("LayerGl", () => {
       expect(gl.deleteVertexArray).toHaveBeenCalledWith(
         gl.createVertexArray.mock.results[0]!.value,
       );
-      expect(gl.deleteProgram.mock.calls.map(([program]) => program)).toEqual(
-        gl.createProgram.mock.results.map((r) => r.value as unknown),
-      );
+      expect(gl.deleteProgram).not.toHaveBeenCalled();
 
       // Once: a second release has nothing left, and a frame after it makes
-      // everything anew
+      // the buffers anew but takes the programs it kept
       objects.release(context());
       expect(gl.deleteBuffer).toHaveBeenCalledTimes(2);
       begin();
+      begin(frame(true));
       expect(gl.createVertexArray).toHaveBeenCalledTimes(2);
+      expect(gl.createProgram).toHaveBeenCalledTimes(2);
     });
 
-    it("skips a program that could not be made", () => {
-      gl.getShaderParameter.mockReturnValueOnce(false);
+    it("makes the programs anew where the context lost them while off the map", () => {
       begin();
-      begin(frame(true));
-      gl.deleteProgram.mockClear();
       objects.release(context());
-      // The one of the globe; the failed one was deleted as it failed
-      expect(gl.deleteProgram).toHaveBeenCalledOnce();
-      expect(gl.deleteProgram).toHaveBeenCalledWith(
-        gl.createProgram.mock.results[1]!.value,
-      );
+      // The same context object, restored without them
+      gl.isProgram.mockReturnValue(false);
+      begin();
+      expect(gl.createProgram).toHaveBeenCalledTimes(2);
+    });
+
+    it("makes the programs anew in another context", () => {
+      begin();
+      objects.release(context());
+      const other = mockGl();
+      begin(frame(), data, other);
+      expect(other.createProgram).toHaveBeenCalledOnce();
+      expect(other.isProgram).not.toHaveBeenCalled();
     });
 
     it("touches neither a lost context nor another than the one it made them in", () => {

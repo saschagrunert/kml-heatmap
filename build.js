@@ -287,7 +287,10 @@ function analyzeBundleComposition(metafile, fileName) {
 // routes, airborne and new areas. The heatmap alone comes to 148.3 KB raw
 // and 50.96 KB gzipped in a local build; all of them together are about
 // 150.2 KB raw and 51.5 KB gzipped.
-const BUDGET_APP = { raw: 152 * 1024, gzip: 52.5 * 1024 };
+// Raised from 152 KB and 52.5 KB for the heat legend, the hotspot tour and
+// the cross-section, landing next to the heatmap weighed by time: about
+// 153.4 KB raw and 53 KB gzipped together in CI.
+const BUDGET_APP = { raw: 156 * 1024, gzip: 54 * 1024 };
 // The feature bundle is fetched only when replay is opened, the relief, the
 // heat cloud and the ribbons of a selection of the 3D view are first drawn,
 // the Satellite switch is first on or a single flight is first selected, so

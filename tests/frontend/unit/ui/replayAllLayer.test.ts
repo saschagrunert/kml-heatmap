@@ -74,6 +74,7 @@ function mockGl(compiles = true) {
     deleteBuffer: vi.fn(),
     deleteVertexArray: vi.fn(),
     deleteProgram: vi.fn(),
+    isProgram: vi.fn(() => true),
     isContextLost: vi.fn(() => false),
   };
 }
@@ -280,7 +281,7 @@ describe("the replay of all flights' layer", () => {
     expect(layer.frames).toBe(2);
   });
 
-  it("lets go of what it made as it is removed", () => {
+  it("lets go of its buffers as it is removed, and keeps its program for its return", () => {
     layer.setPoints(flights());
     draw();
 
@@ -288,6 +289,11 @@ describe("the replay of all flights' layer", () => {
 
     expect(gl.deleteBuffer).toHaveBeenCalledTimes(2);
     expect(gl.deleteVertexArray).toHaveBeenCalledTimes(1);
-    expect(gl.deleteProgram).toHaveBeenCalledTimes(1);
+    expect(gl.deleteProgram).not.toHaveBeenCalled();
+
+    layer.onAdd(map);
+    draw();
+    expect(gl.createProgram).toHaveBeenCalledTimes(1);
+    expect(layer.frames).toBe(2);
   });
 });

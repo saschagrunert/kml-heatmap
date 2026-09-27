@@ -18,7 +18,7 @@
  */
 import type { PathSegment } from "../types";
 import type { SmoothedFlights } from "./smoothing";
-import { planarMetres } from "../utils/geometry";
+import { planarMetres, type Coordinate } from "../utils/geometry";
 import { segmentSeconds } from "./heatLines";
 
 /**
@@ -123,6 +123,64 @@ export function chainTimes(
     }
   }
   return times;
+}
+
+/**
+ * What the pieces of the curve of a chain are, point by point (see
+ * chainPieces): the metres from the point before, the seconds of the heat
+ * spent on them, and the time into its flight at each point
+ */
+export interface ChainPieces {
+  lengths: Float64Array;
+  seconds: Float64Array;
+  times: Float64Array;
+}
+
+/**
+ * The pieces of each curve, by its points, and the clock they were timed
+ * by: a flight's curve is the same on every ground and at every level (see
+ * groundedFlights), which only lift its points, so the cloud and the
+ * replay of every level take them from here. They go with the curves.
+ */
+const piecesOf = new WeakMap<
+  readonly Coordinate[],
+  ChainPieces & { clock: FlightClock }
+>();
+
+/**
+ * The pieces of the curve of the chain the segments `first` to `end`
+ * (exclusive) of `segments` are smoothed into, as `flights` has it: the
+ * metres of each (pieceLengths), the seconds of each by the heat lines'
+ * count of its segment's (segmentSeconds) spread over its pieces by their
+ * length, and the time into its flight at each point by `clock`
+ * (chainTimes). Worked out once for a curve and its clock.
+ */
+export function chainPieces(
+  segments: readonly PathSegment[],
+  flights: SmoothedFlights,
+  first: number,
+  end: number,
+  clock: FlightClock,
+): ChainPieces {
+  const { chains, chainOf, from, to } = flights;
+  const points = chains[chainOf[first]!]!.points;
+  const held = piecesOf.get(points);
+  if (held?.clock === clock) return held;
+  const lengths = pieceLengths(flights, first, end);
+  const seconds = new Float64Array(points.length);
+  for (let m = first; m < end; m++) {
+    let total = 0;
+    for (let j = from[m]! + 1; j <= to[m]!; j++) total += lengths[j]!;
+    const spent = segmentSeconds(segments[m]!, segments[m + 1]);
+    const pieces = to[m]! - from[m]!;
+    for (let j = from[m]! + 1; j <= to[m]!; j++) {
+      seconds[j] = total > 0 ? (spent * lengths[j]!) / total : spent / pieces;
+    }
+  }
+  const times = chainTimes(flights, clock, first, end, lengths);
+  const made = { lengths, seconds, times, clock };
+  piecesOf.set(points, made);
+  return made;
 }
 
 /**
