@@ -89,6 +89,7 @@ import {
   type HeatCloudStyle,
 } from "./heatCloudLayer";
 import { followHeightBand } from "./heightBand";
+import { followCloudReadout } from "./cloudReadout";
 
 /**
  * The layer the cloud is drawn below: the first of the ribbons, above every
@@ -285,6 +286,8 @@ export function followHeatCloud(app: MapApp): void {
   const map = app.map;
   if (!map || followed.has(app)) return;
   followHeightBand(app);
+  // What the cloud under the pointer is made of (ui/cloudReadout.ts)
+  followCloudReadout(app);
   /**
    * The shaders did not work in the map's context: the heatmap stays, until
    * a lost context is restored
