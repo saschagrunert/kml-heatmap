@@ -1,11 +1,21 @@
 /**
  * The custom layer of the heat cloud, with the WebGL context mocked: what it
- * makes, when, what it draws, and what it lets go of.
+ * makes, when, what it draws, and what it lets go of; its shadow, its
+ * pulses and its exposure.
  */
-import { describe, it, expect, beforeEach, vi, type Mock } from "vitest";
+import {
+  describe,
+  it,
+  expect,
+  beforeEach,
+  afterEach,
+  vi,
+  type Mock,
+} from "vitest";
 import type { CustomRenderMethodInput, Map as MapLibreMap } from "maplibre-gl";
 import {
   CLOUD_STOPS,
+  cloudExposure,
   cloudLook,
   cloudMatrix,
   HEAT_CLOUD_LAYER,
@@ -18,6 +28,11 @@ import {
 } from "../../../../kml_heatmap/frontend/calculations/heatCloud";
 import { smoothFlights } from "../../../../kml_heatmap/frontend/calculations/smoothing";
 import type { PathSegment } from "../../../../kml_heatmap/frontend/types";
+
+const motion = vi.hoisted(() => ({ reduced: false }));
+vi.mock("../../../../kml_heatmap/frontend/utils/motion", () => ({
+  prefersReducedMotion: () => motion.reduced,
+}));
 
 /** A WebGL2 context that records what is asked of it */
 function mockGl(compiles = true) {
@@ -161,7 +176,15 @@ function points(): CloudPoints {
   return cloudPoints(segments, flights, () => true, 11);
 }
 
-const STYLE: HeatCloudStyle = { groundM: 3, liftM: 3, opacity: 1 };
+const STYLE: HeatCloudStyle = {
+  groundM: 3,
+  liftM: 3,
+  opacity: 1,
+  flow: true,
+};
+
+/** The draws of a frame of STYLE: the shadow, then the glow */
+const PASSES = 2;
 
 describe("the heat cloud's layer", () => {
   let gl: MockGl;
@@ -173,12 +196,54 @@ describe("the heat cloud's layer", () => {
   const render = (options = frame()): void =>
     layer.render(gl as unknown as WebGL2RenderingContext, options);
 
+  /** What performance.now says, in milliseconds */
+  let now: number;
+
+  /** Every value given to a uniform, with its place in the calls */
+  const given = (): [name: string, at: number, values: number[]][] =>
+    [gl.uniform1f, gl.uniform2f, gl.uniform4f].flatMap((fn) =>
+      fn.mock.calls.map(
+        (call, k) =>
+          [
+            (call[0] as { name: string }).name,
+            fn.mock.invocationCallOrder[k]!,
+            call.slice(1) as number[],
+          ] as [string, number, number[]],
+      ),
+    );
+
+  /** The value the uniform `name` was last given before the call `before` */
+  const uniform = (name: string, before = Infinity): number[] => {
+    let last = -1;
+    let value: number[] = [];
+    for (const [of, at, values] of given()) {
+      if (of === name && at < before && at > last) {
+        last = at;
+        value = values;
+      }
+    }
+    return value;
+  };
+
+  /** The values the uniform `name` had in the draws of the last frame */
+  const perDraw = (name: string): number[][] =>
+    gl.drawArraysInstanced.mock.invocationCallOrder
+      .slice(-PASSES)
+      .map((draw) => uniform(name, draw));
+
   beforeEach(() => {
     gl = mockGl();
     map = mockMap();
     style = STYLE;
     failed = vi.fn();
+    motion.reduced = false;
+    now = 1000;
+    vi.spyOn(performance, "now").mockImplementation(() => now);
     layer = new HeatCloudLayer(() => style, failed);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
   it("is a 3D custom layer of its own id", () => {
@@ -221,7 +286,8 @@ describe("the heat cloud's layer", () => {
     layer.setPoints(cloud);
     render();
 
-    expect(gl.drawArraysInstanced).toHaveBeenCalledExactlyOnceWith(
+    expect(gl.drawArraysInstanced).toHaveBeenCalledTimes(PASSES);
+    expect(gl.drawArraysInstanced).toHaveBeenLastCalledWith(
       gl.TRIANGLE_STRIP,
       0,
       4,
@@ -262,7 +328,7 @@ describe("the heat cloud's layer", () => {
     expect(
       gl.bufferData.mock.calls.filter(([, data]) => data === next.points),
     ).toHaveLength(1);
-    expect(gl.drawArraysInstanced).toHaveBeenCalledTimes(4);
+    expect(gl.drawArraysInstanced).toHaveBeenCalledTimes(4 * PASSES);
   });
 
   it("builds its vertex shader on MapLibre's prelude for the projection, and a program per projection", () => {
@@ -360,7 +426,7 @@ describe("the heat cloud's layer", () => {
 
     expect(gl.createVertexArray).toHaveBeenCalledOnce();
     expect(gl.createProgram).toHaveBeenCalledOnce();
-    expect(gl.drawArraysInstanced).toHaveBeenCalledOnce();
+    expect(gl.drawArraysInstanced).toHaveBeenCalledTimes(PASSES);
   });
 
   it("makes everything anew in another context", () => {
@@ -373,7 +439,256 @@ describe("the heat cloud's layer", () => {
     expect(other.createVertexArray).toHaveBeenCalledOnce();
     expect(other.createProgram).toHaveBeenCalledOnce();
     expect(other.bufferData).toHaveBeenCalled();
-    expect(other.drawArraysInstanced).toHaveBeenCalledOnce();
+    expect(other.drawArraysInstanced).toHaveBeenCalledTimes(PASSES);
+  });
+
+  it("reads the heat and the time of a stretch's ends from the six floats of each point", () => {
+    layer.onAdd(map);
+    layer.setPoints(points());
+    render();
+    const stride = 6 * 4;
+    const pointers = gl.vertexAttribPointer.mock.calls
+      .slice(1)
+      .map((call) => call as unknown as number[]);
+    // Before, start, end and after, and a float or two past each of the
+    // first three: the heat into the start, and the heat and the time at
+    // either end of the stretch
+    expect(
+      pointers.map(([location, size, , , step, offset]) => [
+        location,
+        size,
+        step,
+        offset,
+      ]),
+    ).toEqual([
+      [1, 4, stride, 0],
+      [2, 1, stride, 16],
+      [3, 4, stride, stride],
+      [4, 2, stride, stride + 16],
+      [5, 4, stride, 2 * stride],
+      [6, 2, stride, 2 * stride + 16],
+      [7, 4, stride, 3 * stride],
+    ]);
+  });
+
+  it("draws a faint shadow on the ground under the lifted flights, then their glow", () => {
+    layer.onAdd(map);
+    layer.setPoints(points());
+    render();
+
+    const [shadow, glow] = perDraw("u_heights");
+    expect(shadow).toEqual([STYLE.groundM, 0]);
+    expect(glow).toEqual([STYLE.groundM, STYLE.liftM]);
+    // Muted, filling slower and not near as far, and as strong as the app
+    // asks for either
+    const [shadowColour, glowColour] = perDraw("u_colour");
+    const [r, g, b] = shadowColour!;
+    expect(Math.max(r!, g!, b!) - Math.min(r!, g!, b!)).toBeLessThan(0.1);
+    expect(b).toBeGreaterThan(0);
+    expect(b).toBeLessThan(glowColour![2]! / 2);
+    expect(shadowColour![3]).toBe(glowColour![3]);
+    const [shadowCeiling, glowCeiling] = perDraw("u_ceiling").map(([c]) => c);
+    expect(shadowCeiling).toBeLessThan(0.5);
+    expect(glowCeiling).toBe(1);
+    // No pulses in the shadow
+    expect(perDraw("u_flowMix")[0]![1]).toBe(0);
+  });
+
+  it("draws no shadow where the flights are drawn on the ground", () => {
+    style = { ...STYLE, liftM: 0 };
+    layer.onAdd(map);
+    layer.setPoints(points());
+    render();
+    expect(gl.drawArraysInstanced).toHaveBeenCalledOnce();
+    expect(uniform("u_heights")).toEqual([STYLE.groundM, 0]);
+  });
+
+  describe("the pulses", () => {
+    /** Draw frames `ms` apart for `total` milliseconds */
+    const frames = (total: number, ms = 16): void => {
+      for (let t = 0; t < total; t += ms) {
+        now += ms;
+        render();
+      }
+    };
+    const strength = (): number => uniform("u_flowMix")[1]!;
+
+    beforeEach(() => {
+      layer.onAdd(map);
+      layer.setPoints(points());
+    });
+
+    it("fade in and move on along the flights' time, a frame after the other", () => {
+      render();
+      expect(map.triggerRepaint).toHaveBeenCalled();
+      frames(2000);
+      expect(strength()).toBeGreaterThan(0.5);
+      expect(strength()).toBeLessThanOrEqual(1);
+      const [, , before] = uniform("u_flow");
+      now += 16;
+      render();
+      const [inverse, half, after] = uniform("u_flow");
+      // Two periods, one twice the other
+      expect(half).toBeCloseTo(inverse! / 2, 12);
+      expect(after).not.toBe(before);
+      map.triggerRepaint.mockClear();
+      render();
+      expect(map.triggerRepaint).toHaveBeenCalledOnce();
+    });
+
+    it("fade out and ask for no frame once the map has not been used for a while, and run again as it is", () => {
+      frames(2000);
+      frames(30000, 100);
+      expect(strength()).toBe(0);
+      map.triggerRepaint.mockClear();
+      now += 16;
+      render();
+      expect(map.triggerRepaint).not.toHaveBeenCalled();
+
+      map.emit("mousemove");
+      expect(map.triggerRepaint).toHaveBeenCalledOnce();
+      // Once is enough until they rest again
+      map.emit("move");
+      expect(map.triggerRepaint).toHaveBeenCalledOnce();
+      frames(2000);
+      expect(strength()).toBeGreaterThan(0.5);
+    });
+
+    it("keep running while the map is used", () => {
+      for (let k = 0; k < 40; k++) {
+        frames(1000, 100);
+        map.emit("move");
+      }
+      expect(strength()).toBeGreaterThan(0.5);
+    });
+
+    it("do not run under reduced motion, nor where the app says not to, and ask for no frame", () => {
+      for (const [reduced, flow] of [
+        [true, true],
+        [false, false],
+      ] as const) {
+        motion.reduced = reduced;
+        style = { ...STYLE, flow };
+        frames(500);
+        expect(strength()).toBe(0);
+        map.triggerRepaint.mockClear();
+        now += 16;
+        render();
+        expect(map.triggerRepaint).not.toHaveBeenCalled();
+        // Nor for the map as it is used
+        map.emit("mousemove");
+        expect(map.triggerRepaint).not.toHaveBeenCalled();
+      }
+    });
+
+    it("start again as the map is used once reduced motion is turned off", () => {
+      motion.reduced = true;
+      frames(500);
+      map.triggerRepaint.mockClear();
+      map.emit("mousemove");
+      expect(map.triggerRepaint).not.toHaveBeenCalled();
+      motion.reduced = false;
+      map.emit("mousemove");
+      expect(map.triggerRepaint).toHaveBeenCalledOnce();
+      frames(2000);
+      expect(strength()).toBeGreaterThan(0.5);
+    });
+
+    it("stop the frames when the cloud is not drawn", () => {
+      frames(2000);
+      expect(strength()).toBeGreaterThan(0.5);
+      style = null;
+      map.triggerRepaint.mockClear();
+      now += 16;
+      render();
+      expect(map.triggerRepaint).not.toHaveBeenCalled();
+      map.emit("mousemove");
+      expect(map.triggerRepaint).not.toHaveBeenCalled();
+    });
+
+    it("let go of the map as the layer is removed", () => {
+      layer.onRemove(map, gl as unknown as WebGL2RenderingContext);
+      expect(map.off).toHaveBeenCalledWith("mousemove", expect.any(Function));
+      expect(map.off).toHaveBeenCalledWith("move", expect.any(Function));
+    });
+  });
+
+  describe("the exposure", () => {
+    const gainOf = (cloud: CloudPoints): number => {
+      const fresh = new HeatCloudLayer(() => ({ ...STYLE, liftM: 0 }), failed);
+      fresh.onAdd(map);
+      fresh.setPoints(cloud);
+      gl.uniform1f.mockClear();
+      fresh.render(gl as unknown as WebGL2RenderingContext, frame());
+      return uniform("u_gain")[0]!;
+    };
+
+    it("follows the busiest heat of the points", () => {
+      const cloud = { ...points(), busiest: 100 / 51.4 };
+      const busy = { ...cloud, busiest: 200 / 51.4 };
+      expect(gainOf(busy) / gainOf(cloud)).toBeCloseTo(0.5, 9);
+    });
+
+    it("darkens the busiest cells no further than white at the gain of the zoom", () => {
+      const light = { ...points(), busiest: 10 / 51.4 };
+      const busy = { ...light, busiest: 200 / 51.4 };
+      const out = [gainOf(light), gainOf(busy)];
+      (map.getZoom as Mock).mockReturnValue(13);
+      const closer = [gainOf(light), gainOf(busy)];
+      // Five zooms in a pixel is 32 times shorter, at half the gain: a light
+      // cloud dims with it, the busiest cells stay as white as further out
+      expect(closer[0]! / out[0]!).toBeCloseTo(16, 6);
+      expect(closer[1]! / out[1]!).toBeCloseTo(32, 6);
+    });
+
+    it("eases to that of new points, and asks for no frame once there", () => {
+      motion.reduced = true;
+      style = { ...STYLE, liftM: 0 };
+      const cloud = { ...points(), busiest: 200 / 51.4 };
+      layer.onAdd(map);
+      layer.setPoints(cloud);
+      render();
+      const first = uniform("u_gain")[0]!;
+      layer.setPoints({ ...cloud, busiest: cloud.busiest / 2 });
+      now += 16;
+      render();
+      const eased = uniform("u_gain")[0]!;
+      const target = first * 2;
+      expect(eased).toBeGreaterThan(first);
+      expect(eased).toBeLessThan(target);
+      map.triggerRepaint.mockClear();
+      for (let k = 0; k < 100; k++) {
+        now += 16;
+        render();
+      }
+      expect(map.triggerRepaint).toHaveBeenCalled();
+      expect(uniform("u_gain")[0]! / target).toBeCloseTo(1, 1);
+      map.triggerRepaint.mockClear();
+      now += 16;
+      render();
+      expect(map.triggerRepaint).not.toHaveBeenCalled();
+    });
+  });
+});
+
+describe("cloudExposure", () => {
+  /** The heat per metre of `count` cruises over the same track */
+  const cruises = (count: number): number => count / 51.4;
+
+  it("draws the busiest cells no hotter than white, the whole cloud darker for them", () => {
+    const hundred = cloudExposure(cruises(100));
+    expect(hundred).toBeLessThan(1);
+    expect(cloudExposure(cruises(200))).toBeCloseTo(hundred / 2, 9);
+    // Years of flights over one field are not darkened to nothing
+    expect(cloudExposure(cruises(10000))).toBe(cloudExposure(cruises(20000)));
+    expect(cloudExposure(cruises(10000))).toBeGreaterThan(0);
+  });
+
+  it("never draws the cloud brighter than its colours are made for", () => {
+    expect(cloudExposure(cruises(10))).toBe(1);
+    expect(cloudExposure(cruises(0.1))).toBe(1);
+    expect(cloudExposure(0)).toBe(1);
+    expect(cloudExposure(Number.NaN)).toBe(1);
   });
 });
 

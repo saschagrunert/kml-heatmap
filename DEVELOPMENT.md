@@ -617,11 +617,13 @@ store, for which `followLayerVisibility` hides the flat heatmap and its heat
 lines; the Heatmap switch, its button, the sheet row, the saved state and
 the link are the heatmap's as before. It draws what the heatmap would: the
 flights the year and aircraft filters keep, the selected ones alone while
-isolated, nothing while the switch is off or a replay runs, and at the
-heatmap's dimmed opacity under a colour layer, the aviation chart or a
-selection's lines (`dimsHeatmap`). No style layer draws a glow at a height:
-`heatmap` lies on the ground, `circle` has no depth, and deck.gl or
-three.js would be several hundred kilobytes for one layer.
+isolated, nothing while the switch is off, at the heatmap's dimmed opacity
+under a colour layer, the aviation chart or a selection's lines
+(`dimsHeatmap`), and at a quarter (`CLOUD_REPLAY_OPACITY`) and without its
+pulses while a replay runs, where the flat heatmap is hidden. No style
+layer draws a glow at a height: `heatmap` lies on the ground, `circle` has
+no depth, and deck.gl or three.js would be several hundred kilobytes for
+one layer.
 
 `calculations/heatCloud.ts` makes the data, once per dataset, filter,
 isolated selection, relief level and relief on or off (the points of the
@@ -639,11 +641,16 @@ fraction of a pixel), the ground under the point and the height above it in
 feet, and the seconds spent on the stretch to the next point: those of each
 segment (`segmentSeconds`, as the heat lines count them; counting fixes, as
 the heatmap does, left a cruise logged at an uneven pace in beads), spread
-over the stretches of the curve along it by their length. The heights are
-the ribbons': the smoothed altitude above the ground of the flight at the
-relief level, never below it, on the relief standing on that ground, and
-exaggerated by the relief's own exaggeration (`map.getTerrain()`), or by the
-level's without a relief. A custom layer cannot read the relief MapLibre
+over the stretches of the curve along it by their length, and the time
+into its flight the point was flown at (the same seconds added up from 0 at
+the flight's first fix, on across a gap in its log; `CLOUD_POINT_FLOATS`,
+6). On the way the heat of each stretch over its length is added up in
+cells of `CLOUD_CELL_PX` (16 px of the level), and `busiest` is the 99th
+percentile of the cells with any. The heights are the ribbons': the
+smoothed altitude above the ground of the flight at the relief level, never
+below it, on the relief standing on that ground, and exaggerated by the
+relief's own exaggeration (`map.getTerrain()`), or by the level's without a
+relief. A custom layer cannot read the relief MapLibre
 draws, so where the ribbons stand on the elevation tiles of the level drawn
 under them (see above), the cloud stands on the ground the build sampled,
 smoothed for the level: within about a pixel of them, and a flight whose
@@ -678,6 +685,22 @@ code MapLibre hands a custom layer (`shaderData.vertexShaderPrelude`,
 `projectTileFor3D`), so the same shaders work on the globe, which gets its
 own matrix and the flat map's (`fallbackMatrix`, scaled to heights in
 metres) for the way into and out of it; a program is compiled per variant.
+Where the flights are lifted, the same buffers are drawn a second time
+first, on the ground (no lift), in a muted grey blue that fills to 18 % at
+most (`CLOUD_SHADOW_COLOUR`, `CLOUD_SHADOW_CEILING`): a shadow that shows
+how high the glow above it is. The exposure (`cloudExposure`) scales the
+heat so the busiest cells, at the gain of the zoom, glow no hotter than
+`CLOUD_WHITE_HEAT` (white), down to a quarter and never above 1, eased over
+a fraction of a second as the level or the zoom changes; the two years of
+the sample data never reach it. The pulses of the flow brighten and dim the glow by
+the time of each pixel's stretch, a comet brightest at its head moving the
+way the flights went, about 90 px of a cruise apart at any zoom (two
+spacings a power of two apart, blended by the zoom so they do not jump) and
+a mean of 1, so the heat as a whole stays as it was. They fade in while the
+map is used (`mousemove`, `touchstart`, `move`) and out 20 s after, and the
+layer asks for another frame (`triggerRepaint`) only while they run or fade
+or the exposure moves, so an idle map draws nothing. They are off under
+reduced motion, read in every frame, and during a replay.
 It is a 3D layer, right below the first ribbon layer: above every layer
 of the app that lies on the ground, the flat lines of the selection, the
 flights and the replay's route and trail among them, and below the ribbons
@@ -703,6 +726,9 @@ ribbons stay what is hovered and clicked. An exported image has it, since
 the canvas is read in the frame that drew it (`withMapStill`). It is drawn
 in the world copy of the flights only, where the flat map shows several.
 
+The numbers below were measured before the shadow, which draws the cloud a
+second time where the flights are lifted, and the pulses, which redraw the
+map every frame while they run.
 On a desktop GPU (Radeon RX 9070 XT, 1440x900) the cloud's draw took 0.35 ms
 of a frame for all years at `z` 6, 0.6 ms for 2025 at `z` 8 and 1.4 ms for
 all years at `z` 12, and the camera turned at 60 frames a second with and

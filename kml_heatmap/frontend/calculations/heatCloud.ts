@@ -17,12 +17,17 @@
  * draws, which that ground follows to within a pixel at every level (see
  * groundProfileFt); the cloud stands on the ground, since a custom layer
  * cannot ask the map for its relief.
+ *
+ * Each point also carries the time into its flight it was flown at, which
+ * the pulses of the layer run along, and the heat is added up in coarse
+ * cells on the way, for the exposure the layer draws the cloud with.
  */
 import type { PathSegment } from "../types";
 import {
   DEGREES_TO_RADIANS,
   metresPerPixel,
   planarMetres,
+  TILE_SIZE_PX,
   type Coordinate,
 } from "../utils/geometry";
 import { FEET_TO_METERS } from "../utils/constants";
@@ -51,8 +56,20 @@ const CLOUD_HEIGHT_STEP_PX = 1;
 /** The least heat a stretch carries, in seconds */
 const MIN_HEAT_S = 0.01;
 
-/** The floats of a point of the cloud: x, y, ground, lift and heat */
-export const CLOUD_POINT_FLOATS = 5;
+/**
+ * The cells the heat is added up in for the exposure of the cloud (see
+ * CloudPoints.busiest), this many pixels wide in the middle of the relief
+ * level: about as wide as the glow of a stretch (see CLOUD_STOPS in
+ * ui/heatCloudLayer.ts), so the heat of a cell is about what glows on its
+ * brightest pixels
+ */
+const CLOUD_CELL_PX = 16;
+
+/** The part of the cells of heat that are less busy than CloudPoints.busiest */
+const CLOUD_BUSIEST_PERCENTILE = 0.99;
+
+/** The floats of a point of the cloud: x, y, ground, lift, heat and time */
+export const CLOUD_POINT_FLOATS = 6;
 
 /**
  * The points of the cloud, one after the other along each flight, with a
@@ -66,7 +83,11 @@ export const CLOUD_POINT_FLOATS = 5;
  * - its height above that ground, in feet, never below 0 (see liftFt);
  * - the heat of the stretch from it to the next point: the seconds spent
  *   on the segments merged into it. The last point of a flight has none,
- *   and the stretch from it to the next flight's first is not drawn.
+ *   and the stretch from it to the next flight's first is not drawn;
+ * - its time: the seconds into its flight at which it was flown, as the
+ *   heat lines count them (segmentSeconds), from 0 at the flight's first
+ *   fix and on across a gap in its log, so the time runs the way the
+ *   flight went.
  */
 export interface CloudPoints {
   points: Float32Array;
@@ -74,6 +95,14 @@ export interface CloudPoints {
   count: number;
   /** The Mercator point the points are given from */
   origin: readonly [number, number];
+  /**
+   * The heat per metre where the cloud is busiest: of the cells of
+   * CLOUD_CELL_PX the heat of the stretches in them is added up in, the
+   * one CLOUD_BUSIEST_PERCENTILE of the others are below, its heat over
+   * its width, in seconds per metre; 0 without any. The layer sets its
+   * exposure by it (see cloudExposure in ui/heatCloudLayer.ts).
+   */
+  busiest: number;
 }
 
 /** The Mercator x and y (0 to 1) of a `[lat, lng]` point */
@@ -94,7 +123,7 @@ export function mercatorOf([lat, lng]: Readonly<Coordinate>): [number, number] {
  * by CLOUD_HEIGHT_STEP_PX, and at either end of a flight. The seconds of a
  * segment (segmentSeconds) are spread over the stretches of the curve
  * along it by their length, and a stretch of the cloud carries those of
- * the curve it is merged from.
+ * the curve it is merged from, and the time its first point was flown at.
  */
 export function cloudPoints(
   segments: readonly PathSegment[],
@@ -110,11 +139,21 @@ export function cloudPoints(
   let south = -Infinity;
   const { chains, chainOf, from, to } = flights;
   const count = segments.length;
+  // The cells of heat, in Mercator units, and the heat per metre in each
+  const cell = CLOUD_CELL_PX / (TILE_SIZE_PX * 2 ** (level + 0.5));
+  const cells = new Map<number, number>();
+  // The flight the clock runs for, and its seconds up to the chain of `i`
+  let clockOf = -1;
+  let clock = 0;
   let i = 0;
   while (i < count) {
     // The segments of the chain of `i`, one after the other
     let end = i + 1;
     while (end < count && chainOf[end] === chainOf[i]) end++;
+    if (segments[i]!.path_id !== clockOf) {
+      clockOf = segments[i]!.path_id;
+      clock = 0;
+    }
     const chain = chains[chainOf[i]!];
     if (chain && chain.points.length > 1 && keep(segments[i]!.path_id)) {
       const { points, heights, ground } = chain;
@@ -122,6 +161,7 @@ export function cloudPoints(
       const pixelM =
         metresPerPixel(level + 0.5) * Math.cos(lat * DEGREES_TO_RADIANS);
       const stepM = CLOUD_STEP_PX * pixelM;
+      const cellM = CLOUD_CELL_PX * pixelM;
       const heightStepFt =
         (CLOUD_HEIGHT_STEP_PX * pixelM) / exaggeration / FEET_TO_METERS;
       // The seconds of each stretch of the curve, from its segment's
@@ -144,20 +184,25 @@ export function cloudPoints(
       let along = 0;
       let heat = 0;
       let keptFt = heightAt(0);
+      let keptX = 0;
+      let keptY = 0;
       const push = (j: number): void => {
         const [x, y] = mercatorOf(points[j]!);
         west = Math.min(west, x);
         east = Math.max(east, x);
         north = Math.min(north, y);
         south = Math.max(south, y);
-        values.push(x, y, ground?.[j] ?? 0, heights[j]!, 0);
+        values.push(x, y, ground?.[j] ?? 0, heights[j]!, 0, clock);
         keptFt = heightAt(j);
+        keptX = x;
+        keptY = y;
       };
       push(0);
       const last = points.length - 1;
       for (let j = 1; j <= last; j++) {
         along += lengths[j]!;
         heat += seconds[j]!;
+        clock += seconds[j]!;
         if (
           j === last ||
           along >= stepM ||
@@ -166,7 +211,15 @@ export function cloudPoints(
           // The heat of the stretch goes on the point it starts from; a
           // stretch of none (a track without times or speeds) gets a trace,
           // since none is no stretch at all to the layer
-          values[values.length - 1] = Math.max(heat, MIN_HEAT_S);
+          const stretch = Math.max(heat, MIN_HEAT_S);
+          values[values.length - 2] = stretch;
+          // Into the cell it starts in, over as many metres as it spans
+          const key =
+            Math.floor(keptX / cell) * 2 ** 26 + Math.floor(keptY / cell);
+          cells.set(
+            key,
+            (cells.get(key) ?? 0) + stretch / Math.max(along, cellM),
+          );
           push(j);
           along = 0;
           heat = 0;
@@ -178,13 +231,17 @@ export function cloudPoints(
   const origin: [number, number] =
     values.length > 0 ? [(west + east) / 2, (north + south) / 2] : [0.5, 0.5];
   const points = new Float32Array(values.length + 2 * CLOUD_POINT_FLOATS);
+  points.set(values, CLOUD_POINT_FLOATS);
   for (let k = 0; k < values.length; k += CLOUD_POINT_FLOATS) {
-    const at = k + CLOUD_POINT_FLOATS;
-    points[at] = values[k]! - origin[0];
-    points[at + 1] = values[k + 1]! - origin[1];
-    points[at + 2] = values[k + 2]!;
-    points[at + 3] = values[k + 3]!;
-    points[at + 4] = values[k + 4]!;
+    points[k + CLOUD_POINT_FLOATS] = values[k]! - origin[0];
+    points[k + CLOUD_POINT_FLOATS + 1] = values[k + 1]! - origin[1];
   }
-  return { points, count: values.length / CLOUD_POINT_FLOATS, origin };
+  const busy = Float64Array.from(cells.values()).sort();
+  return {
+    points,
+    count: values.length / CLOUD_POINT_FLOATS,
+    origin,
+    busiest:
+      busy[Math.floor(CLOUD_BUSIEST_PERCENTILE * (busy.length - 1))] ?? 0,
+  };
 }
