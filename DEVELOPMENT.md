@@ -168,9 +168,10 @@ their traces in `test-results/`, and every run writes an HTML report to
 ribbons of a selection of the 3D view, the satellite imagery, the places
 new in a year of the New areas switch (Wrapped counts their area with the
 app's code, and never fetches this bundle), the profile of a single
-selected flight and the cross-section (`ui/crossSection.ts`; the first
+selected flight, the cross-section (`ui/crossSection.ts`; the first
 visit carries only its control in the View group and its row in the
-phone's More sheet), and
+phone's More sheet) and the hotspot tour (`ui/hotspotTour.ts`, with its
+places found in `calculations/hotspots.ts`, carried the same way), and
 `wrapped.bundle.js` holds Wrapped, the content of
 the statistics panel and the flight list of its Flights tab (the rail
 itself is part of the app, and says it is loading until the bundle is in;
@@ -195,7 +196,11 @@ one chunk, which has a fixed name that the site publishes and the page
 preloads. A module replay and Wrapped share without the app would still get
 a chunk of its own, and the build fails if it ever writes another file
 (`assertExpectedOutputs` in `build.js`); such a module belongs where the app
-reaches it (`segmentBounds` in `utils/geometry.ts` is one).
+reaches it (`segmentBounds` in `utils/geometry.ts` is one), or in the
+feature bundle, which hands it to Wrapped's code through `FeatureModule`:
+the camera moves Wrapped's intro and the hotspot tour share
+(`ui/cameraScript.ts`) do that, as the intro waits for the feature bundle
+anyway.
 `yearWorker.bundle.js` is a build of its own and shares nothing with the
 others: it is everything that works on the year files. The page imports it
 next to the first year file (`services/dataLoader.ts`), and the file then

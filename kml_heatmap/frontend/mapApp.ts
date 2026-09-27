@@ -94,6 +94,8 @@ import {
 import type { ReplayManager } from "./ui/replayManager";
 import type { StatsManager } from "./ui/statsManager";
 import type { WrappedManager } from "./ui/wrappedManager";
+import type { TourView } from "./ui/hotspotTour";
+import type { FeatureModule } from "./features";
 import type {
   AircraftModels,
   AirportMarker,
@@ -219,12 +221,20 @@ export const BASE_STYLE_RETRY_MS = 5_000;
  */
 export const REPLAY_UNAVAILABLE_MESSAGE =
   "Replay is unavailable: its code could not be loaded";
+export const TOUR_UNAVAILABLE_MESSAGE =
+  "The hotspot tour is unavailable: its code could not be loaded";
 export const WRAPPED_UNAVAILABLE_MESSAGE =
   "Wrapped is unavailable: its code could not be loaded";
 export const STATS_UNAVAILABLE_MESSAGE =
   "The statistics are unavailable: their code could not be loaded";
 export const CROSS_SECTION_UNAVAILABLE_MESSAGE =
   "The cross-section is unavailable: its code could not be loaded";
+
+/** What a control starts in the feature bundle once it has arrived */
+type FeatureToggle = keyof Pick<
+  FeatureModule,
+  "toggleReplayAll" | "toggleHotspotTour" | "toggleCrossSection"
+>;
 
 /** The messages of the one file that carries Wrapped and the statistics */
 const WRAPPED_BUNDLE_MESSAGES = [
@@ -286,10 +296,8 @@ export class MapApp {
   private readonly lifetime = new AbortController();
   /** Set while a click on Replay waits for the feature bundle */
   private pendingReplayToggle: Promise<void> | null = null;
-  /** Set while a click on Replay all waits for the feature bundle */
-  private pendingReplayAllToggle: Promise<void> | null = null;
-  /** Set while a click on Cross-section waits for the feature bundle */
-  private pendingSectionToggle: Promise<void> | null = null;
+  /** The toggles of the feature bundle a click waits for the bundle for */
+  private readonly pendingFeatureToggles = new Set<FeatureToggle>();
   /**
    * Where the last fit to the start view takes the camera: the one of a
    * first visit, measured as the map opens, then that of every Reset view.
@@ -385,6 +393,11 @@ export class MapApp {
   statsManager?: StatsManager | undefined;
   replayManager?: ReplayManager | undefined;
   wrappedManager?: WrappedManager | undefined;
+  /**
+   * The user's view while the hotspot tour holds the map, set by the tour
+   * (ui/hotspotTour.ts): the one the state manager saves, as Wrapped's
+   */
+  tourView: TourView | null = null;
   uiToggles!: UIToggles;
   mobileBar!: MobileBar | null;
 
@@ -1150,16 +1163,25 @@ export class MapApp {
    * its way is dropped, and one that loads nothing says so.
    */
   toggleReplayAll(): void {
-    this.pendingReplayAllToggle ??= this.loadLazyBundle(
-      loadFeatures,
-      REPLAY_UNAVAILABLE_MESSAGE,
-    )
+    this.toggleFeature("toggleReplayAll", REPLAY_UNAVAILABLE_MESSAGE);
+  }
+
+  /** Start or stop the hotspot tour (ui/hotspotTour.ts), as Replay all */
+  toggleHotspotTour(): void {
+    this.toggleFeature("toggleHotspotTour", TOUR_UNAVAILABLE_MESSAGE);
+  }
+
+  private toggleFeature(name: FeatureToggle, unavailable: string): void {
+    const pending = this.pendingFeatureToggles;
+    if (pending.has(name)) return;
+    pending.add(name);
+    this.loadLazyBundle(loadFeatures, unavailable)
       .then((features) => {
-        this.pendingReplayAllToggle = null;
-        if (!this.destroyed) features?.toggleReplayAll(this);
+        pending.delete(name);
+        if (!this.destroyed) features?.[name](this);
       })
       .catch((error: unknown) => {
-        this.pendingReplayAllToggle = null;
+        pending.delete(name);
         logError(error);
       });
   }
@@ -1169,13 +1191,7 @@ export class MapApp {
    * the feature bundle, dropping clicks while it is on its way as above
    */
   toggleCrossSection(): void {
-    this.pendingSectionToggle ??= this.loadLazyBundle(
-      loadFeatures,
-      CROSS_SECTION_UNAVAILABLE_MESSAGE,
-    ).then((features) => {
-      this.pendingSectionToggle = null;
-      if (!this.destroyed) features?.toggleCrossSection(this);
-    });
+    this.toggleFeature("toggleCrossSection", CROSS_SECTION_UNAVAILABLE_MESSAGE);
   }
 
   /**

@@ -288,9 +288,10 @@ export class WrappedManager {
    */
   showWrapped(intro = false): void {
     if (!this.app.map || this.app.wrappedVisible) return;
-    // Replay owns the map while it runs; its control is disabled then, and
-    // this covers every other way in (the mobile tab, a restored state)
-    if (this.app.replayActive) return;
+    // Replay owns the map while it runs, and so does the hotspot tour; the
+    // control is disabled then, and this covers every other way in (the
+    // mobile tab, a restored state, a click whose bundle came late)
+    if (this.app.replayActive || this.app.tourView) return;
 
     // A close that is still settling must not remeasure a map that is about
     // to move back into the dialog

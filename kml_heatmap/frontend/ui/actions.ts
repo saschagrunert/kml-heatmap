@@ -19,6 +19,7 @@ export const DEFERRED_WHILE_INITIALIZING: ReadonlySet<ActionName> =
     "toggleReplay",
     "toggleReplayAll",
     "toggleCrossSection",
+    "toggleHotspotTour",
     "playReplay",
     "pauseReplay",
     "stopReplay",
@@ -65,13 +66,14 @@ function actionHandlers(app: MapApp) {
     resetView: () => {
       app.resetView().catch(logError);
     },
-    // Replay, Wrapped and the cross-section live in lazily loaded bundles.
-    // Only these four can be the first thing a visitor touches; the rest are on
-    // chrome that exists only once the feature is open, so they find the
-    // manager already there.
+    // Replay, the hotspot tour, Wrapped and the cross-section live in lazily
+    // loaded bundles. Only these five can be the first thing a visitor
+    // touches; the rest are on chrome that exists only once the feature is
+    // open, so they find the manager already there.
     toggleReplay: () => app.toggleReplay(),
     toggleReplayAll: () => app.toggleReplayAll(),
     toggleCrossSection: () => app.toggleCrossSection(),
+    toggleHotspotTour: () => app.toggleHotspotTour(),
     filterByYear: () => {
       app.filterManager.filterByYear().catch(logError);
     },

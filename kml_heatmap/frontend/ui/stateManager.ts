@@ -182,8 +182,9 @@ export class StateManager {
     // replay's chase view flies the map along a flight. The `?.` is for
     // both living in lazily loaded bundles: before one has ever been opened
     // there is no saved view either way. Wrapped keeps the user's globe and
-    // 3D switches with it, which its intro changes for a while.
-    const wrapped = this.app.wrappedManager?.userMapView();
+    // 3D switches with it, which its intro changes for a while, and so does
+    // the hotspot tour with the 3D view and the heatmap it turns on.
+    const wrapped = this.app.wrappedManager?.userMapView() ?? this.app.tourView;
     const kept: Partial<ToggleFlags> = wrapped ?? {};
     const view = wrapped ??
       this.app.replayManager?.userMapView() ?? {
@@ -209,7 +210,8 @@ export class StateManager {
       selectedYear: this.app.selectedYear,
       selectedAircraft: this.app.selectedAircraft,
       selectedPathIds: Array.from(this.app.selectedPathIds),
-      heightBand: this.app.heightBand,
+      // The tour shows every height while it runs (ui/hotspotTour.ts)
+      heightBand: this.app.tourView?.heightBand ?? this.app.heightBand,
       // Replay state is not persisted: too complex to restore reliably
     };
     for (const toggle of TOGGLES) {

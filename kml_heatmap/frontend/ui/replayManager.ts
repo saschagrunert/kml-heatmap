@@ -84,6 +84,7 @@ const REPLAY_DISABLED_CONTROL_IDS = [
   "reset-view-btn",
   "replay-all-btn",
   "cross-section-btn",
+  "hotspot-tour-btn",
 ];
 
 /** Custom property holding the replay panel's height, read by styles.css */
@@ -282,6 +283,9 @@ export class ReplayManager {
       this.deactivateReplay(panel);
       return;
     }
+    // The hotspot tour holds the map, and the control with it; this covers
+    // a click whose bundle came late
+    if (this.app.tourView) return;
 
     if (!this.canReplay()) {
       showToast(REPLAY_PRECONDITION_MESSAGE, "info");

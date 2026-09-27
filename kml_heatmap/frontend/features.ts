@@ -10,7 +10,8 @@
  * they are first wanted, the satellite imagery, which its switch fetches,
  * the profile of a single selected flight, which the app fetches as one
  * is first selected, the places new in a year, which their switch fetches
- * (ui/newAreas.ts), and the cross-section, which its control fetches.
+ * (ui/newAreas.ts), the cross-section, which its control fetches, and the
+ * hotspot tour with the camera moves it shares with Wrapped's intro.
  * Wrapped has a bundle of its own (wrapped.ts), and never fetches this
  * one: not even for the airspace new in a year, which it counts with the
  * app's code (DataManager.newAreaKm2).
@@ -34,6 +35,13 @@ import { ReplayAllPlayer, toggleReplayAll } from "./ui/replayAll";
 import { followFlightProfile } from "./ui/flightProfile";
 import { drawNewAreas } from "./ui/newAreas";
 import { toggleCrossSection } from "./ui/crossSection";
+import {
+  flyToStop,
+  followTakeover,
+  jumpToStop,
+  turnTo,
+} from "./ui/cameraScript";
+import { toggleHotspotTour } from "./ui/hotspotTour";
 
 export interface FeatureModule {
   ReplayManager: typeof ReplayManager;
@@ -47,6 +55,11 @@ export interface FeatureModule {
   followFlightProfile: typeof followFlightProfile;
   drawNewAreas: typeof drawNewAreas;
   toggleCrossSection: typeof toggleCrossSection;
+  flyToStop: typeof flyToStop;
+  followTakeover: typeof followTakeover;
+  jumpToStop: typeof jumpToStop;
+  turnTo: typeof turnTo;
+  toggleHotspotTour: typeof toggleHotspotTour;
 }
 
 export {
@@ -61,4 +74,9 @@ export {
   followFlightProfile,
   drawNewAreas,
   toggleCrossSection,
+  flyToStop,
+  followTakeover,
+  jumpToStop,
+  turnTo,
+  toggleHotspotTour,
 };

@@ -414,6 +414,13 @@ export class MobileBar {
       },
       {
         kind: "action",
+        id: "hotspot-tour",
+        icon: "trophy",
+        label: "Hotspot tour",
+        onSelect: () => runAction(app, "toggleHotspotTour"),
+      },
+      {
+        kind: "action",
         id: "cross-section",
         icon: "ruler",
         label: "Cross-section",

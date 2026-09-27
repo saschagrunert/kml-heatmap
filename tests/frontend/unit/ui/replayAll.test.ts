@@ -758,6 +758,26 @@ describe("the replay of all flights", () => {
       expect(onMap()).toBe(false);
     });
 
+    it("stays shut while the hotspot tour holds the map", () => {
+      // A click whose bundle came after the tour's
+      app.tourView = {
+        center: { lat: 51, lng: 12 },
+        zoom: 8,
+        bearing: 0,
+        pitch: 0,
+        globeVisible: false,
+        threeDVisible: false,
+        heatmapVisible: true,
+        heightBand: "",
+      };
+
+      controls.show();
+
+      expect(controls.isOpen).toBe(false);
+      expect(app.replayActive).toBe(false);
+      expect(onMap()).toBe(false);
+    });
+
     it("opens and closes from one toggle for each app", () => {
       toggleReplayAll(asMapApp(app));
       expect(app.replayActive).toBe(true);

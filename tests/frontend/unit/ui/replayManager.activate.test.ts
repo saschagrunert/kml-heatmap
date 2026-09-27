@@ -190,6 +190,26 @@ describe("ReplayManager activation", () => {
       expect(document.body.classList.contains("replay-active")).toBe(true);
     });
 
+    it("stays shut while the hotspot tour holds the map", () => {
+      // A click whose bundle came after the tour's
+      mockApp.selectedPathIds = new Set([1]);
+      mockApp.tourView = {
+        center: { lat: 48, lng: 16 },
+        zoom: 8,
+        bearing: 0,
+        pitch: 0,
+        globeVisible: false,
+        threeDVisible: false,
+        heatmapVisible: true,
+        heightBand: "",
+      };
+
+      replayManager.toggleReplay();
+
+      expect(mockApp.replayActive).toBe(false);
+      expect(el("replay-controls").style.display).not.toBe("block");
+    });
+
     it("goes to the start of the flight, unless asked to stay", () => {
       mockApp.selectedPathIds = new Set([1]);
       const easeTo = vi.mocked(mockApp.map!.easeTo);

@@ -1,5 +1,5 @@
-/* The styles of replay, of the flight profile and of the cross-section,
-   loaded with features.bundle.js.
+/* The styles of replay, of the flight profile, of the cross-section and of
+   the hotspot tour, loaded with features.bundle.js.
 
    Not in the page up front: see the header of styles.css for why, and for
    which rule belongs where.
@@ -1098,5 +1098,128 @@ body.cross-section-open .toast-stack {
   }
   #heat-legend .heat-cloud-still {
     display: inline;
+  }
+}
+
+/* ==========================================================================
+   Hotspot tour (ui/hotspotTour.ts): the caption of the place over its
+   controls, where the replay of all flights has its row
+   ========================================================================== */
+#hotspot-tour {
+  position: fixed;
+  bottom: calc(var(--space-lg) + var(--safe-bottom));
+  left: 50%;
+  transform: translateX(-50%);
+  box-sizing: border-box;
+  width: min(360px, calc(100vw - 2 * var(--edge-gap)));
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-sm);
+  background-color: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-panel);
+  padding: var(--space-sm) var(--space-md);
+  z-index: var(--z-controls);
+  box-shadow: var(--shadow-panel);
+}
+#hotspot-tour[hidden] {
+  display: none;
+}
+#hotspot-tour-caption {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  max-width: 100%;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+#hotspot-tour-count,
+#hotspot-tour-detail {
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+}
+#hotspot-tour-name {
+  color: var(--color-text);
+  font-size: var(--text-md);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+#hotspot-tour-buttons {
+  display: flex;
+  gap: var(--space-sm);
+}
+#hotspot-tour-buttons > button {
+  font-size: var(--icon-sm);
+  padding: 0;
+  min-width: 44px;
+  line-height: 1;
+}
+#hotspot-tour-buttons > [aria-disabled="true"] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+/* The profile of a selected flight has the same place, and the tour's
+   caption is what is read there while it runs. The cloud shows every
+   height meanwhile, without the control of the band, as in Wrapped, and
+   without the readout under a pointer the camera moves under. */
+body.hotspot-tour-active #flight-profile,
+body.hotspot-tour-active #height-band,
+body.hotspot-tour-active .cloud-readout {
+  visibility: hidden;
+}
+/* The toasts stack above the panel, as above the replay's. The tour
+   measures --tour-panel-h. */
+body.hotspot-tour-active .toast-stack {
+  bottom: calc(
+    var(--space-lg) + var(--safe-bottom) + var(--tour-panel-h, 0px) +
+      var(--space-sm)
+  );
+}
+@media (min-width: 768px) {
+  body.stats-open #hotspot-tour {
+    left: calc(50% + var(--stats-rail-w) / 2);
+  }
+}
+/* On a phone the panel spans the width above the credit and the bar, which
+   waits under it, inert, until the tour ends */
+@media (max-width: 767.98px) {
+  #hotspot-tour {
+    left: calc(var(--edge-gap) + var(--safe-left));
+    right: calc(var(--edge-gap) + var(--safe-right));
+    bottom: calc(var(--attribution-h) + var(--space-sm) + var(--safe-bottom));
+    width: auto;
+    transform: none;
+  }
+  body:has(.mobile-bar) #hotspot-tour {
+    bottom: calc(
+      var(--mobile-bar-h) + var(--attribution-h) + var(--space-sm) +
+        var(--safe-bottom)
+    );
+  }
+  body.hotspot-tour-active .mobile-tab {
+    opacity: 0.5;
+  }
+  body.hotspot-tour-active .toast-stack {
+    bottom: calc(
+      var(--attribution-h) + var(--space-sm) + var(--safe-bottom) +
+        var(--tour-panel-h, 0px) + var(--space-sm)
+    );
+  }
+  body:has(.mobile-bar).hotspot-tour-active .toast-stack {
+    bottom: calc(
+      var(--mobile-bar-h) + var(--attribution-h) + var(--space-sm) +
+        var(--safe-bottom) + var(--tour-panel-h, 0px) + var(--space-sm)
+    );
+  }
+  body.hotspot-tour-active #github-footer,
+  body.hotspot-tour-active #stats-rail,
+  body.hotspot-tour-active .color-legend {
+    visibility: hidden;
+  }
+}
+@media (prefers-contrast: more) {
+  #hotspot-tour {
+    border-width: 2px;
   }
 }
