@@ -105,6 +105,8 @@ vi.mock("../../../../kml_heatmap/frontend/services/featureLoader", () => ({
       // The satellite switch hands itself over to the bundle
       followSatellite: vi.fn(),
       toggleReplayAll: m.toggleReplayAll,
+      // And a single selected flight to its profile
+      followFlightProfile: vi.fn(),
     }),
   ),
   loadWrapped: vi.fn(() =>
@@ -678,6 +680,102 @@ describe("MapApp controls and map", () => {
       app.replayActive = false;
 
       expect(replayButton().getAttribute("aria-disabled")).toBe("true");
+    });
+  });
+
+  describe("the flight profile", () => {
+    /** Select `ids` alone, and let the bundle arrive */
+    async function select(...ids: number[]): Promise<void> {
+      app.selectedPathIds.clear();
+      for (const id of ids) app.selectedPathIds.add(id);
+      app.store.notifyMutation("selectedPathIds");
+      await Promise.resolve();
+      await Promise.resolve();
+    }
+
+    /** The bundle the next load hands over */
+    async function nextBundle(): Promise<
+      NonNullable<Awaited<ReturnType<typeof loadFeatures>>>
+    > {
+      const bundle = (await loadFeatures())!;
+      vi.mocked(loadFeatures).mockClear();
+      vi.mocked(loadFeatures).mockResolvedValueOnce(bundle);
+      return bundle;
+    }
+
+    it("fetches the feature bundle as one flight is first selected", async () => {
+      await initializeApp(app);
+      const bundle = await nextBundle();
+
+      await select(1, 2);
+      expect(loadFeatures).not.toHaveBeenCalled();
+
+      await select(1);
+      await vi.waitFor(() =>
+        expect(bundle.followFlightProfile).toHaveBeenCalledWith(app),
+      );
+
+      // Once is enough: the profile follows the selection from then on
+      vi.mocked(loadFeatures).mockClear();
+      await select(2);
+      expect(loadFeatures).not.toHaveBeenCalled();
+    });
+
+    it("tries again with the next single selection after a failure", async () => {
+      await initializeApp(app);
+      const bundle = (await loadFeatures())!;
+      vi.mocked(loadFeatures).mockClear();
+      vi.mocked(loadFeatures)
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(bundle);
+
+      await select(1);
+      await vi.waitFor(() => expect(loadFeatures).toHaveBeenCalledOnce());
+      await select(2);
+
+      await vi.waitFor(() =>
+        expect(bundle.followFlightProfile).toHaveBeenCalledWith(app),
+      );
+    });
+
+    it("tries again as a replay opens after a failure", async () => {
+      await initializeApp(app);
+      const bundle = (await loadFeatures())!;
+      vi.mocked(loadFeatures).mockClear();
+      vi.mocked(loadFeatures)
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(bundle);
+
+      await select(1);
+      await vi.waitFor(() => expect(loadFeatures).toHaveBeenCalledOnce());
+      // Replay fetched the bundle for itself
+      app.replayActive = true;
+
+      await vi.waitFor(() =>
+        expect(bundle.followFlightProfile).toHaveBeenCalledWith(app),
+      );
+    });
+
+    it("asks once while the bundle is on its way", async () => {
+      await initializeApp(app);
+      let deliver: () => void = () => {};
+      const bundle = await loadFeatures();
+      vi.mocked(loadFeatures).mockClear();
+      vi.mocked(loadFeatures).mockImplementationOnce(
+        () => new Promise((resolve) => (deliver = () => resolve(bundle))),
+      );
+
+      app.selectedPathIds.add(1);
+      app.store.notifyMutation("selectedPathIds");
+      app.store.notifyMutation("selectedPathIds");
+      app.destroy();
+      deliver();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(loadFeatures).toHaveBeenCalledOnce();
+      // Torn down meanwhile: nothing is left to draw it for
+      expect(bundle!.followFlightProfile).not.toHaveBeenCalled();
     });
   });
 

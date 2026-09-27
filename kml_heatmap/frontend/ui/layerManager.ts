@@ -354,7 +354,7 @@ export class LayerManager implements PathHitTester {
   /** The map the zoom handler is registered on */
   private listeningTo: MapLibreMap | null = null;
   /** The flight under the pointer, and its values (ui/pathHover.ts) */
-  private readonly pathHover: PathHover;
+  readonly pathHover: PathHover;
   /** The relief's code has been loaded and follows terrainActive */
   private terrainLoaded = false;
   /** A cut of the flights waits for the relief's code (see syncTerrain) */

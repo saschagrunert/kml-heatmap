@@ -7,8 +7,9 @@
  * lives in shared.bundle.js, so this bundle adds only replay itself (of one
  * flight and of all of them at once), the relief, the heat cloud and the
  * ribbons of a selection of the 3D view, which the layer manager fetches as
- * they are first wanted, and the satellite imagery, which its switch
- * fetches. Wrapped has a bundle of its own (wrapped.ts).
+ * they are first wanted, the satellite imagery, which its switch fetches,
+ * and the profile of a single selected flight, which the app fetches as one
+ * is first selected. Wrapped has a bundle of its own (wrapped.ts).
  *
  * The app is imported for the bundler's sake. esbuild puts every module in
  * a chunk by the set of entry points that reach it, so with three of them a
@@ -26,6 +27,7 @@ import { followSatellite } from "./ui/satellite";
 import { followHeatCloud } from "./ui/heatCloud";
 import { followSelectionRibbons } from "./ui/selectionRibbons";
 import { ReplayAllPlayer, toggleReplayAll } from "./ui/replayAll";
+import { followFlightProfile } from "./ui/flightProfile";
 
 export interface FeatureModule {
   ReplayManager: typeof ReplayManager;
@@ -35,6 +37,7 @@ export interface FeatureModule {
   followSelectionRibbons: typeof followSelectionRibbons;
   ReplayAllPlayer: typeof ReplayAllPlayer;
   toggleReplayAll: typeof toggleReplayAll;
+  followFlightProfile: typeof followFlightProfile;
 }
 
 export {
@@ -45,4 +48,5 @@ export {
   followSelectionRibbons,
   ReplayAllPlayer,
   toggleReplayAll,
+  followFlightProfile,
 };

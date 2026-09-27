@@ -268,7 +268,12 @@ export class ReplayManager {
     return this.app.canReplay();
   }
 
-  toggleReplay(): void {
+  /**
+   * Open replay, or close it. `moveCamera` false opens it where the map
+   * is: the flight profile opens it at a moment of the flight, and seeks
+   * there right after (ui/flightProfile.ts).
+   */
+  toggleReplay(moveCamera = true): void {
     const panel = domCache.get("replay-controls");
     if (!panel) return;
 
@@ -287,7 +292,7 @@ export class ReplayManager {
     // strip showing placeholder dashes for the whole first activation
     const exit = this.ensureReplayChrome(panel);
 
-    if (!this.initializeReplay()) return;
+    if (!this.initializeReplay(moveCamera)) return;
 
     // A popup left open on the map, such as the one a tap on a path opens on
     // a phone, would otherwise stay over the replay and its controls. The
@@ -551,7 +556,7 @@ export class ReplayManager {
     this.renderer.updateAirplanePopup(this.state);
   }
 
-  initializeReplay(): boolean {
+  initializeReplay(moveCamera = true): boolean {
     if (!this.app.fullPathSegments) {
       showToast(
         "No flight data available for replay. Please wait for data to load or refresh the page.",
@@ -600,7 +605,7 @@ export class ReplayManager {
     if (!this.createReplayMarker()) return false;
 
     this.state.resetDrawState();
-    this.setInitialView();
+    if (moveCamera) this.setInitialView();
     this.updateReplayDisplay();
 
     return true;
@@ -1009,6 +1014,11 @@ export class ReplayManager {
       appendTrailSegment(this.state, i, mode === "airspeed");
     }
     this.renderer.scheduleTrailFlush(this.state);
+  }
+
+  /** Tell `listener` the replay's time on every display (see onTime) */
+  followTime(listener: ((state: ReplayState) => void) | null): void {
+    this.renderer.onTime = listener;
   }
 
   updateReplayDisplay(isManualSeek: boolean = false): void {

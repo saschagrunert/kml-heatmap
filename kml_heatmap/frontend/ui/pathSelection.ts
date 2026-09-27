@@ -17,6 +17,7 @@ const MAP_CHROME_SELECTOR = [
   "#left-buttons",
   "#right-buttons",
   "#selection-chip",
+  "#flight-profile",
   "#mobile-bar",
   ".color-legend",
 ].join(", ");

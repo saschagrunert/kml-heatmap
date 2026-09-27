@@ -289,9 +289,9 @@ function analyzeBundleComposition(metafile, fileName) {
 // 150.2 KB raw and 51.5 KB gzipped.
 const BUDGET_APP = { raw: 152 * 1024, gzip: 52.5 * 1024 };
 // The feature bundle is fetched only when replay is opened, the relief, the
-// heat cloud and the ribbons of a selection of the 3D view are first drawn
-// or the Satellite switch is first on, so it is
-// not part of what a first visit downloads; it still gets a budget so it
+// heat cloud and the ribbons of a selection of the 3D view are first drawn,
+// the Satellite switch is first on or a single flight is first selected, so
+// it is not part of what a first visit downloads; it still gets a budget so it
 // cannot grow without anyone noticing. 41.01 KB raw and 14.53 KB gzipped.
 // Raised from 43 KB for the replay camera's own rest and the relief and
 // imagery placed on the ground: 43.19 KB raw and 15.18 KB gzipped then,
@@ -312,7 +312,11 @@ const BUDGET_APP = { raw: 152 * 1024, gzip: 52.5 * 1024 };
 // with shaders of its own, the player, its panel, and the clock of every
 // flight): 75.54 KB raw and 25.97 KB gzipped in a local build, about
 // 26.07 KB in CI going by the 0.4 % above.
-const BUDGET_FEATURES = { raw: 77 * 1024, gzip: 26.75 * 1024 };
+// Raised from 77 KB and 26.75 KB for the profile of a single selected
+// flight, which the app fetches this bundle for, and its place in the
+// replay panel: 84.88 KB raw and 29.67 KB gzipped in a local build (76.77
+// KB and 26.39 KB before), about 29.8 KB in CI.
+const BUDGET_FEATURES = { raw: 87 * 1024, gzip: 30.75 * 1024 };
 
 // The Wrapped bundle is fetched only when the Wrapped dialog or the
 // statistics panel is first opened, and not with replay's code or replay

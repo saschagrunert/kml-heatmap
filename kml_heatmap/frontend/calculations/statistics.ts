@@ -343,3 +343,37 @@ export function groundLevelsFt(segments: PathSegment[]): Map<number, number> {
   }
   return levels;
 }
+
+/**
+ * Height of each segment above the ground, in feet, and whether all of it
+ * is.
+ *
+ * The ground is the terrain under the segment where the export carries it
+ * (ground_ft, kml_heatmap/terrain.py), which is what AGL means. A path the
+ * build has no terrain for stands on the lowest part of its own time
+ * instead (groundLevelsFt), which is the height above its airfield; any
+ * segment measured that way makes `fromTerrain` false, so the panel does
+ * not call a height above the field AGL. The statistics panel and the
+ * flight profile (ui/flightProfile.ts) both measure with it, and live in
+ * different lazy bundles, so it is kept here with the map's own figures.
+ */
+export function heightsAboveGround(segments: PathSegment[]): {
+  heightFt: (segment: PathSegment, altitudeFt: number) => number;
+  readonly fromTerrain: boolean;
+} {
+  let fieldLevels: Map<number, number> | null = null;
+  let fromTerrain = true;
+  return {
+    heightFt(segment, altitudeFt) {
+      if (segment.ground_ft !== undefined) {
+        return altitudeFt - segment.ground_ft;
+      }
+      fromTerrain = false;
+      fieldLevels ??= groundLevelsFt(segments);
+      return altitudeFt - (fieldLevels.get(segment.path_id) ?? 0);
+    },
+    get fromTerrain() {
+      return fromTerrain;
+    },
+  };
+}
