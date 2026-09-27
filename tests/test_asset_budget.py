@@ -49,10 +49,12 @@ from kml_heatmap.site_assets import CSS_FILES, STATIC_DIR, _copy_and_minify_css
 # panel over the map on a phone (11,596 B before, 13,608 B after), and from
 # 15.5 KB for the cross-section, its panel, chart, the ends of its line on
 # the map and its place beside the legends and the toasts (13,608 B before,
-# 17,471 B after).
+# 17,471 B after), and from 19 KB for the panel of the hotspot tour, its
+# caption, its place over the phone's bar and the toasts above it (18,582 B
+# before, 20,992 B after).
 STYLESHEET_BUDGET_BYTES = {
     "styles.css": 40 * 1024,
-    "features.css": 19 * 1024,
+    "features.css": int(21.5 * 1024),
     "wrapped.css": 33 * 1024,
 }
 

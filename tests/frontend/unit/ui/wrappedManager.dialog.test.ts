@@ -291,6 +291,25 @@ describe("WrappedManager dialog", () => {
       expect(mockApp.map!.fitBounds).not.toHaveBeenCalled();
     });
 
+    it("does not open while the hotspot tour runs", () => {
+      // A click on Wrapped whose bundle came after the tour had started
+      mockApp.tourView = {
+        center: { lat: 51, lng: 12 },
+        zoom: 8,
+        bearing: 0,
+        pitch: 0,
+        globeVisible: false,
+        threeDVisible: false,
+        heatmapVisible: true,
+        heightBand: "",
+      };
+
+      wrappedManager.showWrapped(true);
+
+      expect(el("wrapped-modal").hidden).toBe(true);
+      expect(mockApp.store.get("wrappedVisible")).toBe(false);
+    });
+
     it("refreshes the cards when data finishes loading while it is open", () => {
       const flightCount = (): string | undefined =>
         Array.from(el("wrapped-stats").querySelectorAll(".stat-card"))

@@ -297,7 +297,8 @@ function analyzeBundleComposition(metafile, fileName) {
 // 52.81 KB gzipped after, in a local build. The heat legend with its
 // scale on top of that: 154.56 KB raw and 53.28 KB gzipped. The
 // cross-section's control and its row in the phone's More sheet on top of
-// that: 155.06 KB raw and 53.4 KB gzipped.
+// that: 155.06 KB raw and 53.4 KB gzipped. The hotspot tour's on top of
+// that: 155.38 KB raw and 53.54 KB gzipped.
 const BUDGET_APP = { raw: 156 * 1024, gzip: 54 * 1024 };
 // The feature bundle is fetched only when replay is opened, the relief, the
 // heat cloud and the ribbons of a selection of the 3D view are first drawn,
@@ -366,8 +367,13 @@ const BUDGET_APP = { raw: 156 * 1024, gzip: 54 * 1024 };
 // for the cross-section (ui/crossSection.ts, calculations/crossSection.ts):
 // the line drawn on the map with its corridor, and the chart of the heat
 // along it with its panel, readout and summary. 127.38 KB raw and 46.69 KB
-// gzipped after, in a local build, about 46.88 KB in CI.
-const BUDGET_FEATURES = { raw: 127.75 * 1024, gzip: 47.25 * 1024 };
+// gzipped after, in a local build, about 46.88 KB in CI. Raised from
+// 127.75 KB and 47.25 KB for the hotspot tour (ui/hotspotTour.ts,
+// calculations/hotspots.ts: the busiest places of the heat, its panel and
+// its steps) and the camera moves it shares with Wrapped's intro, which
+// came here from the Wrapped bundle (ui/cameraScript.ts): 137.78 KB raw
+// and 50.42 KB gzipped after, in a local build, about 50.62 KB in CI.
+const BUDGET_FEATURES = { raw: 138 * 1024, gzip: 50.75 * 1024 };
 
 // The Wrapped bundle is fetched only when the Wrapped dialog or the
 // statistics panel is first opened, and not with replay's code or replay

@@ -98,6 +98,8 @@ export const toggleReplayAll = vi.fn();
 
 /** The feature bundle's toggle of the cross-section */
 export const toggleCrossSection = vi.fn();
+/** The feature bundle's toggle of the hotspot tour */
+export const toggleHotspotTour = vi.fn();
 
 export const mockUITogglesInstance = {
   toggleHeatmap: vi.fn(),

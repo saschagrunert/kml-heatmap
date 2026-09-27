@@ -889,6 +889,28 @@ describe("cross-section", () => {
       expect(root().hidden).toBe(true);
     });
 
+    it("does not open while the hotspot tour holds the map", async () => {
+      const { app } = await setup();
+      // Set by the tour, which closes the cross-section as it starts
+      app.tourView = {
+        center: { lat: LAT, lng: LON },
+        zoom: 8,
+        bearing: 0,
+        pitch: 0,
+        globeVisible: false,
+        threeDVisible: false,
+        heatmapVisible: true,
+        heightBand: "",
+      };
+
+      await open(app);
+
+      expect(crossSectionOpen(asMapApp(app))).toBe(false);
+      app.tourView = null;
+      await open(app);
+      expect(crossSectionOpen(asMapApp(app))).toBe(true);
+    });
+
     it("puts its corridor back on a new base style", async () => {
       const { app, canvas, map } = await setup();
       await open(app);

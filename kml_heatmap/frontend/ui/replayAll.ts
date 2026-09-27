@@ -523,6 +523,7 @@ const HELD_CONTROL_IDS = [
   "reset-view-btn",
   "replay-btn",
   "cross-section-btn",
+  "hotspot-tour-btn",
 ];
 
 /** The control that opens and closes the replay of all flights */
@@ -609,7 +610,17 @@ export class ReplayAllControls {
   show(): void {
     const app = this.app;
     const map = app.map;
-    if (this.open || !map || app.replayActive || app.wrappedVisible) return;
+    // Not while another has the map, the hotspot tour among them: its
+    // control is held then, and this covers a click whose bundle came late
+    if (
+      this.open ||
+      !map ||
+      app.replayActive ||
+      app.wrappedVisible ||
+      app.tourView
+    ) {
+      return;
+    }
     const panel = this.panelOf();
     const speed = Number(
       panel.querySelector<HTMLSelectElement>("select")?.value,

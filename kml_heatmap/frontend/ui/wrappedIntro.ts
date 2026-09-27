@@ -20,6 +20,8 @@
  * The flight and the turn carry REPLAY_CAMERA_MOVE, so what the app does
  * as the map comes to rest waits for the settle, which does not: the
  * ribbons of the 3D view, the relief level of the cloud, the saved view.
+ * They are the moves of ui/cameraScript.ts, which the hotspot tour makes
+ * too, from the feature bundle the intro waits for anyway.
  */
 import type {
   FitBoundsOptions,
@@ -35,7 +37,7 @@ import { loadFeatures } from "../services/featureLoader";
 import { domCache } from "../utils/domCache";
 import { logError } from "../utils/logger";
 import { segmentBounds, type Coordinate } from "../utils/geometry";
-import { REPLAY_CAMERA_MOVE, toBounds, toLngLat } from "../utils/mapHelpers";
+import { toBounds, toLngLat } from "../utils/mapHelpers";
 import { prefersReducedMotion } from "../utils/motion";
 
 /** Padding in pixels around the data when the dialog fits the map to it */
@@ -327,23 +329,15 @@ export function startWrappedIntro(
         fit({ animate: false });
       });
       const [lat, lng] = home;
-      map.jumpTo(
-        {
-          center: toLngLat([Math.max(lat - FAR.south, -60), lng - FAR.west]),
-          zoom: FAR.zoom,
-          bearing: 0,
-          pitch: 0,
-        },
-        REPLAY_CAMERA_MOVE,
-      );
+      found.jumpToStop(map, {
+        center: [Math.max(lat - FAR.south, -60), lng - FAR.west],
+        zoom: FAR.zoom,
+        bearing: 0,
+        pitch: 0,
+      });
       // The user takes over: a press, a wheel or a key on the map. The map
       // stops the camera for them, and the intro makes way.
-      for (const type of ["pointerdown", "wheel", "keydown"]) {
-        map.getContainer().addEventListener(type, skip, {
-          passive: true,
-          signal: listening.signal,
-        });
-      }
+      found.followTakeover(map, skip, listening.signal);
       return true;
     },
 
@@ -355,25 +349,10 @@ export function startWrappedIntro(
       // The flights first: their curves are cut as they start, which the
       // camera would otherwise lose its first frames to
       replay = startIntroReplay(app, features);
-      map.flyTo(
-        {
-          center: toLngLat(home),
-          zoom: HOME.zoom,
-          pitch: HOME.pitch,
-          bearing: HOME.bearing,
-          duration: INTRO_FLY_MS,
-        },
-        REPLAY_CAMERA_MOVE,
-      );
+      const { flyToStop, turnTo } = features;
+      flyToStop(map, { center: home, ...HOME }, INTRO_FLY_MS);
       after(INTRO_FLY_MS, () => {
-        map.easeTo(
-          {
-            bearing: HOME.bearing + TURN_DEG,
-            duration: INTRO_TURN_MS,
-            easing: (t) => t,
-          },
-          REPLAY_CAMERA_MOVE,
-        );
+        turnTo(map, HOME.bearing + TURN_DEG, INTRO_TURN_MS);
         // Then to rest on the overview, as the cards come in. Not tagged:
         // the app follows where the map comes to rest from here on.
         after(INTRO_TURN_MS, () => {

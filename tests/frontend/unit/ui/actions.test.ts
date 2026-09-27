@@ -23,6 +23,7 @@ const BUTTON_ACTIONS = [
   "toggleReplay",
   "toggleReplayAll",
   "toggleCrossSection",
+  "toggleHotspotTour",
   "exportMap",
   "shareLink",
   "showWrapped",
@@ -168,6 +169,12 @@ describe("bindActions", () => {
     elements["toggleCrossSection"]!.click();
 
     expect(app.toggleCrossSection).toHaveBeenCalledTimes(1);
+  });
+
+  it("binds the hotspot tour, which the app fetches with the feature bundle", () => {
+    elements["toggleHotspotTour"]!.click();
+
+    expect(app.toggleHotspotTour).toHaveBeenCalledTimes(1);
   });
 
   it("binds the filters to the change event", () => {

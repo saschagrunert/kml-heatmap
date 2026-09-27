@@ -17,8 +17,8 @@
  * the selected ones among them, so a click on a flight shows that flight
  * alone. The panel is the one at the bottom of the map that the altitude
  * profile of a selected flight uses: the profile steps aside while this is
- * open (crossSectionOpen), and neither replay nor Wrapped runs with it, as
- * both take the map over: they close it.
+ * open (crossSectionOpen), and neither replay, Wrapped nor the hotspot
+ * tour runs with it, as they take the map over: they close it.
  *
  * It comes with the feature bundle, which the Cross-section control
  * fetches the first time it is used (MapApp.toggleCrossSection). A closure
@@ -1077,7 +1077,11 @@ function createTool(app: MapApp): Tool {
   };
 
   const show = (): void => {
-    if (app.replayActive || app.wrappedVisible || !map()) return;
+    // Nor while the hotspot tour holds the map, which closes it as it
+    // starts; its control is held then, and this covers a late bundle
+    if (app.replayActive || app.wrappedVisible || app.tourView || !map()) {
+      return;
+    }
     const target = map()!;
     const mapElement = document.getElementById("map");
     // Ahead of the map, like the controls: after it, it was past every

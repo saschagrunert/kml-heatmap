@@ -85,6 +85,8 @@ function createMockApp() {
       replayManager.toggleReplay();
     }),
     loadWrapped: vi.fn(() => Promise.resolve(wrappedManager)),
+    // The hotspot tour, which the app fetches with the feature bundle
+    toggleHotspotTour: vi.fn(),
     resetView: vi.fn(() => Promise.resolve()),
     // Something to reset unless a test says otherwise
     isReset: vi.fn(() => false),
@@ -443,6 +445,7 @@ describe("MobileBar", () => {
       expect(sheetRows()).toEqual([
         "replay",
         "replay-all",
+        "hotspot-tour",
         "cross-section",
         "isolate",
         "reset-view",
@@ -665,6 +668,12 @@ describe("MobileBar", () => {
       await vi.waitFor(() =>
         expect(app.replayManager.toggleReplay).toHaveBeenCalledTimes(1),
       );
+    });
+
+    it("starts the hotspot tour from the sheet, next to Replay all", () => {
+      document.querySelector<HTMLElement>('[data-row="hotspot-tour"]')!.click();
+
+      expect(app.toggleHotspotTour).toHaveBeenCalledTimes(1);
     });
 
     it("keeps isolate unavailable without a selection, as on the desktop", () => {

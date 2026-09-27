@@ -14,6 +14,7 @@ import {
   INTRO_WAIT_MS,
   prepareWrappedIntro,
 } from "../../../../kml_heatmap/frontend/ui/wrappedIntro";
+import * as cameraScript from "../../../../kml_heatmap/frontend/ui/cameraScript";
 import { REPLAY_CAMERA_MOVE } from "../../../../kml_heatmap/frontend/utils/mapHelpers";
 import * as motion from "../../../../kml_heatmap/frontend/utils/motion";
 import { asMapApp, type MockApp } from "../../testHelpers";
@@ -61,6 +62,9 @@ vi.mock(
     loadFeatures: loader.loadFeatures,
   }),
 );
+
+// The camera moves the intro finds in the bundle are the real ones
+Object.assign(features, cameraScript);
 
 /** The dialog moves the map in and measures it this long after opening */
 const MAP_IN_DIALOG_MS = 150;

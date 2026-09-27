@@ -9,6 +9,7 @@ import {
   CROSS_SECTION_UNAVAILABLE_MESSAGE,
   REPLAY_UNAVAILABLE_MESSAGE,
   STATS_UNAVAILABLE_MESSAGE,
+  TOUR_UNAVAILABLE_MESSAGE,
   WRAPPED_UNAVAILABLE_MESSAGE,
   MapApp,
 } from "../../../../kml_heatmap/frontend/mapApp";
@@ -107,6 +108,7 @@ vi.mock("../../../../kml_heatmap/frontend/services/featureLoader", () => ({
       followSatellite: vi.fn(),
       toggleReplayAll: m.toggleReplayAll,
       toggleCrossSection: m.toggleCrossSection,
+      toggleHotspotTour: m.toggleHotspotTour,
       // And a single selected flight to its profile
       followFlightProfile: vi.fn(),
     }),
@@ -979,6 +981,67 @@ describe("MapApp controls and map", () => {
           REPLAY_UNAVAILABLE_MESSAGE,
           "error",
         ),
+      );
+    });
+
+    it("starts the hotspot tour once for quick clicks, apart from Replay all", async () => {
+      await initializeApp(app);
+      let deliver: () => void = () => {};
+      const bundle = await loadFeatures();
+      vi.mocked(loadFeatures).mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            deliver = () => resolve(bundle);
+          }),
+      );
+      m.toggleHotspotTour.mockClear();
+      m.toggleReplayAll.mockClear();
+
+      app.toggleHotspotTour();
+      app.toggleHotspotTour();
+      deliver();
+
+      await vi.waitFor(() =>
+        expect(m.toggleHotspotTour).toHaveBeenCalledWith(app),
+      );
+      await Promise.resolve();
+      expect(m.toggleHotspotTour).toHaveBeenCalledTimes(1);
+      expect(m.toggleReplayAll).not.toHaveBeenCalled();
+
+      // Waits for nothing once the bundle is in
+      app.toggleHotspotTour();
+      await vi.waitFor(() =>
+        expect(m.toggleHotspotTour).toHaveBeenCalledTimes(2),
+      );
+    });
+
+    it("says so when the hotspot tour cannot fetch the bundle", async () => {
+      await initializeApp(app);
+      vi.mocked(loadFeatures).mockResolvedValueOnce(null);
+
+      app.toggleHotspotTour();
+
+      await vi.waitFor(() =>
+        expect(showToast).toHaveBeenCalledWith(
+          TOUR_UNAVAILABLE_MESSAGE,
+          "error",
+        ),
+      );
+    });
+
+    it("logs a hotspot tour that fails to start, and takes the next click", async () => {
+      await initializeApp(app);
+      m.toggleHotspotTour.mockClear();
+      m.toggleHotspotTour.mockImplementationOnce(() => {
+        throw new Error("no map");
+      });
+
+      app.toggleHotspotTour();
+      await vi.waitFor(() => expect(logError).toHaveBeenCalled());
+
+      app.toggleHotspotTour();
+      await vi.waitFor(() =>
+        expect(m.toggleHotspotTour).toHaveBeenCalledTimes(2),
       );
     });
   });

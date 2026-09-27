@@ -483,6 +483,37 @@ describe("StateManager", () => {
       expect(new URLSearchParams(url).get("h")).toBe("500-3000");
     });
 
+    it("saves the view and the switches the hotspot tour started from while it runs", () => {
+      // The tour turns the 3D view and the heatmap on, shows every height
+      // and flies the map from place to place; a reload or a link keeps
+      // the user's
+      mockApp.store.set("threeDVisible", true);
+      mockApp.store.set("heatmapVisible", true);
+      mockApp.store.set("heightBand", "");
+      mockApp.tourView = {
+        center: { lat: 51.2, lng: 12.4 },
+        zoom: 9,
+        bearing: 10,
+        pitch: 0,
+        globeVisible: false,
+        threeDVisible: false,
+        heatmapVisible: false,
+        heightBand: "500-3000",
+      };
+
+      stateManager.saveMapState();
+
+      expect(savedState()).toMatchObject({
+        center: { lat: 51.2, lng: 12.4 },
+        zoom: 10,
+        bearing: 10,
+        threeDVisible: false,
+        heatmapVisible: false,
+        heightBand: "500-3000",
+      });
+      expect(mockApp.map!.getCenter).not.toHaveBeenCalled();
+    });
+
     it("saves the user's own view while the replay's chase view flies the map", () => {
       // A camera half way along a flight, tilted and turned with it, is no
       // view to come back to
