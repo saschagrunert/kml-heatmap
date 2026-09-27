@@ -523,6 +523,17 @@ export function closeWhenBehindGlobe(map: MapLibreMap, popup: Popup): void {
  */
 export const MAP_STILL_TIMEOUT_MS = 3000;
 
+/** The maps `withMapStill` is capturing */
+const stillMaps = new WeakSet<MapLibreMap>();
+
+/**
+ * Whether `withMapStill` is capturing the map: what moves on it by itself,
+ * the pulses of the heat cloud, holds still for the frame it takes
+ */
+export function isMapStill(map: MapLibreMap): boolean {
+  return stillMaps.has(map);
+}
+
 /**
  * The frame the map draws next, as a PNG data URL. Rejects when no frame
  * comes in time or the canvas cannot be read: a promise that never settled
@@ -600,6 +611,7 @@ export async function withMapStill<T>(
   const raised =
     pixelRatio !== undefined && pixelRatio > screenRatio && !clamped;
   let still: HTMLImageElement | null = null;
+  stillMaps.add(map);
   try {
     if (raised) map.setPixelRatio(pixelRatio);
     const dataUrl = await nextFrameAsDataUrl(map);
@@ -637,6 +649,7 @@ export async function withMapStill<T>(
       still?.replaceWith(canvas);
       // A 2x frame of a large monitor is tens of megabytes once decoded
       still?.removeAttribute("src");
+      stillMaps.delete(map);
     }
   }
 }

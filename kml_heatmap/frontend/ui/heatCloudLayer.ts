@@ -27,9 +27,10 @@
  * against the relief in the depth buffer, so a mountain in front of a
  * flight hides its glow, but without writing to it, so the glow of one
  * flight does not hide another's, and the ribbons are drawn over it.
- * Each glow is pulled towards the camera by its reach for that test, so a
- * fix on the ground glows round rather than cut in half by the ground in
- * front of it. MapLibre's own projection code (the prelude it hands a
+ * Each glow is pulled towards the camera by its reach for that test, and
+ * near the ground as far as the ground in front of it rises, so a fix on
+ * the ground glows round rather than cut in half by the ground in front of
+ * it. MapLibre's own projection code (the prelude it hands a
  * custom layer) projects the points, which makes the same shaders work on
  * the globe; the points are given from an origin near them, so a 32-bit
  * float keeps them to a fraction of a pixel close in.
@@ -39,13 +40,13 @@
  * along every track the way it was flown, by the time of its points,
  * which shows the direction of a circuit and the usual ways in and out;
  * they rest while the map is not used and under reduced motion, and the
- * map draws no frame for them then. And the exposure follows the heat:
- * the busiest cells of the cloud glow no brighter than white, however
- * many flights the filters keep (see cloudExposure). A band of heights
- * above ground can leave out the heat below and above it, in the glow and
- * its shadow alike, fading out at its edges (calculations/heightBand.ts);
- * the exposure stays that of all of it, so a band draws its heat as bright
- * as the whole cloud does.
+ * map draws no frame for them then, and an exported image has none. And
+ * the exposure follows the heat: the busiest cells of the cloud glow no
+ * brighter than white, however many flights the filters keep (see
+ * cloudExposure). A band of heights above ground can leave out the heat
+ * below and above it, in the glow and its shadow alike, fading out at its
+ * edges (calculations/heightBand.ts); the exposure stays that of all of it,
+ * so a band draws its heat as bright as the whole cloud does.
  */
 import type {
   CustomLayerInterface,
@@ -58,6 +59,7 @@ import {
   type CloudPoints,
 } from "../calculations/heatCloud";
 import { LayerGl, MAPLIBRE_EARTH_RADIUS_M, setProjection } from "./glLayer";
+import { isMapStill } from "../utils/mapHelpers";
 import { prefersReducedMotion } from "../utils/motion";
 
 /** The id of the cloud's layer on the map */
@@ -100,21 +102,33 @@ export function cloudLook(zoom: number): { sigmaPx: number; gain: number } {
 }
 
 /**
- * The narrowest and the widest the blur gets in a tilted view, as parts of
- * the one at the middle: behind a pixel the far flights would flicker, and
- * close to the camera a glow would fill the screen
+ * The narrowest the blur gets in a tilted view, in device pixels, and the
+ * widest, as a part of the one at the middle: close to the camera a glow
+ * would fill the screen. A far flight narrower than a pixel was drawn as a
+ * crisp line that flickered: it is drawn this wide, and as much fainter,
+ * so it fades into the distance.
  */
-const CLOUD_SIGMA_RANGE = [0.15, 3] as const;
+const CLOUD_SIGMA_FLOOR_PX = 0.8;
+const CLOUD_SIGMA_MOST = 3;
 
-/** How many blurs a quad reaches around its stretch */
+/**
+ * How many blurs a quad reaches around its stretch, and pulls its glow
+ * towards the camera for the depth test: as far as it reaches, so the
+ * relief hides the glow of a flight only where it is in front of all of it
+ */
 const CLOUD_REACH = 3;
 
 /**
- * How many blurs a glow is pulled towards the camera for the depth test:
- * as far as it reaches, so the relief hides the glow of a flight only
- * where it is in front of all of it
+ * Near the ground a glow is pulled further, to where the ground in front
+ * of each corner of its quad lies, as the ground there rises into the
+ * view the steeper, the flatter the view: it cut the glow of a runway in a
+ * straight line. The ground is taken this many feet higher than the
+ * cloud's, where the relief MapLibre draws can lie, and the pull is held
+ * to this many blurs, so a ridge in front of a flight low over a valley
+ * still hides it.
  */
-const CLOUD_DEPTH_PULL = CLOUD_REACH;
+const CLOUD_GROUND_SLACK_FT = 30;
+const CLOUD_GROUND_PULL = 12;
 
 /**
  * The groundspeed of a cruise, in metres per second (100 kt). The heat of
@@ -155,30 +169,69 @@ const CLOUD_EXPOSURE_RANGE = [0.25, 1] as const;
  * The shadow of the cloud: how fast each colour channel fills with heat (see
  * CLOUD_COLOUR), a muted grey blue, and the most it fills, so that under a
  * busy field it stays a haze rather than a second white blot under the
- * glow's
+ * glow's. The shadows are not added up but the brightest is kept, which
+ * the ceiling holds: added up, those of every circuit over a field filled
+ * to white. The brightest is kept against what the pixel already has, the
+ * map, so over ground brighter than the shadow (roads, satellite imagery)
+ * none shows: keeping it against the other shadows alone needs a texture
+ * of its own (see DEVELOPMENT.md). A stretch casts none on the ground it is on (the taxiing, the
+ * run for a take-off), and a full one from the second of these heights
+ * above it, in feet. It is a Gaussian of the distance to the stretch,
+ * which the brightest of them keeps as whole as the joins of the glow do,
+ * cut at this many blurs, at half the cost of the glow. None is drawn
+ * while the cloud is dimmed (see HeatCloudStyle.opacity), where it cost
+ * as much as the glow for a haze no one could see.
  */
-const CLOUD_SHADOW_COLOUR = [0.1, 0.12, 0.16] as const;
+const CLOUD_SHADOW_COLOUR = [0.22, 0.26, 0.35] as const;
 const CLOUD_SHADOW_CEILING = 0.18;
+const CLOUD_SHADOW_LIFT_FT = [30, 100] as const;
+const CLOUD_SHADOW_REACH = 2;
+
+/** The Gaussian of the shadow at its reach, taken off so it ends at 0 */
+const SHADOW_EDGE = Math.exp(-0.5 * CLOUD_SHADOW_REACH ** 2);
 
 /**
  * The pulses of the flow: how many CSS pixels a cruise flies between two
  * (see CLOUD_REFERENCE_SPEED_MS), in how many seconds one moves on to the
- * next, and how strongly they bring out and take back the glow
+ * next, and how strongly they bring out and take back the glow. Along a
+ * stretch where they would come closer than the first of these many blurs
+ * on the screen, the taxiing close in and every track near the horizon,
+ * they ran together into a comb: they fade out there from the second.
  */
 const CLOUD_FLOW_SPACING_PX = 90;
 const CLOUD_FLOW_CYCLE_S = 2.5;
 const CLOUD_FLOW_STRENGTH = 0.6;
+const CLOUD_FLOW_CLOSEST = [4, 8] as const;
+
+/**
+ * The factor of a pulse at the part `phase` of its period (see
+ * FRAGMENT_SHADER, which has the same): a raised cosine, skewed forward by
+ * the square of the phase, so it rises along where it has been to its head
+ * at 0.71 of the period and falls, a little quicker but as smoothly, ahead
+ * of it. It and its slope are 0 at either end of the period, so the pulses
+ * pass without a jump, where a fall to 0 in the last 15 % of it snapped.
+ * CLOUD_PULSE_SCALE makes it 1 on average, 1 / (1 - C(2) / 2) with the
+ * Fresnel integral C, so the heat as a whole shows as bright as without.
+ */
+const CLOUD_PULSE_SCALE = 1.3229730485502598;
+export function cloudPulse(phase: number): number {
+  return (1 - Math.cos(2 * Math.PI * phase * phase)) * CLOUD_PULSE_SCALE;
+}
 
 /**
  * How long after the map was last used the pulses keep running, and in
  * how many seconds they fade in and out (and the exposure follows a new
  * level's)
  */
-const CLOUD_FLOW_IDLE_MS = 20000;
+const CLOUD_FLOW_IDLE_MS = 8000;
 const CLOUD_FADE_S = 0.8;
 
-/** What the map does when it is used: each wakes the flow */
-const CLOUD_FLOW_WAKE = ["mousemove", "touchstart", "move"] as const;
+/**
+ * What the map does when it is used, a move of its camera or a touch: each
+ * wakes the flow. The pointer moving over it is not: it kept the map
+ * drawing every frame for as long as it rested on it.
+ */
+const CLOUD_FLOW_WAKE = ["touchstart", "move"] as const;
 
 /**
  * How brightly the cloud is drawn for its busiest heat per metre
@@ -205,7 +258,10 @@ export interface HeatCloudStyle {
    */
   groundM: number;
   liftM: number;
-  /** How strongly the cloud is drawn, from 0 to 1 (see dimsHeatCloud) */
+  /**
+   * How strongly the cloud is drawn, from 0 to 1 (see dimsHeatCloud): the
+   * most of white it fills a pixel to; below 1 without its shadow
+   */
   opacity: number;
   /** Whether its pulses may run (see CLOUD_FLOW_SPACING_PX) */
   flow: boolean;
@@ -231,9 +287,18 @@ export interface HeatCloudStyle {
  *   a short stretch is a soft point anyway.
  * - The quad reaches past each end by the reach of the glow, and as far
  *   again as the bisector slants away from the end at that distance
- *   across.
- * - It is pulled towards the camera by CLOUD_DEPTH_PULL blurs, where it is
- *   still on the same pixels, with the depth the projection gives there.
+ *   across; the shadow's only by its reach (CLOUD_SHADOW_REACH).
+ * - It is pulled towards the camera by its reach, where it is still on the
+ *   same pixels, with the depth the projection gives there; and a corner
+ *   the ground in front of it is nearer than that to where the ground is
+ *   (CLOUD_GROUND_PULL): the plane of the ground under its end, through
+ *   three points of it projected, meets the ray through the corner there.
+ *   Never nearer than halfway to the camera, nor than its near plane.
+ * - The shadow of a stretch shorter than its blur is as bright as the
+ *   glow's erf makes it in its middle: a soft point, where the brightest
+ *   of them is kept.
+ * - Its pulses come as far apart on the screen as its length over the
+ *   periods of the flight's time along it (CLOUD_FLOW_CLOSEST).
  * - A stretch whose two ends are below the band of heights, or both above
  *   it, is left out whole: none of it is in the band.
  */
@@ -253,12 +318,17 @@ uniform vec3 u_sigma;
 uniform vec4 u_depth;
 uniform float u_gain;
 uniform vec4 u_band;
+uniform vec2 u_ground;
+uniform vec2 u_shadow;
+uniform vec4 u_flow;
+uniform vec2 u_flowMix;
 flat out vec4 v_ends;
 flat out vec4 v_joins;
 flat out vec4 v_blur;
 flat out float v_heat;
 flat out vec2 v_time;
 flat out vec2 v_height;
+flat out float v_flow;
 
 vec4 project(vec4 point) {
   return projectTileFor3D(point.xy, point.z * u_heights.x + point.w * u_heights.y);
@@ -273,12 +343,24 @@ vec2 unit(vec2 v, vec2 otherwise) {
   return l > 1e-3 ? v / l : otherwise;
 }
 
+float meet(vec4 o, vec4 e, vec4 n, vec2 at) {
+  vec2 q = at / u_viewport * 2.0 - 1.0;
+  vec2 r = q * o.w - o.xy;
+  vec2 ce = e.xy - q * e.w;
+  vec2 cn = n.xy - q * n.w;
+  float det = ce.x * cn.y - ce.y * cn.x;
+  if (abs(det) <= 1e-6 * length(ce) * length(cn)) return 0.0;
+  return o.w + (e.w * (r.x * cn.y - r.y * cn.x) + n.w * (ce.x * r.y - ce.y * r.x)) / det;
+}
+
 void main() {
+  bool shadow = u_shadow.y > 0.0;
+  float shade = shadow ? smoothstep(u_shadow.x, u_shadow.y, max(a_start.w, a_end.w)) : 1.0;
   vec4 a = project(a_start);
   vec4 b = project(a_end);
   float near = u_depth.z;
   if (
-    a_heat.x <= 0.0 || (a.w < near && b.w < near)
+    a_heat.x <= 0.0 || shade <= 0.0 || (a.w < near && b.w < near)
     || max(a_start.w, a_end.w) <= u_band.x || min(a_start.w, a_end.w) >= u_band.w
   ) {
     gl_Position = vec4(0.0, 0.0, 2.0, 1.0);
@@ -288,7 +370,8 @@ void main() {
   if (b.w < near) b = mix(b, a, (near - b.w) / (a.w - b.w));
   float middle = projectTileFor3D(u_centre.xy, u_centre.z).w;
   vec2 scales = vec2(middle / a.w, middle / b.w);
-  vec2 sigmas = clamp(u_sigma.x * scales, u_sigma.y, u_sigma.z);
+  vec2 blurs = u_sigma.x * scales;
+  vec2 sigmas = clamp(blurs, u_sigma.y, u_sigma.z);
   vec2 pa = onScreen(a);
   vec2 pb = onScreen(b);
   float length_px = distance(pa, pb);
@@ -310,11 +393,27 @@ void main() {
   float sigma = atEnd ? sigmas.y : sigmas.x;
   float w = atEnd ? b.w : a.w;
   float slant = clamp(dot(atEnd ? joinB : joinA, dir), 0.5, 1.0);
-  float reach = ${CLOUD_REACH.toFixed(1)} * sigma;
+  float reach = (shadow ? ${CLOUD_SHADOW_REACH.toFixed(1)} : ${CLOUD_REACH.toFixed(1)}) * sigma;
   vec2 corner = (atEnd ? pb : pa)
-    + dir * a_corner.x * reach * (1.0 + sqrt(max(1.0 - slant * slant, 0.0)) / slant)
+    + dir * a_corner.x * reach * (shadow ? 1.0 : 1.0 + sqrt(max(1.0 - slant * slant, 0.0)) / slant)
     + vec2(-dir.y, dir.x) * a_corner.y * reach;
-  float pulled = max(w - ${CLOUD_DEPTH_PULL.toFixed(1)} * sigma * w / u_depth.w, 0.5 * w);
+  float pull = reach * w / u_depth.w;
+  float pulled = w - pull;
+  vec4 point = atEnd ? a_end : a_start;
+  float h = point.z * u_heights.x + u_ground.y;
+  vec4 o = projectTileFor3D(point.xy, h);
+  vec4 e = projectTileFor3D(point.xy + vec2(u_ground.x, 0.0), h) - o;
+  vec4 n = projectTileFor3D(point.xy + vec2(0.0, u_ground.x), h) - o;
+  float behind = meet(o, e, n, atEnd ? pb : pa);
+  float under = meet(o, e, n, corner);
+  if (behind > 0.0 && behind < w + pull && under > 0.0 && under < pulled) {
+    pulled = mix(
+      max(under, w - ${CLOUD_GROUND_PULL.toFixed(1)} * sigma * w / u_depth.w),
+      pulled,
+      max(behind - w, 0.0) / pull
+    );
+  }
+  pulled = max(pulled, max(0.5 * w, near * 1.01));
   gl_Position = vec4(
     (corner / u_viewport * 2.0 - 1.0) * pulled,
     u_depth.y - u_depth.x * pulled,
@@ -322,22 +421,34 @@ void main() {
   );
   v_ends = vec4(pa, pb);
   v_joins = vec4(joinA, joinB);
-  v_blur = vec4(sigmas, scales);
-  v_heat = u_gain * a_heat.x / max(length_px, 1e-3);
+  v_blur = vec4(sigmas, scales * min(blurs / sigmas, 1.0));
+  if (shadow) {
+    float f = length_px / (1.4142136 * (sigmas.x + sigmas.y));
+    shade *= sqrt(1.0 - exp(-1.2732395 * f * f));
+  }
+  v_heat = shade * u_gain * a_heat.x / max(length_px, 1e-3);
   v_time = vec2(a_heat.y, a_out.y);
   v_height = vec2(a_start.w, a_end.w);
+  float periods = abs(a_out.y - a_heat.y) * u_flow.x / (1.0 + u_flowMix.x);
+  v_flow = shadow ? 0.0 : smoothstep(
+    ${CLOUD_FLOW_CLOSEST[0].toFixed(1)},
+    ${CLOUD_FLOW_CLOSEST[1].toFixed(1)},
+    length_px / max(periods, 1e-6) / (0.5 * (sigmas.x + sigmas.y))
+  );
 }
 `;
 
 /**
  * The glow of a pixel of a stretch: the Gaussian across the stretch,
  * integrated along it from the join with the one before to the join with
- * the one after. With the flow, times its pulses at the time the pixel
- * was flown at, in two periods, one twice the other, blended as the zoom
- * goes from one to the next; a pulse is brightest at its head and fades
- * along where it has been, and is 1 on average. Times the part of the band
- * of heights at the height it was flown at, which fades in and out at the
- * band's edges.
+ * the one after; of the shadow, the Gaussian of its distance to the
+ * stretch, down to 0 at its reach. With the flow, times its pulses at the
+ * time the pixel was flown at, in two periods, one twice the other,
+ * blended as the zoom goes from one to the next; a pulse is brightest at
+ * its head and fades along where it has been, and is 1 on average.
+ * Times the part of the band of heights at the height it was flown at,
+ * which fades in and out at the band's edges, in the shadow as in the
+ * glow.
  */
 const FRAGMENT_SHADER = `#version 300 es
 precision highp float;
@@ -347,15 +458,17 @@ flat in vec4 v_blur;
 flat in float v_heat;
 flat in vec2 v_time;
 flat in vec2 v_height;
-uniform vec4 u_colour;
+flat in float v_flow;
+uniform vec3 u_colour;
 uniform float u_ceiling;
+uniform vec2 u_shadow;
 uniform vec4 u_flow;
 uniform vec2 u_flowMix;
 uniform vec4 u_band;
 out vec4 fragColor;
 
 float pulse(float phase) {
-  return phase * phase * (1.0 - smoothstep(0.85, 1.0, phase)) * 3.776;
+  return (1.0 - cos(6.2831853 * phase * phase)) * ${CLOUD_PULSE_SCALE.toFixed(7)};
 }
 
 // Abramowitz and Stegun 7.1.26, to 1.5e-7
@@ -376,21 +489,28 @@ void main() {
   float t = length_px > 1e-3 ? clamp(dot(p - a, dir) / length_px, 0.0, 1.0) : 0.5;
   float sigma = mix(v_blur.x, v_blur.y, t);
   float scale = mix(v_blur.z, v_blur.w, t);
-  float spread = 0.70710678 / sigma;
-  float glow = v_heat * scale * exp(-0.5 * across * across / (sigma * sigma))
-    * 0.5 * (erf(dot(p - a, v_joins.xy) * spread) + erf(dot(b - p, v_joins.zw) * spread));
+  float glow;
+  if (u_shadow.y > 0.0) {
+    float off = distance(p, a + dir * clamp(dot(p - a, dir), 0.0, length_px)) / sigma;
+    glow = v_heat * scale * max(exp(-0.5 * off * off) - ${SHADOW_EDGE.toFixed(6)}, 0.0)
+      / ${(1 - SHADOW_EDGE).toFixed(6)};
+  } else {
+    float spread = 0.70710678 / sigma;
+    glow = v_heat * scale * exp(-0.5 * across * across / (sigma * sigma))
+      * 0.5 * (erf(dot(p - a, v_joins.xy) * spread) + erf(dot(b - p, v_joins.zw) * spread));
+  }
   float height = mix(v_height.x, v_height.y, t);
   glow *= smoothstep(u_band.x, u_band.y, height) * (1.0 - smoothstep(u_band.z, u_band.w, height));
-  if (u_flowMix.y > 0.0) {
+  if (u_flowMix.y * v_flow > 0.0) {
     float time = mix(v_time.x, v_time.y, t);
     float pulses = mix(
       pulse(fract(time * u_flow.x - u_flow.z)),
       pulse(fract(time * u_flow.y - u_flow.w)),
       u_flowMix.x
     );
-    glow *= 1.0 + u_flowMix.y * (pulses - 1.0);
+    glow *= 1.0 + u_flowMix.y * v_flow * (pulses - 1.0);
   }
-  vec3 filled = u_ceiling * (1.0 - exp(-glow * u_colour.a * u_colour.rgb / u_ceiling));
+  vec3 filled = u_ceiling * (1.0 - exp(-glow * u_colour / u_ceiling));
   if (filled.b < 0.002) discard;
   fragColor = vec4(filled, max(filled.r, max(filled.g, filled.b)));
 }
@@ -416,6 +536,8 @@ const UNIFORMS = [
   "u_sigma",
   "u_depth",
   "u_gain",
+  "u_ground",
+  "u_shadow",
   "u_colour",
   "u_ceiling",
   "u_flow",
@@ -517,6 +639,8 @@ export class HeatCloudLayer implements CustomLayerInterface {
    * and so once reduced motion is turned off
    */
   private readonly wake = (): void => {
+    // Not by the resizes of an export (see withMapStill)
+    if (this.map && isMapStill(this.map)) return;
     this.usedAt = performance.now();
     if (!this.resting || prefersReducedMotion()) return;
     this.resting = false;
@@ -568,8 +692,8 @@ export class HeatCloudLayer implements CustomLayerInterface {
     gl.uniform3f(
       u.u_sigma,
       sigma,
-      sigma * CLOUD_SIGMA_RANGE[0],
-      sigma * CLOUD_SIGMA_RANGE[1],
+      CLOUD_SIGMA_FLOOR_PX,
+      sigma * CLOUD_SIGMA_MOST,
     );
     // What the projection makes of a distance from the camera (w) for the
     // depth, the nearest a point may be, and the focal length in pixels
@@ -589,8 +713,20 @@ export class HeatCloudLayer implements CustomLayerInterface {
         MAPLIBRE_EARTH_RADIUS_M *
         Math.cos((center.lat * Math.PI) / 180)) /
       (512 * 2 ** zoom);
+    // The ground under a glow, for its pull: the plane through its point
+    // and two a hundred pixels of the middle away, where the relief may be
+    gl.uniform2f(
+      u.u_ground,
+      100 / (512 * 2 ** zoom),
+      CLOUD_GROUND_SLACK_FT * style.groundM,
+    );
 
-    // The pulses and the exposure, eased from the last frame's
+    // The pulses and the exposure, eased from the last frame's. A frame
+    // that took longer than 100 ms (a first one after a rest, or a busy
+    // main thread) moves them on by that much: they slow for it rather
+    // than jump. The period changing by the zoom needs nothing here: the
+    // longer period of one octave is the shorter of the next, at the same
+    // phase, and the blend between them is all on it where they meet.
     const now = performance.now();
     const seconds = Math.min(Math.max(now - this.drawnAt, 0), 100) / 1000;
     this.drawnAt = now;
@@ -627,8 +763,17 @@ export class HeatCloudLayer implements CustomLayerInterface {
     );
     gl.bindVertexArray(ready.vao);
     gl.enable(gl.BLEND);
+    // The screen of the glows, towards white at full strength, and towards
+    // as much of white as the cloud is drawn with when it is dimmed: every
+    // glow on a pixel moves it that way, so however many there are it gets
+    // no brighter than that, where a quarter of their heat, which it scaled
+    // before, still filled the home field to white. The map under the
+    // brightest of it goes the same way (see DEVELOPMENT.md). The shadow's
+    // MAX takes no factors, and it is not drawn dimmed.
+    const opacity = style.opacity;
+    gl.blendColor(opacity, opacity, opacity, opacity);
     gl.blendFuncSeparate(
-      gl.ONE,
+      gl.CONSTANT_COLOR,
       gl.ONE_MINUS_SRC_COLOR,
       gl.ONE,
       gl.ONE_MINUS_SRC_ALPHA,
@@ -637,27 +782,41 @@ export class HeatCloudLayer implements CustomLayerInterface {
     gl.depthMask(false);
     gl.disable(gl.CULL_FACE);
     gl.disable(gl.STENCIL_TEST);
-    // The shadow on the ground, where the flights are lifted off it, then
-    // the glow at their heights
+    // The shadow on the ground, where the flights are lifted off it and the
+    // cloud is not dimmed, the brightest of them kept; then the glow at
+    // their heights, added up, and without its pulses while the map is
+    // exported
+    const flow = isMapStill(map) ? 0 : this.flow * CLOUD_FLOW_STRENGTH;
     const passes = [
-      [0, CLOUD_SHADOW_COLOUR, CLOUD_SHADOW_CEILING, 0],
-      [style.liftM, CLOUD_COLOUR, 1, this.flow * CLOUD_FLOW_STRENGTH],
+      [
+        0,
+        CLOUD_SHADOW_COLOUR,
+        CLOUD_SHADOW_CEILING,
+        0,
+        gl.MAX,
+        CLOUD_SHADOW_LIFT_FT,
+      ],
+      [style.liftM, CLOUD_COLOUR, 1, flow, gl.FUNC_ADD, [0, 0]],
     ] as const;
-    for (const [liftM, colour, ceiling, flow] of passes.slice(
-      style.liftM > 0 ? 0 : 1,
+    const shadow = style.liftM > 0 && style.opacity >= 1;
+    for (const [liftM, colour, ceiling, pulses, blend, cast] of passes.slice(
+      shadow ? 0 : 1,
     )) {
+      gl.blendEquation(blend);
       gl.uniform2f(u.u_heights, style.groundM, liftM);
-      gl.uniform4f(u.u_colour, colour[0], colour[1], colour[2], style.opacity);
+      gl.uniform2f(u.u_shadow, cast[0], cast[1]);
+      gl.uniform3f(u.u_colour, colour[0], colour[1], colour[2]);
       gl.uniform1f(u.u_ceiling, ceiling);
-      gl.uniform2f(u.u_flowMix, octave - Math.floor(octave), flow);
+      gl.uniform2f(u.u_flowMix, octave - Math.floor(octave), pulses);
       gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, cloud.count - 1);
     }
     gl.bindVertexArray(null);
     gl.depthMask(true);
     this.frames++;
     this.drawn = cloud.count - 1;
-    // Another frame while the pulses run or fade, or the exposure moves;
-    // none at all once they rest, for the map or for reduced motion
+    // The next frame while the pulses run or fade, or the exposure moves,
+    // every one the screen shows so they move smoothly; none at all once
+    // they rest, for the map or for reduced motion
     this.resting = style.flow && !awake && !this.flow;
     if (
       awake ||
