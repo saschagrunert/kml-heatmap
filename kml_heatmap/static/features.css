@@ -673,6 +673,135 @@ body.profile-open .toast-stack {
 }
 
 /* ==========================================================================
+   Height band of the heat cloud (ui/heightBand.ts)
+
+   A row of the Map group under the 3D switch; in the phone layout, where
+   the columns are hidden, a control group of its own over the top of the
+   map, beside the compass. Two range inputs lie over one track, and only
+   their thumbs take the pointer, so each thumb is dragged on its own.
+   ========================================================================== */
+#height-band {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  padding: var(--space-sm) var(--space-md);
+  font-size: var(--text-md);
+}
+#height-band[hidden] {
+  display: none;
+}
+/* The value beside the title, or under it at the right where the two do
+   not fit side by side, as in a column */
+.height-band-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: var(--space-sm);
+}
+#height-band-title {
+  display: flex;
+  gap: 9px;
+  font-weight: 500;
+}
+.height-band-value {
+  margin-left: auto;
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+  white-space: nowrap;
+}
+/* The track, and the band on it from the middle of one thumb to the
+   middle of the other */
+.height-band-track {
+  --thumb: var(--icon-sm);
+  --at: calc(100% - var(--thumb));
+  position: relative;
+  height: 24px;
+  background:
+    linear-gradient(
+        90deg,
+        transparent calc(var(--thumb) / 2 + var(--at) * var(--band-low)),
+        var(--color-accent-blue) 0
+          calc(var(--thumb) / 2 + var(--at) * var(--band-high)),
+        transparent 0
+      )
+      center / 100% 4px no-repeat,
+    linear-gradient(var(--color-bg-active) 0 0) center / 100% 4px no-repeat;
+}
+#height-band input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  margin: 0;
+  background: none;
+  appearance: none;
+  pointer-events: none;
+}
+#height-band .is-above {
+  z-index: 1;
+}
+#height-band input::-webkit-slider-thumb {
+  appearance: none;
+  width: var(--thumb);
+  height: var(--thumb);
+  border-radius: 50%;
+  background: var(--color-accent-blue);
+  pointer-events: auto;
+  cursor: pointer;
+}
+#height-band input::-moz-range-thumb {
+  width: var(--thumb);
+  height: var(--thumb);
+  border: 0;
+  border-radius: 50%;
+  background: var(--color-accent-blue);
+  pointer-events: auto;
+  cursor: pointer;
+}
+#height-band input:focus-visible {
+  outline: none;
+  --color-accent-blue: var(--color-text);
+}
+/* A finger needs a bigger thumb to hold */
+@media (pointer: coarse) {
+  .height-band-track {
+    --thumb: 24px;
+    height: 32px;
+  }
+}
+/* In the icon rail of a column beside the statistics there is no room for
+   a slider, and on a phone the statistics sheet runs up under it, where it
+   covered the sheet's tabs: the band stays as it is, and shows again with
+   the labels or the map */
+@media (max-width: 1279.98px) {
+  body.stats-open #height-band {
+    display: none;
+  }
+}
+@media (max-width: 767.98px) {
+  body > #height-band {
+    position: fixed;
+    top: calc(
+      var(--edge-gap) + var(--safe-top) + var(--btn-min-height) +
+        var(--space-sm)
+    );
+    left: calc(var(--edge-gap) + var(--safe-left));
+    right: calc(
+      var(--edge-gap) * 2 + var(--safe-right) + var(--btn-min-height)
+    );
+    z-index: var(--z-controls);
+  }
+}
+/* Forced colours drop the track's gradients and paint the thumbs over */
+@media (forced-colors: active) {
+  .height-band-track {
+    forced-color-adjust: none;
+    --color-accent-blue: Highlight;
+    --color-bg-active: GrayText;
+    --color-text: CanvasText;
+  }
+}
+
+/* ==========================================================================
    Reduced motion
    ========================================================================== */
 @media (prefers-reduced-motion: reduce) {

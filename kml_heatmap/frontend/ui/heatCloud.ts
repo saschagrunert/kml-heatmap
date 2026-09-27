@@ -29,6 +29,10 @@
  * woken by the flight and resting when the map does: the replay of all
  * flights that plays under the intro is no replay of the app's
  * (replayActive), which would dim it.
+ *
+ * In the 3D view the band of heights of its control (ui/heightBand.ts)
+ * leaves out the heat below and above it. Wrapped, which has no such
+ * control, shows all of it.
  */
 import type { MapApp } from "../mapApp";
 import type { StoreState } from "../state/store";
@@ -36,6 +40,11 @@ import type { KMLDataset } from "../types";
 import { cloudPoints, type CloudPoints } from "../calculations/heatCloud";
 import { groundedFlights } from "../calculations/groundProfile";
 import { datasetIndex } from "../calculations/datasetIndex";
+import {
+  FULL_BAND,
+  heightBandEdgesFt,
+  parseHeightBand,
+} from "../calculations/heightBand";
 import {
   isLiftedAt,
   liftExaggeration,
@@ -55,6 +64,7 @@ import {
   HeatCloudLayer,
   type HeatCloudStyle,
 } from "./heatCloudLayer";
+import { followHeightBand } from "./heightBand";
 
 /**
  * The layer the cloud is drawn below: the first of the ribbons, above every
@@ -75,6 +85,8 @@ const CLOUD_REPLAY_OPACITY = 0.25;
 const CLOUD_KEYS: readonly (keyof StoreState)[] = [
   "threeDVisible",
   "forcedHeatCloud",
+  "heightBand",
+  "wrappedVisible",
   "heatmapVisible",
   "replayActive",
   "currentData",
@@ -147,6 +159,7 @@ export function prepareHeatCloud(app: MapApp, levels: readonly number[]): void {
 export function followHeatCloud(app: MapApp): void {
   const map = app.map;
   if (!map || followed.has(app)) return;
+  followHeightBand(app);
   /** The shaders did not work in the map's context: the heatmap stays */
   let broken = false;
   /** How strongly the cloud is drawn, as the heatmap would be */
@@ -194,6 +207,10 @@ export function followHeatCloud(app: MapApp): void {
       liftM: lifted ? metres : 0,
       opacity,
       flow: !app.replayActive,
+      // Wrapped shows the whole year, without the control of the band
+      band: heightBandEdgesFt(
+        app.wrappedVisible ? FULL_BAND : parseHeightBand(app.heightBand),
+      ),
     };
   };
 

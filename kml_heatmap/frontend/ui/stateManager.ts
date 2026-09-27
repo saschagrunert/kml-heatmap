@@ -11,6 +11,7 @@ import {
 } from "../state/toggles";
 import type { MapCenter, SavedState } from "../types";
 import {
+  HEIGHT_BAND_TEXT,
   isPathId,
   isSupportedSchemaVersion,
   STATE_SCHEMA_VERSION,
@@ -36,12 +37,16 @@ export function storageKey(
   return directory === "/" ? STORAGE_KEY : STORAGE_KEY + ":" + directory;
 }
 
-/** What a session keeps of the store: the filters and every toggle */
+/**
+ * What a session keeps of the store: the filters, every toggle and the
+ * heat cloud's band of heights
+ */
 const PERSISTED_KEYS: readonly (keyof StoreState)[] = [
   "selectedYear",
   "selectedAircraft",
   "selectedPathIds",
   ...TOGGLE_KEYS,
+  "heightBand",
 ];
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -84,6 +89,10 @@ export function sanitizeSavedState(candidate: unknown): SavedState {
     if (typeof value === "boolean") {
       result[key] = value;
     }
+  }
+  const band = candidate["heightBand"];
+  if (typeof band === "string" && HEIGHT_BAND_TEXT.test(band)) {
+    result.heightBand = band;
   }
   // Path ids are only meaningful when they were written with an id scheme
   // this build reads; older payloads refer to different flights. Schema 4
@@ -200,6 +209,7 @@ export class StateManager {
       selectedYear: this.app.selectedYear,
       selectedAircraft: this.app.selectedAircraft,
       selectedPathIds: Array.from(this.app.selectedPathIds),
+      heightBand: this.app.heightBand,
       // Replay state is not persisted: too complex to restore reliably
     };
     for (const toggle of TOGGLES) {

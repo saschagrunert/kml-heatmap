@@ -44,10 +44,12 @@ from kml_heatmap.site_assets import CSS_FILES, STATIC_DIR, _copy_and_minify_css
 # 31,495 B after). features.css was raised from 7 KB for the panel of the
 # replay of all flights (6,298 B before, 7,551 B after), and from 8 KB for
 # the flight profile, whose strip, chart, chip toggle and place in the replay
-# panel it carries (7,551 B before, 11,596 B after).
+# panel it carries (7,551 B before, 11,596 B after), and from 13.5 KB for the
+# slider of the heat cloud's band of heights, a row of the Map group or a
+# panel over the map on a phone (11,596 B before, 13,608 B after).
 STYLESHEET_BUDGET_BYTES = {
     "styles.css": 40 * 1024,
-    "features.css": int(13.5 * 1024),
+    "features.css": int(15.5 * 1024),
     "wrapped.css": 33 * 1024,
 }
 

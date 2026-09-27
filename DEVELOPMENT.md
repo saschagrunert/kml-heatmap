@@ -736,6 +736,35 @@ ribbons stay what is hovered and clicked. An exported image has it, since
 the canvas is read in the frame that drew it (`withMapStill`). It is drawn
 in the world copy of the flights only, where the flat map shows several.
 
+The band of heights (`heightBand` in the store, `h` in the link, the text
+`500-3000` or `1000-` of `calculations/heightBand.ts`, empty for every
+height) leaves out the heat below and above two heights above ground. It
+needs no other points: the fourth float of a point is its height above the
+ground in feet, the one the cloud is lifted by, and the shaders get the band
+as one uniform (`u_band`, from `heightBandEdgesFt`): where it fades in, where
+it is whole, where it starts to fade out and where it is gone, 15 % of each
+edge's height past it and at least 50 ft. A stretch with both ends outside
+the band on one side is dropped in the vertex shader, and the others are
+faded per pixel by the height along them (`smoothstep`), in the glow and in
+the shadow alike; the exposure is still that of all the points, so a band is
+as bright as in the whole cloud. The band is above ground rather than above
+the sea because the ground under every point is known, the relief sampled
+by the build or without it the line between the fields, and a circuit is
+then at the same height over any field. The control (`ui/heightBand.ts`, in
+the feature bundle and started with the cloud) is two range inputs over one
+track, each with a label and its height as `aria-valuetext`, at the stops of
+`HEIGHT_BAND_STOPS_FT` (the top past the last is no top); it is a row of the
+Map group under the 3D switch, a group of its own over the top of the map
+in the phone layout (`PHONE_LAYOUT_QUERY`, before the floating compass in
+the page, so the keyboard reaches the two in turn), and shown while the 3D
+view draws the cloud with the Heatmap switch on, but not over the statistics
+(`features.css`). The first visit carries only the parsing of the link
+(`HEIGHT_BAND_TEXT` in `state/urlState.ts`, which the saved state checks as
+well), the store key and Reset view, about 130 B gzipped. A text that is not
+two stops, as a link edited by hand may have, is every height, and the
+control writes that back. Wrapped always draws every height
+(`wrappedVisible`), its intro included.
+
 The numbers below were measured before the shadow, which draws the cloud a
 second time where the flights are lifted, and the pulses, which redraw the
 map every frame while they run.

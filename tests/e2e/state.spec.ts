@@ -606,4 +606,122 @@ test.describe("State Persistence", () => {
       .poll(() => new URL(page.url()).searchParams.has("s"))
       .toBe(false);
   });
+
+  test("the band of heights of the 3D view's heat cloud reaches its shaders, kept in the link until Reset view", async ({
+    page,
+  }) => {
+    // The 3D view in software WebGL, as in the Reset view spec above, and
+    // without the relief, which this spec does not look at. A frame of the
+    // cloud takes 0.6 to 2.3 s there and holds up every step of the page
+    // meanwhile, so each change of the band costs seconds: two of them,
+    // and the link is loaded without the 3D view (the unit tests restore
+    // the band with it)
+    test.setTimeout(60000);
+    await holdElevationTiles(page);
+    const mobile = await usesMobileBar(page);
+    await recordHeightBandUniform(page);
+    const band = page.locator("#height-band");
+    const low = page.getByRole("slider", {
+      name: "Lowest height above ground",
+    });
+    const high = page.getByRole("slider", {
+      name: "Highest height above ground",
+    });
+    await expect(band).toBeHidden();
+
+    await toggleThreeD(page, mobile);
+
+    // Every height at first, which the link leaves out
+    await expect(band).toBeVisible();
+    await expect(band).toContainText("All heights");
+    await expect.poll(() => drawnHeightBand(page)).toEqual([-2, -1, 1e6, 2e6]);
+    expect(new URL(page.url()).searchParams.has("h")).toBe(false);
+
+    // The bottom as a drag leaves it (`fill` sets the value of a range
+    // input and sends `input` and `change`), the top by a key
+    await low.fill("4");
+    await high.focus();
+    await page.keyboard.press("ArrowLeft");
+    await expect(low).toHaveAttribute("aria-valuetext", "500 ft");
+    await expect(high).toHaveAttribute("aria-valuetext", "10,000 ft");
+    await expect(band).toContainText("500 to 10,000 ft");
+    await expect
+      .poll(() => new URL(page.url()).searchParams.get("h"))
+      .toBe("500-10000");
+    // Faded in from 425 ft and out up to 11,500 ft
+    await expect
+      .poll(() => drawnHeightBand(page))
+      .toEqual([425, 500, 10000, 11500]);
+
+    // The link brings the band back, kept while the 3D view is off
+    const link = new URL(page.url());
+    link.searchParams.delete("d");
+    await gotoApp(page, link.search);
+    expect(await page.evaluate(() => window.mapApp!.heightBand)).toBe(
+      "500-10000",
+    );
+    await expect
+      .poll(() => new URL(page.url()).searchParams.get("h"))
+      .toBe("500-10000");
+
+    // Part of what a first visit shows, which has every height
+    if (mobile) {
+      await openMobileSheet(page, "more");
+      await page.locator('.sheet-row[data-row="reset-view"]').click();
+    } else {
+      await page.getByRole("button", { name: /^Reset view/ }).click();
+    }
+    await expect
+      .poll(() => new URL(page.url()).searchParams.has("h"))
+      .toBe(false);
+    expect(await page.evaluate(() => window.mapApp!.heightBand)).toBe("");
+  });
 });
+
+/** Turn the 3D view on or off, by its button or its row of the Layers sheet */
+async function toggleThreeD(page: Page, mobile: boolean): Promise<void> {
+  if (mobile) {
+    await openMobileSheet(page, "layers");
+    await page.locator('.sheet-row[data-row="three-d"]').click();
+    await closeMobileSheet(page);
+  } else {
+    await page.locator("#three-d-btn").click();
+  }
+}
+
+/**
+ * Record what the heat cloud's shaders are given for their band of
+ * heights (u_band): the location of a uniform is known only as it is asked
+ * for, which the layer does as it first draws, in the 3D view
+ */
+async function recordHeightBandUniform(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const proto = WebGL2RenderingContext.prototype;
+    const bands = new WeakSet<WebGLUniformLocation>();
+    const locate = proto.getUniformLocation;
+    proto.getUniformLocation = function (program, name) {
+      const location = locate.call(this, program, name);
+      if (location && name === "u_band") bands.add(location);
+      return location;
+    };
+    const set = proto.uniform4f;
+    proto.uniform4f = function (location, x, y, z, w) {
+      if (location && bands.has(location)) {
+        (window as { drawnHeightBand?: number[] }).drawnHeightBand = [
+          x,
+          y,
+          z,
+          w,
+        ];
+      }
+      set.call(this, location, x, y, z, w);
+    };
+  });
+}
+
+/** The band the cloud's shaders were last given, in feet above ground */
+function drawnHeightBand(page: Page): Promise<number[] | null> {
+  return page.evaluate(
+    () => (window as { drawnHeightBand?: number[] }).drawnHeightBand ?? null,
+  );
+}

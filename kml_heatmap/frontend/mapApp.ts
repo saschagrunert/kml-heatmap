@@ -190,6 +190,12 @@ const RESTORED_TOGGLES: readonly ToggleKey[] = TOGGLES.filter(
   (toggle: Toggle) => !("panel" in toggle) && toggle.key !== "isolateSelection",
 ).map((toggle) => toggle.key);
 
+/**
+ * The keys of the view besides the filters that Reset view puts back: the
+ * toggles and the heat cloud's band of heights
+ */
+const VIEW_KEYS = [...TOGGLE_KEYS, "heightBand"] as const;
+
 /** Padding around the flights when the view is fitted to all of them */
 const START_VIEW_PADDING = 30;
 
@@ -670,6 +676,7 @@ export class MapApp {
         const value = state[key];
         if (value !== undefined) this.store.set(key, value);
       }
+      if (state.heightBand) this.heightBand = state.heightBand;
       // Altitude and speed colour the same paths, and the toggles never
       // leave both on (setColorLayer); a link written by hand, or with every
       // flag of `v` set, can. Altitude is the one kept, as it needs no
@@ -981,7 +988,7 @@ export class MapApp {
     this.followFlightProfile();
     this.store.subscribeKeys(
       [
-        ...TOGGLE_KEYS,
+        ...VIEW_KEYS,
         "selectedYear",
         "selectedAircraft",
         "selectedPathIds",
@@ -997,10 +1004,11 @@ export class MapApp {
 
   /**
    * Go back to what a first visit shows: the newest year, every aircraft,
-   * the heatmap and the airports, nothing selected or isolated, flat and
-   * north up over all the flights. It goes through the year filter, so the
-   * dropdowns, the loaded data and the store change together in one batch;
-   * the saved state and the link follow the store and the camera as ever.
+   * the heatmap and the airports, nothing selected or isolated, the heat
+   * cloud at every height, flat and north up over all the flights. It goes
+   * through the year filter, so the dropdowns, the loaded data and the
+   * store change together in one batch; the saved state and the link
+   * follow the store and the camera as ever.
    * Out of reach during a replay, like the filters: the button is disabled
    * (REPLAY_DISABLED_CONTROL_IDS) and the phone's bar steps aside.
    */
@@ -1013,7 +1021,7 @@ export class MapApp {
       this.defaultYear,
       () => {
         // The selection goes with the year switch, as with every filter
-        for (const key of [...TOGGLE_KEYS, "selectedAircraft"] as const) {
+        for (const key of [...VIEW_KEYS, "selectedAircraft"] as const) {
           this.store.set(key, defaults[key]);
         }
       },
@@ -1072,7 +1080,7 @@ export class MapApp {
       this.selectedYear === this.defaultYear &&
       this.selectedAircraft === "all" &&
       this.selectedPathIds.size === 0 &&
-      TOGGLE_KEYS.every((key) => this[key] === defaults[key]) &&
+      VIEW_KEYS.every((key) => this[key] === defaults[key]) &&
       Math.abs(center.lng - target.lng) + Math.abs(center.lat - target.lat) <
         2e-6 &&
       Math.abs(map.getZoom() - start.zoom!) < 0.01 &&

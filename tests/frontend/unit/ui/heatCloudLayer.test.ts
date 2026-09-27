@@ -27,6 +27,10 @@ import {
   type CloudPoints,
 } from "../../../../kml_heatmap/frontend/calculations/heatCloud";
 import { smoothFlights } from "../../../../kml_heatmap/frontend/calculations/smoothing";
+import {
+  FULL_BAND,
+  heightBandEdgesFt,
+} from "../../../../kml_heatmap/frontend/calculations/heightBand";
 import type { PathSegment } from "../../../../kml_heatmap/frontend/types";
 
 const motion = vi.hoisted(() => ({ reduced: false }));
@@ -181,6 +185,7 @@ const STYLE: HeatCloudStyle = {
   liftM: 3,
   opacity: 1,
   flow: true,
+  band: heightBandEdgesFt(FULL_BAND),
 };
 
 /** The draws of a frame of STYLE: the shadow, then the glow */
@@ -492,6 +497,34 @@ describe("the heat cloud's layer", () => {
     expect(glowCeiling).toBe(1);
     // No pulses in the shadow
     expect(perDraw("u_flowMix")[0]![1]).toBe(0);
+  });
+
+  it("draws the heat of the band of heights the app asks for, in the glow and its shadow alike", () => {
+    style = { ...STYLE, band: [425, 500, 3000, 3450] };
+    layer.onAdd(map);
+    layer.setPoints(points());
+    render();
+
+    expect(perDraw("u_band")).toEqual([
+      [425, 500, 3000, 3450],
+      [425, 500, 3000, 3450],
+    ]);
+    const sources = gl.shaderSource.mock.calls.map(
+      ([, source]) => source as string,
+    );
+    const vertex = sources.find((source) =>
+      source.includes("projectTileFor3D"),
+    );
+    const fragment = sources.find((source) => source.includes("fragColor"));
+    // A stretch all below the band or all above it is left out whole, and
+    // the glow of the others fades by the height along them
+    expect(vertex).toContain(
+      "max(a_start.w, a_end.w) <= u_band.x || min(a_start.w, a_end.w) >= u_band.w",
+    );
+    expect(vertex).toContain("v_height = vec2(a_start.w, a_end.w);");
+    expect(fragment).toContain(
+      "glow *= smoothstep(u_band.x, u_band.y, height) * (1.0 - smoothstep(u_band.z, u_band.w, height));",
+    );
   });
 
   it("draws no shadow where the flights are drawn on the ground", () => {

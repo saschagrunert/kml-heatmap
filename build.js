@@ -322,7 +322,12 @@ const BUDGET_APP = { raw: 152 * 1024, gzip: 52.5 * 1024 };
 // ahead for where the camera comes down (ReplayAllRun.zoom): 84.88 KB raw
 // and 29.67 KB gzipped before, 85.78 KB raw and 29.97 KB gzipped after, in
 // a local build.
-const BUDGET_FEATURES = { raw: 88 * 1024, gzip: 31 * 1024 };
+// Raised from 88 KB and 31 KB for the band of heights of the heat cloud:
+// its control, the text of its link and its fade in the cloud's shaders
+// (ui/heightBand.ts, calculations/heightBand.ts): 84.19 KB raw and 30.05 KB
+// gzipped before, 87.06 KB raw and 31.06 KB gzipped after, in a local build,
+// about 31.18 KB in CI going by the 0.4 % above.
+const BUDGET_FEATURES = { raw: 89 * 1024, gzip: 32 * 1024 };
 
 // The Wrapped bundle is fetched only when the Wrapped dialog or the
 // statistics panel is first opened, and not with replay's code or replay

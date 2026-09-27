@@ -48,6 +48,18 @@ describe("sanitizeSavedState", () => {
     ).toEqual({ selectedPathIds: [0, 2 ** 40 - 1] });
   });
 
+  it("keeps the heat cloud's band of heights as a link writes it, and nothing else", () => {
+    expect(sanitizeSavedState({ heightBand: "500-3000" })).toEqual({
+      heightBand: "500-3000",
+    });
+    expect(sanitizeSavedState({ heightBand: "1000-" })).toEqual({
+      heightBand: "1000-",
+    });
+    for (const heightBand of ["", "500", "-3000", "a-b", 500, null]) {
+      expect(sanitizeSavedState({ heightBand })).toEqual({});
+    }
+  });
+
   it("drops path ids saved with an older id scheme", () => {
     // Version 2 ids were positions in the export, not content hashes
     expect(
@@ -221,6 +233,7 @@ describe("StateManager", () => {
         "statsPanelVisible",
         "flightListVisible",
         "wrappedVisible",
+        "heightBand",
       ]);
     });
 
@@ -457,6 +470,16 @@ describe("StateManager", () => {
       expect(params.get("d")).toBe("1");
     });
 
+    it("saves the heat cloud's band of heights, and carries it in the link", () => {
+      mockApp.store.set("heightBand", "500-3000");
+
+      stateManager.saveMapState();
+
+      expect(savedState()).toMatchObject({ heightBand: "500-3000" });
+      const url = String(vi.mocked(history.replaceState).mock.calls[0]![2]);
+      expect(new URLSearchParams(url).get("h")).toBe("500-3000");
+    });
+
     it("saves the user's own view while the replay's chase view flies the map", () => {
       // A camera half way along a flight, tilted and turned with it, is no
       // view to come back to
@@ -565,6 +588,7 @@ describe("StateManager", () => {
         flightListVisible: false,
         wrappedVisible: false,
         isolateSelection: false,
+        heightBand: "",
       });
       // North up, flat and Mercator are the defaults and stay out of the link
       expect(history.replaceState).toHaveBeenCalledWith(

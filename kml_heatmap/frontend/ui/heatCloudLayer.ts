@@ -41,7 +41,11 @@
  * they rest while the map is not used and under reduced motion, and the
  * map draws no frame for them then. And the exposure follows the heat:
  * the busiest cells of the cloud glow no brighter than white, however
- * many flights the filters keep (see cloudExposure).
+ * many flights the filters keep (see cloudExposure). A band of heights
+ * above ground can leave out the heat below and above it, in the glow and
+ * its shadow alike, fading out at its edges (calculations/heightBand.ts);
+ * the exposure stays that of all of it, so a band draws its heat as bright
+ * as the whole cloud does.
  */
 import type {
   CustomLayerInterface,
@@ -205,6 +209,12 @@ export interface HeatCloudStyle {
   opacity: number;
   /** Whether its pulses may run (see CLOUD_FLOW_SPACING_PX) */
   flow: boolean;
+  /**
+   * The heights above ground its heat is drawn at, in feet: from the first
+   * it fades in up to the second, and from the third out up to the fourth
+   * (see heightBandEdgesFt)
+   */
+  band: readonly [number, number, number, number];
 }
 
 /**
@@ -224,6 +234,8 @@ export interface HeatCloudStyle {
  *   across.
  * - It is pulled towards the camera by CLOUD_DEPTH_PULL blurs, where it is
  *   still on the same pixels, with the depth the projection gives there.
+ * - A stretch whose two ends are below the band of heights, or both above
+ *   it, is left out whole: none of it is in the band.
  */
 const VERTEX_SHADER = `
 in vec2 a_corner;
@@ -240,11 +252,13 @@ uniform vec2 u_viewport;
 uniform vec3 u_sigma;
 uniform vec4 u_depth;
 uniform float u_gain;
+uniform vec4 u_band;
 flat out vec4 v_ends;
 flat out vec4 v_joins;
 flat out vec4 v_blur;
 flat out float v_heat;
 flat out vec2 v_time;
+flat out vec2 v_height;
 
 vec4 project(vec4 point) {
   return projectTileFor3D(point.xy, point.z * u_heights.x + point.w * u_heights.y);
@@ -263,7 +277,10 @@ void main() {
   vec4 a = project(a_start);
   vec4 b = project(a_end);
   float near = u_depth.z;
-  if (a_heat.x <= 0.0 || (a.w < near && b.w < near)) {
+  if (
+    a_heat.x <= 0.0 || (a.w < near && b.w < near)
+    || max(a_start.w, a_end.w) <= u_band.x || min(a_start.w, a_end.w) >= u_band.w
+  ) {
     gl_Position = vec4(0.0, 0.0, 2.0, 1.0);
     return;
   }
@@ -308,6 +325,7 @@ void main() {
   v_blur = vec4(sigmas, scales);
   v_heat = u_gain * a_heat.x / max(length_px, 1e-3);
   v_time = vec2(a_heat.y, a_out.y);
+  v_height = vec2(a_start.w, a_end.w);
 }
 `;
 
@@ -317,7 +335,9 @@ void main() {
  * the one after. With the flow, times its pulses at the time the pixel
  * was flown at, in two periods, one twice the other, blended as the zoom
  * goes from one to the next; a pulse is brightest at its head and fades
- * along where it has been, and is 1 on average.
+ * along where it has been, and is 1 on average. Times the part of the band
+ * of heights at the height it was flown at, which fades in and out at the
+ * band's edges.
  */
 const FRAGMENT_SHADER = `#version 300 es
 precision highp float;
@@ -326,10 +346,12 @@ flat in vec4 v_joins;
 flat in vec4 v_blur;
 flat in float v_heat;
 flat in vec2 v_time;
+flat in vec2 v_height;
 uniform vec4 u_colour;
 uniform float u_ceiling;
 uniform vec4 u_flow;
 uniform vec2 u_flowMix;
+uniform vec4 u_band;
 out vec4 fragColor;
 
 float pulse(float phase) {
@@ -357,6 +379,8 @@ void main() {
   float spread = 0.70710678 / sigma;
   float glow = v_heat * scale * exp(-0.5 * across * across / (sigma * sigma))
     * 0.5 * (erf(dot(p - a, v_joins.xy) * spread) + erf(dot(b - p, v_joins.zw) * spread));
+  float height = mix(v_height.x, v_height.y, t);
+  glow *= smoothstep(u_band.x, u_band.y, height) * (1.0 - smoothstep(u_band.z, u_band.w, height));
   if (u_flowMix.y > 0.0) {
     float time = mix(v_time.x, v_time.y, t);
     float pulses = mix(
@@ -396,6 +420,7 @@ const UNIFORMS = [
   "u_ceiling",
   "u_flow",
   "u_flowMix",
+  "u_band",
 ] as const;
 
 /**
@@ -594,6 +619,7 @@ export class HeatCloudLayer implements CustomLayerInterface {
       (this.flowS / period / 2) % 1,
     );
 
+    gl.uniform4f(u.u_band, ...style.band);
     gl.uniform1f(
       u.u_gain,
       (look.gain * this.exposure * CLOUD_REFERENCE_SPEED_MS * ratio) /
