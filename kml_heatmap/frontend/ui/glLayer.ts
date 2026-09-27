@@ -5,7 +5,8 @@
  * points, from a buffer of points uploaded once; a program per projection,
  * built on the prelude MapLibre hands a custom layer, so the same shaders
  * work on the globe; and GL objects made for one context, anew after it
- * was lost.
+ * was lost. The programs outlast the layer's time off the map, as long as
+ * their context does.
  */
 import type { CustomRenderMethodInput } from "maplibre-gl";
 
@@ -72,6 +73,12 @@ interface Resources<U extends string> {
  */
 export class LayerGl<U extends string> {
   private resources: Resources<U> | null = null;
+  /**
+   * The programs of a layer taken off the map, for when it is added again
+   * in the same context: the cloud comes and goes with the 3D view, and
+   * compiling its shaders anew was part of the stall of each return
+   */
+  private kept: Pick<Resources<U>, "gl" | "programs"> | null = null;
 
   /**
    * `failed` is told when the shaders or buffers do not work in a context.
@@ -89,6 +96,7 @@ export class LayerGl<U extends string> {
    */
   readonly lost = (): void => {
     this.resources = null;
+    this.kept = null;
   };
 
   /**
@@ -114,7 +122,10 @@ export class LayerGl<U extends string> {
     return { program, vao: resources.vao };
   }
 
-  /** Let go of what was made in `gl`, unless that context is lost */
+  /**
+   * Let go of the buffers made in `gl`, unless that context is lost, and
+   * keep the programs for the layer's return
+   */
   release(gl: WebGL2RenderingContext): void {
     const resources = this.resources;
     this.resources = null;
@@ -122,9 +133,7 @@ export class LayerGl<U extends string> {
     gl.deleteBuffer(resources.corners);
     gl.deleteBuffer(resources.points);
     gl.deleteVertexArray(resources.vao);
-    for (const program of resources.programs.values()) {
-      if (program) gl.deleteProgram(program.program);
-    }
+    this.kept = { gl, programs: resources.programs };
   }
 
   /** The GL objects for the context `gl`, made the first time */
@@ -183,7 +192,27 @@ export class LayerGl<U extends string> {
     this.shaders.layout(gl);
     gl.bindVertexArray(null);
     gl.bindBuffer(gl.ARRAY_BUFFER, null);
-    return { gl, corners, points, vao, programs: new Map(), uploaded: null };
+    const programs = this.keptIn(gl);
+    return { gl, corners, points, vao, programs, uploaded: null };
+  }
+
+  /**
+   * The programs kept from before in `gl`, where they still work in it: a
+   * context lost while the layer was off the map, which it did not hear
+   * of, comes back as the same object without them
+   */
+  private keptIn(gl: WebGL2RenderingContext): Resources<U>["programs"] {
+    const kept = this.kept;
+    this.kept = null;
+    if (
+      kept?.gl !== gl ||
+      [...kept.programs.values()].some(
+        (program) => program && !gl.isProgram(program.program),
+      )
+    ) {
+      return new Map();
+    }
+    return kept.programs;
   }
 
   /** Compile and link the program of `vertex` and the fragment shader */

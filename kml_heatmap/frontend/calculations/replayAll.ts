@@ -15,7 +15,7 @@ import {
   planarMetres,
 } from "../utils/geometry";
 import { FEET_TO_METERS } from "../utils/constants";
-import { chainTimes, type FlightClock } from "./flightClock";
+import { chainPieces, type FlightClock } from "./flightClock";
 import { mercatorOf } from "./heatCloud";
 import { liftExaggeration } from "./lift";
 import type { SmoothedFlights } from "./smoothing";
@@ -108,7 +108,7 @@ export function replayAllPoints(
       played.add(pathId);
       duration = Math.max(duration, seconds);
       const { points, heights, ground } = chain;
-      const times = chainTimes(flights, clock, i, end);
+      const { times } = chainPieces(segments, flights, i, end, clock);
       const pixelM =
         metresPerPixel(detail + 0.5) *
         Math.cos(points[0]![0] * DEGREES_TO_RADIANS);

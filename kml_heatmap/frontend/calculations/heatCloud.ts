@@ -26,14 +26,12 @@ import type { PathSegment } from "../types";
 import {
   DEGREES_TO_RADIANS,
   metresPerPixel,
-  planarMetres,
   TILE_SIZE_PX,
   type Coordinate,
 } from "../utils/geometry";
 import { FEET_TO_METERS } from "../utils/constants";
-import { segmentSeconds } from "./heatLines";
 import { liftExaggeration } from "./lift";
-import { chainTimes, flightClockOf } from "./flightClock";
+import { chainPieces, flightClockOf } from "./flightClock";
 import type { SmoothedFlights } from "./smoothing";
 
 /**
@@ -138,7 +136,7 @@ export function cloudPoints(
   let east = -Infinity;
   let north = Infinity;
   let south = -Infinity;
-  const { chains, chainOf, from, to } = flights;
+  const { chains, chainOf } = flights;
   const count = segments.length;
   // The cells of heat, in Mercator units, and the heat per metre in each
   const cell = CLOUD_CELL_PX / (TILE_SIZE_PX * 2 ** (level + 0.5));
@@ -160,23 +158,15 @@ export function cloudPoints(
       const cellM = CLOUD_CELL_PX * pixelM;
       const heightStepFt =
         (CLOUD_HEIGHT_STEP_PX * pixelM) / exaggeration / FEET_TO_METERS;
-      // The seconds of each stretch of the curve, from its segment's
-      const seconds = new Float64Array(points.length);
-      const lengths = new Float64Array(points.length);
-      for (let m = i; m < end; m++) {
-        let total = 0;
-        for (let j = from[m]! + 1; j <= to[m]!; j++) {
-          lengths[j] = planarMetres(points[j - 1]!, points[j]!);
-          total += lengths[j]!;
-        }
-        const spent = segmentSeconds(segments[m]!, segments[m + 1]);
-        const pieces = to[m]! - from[m]!;
-        for (let j = from[m]! + 1; j <= to[m]!; j++) {
-          seconds[j] =
-            total > 0 ? (spent * lengths[j]!) / total : spent / pieces;
-        }
-      }
-      const times = chainTimes(flights, clock, i, end, lengths);
+      // The length, the seconds and the time of each stretch of the curve,
+      // the same at every level (see chainPieces)
+      const { lengths, seconds, times } = chainPieces(
+        segments,
+        flights,
+        i,
+        end,
+        clock,
+      );
       const heightAt = (j: number): number => (ground?.[j] ?? 0) + heights[j]!;
       let along = 0;
       let heat = 0;

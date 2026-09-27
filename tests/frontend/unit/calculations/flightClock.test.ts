@@ -3,11 +3,19 @@
  * each point of its curve, from its logged times or, without them, from its
  * length at its groundspeed.
  */
-import { describe, it, expect } from "vitest";
+import { afterEach, describe, it, expect } from "vitest";
 import {
+  chainPieces,
   chainTimes,
   flightClock,
+  flightClockOf,
 } from "../../../../kml_heatmap/frontend/calculations/flightClock";
+import {
+  groundedFlights,
+  releaseGroundProfiles,
+} from "../../../../kml_heatmap/frontend/calculations/groundProfile";
+import { segmentSeconds } from "../../../../kml_heatmap/frontend/calculations/heatLines";
+import { planarMetres } from "../../../../kml_heatmap/frontend/utils/geometry";
 import {
   smoothFlights,
   type SmoothedFlights,
@@ -212,5 +220,61 @@ describe("chainTimes", () => {
     const times = chainTimes(flights, clock, 0, 2);
 
     expect(times[flights.to[0]!]).toBe(30);
+  });
+});
+
+describe("chainPieces", () => {
+  /** A flight turning as it goes, so its curve has points between fixes */
+  const segments = Array.from({ length: 8 }, (_, i) => ({
+    ...along(1, i, { time: 20 * i, ground_ft: 500 + 100 * i }),
+    coords: [
+      [47 + 0.01 * Math.sin(i), 11 + 0.01 * i],
+      [47 + 0.01 * Math.sin(i + 1), 11 + 0.01 * (i + 1)],
+    ] as PathSegment["coords"],
+  }));
+
+  afterEach(() => releaseGroundProfiles());
+
+  it("measures, times and weighs each piece of a curve by its segment", () => {
+    const flights = smoothFlights(segments, () => 1000);
+    const clock = flightClockOf(segments);
+
+    const { lengths, seconds, times } = chainPieces(
+      segments,
+      flights,
+      0,
+      segments.length,
+      clock,
+    );
+
+    const { points } = flights.chains[0]!;
+    expect(points.length).toBeGreaterThan(segments.length + 1);
+    for (let j = 1; j < points.length; j++) {
+      expect(lengths[j]).toBe(planarMetres(points[j - 1]!, points[j]!));
+    }
+    expect(times).toEqual(chainTimes(flights, clock, 0, segments.length));
+    // The heat lines' seconds of each segment, spread over its pieces
+    segments.forEach((segment, m) => {
+      let sum = 0;
+      for (let j = flights.from[m]! + 1; j <= flights.to[m]!; j++) {
+        sum += seconds[j]!;
+      }
+      expect(sum).toBeCloseTo(segmentSeconds(segment, segments[m + 1]), 9);
+    });
+  });
+
+  it("works them out once for a curve, at every level it is set on the ground of", () => {
+    const clock = flightClockOf(segments);
+    const at8 = groundedFlights(segments, true, 8);
+    const pieces = chainPieces(segments, at8, 0, segments.length, clock);
+    const at9 = groundedFlights(segments, true, 9);
+    expect(at9).not.toBe(at8);
+
+    expect(chainPieces(segments, at9, 0, segments.length, clock)).toBe(pieces);
+    // Timed by another clock, anew
+    const other = flightClock(segments);
+    const timed = chainPieces(segments, at9, 0, segments.length, other);
+    expect(timed).not.toBe(pieces);
+    expect(timed).toEqual({ ...pieces, clock: other });
   });
 });

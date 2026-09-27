@@ -657,9 +657,14 @@ last four levels are kept, so a zoom back into one takes no work), along the
 curves the
 ribbons are cut from: every flight smoothed through its fixes on its ground
 at the relief level (`groundedFlights` in `calculations/groundProfile.ts`,
-which keeps the last smoothing for both, so the flights are smoothed once;
-the layer manager lets go of it when no colour layer draws in 3D and the
-cloud does not show either, and with the 3D view). The points of a curve are
+which keeps the last for both; the layer manager lets go of it when no
+colour layer draws in 3D and the cloud does not show either, and with the
+3D view). A flight's curve and its smoothed altitudes are the same on every
+ground and at every level, so the curves of a dataset are smoothed once and
+a level only lays its ground along them and lifts the heights, to the bit
+what smoothing on that ground gave; the metres, the seconds and the clock
+times of each curve's pieces are worked out once as well (`chainPieces` in
+`calculations/flightClock.ts`, shared with replay all). The points of a curve are
 merged where they are closer than `CLOUD_STEP_PX` (6 px in the middle of the
 level) unless the height changed by a pixel, and kept as x and y in Mercator
 units from an origin in the middle of them (so 32-bit floats hold them to a
@@ -816,14 +821,17 @@ meeting) or its ray meets it behind the camera, the corner keeps its reach.
 On the globe the plane is a chord of the curved ground, off by a few
 hundredths of a blur at most (about 1 km at `z` 5, where a blur is some 30
 km across, and metres at `z` 8). Its GL objects are made in its first frame,
-where MapLibre takes up the state of its context anew after a custom layer;
-a lost context drops them (`webglcontextlost`), and the style MapLibre gets
-back has no custom layers, so `ui/heatCloud.ts` adds the layer again on
-`style.load`, and on `styledata` after a new base style. Shaders that do not
-compile turn it off with one logged error, and the flat heatmap stays, until
-the context is restored, where they are tried again (the replay of all
-flights alike); what fails while the context is lost (`isContextLost`: every
-GL object is null and no shader compiles) is no failure (`LayerGl`). It only
+where MapLibre takes up the state of its context anew after a custom layer.
+Taken off the map it deletes its buffers and keeps its compiled programs for
+its return in the same context (`ui/glLayer.ts`, shared with replay all),
+which a context lost meanwhile has invalidated (`isProgram`); a lost context
+drops them (`webglcontextlost`), and the style MapLibre gets back has no
+custom layers, so `ui/heatCloud.ts` adds the layer again on `style.load`,
+and on `styledata` after a new base style. Shaders that do not compile turn
+it off with one logged error, and the flat heatmap stays, until the context
+is restored, where they are tried again (the replay of all flights alike);
+what fails while the context is lost (`isContextLost`: every GL object is
+null and no shader compiles) is no failure (`LayerGl`). It only
 draws: a custom layer has no features for `queryRenderedFeatures`, and the
 ribbons stay what is hovered and clicked. An exported image has it, without
 its pulses, since the canvas is read in the frame that drew it
