@@ -133,6 +133,8 @@ interface MockManagers {
     clearSelection: Mock;
     toggleIsolateSelection: Mock;
     updateIsolateButton: Mock;
+    selectFlight: Mock;
+    markSelected: Mock;
   };
   airportManager: {
     updateAirportPopups: Mock;
@@ -325,6 +327,8 @@ function createMockManagers(): MockManagers {
       clearSelection: vi.fn(),
       toggleIsolateSelection: vi.fn(),
       updateIsolateButton: vi.fn(),
+      selectFlight: vi.fn(),
+      markSelected: vi.fn(), // replaced below once the app exists
     },
     airportManager: {
       updateAirportPopups: vi.fn(),
@@ -506,6 +510,19 @@ function buildMockApp(
   // The stub manager answers the way the real one does: by asking the app
   mockApp.replayManager.canReplay.mockImplementation((): boolean =>
     Boolean(mockApp.canReplay()),
+  );
+  // Marks the buttons of the flight lists the way PathSelection does, from
+  // the app's selection
+  mockApp.pathSelection.markSelected.mockImplementation(
+    (buttons: Iterable<HTMLElement>) => {
+      for (const button of buttons) {
+        const id = Number(button.dataset["pathId"]);
+        button.setAttribute(
+          "aria-pressed",
+          String(mockApp.selectedPathIds.has(id)),
+        );
+      }
+    },
   );
 
   return mockApp;

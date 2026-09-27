@@ -65,7 +65,7 @@ npm run format:check     # Check code formatting
 
 End-to-end tests use [Playwright](https://playwright.dev/). They verify the
 full map rendering pipeline including map initialization, layer toggles,
-filters, statistics panel, wrapped modal, airport markers and replay. The
+filters, statistics panel, flight list, wrapped modal, airport markers and replay. The
 `desktop` project runs every spec but `mobile.spec.ts` and `visual.spec.ts` in
 Chromium. The `mobile` project runs `mobile.spec.ts` and the viewport
 independent specs (`core`, `layers`, `state`) on a phone viewport. The
@@ -166,9 +166,10 @@ their traces in `test-results/`, and every run writes an HTML report to
 `npm run build` produces five bundles. `mapApp.bundle.js` starts the map,
 `features.bundle.js` holds Replay, the relief, the heat cloud and the
 ribbons of a selection of the 3D view and the satellite imagery, and
-`wrapped.bundle.js` holds Wrapped and the content of
-the statistics panel (the rail itself is part of the app, and says it is
-loading until the bundle is in; see `ui/statsPanel.ts`); the page
+`wrapped.bundle.js` holds Wrapped, the content of
+the statistics panel and the flight list of its Flights tab (the rail
+itself is part of the app, and says it is loading until the bundle is in;
+see `ui/statsPanel.ts`); the page
 imports each of the last two the first time one of its features is opened.
 `shared.bundle.js` is the app itself and everything the lazy bundles use of
 it. Their styles are split the same way and travel with them:
@@ -177,7 +178,7 @@ it. Their styles are split the same way and travel with them:
 `services/featureLoader.ts`), and each has its own budget in
 `tests/test_asset_budget.py`. A rule belongs in `features.css` when its
 selector names replay and in `wrapped.css` when it names Wrapped or what the
-statistics panel renders; the file headers spell out the rest, including the one-way dependency on
+statistics rail renders, its tabs and the flight list included; the file headers spell out the rest, including the one-way dependency on
 `styles.css`. The bundler moves the modules the entry points share into a
 chunk that each of them imports, because several of them hold state that
 has to be a single instance. It makes one chunk for every set of entry

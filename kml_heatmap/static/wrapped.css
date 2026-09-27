@@ -1459,3 +1459,171 @@
 .kh-stats-build a:focus-visible {
   color: var(--color-text);
 }
+
+/* ==========================================================================
+   Flight list (the Flights tab of the statistics rail, ui/flightList.ts)
+
+   The rail's two tabs are hidden until this sheet and the code that runs
+   them are in, so they cost the first visit nothing; they take over the
+   header's rule. Below them a search, then a table whose header stays put
+   while the rows scroll. Six columns fit the rail's 316 px at the small
+   size with bare figures, the units in the headers' titles; where they
+   still do not fit, the table scrolls sideways rather than wrapping.
+   ========================================================================== */
+#stats-rail-header {
+  border-bottom: none;
+}
+#stats-rail-tabs:not([hidden]) {
+  display: flex;
+  flex-shrink: 0;
+  padding: 0 var(--space-md);
+  border-bottom: 1px solid var(--color-divider);
+}
+#stats-rail-tabs button {
+  flex: 1;
+  min-height: var(--btn-min-height);
+  font: inherit;
+  font-size: var(--text-md);
+  color: var(--color-text-muted);
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+}
+#stats-rail-tabs button:hover,
+#stats-rail-tabs [aria-selected="true"] {
+  color: var(--color-text);
+}
+#stats-rail-tabs [aria-selected="true"] {
+  border-bottom-color: var(--color-accent-blue);
+}
+#stats-rail-tabs button:focus-visible,
+.kh-flights-search:focus-visible,
+.kh-flights button:focus-visible {
+  outline: 2px solid var(--color-accent-blue);
+  outline-offset: -2px;
+}
+#flight-list-panel:not([hidden]) {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+}
+.kh-flights-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-sm) var(--space-md);
+}
+.kh-flights-search {
+  flex: 1;
+  min-width: 0;
+  min-height: 32px;
+  box-sizing: border-box;
+  padding: 0 var(--space-sm);
+  font: inherit;
+  font-size: var(--text-md);
+  color: var(--color-text);
+  background: var(--color-bg-primary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+}
+.kh-flights-count {
+  color: var(--color-text-muted);
+}
+.kh-flights-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding-bottom: var(--safe-bottom);
+}
+/* The phone's sheet stops above the bar, which keeps clear of the home
+   indicator already */
+body:has(.mobile-bar) .kh-flights-scroll {
+  padding-bottom: 0;
+}
+.kh-flights {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.kh-flights th,
+.kh-flights td {
+  height: 28px;
+  padding: 0 var(--space-xs);
+  text-align: left;
+  font-weight: 400;
+}
+.kh-flights tr > :first-child {
+  padding-left: var(--space-md);
+}
+.kh-flights tr > :last-child {
+  padding-right: var(--space-md);
+}
+.kh-flights .kh-num {
+  text-align: right;
+}
+.kh-flights thead th {
+  position: sticky;
+  top: 0;
+  background: var(--color-bg-secondary);
+  border-bottom: 1px solid var(--color-divider);
+}
+.kh-flights button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+.kh-flights thead button {
+  font-weight: 600;
+  color: var(--color-text-muted);
+}
+.kh-flights thead button:hover,
+.kh-flights [aria-sort] button {
+  color: var(--color-text);
+}
+/* aria-sort says the direction; the arrow is not read out as well */
+.kh-flights [aria-sort="ascending"] button::after {
+  content: "▲" / "";
+}
+.kh-flights [aria-sort="descending"] button::after {
+  content: "▼" / "";
+}
+.kh-flights tbody tr {
+  cursor: pointer;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.kh-flights tbody tr:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text);
+}
+.kh-flights tbody tr:has([aria-pressed="true"]) {
+  background: rgba(var(--color-accent-blue-rgb), 0.15);
+  color: var(--color-accent-blue);
+}
+.kh-flights .kh-flight {
+  font-family: var(--font-mono);
+}
+.kh-flights .kh-flights-empty {
+  padding: var(--space-md);
+  white-space: normal;
+  color: var(--color-text-muted);
+}
+@media (pointer: coarse) {
+  /* Under 16 px iOS zooms the page into a field that takes focus */
+  .kh-flights-search {
+    font-size: 16px;
+  }
+  .kh-flights th,
+  .kh-flights td {
+    height: 40px;
+  }
+}

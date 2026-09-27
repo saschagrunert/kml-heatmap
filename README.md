@@ -38,7 +38,8 @@
 - Interactive density heatmap showing visited locations
 - Altitude and groundspeed colored flight paths
 - Airport markers with ICAO codes and visit counts
-- Statistics panel (distance, altitude, flight time)
+- Statistics panel (distance, altitude, flight time), with a sortable,
+  searchable list of the flights next to it
 - Year and aircraft filtering
 - Flight replay with animated airplane marker
 - A map that turns and tilts, and a globe for flights that span a continent
@@ -738,7 +739,7 @@ output-dir/
 ├── mapApp.bundle.js.map
 ├── features.bundle.js     # Map features a first visit does not need (replay among them), imported on first use
 ├── features.bundle.js.map
-├── wrapped.bundle.js      # Wrapped and the statistics panel, imported on first use
+├── wrapped.bundle.js      # Wrapped, the statistics panel and the flight list, imported on first use
 ├── wrapped.bundle.js.map
 ├── shared.bundle.js       # The app, which the three above import
 ├── shared.bundle.js.map
@@ -747,7 +748,7 @@ output-dir/
 ├── map_config.js          # Map defaults, tile API key and the build stamp
 ├── styles.css             # Linked in the page
 ├── features.css           # The styles of those features, fetched with their bundle
-├── wrapped.css            # Wrapped and the statistics panel, fetched with its bundle
+├── wrapped.css            # Wrapped, the statistics panel and the flight list, fetched with its bundle
 ├── manifest.json
 ├── favicon.svg
 ├── favicon.ico
@@ -876,7 +877,7 @@ the other once it has started.
 
 ### Controls
 
-- **Stats** - View statistics (distance, altitude, airports, flight time). Flight time runs from the first to the last recorded point that moved at the exported precision (about 1 m), so standing perfectly still before and after is not counted, while GPS noise on the ground still is
+- **Stats** - View statistics (distance, altitude, airports, flight time). Flight time runs from the first to the last recorded point that moved at the exported precision (about 1 m), so standing perfectly still before and after is not counted, while GPS noise on the ground still is. The panel's Flights tab lists every flight of the year and aircraft filter with its route, aircraft, year, flight time, distance and highest altitude (a year, never a date). The rows start in the order of the flight files; a column header sorts by it, up, down and back. The search keeps the flights whose airports (code or name), registration or type match every word typed. A click on a row selects that flight alone, and Ctrl or Shift adds it to the selection or takes it out; during a replay the selection stays as it is. The arrow keys move between the two tabs. On a phone the same tabs are inside the statistics sheet
 - **Export** - Save the current map view as a JPG image
 - **Copy link** - Copy the current URL to the clipboard. On a phone, where there is a native share dialog, the More sheet's row says **Share link** and opens that instead
 - **Wrapped** - View the year-in-review summary; Escape closes it
@@ -934,6 +935,8 @@ browser's address bar or use the copy-link button:
 - Satellite imagery (`?s=1`), left out while the ground is the dark map. It
   is a parameter of its own, like `g` and `d`, so the nine flags of `v` and
   every older link stay as they were
+- The Flights tab of the statistics panel (`?l=1`), left out while the
+  panel shows its figures
 - Debug logging in the browser console (`?debug=true`)
 
 **Example URLs:**

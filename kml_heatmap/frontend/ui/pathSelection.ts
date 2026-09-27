@@ -127,6 +127,38 @@ export class PathSelection {
     this.afterSelectionChange();
   }
 
+  /**
+   * A flight picked from a list (the airport popup's, the flight list):
+   * select just this flight, or nothing when it already is the whole
+   * selection. Opening an airport's popup with a click or Enter selected
+   * every flight of the airport, so a plain toggle would leave the others
+   * selected. With `add` (Ctrl or Shift on the flight list) it is added to
+   * the selection, or taken out of it. Ignored while replay runs.
+   *
+   * One flush for the clear and the pick: two had the chip announce
+   * "Selection cleared" before every flight and drew the paths and the
+   * statistics of the empty selection in between.
+   */
+  selectFlight(pathId: number, add = false): void {
+    if (this.app.replayActive) return;
+    const selected = this.app.selectedPathIds;
+    const alone = selected.size === 1 && selected.has(pathId);
+    this.app.store.batch(() => {
+      if (!add) this.clearSelection();
+      if (add || !alone) this.togglePathSelection(pathId);
+    });
+  }
+
+  /** Mark the listed flights' buttons that are part of the selection */
+  markSelected(buttons: Iterable<HTMLElement>): void {
+    for (const button of buttons) {
+      const selected = this.app.selectedPathIds.has(
+        Number(button.dataset["pathId"]),
+      );
+      button.setAttribute("aria-pressed", String(selected));
+    }
+  }
+
   selectPathsByAirport(airportName: string): void {
     const pathIds = this.app.airportToPaths[airportName];
     if (pathIds) {

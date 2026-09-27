@@ -155,32 +155,16 @@ describe("listFlights", () => {
     expect(container.querySelector(".kh-popup-flights")).toBeNull();
   });
 
-  it("selects just the flight, and nothing when it is the selection", () => {
+  it("selects just the flight that is clicked", () => {
     const { popup, container } = openPopup();
     listFlights(asMapApp(mockApp), popup, "EDDP Leipzig");
-    const selection = mockApp.pathSelection;
 
     buttons(container)[1]!.click();
 
-    expect(selection.clearSelection).toHaveBeenCalledTimes(1);
-    expect(selection.togglePathSelection).toHaveBeenCalledWith(12);
-
-    mockApp.selectedPathIds = new Set([12]);
-    selection.togglePathSelection.mockClear();
-    buttons(container)[1]!.click();
-
-    expect(selection.clearSelection).toHaveBeenCalledTimes(2);
-    expect(selection.togglePathSelection).not.toHaveBeenCalled();
-  });
-
-  it("leaves the selection alone while replay runs", () => {
-    const { popup, container } = openPopup();
-    listFlights(asMapApp(mockApp), popup, "EDDP Leipzig");
-    mockApp.replayActive = true;
-
-    buttons(container)[0]!.click();
-
-    expect(mockApp.pathSelection.clearSelection).not.toHaveBeenCalled();
+    // What that means, and during a replay, is PathSelection's to say
+    expect(mockApp.pathSelection.selectFlight).toHaveBeenCalledExactlyOnceWith(
+      12,
+    );
   });
 
   it("marks the selected flights and follows the selection", () => {

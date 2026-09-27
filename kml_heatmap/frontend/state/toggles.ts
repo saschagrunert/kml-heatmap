@@ -172,6 +172,14 @@ export const TOGGLES = [
     panel: true,
   },
   {
+    // Whether the statistics rail shows its Flights tab rather than the
+    // figures (ui/flightList.ts, which also runs the tabs). Every `v` slot
+    // is taken, so it has a parameter of its own.
+    key: "flightListVisible",
+    initial: false,
+    url: { param: "l" },
+  },
+  {
     // Wrapped's dialog, opened and closed by actions of their own
     key: "wrappedVisible",
     initial: false,

@@ -219,6 +219,7 @@ describe("StateManager", () => {
         "satelliteVisible",
         "isolateSelection",
         "statsPanelVisible",
+        "flightListVisible",
         "wrappedVisible",
       ]);
     });
@@ -534,6 +535,7 @@ describe("StateManager", () => {
         selectedAircraft: "all",
         selectedPathIds: [1, 2],
         statsPanelVisible: false,
+        flightListVisible: false,
         wrappedVisible: false,
         isolateSelection: false,
       });
