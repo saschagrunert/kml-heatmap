@@ -11,6 +11,7 @@ import {
   PROFILE_STORAGE_KEY,
 } from "../../../../kml_heatmap/frontend/ui/flightProfile";
 import { REPLAY_PANEL_HEIGHT_VAR } from "../../../../kml_heatmap/frontend/ui/replayManager";
+import { toggleCrossSection } from "../../../../kml_heatmap/frontend/ui/crossSection";
 import {
   resetSiteData,
   siteData,
@@ -577,6 +578,22 @@ describe("flight profile", () => {
       expect(root.hidden).toBe(false);
       expect(toggle.hidden).toBe(false);
       expect(document.body.classList.contains("profile-open")).toBe(true);
+    });
+
+    it("steps aside while the cross-section has the bottom of the map", () => {
+      const { app, root, toggle } = setup();
+      expect(root.hidden).toBe(false);
+
+      toggleCrossSection(asMapApp(app));
+
+      expect(root.hidden).toBe(true);
+      expect(toggle.hidden).toBe(true);
+      expect(document.body.classList.contains("profile-open")).toBe(false);
+
+      toggleCrossSection(asMapApp(app));
+
+      expect(root.hidden).toBe(false);
+      expect(toggle.hidden).toBe(false);
     });
 
     it("gives the slider back when put away during replay", () => {

@@ -68,8 +68,9 @@ export const TOGGLES = [
     label: "Heatmap",
     sheet: { group: "layers", id: "heatmap" },
   },
-  // How the heat is counted, for the heatmap, its lines and the cloud of
-  // the 3D view alike (heatWeight in calculations/heatLines.ts)
+  // How the heat is counted, for the heatmap, its lines, the cloud of the
+  // 3D view and the cross-section alike (heatWeight in
+  // calculations/heatLines.ts)
   {
     // Every flight the same per kilometre: where I have been, rather than
     // where I spend time

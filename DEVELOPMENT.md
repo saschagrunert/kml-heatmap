@@ -165,9 +165,12 @@ their traces in `test-results/`, and every run writes an HTML report to
 
 `npm run build` produces five bundles. `mapApp.bundle.js` starts the map,
 `features.bundle.js` holds Replay, the relief, the heat cloud and the
-ribbons of a selection of the 3D view, the satellite imagery and the places
+ribbons of a selection of the 3D view, the satellite imagery, the places
 new in a year of the New areas switch (Wrapped counts their area with the
-app's code, and never fetches this bundle), and
+app's code, and never fetches this bundle), the profile of a single
+selected flight and the cross-section (`ui/crossSection.ts`; the first
+visit carries only its control in the View group and its row in the
+phone's More sheet), and
 `wrapped.bundle.js` holds Wrapped, the content of
 the statistics panel and the flight list of its Flights tab (the rail
 itself is part of the app, and says it is loading until the bundle is in;

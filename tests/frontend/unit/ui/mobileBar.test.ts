@@ -443,6 +443,7 @@ describe("MobileBar", () => {
       expect(sheetRows()).toEqual([
         "replay",
         "replay-all",
+        "cross-section",
         "isolate",
         "reset-view",
         "export",

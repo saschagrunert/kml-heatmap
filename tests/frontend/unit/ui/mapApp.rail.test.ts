@@ -6,6 +6,7 @@ import {
   cartoTransformRequest,
   BASE_STYLE_RETRY_MS,
   FALLBACK_STYLE,
+  CROSS_SECTION_UNAVAILABLE_MESSAGE,
   REPLAY_UNAVAILABLE_MESSAGE,
   STATS_UNAVAILABLE_MESSAGE,
   WRAPPED_UNAVAILABLE_MESSAGE,
@@ -105,6 +106,7 @@ vi.mock("../../../../kml_heatmap/frontend/services/featureLoader", () => ({
       // The satellite switch hands itself over to the bundle
       followSatellite: vi.fn(),
       toggleReplayAll: m.toggleReplayAll,
+      toggleCrossSection: m.toggleCrossSection,
       // And a single selected flight to its profile
       followFlightProfile: vi.fn(),
     }),
@@ -894,6 +896,55 @@ describe("MapApp controls and map", () => {
       );
       await Promise.resolve();
       expect(m.toggleReplayAll).toHaveBeenCalledTimes(1);
+    });
+
+    it("opens the cross-section once for quick clicks while the bundle loads", async () => {
+      await initializeApp(app);
+      let deliver: () => void = () => {};
+      const bundle = await loadFeatures();
+      vi.mocked(loadFeatures).mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            deliver = () => resolve(bundle);
+          }),
+      );
+      m.toggleCrossSection.mockClear();
+
+      app.toggleCrossSection();
+      app.toggleCrossSection();
+      deliver();
+
+      await vi.waitFor(() =>
+        expect(m.toggleCrossSection).toHaveBeenCalledWith(app),
+      );
+      await Promise.resolve();
+      expect(m.toggleCrossSection).toHaveBeenCalledTimes(1);
+    });
+
+    it("drops a Cross-section click the app went before", async () => {
+      await initializeApp(app);
+      m.toggleCrossSection.mockClear();
+
+      app.toggleCrossSection();
+      app.destroy();
+      await vi.waitFor(() => expect(loadFeatures).toHaveBeenCalled());
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(m.toggleCrossSection).not.toHaveBeenCalled();
+    });
+
+    it("says so when the cross-section cannot fetch the bundle", async () => {
+      await initializeApp(app);
+      vi.mocked(loadFeatures).mockResolvedValueOnce(null);
+
+      app.toggleCrossSection();
+
+      await vi.waitFor(() =>
+        expect(showToast).toHaveBeenCalledWith(
+          CROSS_SECTION_UNAVAILABLE_MESSAGE,
+          "error",
+        ),
+      );
     });
 
     it("drops a Replay all click still waiting for the bundle", async () => {
