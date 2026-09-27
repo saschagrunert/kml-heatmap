@@ -104,6 +104,7 @@ vi.mock("../../../../kml_heatmap/frontend/services/featureLoader", () => ({
       }),
       // The satellite switch hands itself over to the bundle
       followSatellite: vi.fn(),
+      toggleReplayAll: m.toggleReplayAll,
     }),
   ),
   loadWrapped: vi.fn(() =>
@@ -772,6 +773,64 @@ describe("MapApp controls and map", () => {
       await Promise.resolve();
 
       expect(m.mockReplayManagerInstance.toggleReplay).not.toHaveBeenCalled();
+    });
+
+    it("opens Replay all once for quick clicks while the bundle loads", async () => {
+      await initializeApp(app);
+      let deliver: () => void = () => {};
+      const bundle = await loadFeatures();
+      vi.mocked(loadFeatures).mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            deliver = () => resolve(bundle);
+          }),
+      );
+      m.toggleReplayAll.mockClear();
+
+      app.toggleReplayAll();
+      app.toggleReplayAll();
+      deliver();
+
+      await vi.waitFor(() =>
+        expect(m.toggleReplayAll).toHaveBeenCalledWith(app),
+      );
+      await Promise.resolve();
+      expect(m.toggleReplayAll).toHaveBeenCalledTimes(1);
+    });
+
+    it("drops a Replay all click still waiting for the bundle", async () => {
+      await initializeApp(app);
+      let deliver: () => void = () => {};
+      const bundle = await loadFeatures();
+      vi.mocked(loadFeatures).mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            deliver = () => resolve(bundle);
+          }),
+      );
+      m.toggleReplayAll.mockClear();
+
+      app.toggleReplayAll();
+      app.destroy();
+      deliver();
+      await vi.waitFor(() => expect(loadFeatures).toHaveBeenCalled());
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(m.toggleReplayAll).not.toHaveBeenCalled();
+    });
+
+    it("says so when Replay all cannot fetch the bundle", async () => {
+      await initializeApp(app);
+      vi.mocked(loadFeatures).mockResolvedValueOnce(null);
+
+      app.toggleReplayAll();
+
+      await vi.waitFor(() =>
+        expect(showToast).toHaveBeenCalledWith(
+          REPLAY_UNAVAILABLE_MESSAGE,
+          "error",
+        ),
+      );
     });
   });
 

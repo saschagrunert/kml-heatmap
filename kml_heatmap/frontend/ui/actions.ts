@@ -17,6 +17,7 @@ export const DEFERRED_WHILE_INITIALIZING: ReadonlySet<ActionName> =
     "filterByYear",
     "filterByAircraft",
     "toggleReplay",
+    "toggleReplayAll",
     "playReplay",
     "pauseReplay",
     "stopReplay",
@@ -55,10 +56,11 @@ function actionHandlers(app: MapApp) {
       app.resetView().catch(logError);
     },
     // Replay and Wrapped live in lazily loaded bundles. Only
-    // these two can be the first thing a visitor touches; the rest are on
+    // these three can be the first thing a visitor touches; the rest are on
     // chrome that exists only once the feature is open, so they find the
     // manager already there.
     toggleReplay: () => app.toggleReplay(),
+    toggleReplayAll: () => app.toggleReplayAll(),
     filterByYear: () => {
       app.filterManager.filterByYear().catch(logError);
     },

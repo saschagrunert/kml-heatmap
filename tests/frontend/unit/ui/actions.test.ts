@@ -21,6 +21,7 @@ const BUTTON_ACTIONS = [
   "resetNorth",
   "resetView",
   "toggleReplay",
+  "toggleReplayAll",
   "exportMap",
   "shareLink",
   "showWrapped",
@@ -154,6 +155,12 @@ describe("bindActions", () => {
     expect(app.replayManager.seekReplay).toHaveBeenCalledWith("50");
     expect(app.replayManager.changeReplaySpeed).toHaveBeenCalledTimes(1);
     expect(app.replayManager.toggleAutoZoom).toHaveBeenCalledTimes(1);
+  });
+
+  it("binds Replay all, which the app fetches with the feature bundle", () => {
+    elements["toggleReplayAll"]!.click();
+
+    expect(app.toggleReplayAll).toHaveBeenCalledTimes(1);
   });
 
   it("binds the filters to the change event", () => {

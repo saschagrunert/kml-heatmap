@@ -200,6 +200,18 @@ describe("layer visibility", () => {
     expect(legend.hidden).toBe(true);
   });
 
+  it("shows no altitude scale for the replay of every flight, whose trails take no colours", () => {
+    followLayerVisibility(asMapApp(app));
+    const legend = el("altitude-legend");
+
+    app.replayState.all = true;
+    app.replayActive = true;
+    expect(legend.hidden).toBe(true);
+
+    app.replayActive = false;
+    app.replayState.all = false;
+  });
+
   it("dims the heatmap as the colour flags change", () => {
     followLayerVisibility(asMapApp(app));
     app.dataManager.applyHeatmapEmphasis.mockClear();

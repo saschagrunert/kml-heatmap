@@ -439,6 +439,7 @@ describe("MobileBar", () => {
       expect(sheetTitle()).toBe("More");
       expect(sheetRows()).toEqual([
         "replay",
+        "replay-all",
         "isolate",
         "reset-view",
         "export",
