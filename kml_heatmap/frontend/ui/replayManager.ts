@@ -82,6 +82,7 @@ const REPLAY_DISABLED_CONTROL_IDS = [
   "isolate-btn",
   "selection-clear-btn",
   "reset-view-btn",
+  "replay-all-btn",
 ];
 
 /** Custom property holding the replay panel's height, read by styles.css */
@@ -185,6 +186,8 @@ export class ReplayManager {
       "keydown",
       (event) => {
         if (event.key !== "Escape" || !app.replayActive) return;
+        // The replay of every flight has an Escape of its own
+        if (app.replayState.all) return;
         if (event.defaultPrevented) return;
         const target = event.target;
         if (

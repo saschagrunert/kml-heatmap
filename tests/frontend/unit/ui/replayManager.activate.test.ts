@@ -321,6 +321,18 @@ describe("ReplayManager activation", () => {
       expect(mockApp.replayActive).toBe(false);
     });
 
+    it("leaves Escape to the replay of every flight, which has its own", () => {
+      mockApp.replayState.all = true;
+      mockApp.replayActive = true;
+
+      document.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Escape", cancelable: true }),
+      );
+
+      expect(mockApp.replayActive).toBe(true);
+      mockApp.replayState.all = false;
+    });
+
     it("leaves Escape to the speed picker and to a popup", () => {
       mockApp.selectedPathIds = new Set([1]);
       replayManager.toggleReplay();

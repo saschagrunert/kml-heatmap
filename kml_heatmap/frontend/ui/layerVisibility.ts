@@ -60,10 +60,14 @@ export function dimsHeatmap(app: MapApp): boolean {
 
 /**
  * Whether paths are coloured by altitude: the altitude layer, or a replay
- * trail, which takes altitude colours unless the speed layer is on
+ * trail, which takes altitude colours unless the speed layer is on. The
+ * trails of the replay of every flight take none.
  */
 export function altitudeColours(app: MapApp): boolean {
-  return app.altitudeVisible || (app.replayActive && !app.airspeedVisible);
+  return (
+    app.altitudeVisible ||
+    (app.replayActive && !app.replayState.all && !app.airspeedVisible)
+  );
 }
 
 /**

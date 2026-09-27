@@ -93,6 +93,9 @@ export const mockWrappedManagerInstance = {
   destroy: vi.fn(),
 };
 
+/** The feature bundle's toggle of the replay of all flights */
+export const toggleReplayAll = vi.fn();
+
 export const mockUITogglesInstance = {
   toggleHeatmap: vi.fn(),
   toggleAltitude: vi.fn(),

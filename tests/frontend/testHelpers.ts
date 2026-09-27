@@ -163,6 +163,7 @@ interface MockManagers {
   replayState: ReplayState;
   canReplay: Mock;
   toggleReplay: Mock;
+  toggleReplayAll: Mock;
   resetView: Mock;
   isReset: Mock;
   canResetView: Mock;
@@ -366,6 +367,7 @@ function createMockManagers(): MockManagers {
     toggleReplay: vi.fn(() => {
       replayManager.toggleReplay();
     }),
+    toggleReplayAll: vi.fn(),
     resetView: vi.fn(() => Promise.resolve()),
     // Something to reset unless a test says otherwise
     isReset: vi.fn(() => false),

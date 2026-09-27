@@ -405,6 +405,13 @@ export class MobileBar {
           runAction(app, "toggleReplay");
         },
       },
+      {
+        kind: "action",
+        id: "replay-all",
+        icon: "play",
+        label: "Replay all",
+        onSelect: () => runAction(app, "toggleReplayAll"),
+      },
       ...this.toggleRows("more"),
       {
         kind: "action",

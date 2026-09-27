@@ -39,11 +39,13 @@ const COLUMN_OFFSET = 2 ** 21;
  * of the next one of its path is when it ends. The last segment of a path,
  * and a track without times (a planned route, an old export), fall back to
  * its length at its groundspeed, and to no time at all without either.
- * The heat cloud of the 3D view counts the time alike (heatCloud.ts).
+ * The heat cloud of the 3D view counts the time alike (heatCloud.ts). It
+ * is at most `most` seconds, MAX_SEGMENT_S for the heat.
  */
 export function segmentSeconds(
   segment: PathSegment,
   next: PathSegment | undefined,
+  most = MAX_SEGMENT_S,
 ): number {
   let seconds = -1;
   if (
@@ -61,7 +63,7 @@ export function segmentSeconds(
           (knots * KNOTS_TO_METRES_PER_SECOND)
         : 0;
   }
-  return Math.min(seconds, MAX_SEGMENT_S);
+  return Math.min(seconds, most);
 }
 
 /** The cells of the grid: a row per `HEAT_CELL_M` of latitude */

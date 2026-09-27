@@ -302,7 +302,11 @@ const BUDGET_APP = { raw: 147.5 * 1024, gzip: 51.25 * 1024 };
 // 3D view, cut around the view only when zoomed in: 58.1 KB raw and
 // 21.08 KB gzipped in a local build, about 21.19 KB in CI; the budget keeps
 // the room the policy asks for.
-const BUDGET_FEATURES = { raw: 60 * 1024, gzip: 22.25 * 1024 };
+// Raised from 60 KB and 22.25 KB for the replay of all flights (its layer,
+// with shaders of its own, the player, its panel, and the clock of every
+// flight): 75.54 KB raw and 25.97 KB gzipped in a local build, about
+// 26.07 KB in CI going by the 0.4 % above.
+const BUDGET_FEATURES = { raw: 77 * 1024, gzip: 26.75 * 1024 };
 
 // The Wrapped bundle is fetched only when the Wrapped dialog or the
 // statistics panel is first opened, and not with replay's code or replay

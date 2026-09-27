@@ -41,10 +41,11 @@ from kml_heatmap.site_assets import CSS_FILES, STATIC_DIR, _copy_and_minify_css
 # was raised from 26 KB for the statistics panel, which comes with the
 # Wrapped bundle (28,811 B after), and from 30 KB for the flight list and the
 # tabs of the statistics rail, which show once it is in (28,603 B before,
-# 31,495 B after).
+# 31,495 B after). features.css was raised from 7 KB for the panel of the
+# replay of all flights (6,298 B before, 7,551 B after).
 STYLESHEET_BUDGET_BYTES = {
     "styles.css": 40 * 1024,
-    "features.css": 7 * 1024,
+    "features.css": 8 * 1024,
     "wrapped.css": 33 * 1024,
 }
 

@@ -260,7 +260,8 @@
 
 /* The toasts stand in the middle of the bottom edge, where the panel is, and
    covered its readouts: during a replay they stack above it instead */
-body.replay-active .toast-stack {
+body.replay-active .toast-stack,
+body.replay-all-active .toast-stack {
   bottom: calc(
     var(--space-lg) + var(--safe-bottom) + var(--replay-panel-h, 0px) +
       var(--space-sm)
@@ -293,6 +294,53 @@ body.replay-active .toast-stack {
 @media (min-width: 768px) and (max-width: 899.98px) {
   body.stats-open.replay-active #github-footer {
     visibility: hidden;
+  }
+}
+
+/* ==========================================================================
+   Replay of all flights (ui/replayAll.ts): one row, where the replay of one
+   flight has its panel
+   ========================================================================== */
+#replay-all-controls {
+  position: fixed;
+  bottom: calc(var(--space-lg) + var(--safe-bottom));
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  gap: var(--space-sm);
+  background-color: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-panel);
+  padding: var(--space-sm) var(--space-md);
+  z-index: var(--z-controls);
+  box-shadow: var(--shadow-panel);
+  max-width: calc(100vw - 2 * var(--edge-gap));
+}
+#replay-all-controls[hidden] {
+  display: none;
+}
+#replay-all-controls > button {
+  font-size: var(--icon-sm);
+  padding: 0;
+  min-width: 44px;
+  line-height: 1;
+}
+#replay-all-clock {
+  color: var(--color-text);
+  font-weight: 600;
+  font-family: var(--font-mono);
+  white-space: nowrap;
+}
+/* The colour legends say nothing of these trails */
+body.replay-all-active .color-legend {
+  visibility: hidden;
+}
+@media (min-width: 768px) {
+  body.stats-open #replay-all-controls {
+    left: calc(50% + var(--stats-rail-w) / 2);
   }
 }
 
@@ -345,6 +393,16 @@ body.replay-active .toast-stack {
   body.replay-active #github-footer {
     visibility: hidden;
   }
+  #replay-all-controls {
+    left: calc(var(--edge-gap) + var(--safe-left));
+    right: calc(var(--edge-gap) + var(--safe-right));
+    bottom: calc(var(--attribution-h) + var(--space-sm) + var(--safe-bottom));
+    transform: none;
+  }
+  body.replay-all-active #github-footer,
+  body.replay-all-active #stats-rail {
+    visibility: hidden;
+  }
   /* Legends are covered by the replay panel on small screens */
   body.replay-active #altitude-legend,
   body.replay-active #airspeed-legend {
@@ -356,7 +414,8 @@ body.replay-active .toast-stack {
   body.replay-active #stats-rail {
     visibility: hidden;
   }
-  body.replay-active .toast-stack {
+  body.replay-active .toast-stack,
+  body.replay-all-active .toast-stack {
     bottom: calc(
       var(--attribution-h) + var(--space-sm) + var(--safe-bottom) +
         var(--replay-panel-h, 0px) + var(--space-sm)
@@ -373,7 +432,8 @@ body.replay-active .toast-stack {
 /* Raised contrast gives the panels' borders real weight (see styles.css);
    this one's rule comes after that list, so it is repeated here */
 @media (prefers-contrast: more) {
-  #replay-controls {
+  #replay-controls,
+  #replay-all-controls {
     border-width: 2px;
   }
 }

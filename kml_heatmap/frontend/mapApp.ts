@@ -277,6 +277,8 @@ export class MapApp {
   private readonly lifetime = new AbortController();
   /** Set while a click on Replay waits for the feature bundle */
   private pendingReplayToggle: Promise<void> | null = null;
+  /** Set while a click on Replay all waits for the feature bundle */
+  private pendingReplayAllToggle: Promise<void> | null = null;
   /**
    * Where the last fit to the start view takes the camera: the one of a
    * first visit, measured as the map opens, then that of every Reset view.
@@ -1095,6 +1097,26 @@ export class MapApp {
       })
       .catch((error) => {
         this.pendingReplayToggle = null;
+        logError(error);
+      });
+  }
+
+  /**
+   * Open or close the replay of all flights (ui/replayAll.ts), which comes
+   * with the feature bundle. As for Replay, a click while the bundle is on
+   * its way is dropped, and one that loads nothing says so.
+   */
+  toggleReplayAll(): void {
+    this.pendingReplayAllToggle ??= this.loadLazyBundle(
+      loadFeatures,
+      REPLAY_UNAVAILABLE_MESSAGE,
+    )
+      .then((features) => {
+        this.pendingReplayAllToggle = null;
+        if (!this.destroyed) features?.toggleReplayAll(this);
+      })
+      .catch((error: unknown) => {
+        this.pendingReplayAllToggle = null;
         logError(error);
       });
   }

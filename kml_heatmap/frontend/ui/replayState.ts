@@ -60,6 +60,8 @@ export interface ReplayAirplane extends PopupHost {
 
 /** Whether a replay runs is the store's `replayActive` */
 export class ReplayState {
+  /** Whether the replay running is the one of every flight (ui/replayAll.ts) */
+  all = false;
   playing = false;
   currentTime = 0;
   maxTime = 0;
