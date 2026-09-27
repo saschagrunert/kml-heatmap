@@ -394,6 +394,34 @@ test.describe("Mobile bar", () => {
     await expect(tab).toHaveAttribute("aria-expanded", "false");
   });
 
+  test("the statistics sheet lists the flights on its own Flights tab", async ({
+    page,
+  }) => {
+    await toggleStatsPanel(page);
+    const flightsTab = page.locator("#flights-tab");
+    const list = page.locator("#flight-list-panel");
+
+    // Inside the sheet, not a sixth tab of the bar
+    await expect(page.locator(".mobile-tab")).toHaveCount(TABS.length);
+    await flightsTab.click();
+
+    await expect(flightsTab).toHaveAttribute("aria-selected", "true");
+    await expect(page.locator("#stats-panel")).toBeHidden();
+    const flight = list.locator("tbody .kh-flight").first();
+    await expect(flight).toBeVisible();
+
+    // A tap picks one flight at a time
+    await flight.click();
+
+    await expect(flight).toHaveAttribute("aria-pressed", "true");
+    await expect(page.locator("#selection-chip-count")).toHaveText(
+      "1 flight selected",
+    );
+
+    await page.locator("#stats-tab").click();
+    await expect(page.locator("#stats-panel .kh-stats")).toBeVisible();
+  });
+
   test("the Wrapped tab opens the year in review", async ({ page }) => {
     const tab = page.locator("#mobile-tab-wrapped");
     const modal = page.locator("#wrapped-modal");

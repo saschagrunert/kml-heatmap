@@ -437,12 +437,47 @@
           aria-expanded="false"
         ></button>
       </div>
+      <!-- The figures and the flight list share the rail, and the phone's
+           statistics sheet with it. The tabs show once the code that runs
+           them has loaded (ui/flightList.ts). -->
+      <div
+        id="stats-rail-tabs"
+        role="tablist"
+        aria-label="Statistics rail"
+        hidden
+      >
+        <button
+          id="stats-tab"
+          type="button"
+          role="tab"
+          aria-controls="stats-panel"
+          aria-selected="true"
+        >
+          Statistics
+        </button>
+        <button
+          id="flights-tab"
+          type="button"
+          role="tab"
+          aria-controls="flight-list-panel"
+          aria-selected="false"
+          tabindex="-1"
+        >
+          Flights
+        </button>
+      </div>
       <!-- Focusable: the panel scrolls (bottom sheet on small screens) -->
       <div
         id="stats-panel"
-        role="region"
-        aria-label="Flight statistics"
+        role="tabpanel"
+        aria-labelledby="stats-tab"
         tabindex="0"
+      ></div>
+      <div
+        id="flight-list-panel"
+        role="tabpanel"
+        aria-labelledby="flights-tab"
+        hidden
       ></div>
     </div>
     <div

@@ -3,7 +3,8 @@
  *
  * Part of the lazily loaded Wrapped bundle (wrapped.ts): the app starts it
  * the first time the panel opens (see ui/statsPanel.ts), and it follows the
- * store from then on.
+ * store from then on. It starts the flight list of the rail's other tab
+ * (ui/flightList.ts) as well, which costs the app nothing that way.
  */
 import type { MapApp } from "../mapApp";
 import type { FilteredStatistics, PathInfo, PathSegment } from "../types";
@@ -31,6 +32,7 @@ import { domCache } from "../utils/domCache";
 import { datasetIndex } from "../calculations/datasetIndex";
 import { watchScrollEnd, type ScrollEndWatcher } from "../utils/scrollFade";
 import { setStatsTitle, STATS_PANEL_ID as PANEL_ID } from "./statsPanel";
+import { FlightList } from "./flightList";
 
 /** Store keys the rendered statistics depend on */
 const STATS_KEYS = [
@@ -462,22 +464,29 @@ export class StatsManager {
   private lastInputs: StatsInputs | null = null;
   /** Stops following the store (see destroy) */
   private readonly unsubscribe: (() => void)[];
+  /** The Flights tab of the same rail */
+  private readonly flightList: FlightList;
 
   constructor(app: MapApp) {
     this.app = app;
 
     // The panel follows the data, the filters and the selection; nothing has
     // to call it. The statistics walk every segment of the filter, so they
-    // are only computed for an open panel, and once per update however many
-    // of the keys it changed.
-    const followData = app.store.subscribeKeys(STATS_KEYS, () => {
-      if (app.statsPanelVisible) this.updateStatsForSelection();
-    });
+    // are only computed for an open panel (the rail open on its Statistics
+    // tab), and once per update however many of the keys it changed.
+    const showing = (): boolean =>
+      app.statsPanelVisible && !app.flightListVisible;
+    const followData = app.store.subscribeKeys(
+      [...STATS_KEYS, "flightListVisible"],
+      () => {
+        if (showing()) this.updateStatsForSelection();
+      },
+    );
     // The rail on desktop and the Stats tab on mobile both open this panel
     // through the same key. Opening it renders whatever changed while it was
     // closed; lastInputs skips the work when nothing did.
-    const followPanel = app.store.subscribe("statsPanelVisible", (visible) => {
-      if (!visible) return;
+    const followPanel = app.store.subscribe("statsPanelVisible", () => {
+      if (!showing()) return;
       this.updateStatsForSelection();
       // A closed rail measures zero, so whatever the panel was told about
       // its own overflow while it was hidden was "everything fits". The
@@ -490,10 +499,12 @@ export class StatsManager {
     const panel = domCache.get(PANEL_ID);
     if (panel) this.scrollWatcher = watchScrollEnd(panel);
     this.unsubscribe = [followData, followPanel];
+    // The rail's other tab, which runs both tabs
+    this.flightList = new FlightList(app);
 
     // Started by the first opening of the panel, which is over by the time
     // the bundle has arrived: it shows what it holds straight away
-    if (app.statsPanelVisible) this.updateStatsForSelection();
+    if (showing()) this.updateStatsForSelection();
   }
 
   /**
@@ -506,6 +517,7 @@ export class StatsManager {
     this.unsubscribe.length = 0;
     this.scrollWatcher?.stop();
     this.scrollWatcher = null;
+    this.flightList.destroy();
   }
 
   /** The inputs of the current state, in a shape that compares cheaply */

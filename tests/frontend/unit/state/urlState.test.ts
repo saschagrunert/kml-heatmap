@@ -60,6 +60,7 @@ function randomState(rnd: () => number): AppState {
     globeVisible: bool(),
     threeDVisible: bool(),
     satelliteVisible: bool(),
+    flightListVisible: bool(),
   };
 }
 
@@ -467,6 +468,7 @@ describe("URL state management", () => {
         if (!state.globeVisible) delete expected.globeVisible;
         if (!state.threeDVisible) delete expected.threeDVisible;
         if (!state.satelliteVisible) delete expected.satelliteVisible;
+        if (!state.flightListVisible) delete expected.flightListVisible;
         const flags = [
           state.heatmapVisible,
           state.altitudeVisible,
@@ -518,6 +520,7 @@ describe("URL state management", () => {
       satelliteVisible: "s=1",
       isolateSelection: "v=100100001",
       statsPanelVisible: "v=100101000",
+      flightListVisible: "l=1",
       wrappedVisible: "v=100100100",
     };
 

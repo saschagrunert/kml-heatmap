@@ -14,6 +14,7 @@
  */
 import type { Popup } from "maplibre-gl";
 import type { MapApp } from "../mapApp";
+import type { PathInfo } from "../types";
 import { datasetIndex } from "../calculations/datasetIndex";
 import { escapeHtml } from "../utils/htmlGenerators";
 import { airportCode } from "../features/airports";
@@ -28,6 +29,14 @@ let listEnd: ScrollEndWatcher | null = null;
 /** An airport as the list names it: its code where it has one */
 function routeEnd(label = "?"): string {
   return airportCode(label) ?? label;
+}
+
+/**
+ * A flight's route by the codes of its airports ("EDAQ → EDDP"), the way
+ * this list and the flight list of the statistics rail name it
+ */
+export function flightRoute(path: PathInfo): string {
+  return routeEnd(path.start_airport) + " → " + routeEnd(path.end_airport);
 }
 
 /**
@@ -54,11 +63,7 @@ export function listFlights(app: MapApp, popup: Popup, name: string): void {
   for (const id of app.airportToPaths[name] ?? []) {
     const path = byId.get(id);
     if (!path) continue;
-    const label = [
-      routeEnd(path.start_airport) + " → " + routeEnd(path.end_airport),
-      path.aircraft_registration,
-      path.year,
-    ]
+    const label = [flightRoute(path), path.aircraft_registration, path.year]
       .filter(Boolean)
       .join(" · ");
     html +=
@@ -89,8 +94,8 @@ export function listFlights(app: MapApp, popup: Popup, name: string): void {
     const button = (event.target as Element).closest<HTMLElement>(
       "[data-path-id]",
     );
-    if (button && !app.replayActive) {
-      selectFlight(app, Number(button.dataset["pathId"]));
+    if (button) {
+      app.pathSelection.selectFlight(Number(button.dataset["pathId"]));
     }
   });
 
@@ -101,24 +106,9 @@ export function listFlights(app: MapApp, popup: Popup, name: string): void {
   }
 }
 
-/**
- * Select just this flight, or nothing when it already is the whole
- * selection. Opening the popup with a click or Enter selected every flight
- * of the airport, so a plain toggle would leave the others selected.
- */
-function selectFlight(app: MapApp, pathId: number): void {
-  const selected = app.selectedPathIds;
-  const alone = selected.size === 1 && selected.has(pathId);
-  app.pathSelection.clearSelection();
-  if (!alone) app.pathSelection.togglePathSelection(pathId);
-}
-
 /** Mark the listed flights that are part of the selection */
 function markSelected(app: MapApp): void {
-  for (const button of document.querySelectorAll<HTMLElement>(
-    ".kh-popup-flight",
-  )) {
-    const selected = app.selectedPathIds.has(Number(button.dataset["pathId"]));
-    button.setAttribute("aria-pressed", String(selected));
-  }
+  app.pathSelection.markSelected(
+    document.querySelectorAll<HTMLElement>(".kh-popup-flight"),
+  );
 }

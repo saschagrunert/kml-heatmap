@@ -824,6 +824,21 @@ describe("StatsManager", () => {
       filterSpy.mockRestore();
     });
 
+    it("computes nothing behind the Flights tab, and catches up after", () => {
+      const spy = vi.spyOn(panelStats, "filterStatistics");
+      mockApp.flightListVisible = true;
+      mockApp.store.set("statsPanelVisible", true);
+      mockApp.selectedYear = "2025";
+
+      expect(spy).not.toHaveBeenCalled();
+      expect(statsPanel.firstChild).toBeNull();
+
+      mockApp.flightListVisible = false;
+
+      expect(leadValue(statsPanel, "Flights")).toBe("1");
+      spy.mockRestore();
+    });
+
     it("renders what changed while closed when the panel opens", () => {
       mockApp.selectedYear = "2025";
 

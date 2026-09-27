@@ -408,6 +408,87 @@ describe("PathSelection", () => {
       expect(mockApp.isolateSelection).toBe(false);
       expect(rebuilds()).toBe(0);
     });
+
+    it("ignores a flight picked from a list, alone or added", () => {
+      pathSelection.selectFlight(2);
+      pathSelection.selectFlight(3, true);
+
+      expect([...mockApp.selectedPathIds]).toEqual([1]);
+    });
+  });
+
+  describe("selectFlight", () => {
+    it("selects just the flight", () => {
+      mockApp.selectedPathIds.add(1);
+      mockApp.selectedPathIds.add(2);
+
+      pathSelection.selectFlight(3);
+
+      expect([...mockApp.selectedPathIds]).toEqual([3]);
+    });
+
+    it("keeps the flight alone when it is one of several", () => {
+      mockApp.selectedPathIds.add(1);
+      mockApp.selectedPathIds.add(2);
+
+      pathSelection.selectFlight(2);
+
+      expect([...mockApp.selectedPathIds]).toEqual([2]);
+    });
+
+    it("selects nothing when the flight is the whole selection", () => {
+      mockApp.selectedPathIds.add(2);
+      mockApp.isolateSelection = true;
+
+      pathSelection.selectFlight(2);
+
+      expect(mockApp.selectedPathIds.size).toBe(0);
+      expect(mockApp.isolateSelection).toBe(false);
+    });
+
+    it("swaps the selection in one update, announced once", () => {
+      mockApp.selectedPathIds.add(1);
+      mockApp.selectedPathIds.add(3);
+      mockApp.store.notifyMutation("selectedPathIds");
+      toastMock.announceStatus.mockClear();
+      const updates = vi.fn();
+      mockApp.store.subscribe("selectedPathIds", updates);
+
+      pathSelection.selectFlight(2);
+
+      expect(updates).toHaveBeenCalledOnce();
+      expect(toastMock.announceStatus).toHaveBeenCalledExactlyOnceWith(
+        "1 flight selected",
+      );
+    });
+
+    it("adds the flight to the selection, or takes it out", () => {
+      mockApp.selectedPathIds.add(1);
+
+      pathSelection.selectFlight(2, true);
+      expect([...mockApp.selectedPathIds]).toEqual([1, 2]);
+
+      pathSelection.selectFlight(1, true);
+      expect([...mockApp.selectedPathIds]).toEqual([2]);
+    });
+  });
+
+  describe("markSelected", () => {
+    it("presses the buttons of the selected flights only", () => {
+      mockApp.selectedPathIds.add(2);
+      const buttons = [1, 2].map((id) => {
+        const button = document.createElement("button");
+        button.dataset["pathId"] = String(id);
+        return button;
+      });
+
+      pathSelection.markSelected(buttons);
+
+      expect(buttons.map((b) => b.getAttribute("aria-pressed"))).toEqual([
+        "false",
+        "true",
+      ]);
+    });
   });
 
   describe("selection chip", () => {

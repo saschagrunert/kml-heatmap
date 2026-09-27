@@ -39,11 +39,13 @@ from kml_heatmap.site_assets import CSS_FILES, STATIC_DIR, _copy_and_minify_css
 # Wrapped got a bundle of its own; split, they minify to 5.0 KB (replay) and
 # 23.2 KB (Wrapped), and each budget keeps about 2 KB over that. wrapped.css
 # was raised from 26 KB for the statistics panel, which comes with the
-# Wrapped bundle (28,811 B after).
+# Wrapped bundle (28,811 B after), and from 30 KB for the flight list and the
+# tabs of the statistics rail, which show once it is in (28,603 B before,
+# 31,495 B after).
 STYLESHEET_BUDGET_BYTES = {
     "styles.css": 40 * 1024,
     "features.css": 7 * 1024,
-    "wrapped.css": 30 * 1024,
+    "wrapped.css": 33 * 1024,
 }
 
 

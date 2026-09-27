@@ -315,8 +315,11 @@ const BUDGET_FEATURES = { raw: 60 * 1024, gzip: 22.25 * 1024 };
 // room the fixes of the second review of 2026-09-25 had taken to 0.6 KB:
 // 25.83 KB raw and 8.65 KB gzipped in CI (the run of 7a79b77), and with
 // the statistics panel's own teardown 25.98 KB raw and 8.68 KB gzipped in
-// a local build.
-const BUDGET_WRAPPED = { raw: 28 * 1024, gzip: 9.75 * 1024 };
+// a local build. Raised from 28 KB and 9.75 KB for the flight list, the
+// Flights tab of the statistics rail with its flight times and distances:
+// 26.83 KB raw and 8.92 KB gzipped before, 32.85 KB raw and 10.94 KB
+// gzipped after, in a local build.
+const BUDGET_WRAPPED = { raw: 35 * 1024, gzip: 12 * 1024 };
 
 // The year worker's bundle is fetched by every visit, but next to the first
 // year file rather than ahead of the app, so it holds up nothing on the page.
