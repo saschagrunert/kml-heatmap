@@ -57,6 +57,11 @@ export interface StoreState extends ToggleFlags {
    */
   forcedHeatCloud: boolean;
   /**
+   * The heights above ground whose heat the 3D view's cloud shows, as a
+   * link writes them (see calculations/heightBand.ts): "" for all of them
+   */
+  heightBand: string;
+  /**
    * Whether the 3D view draws the lines of a selection as ribbons at their
    * height, for which the flat lines step aside (see ui/selectionRibbons.ts,
    * its only writer)
@@ -102,6 +107,7 @@ export const STORE_ACCESSOR_KEYS = [
   "reliefLevel",
   "heatCloud",
   "forcedHeatCloud",
+  "heightBand",
   "selectionRibbons",
   "replayActive",
   "currentData",
@@ -147,6 +153,7 @@ export function createDefaultState(): StoreState {
     reliefLevel: 0,
     heatCloud: false,
     forcedHeatCloud: false,
+    heightBand: "",
     selectionRibbons: false,
     replayActive: false,
     currentData: null,

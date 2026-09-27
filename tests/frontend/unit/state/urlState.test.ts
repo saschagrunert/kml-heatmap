@@ -617,4 +617,37 @@ describe("URL state management", () => {
       );
     });
   });
+
+  describe("the heat cloud's band of heights", () => {
+    it("reads the feet above ground from and to, the top left out for none", () => {
+      expect(parseUrlParams("h=500-3000")).toEqual({ heightBand: "500-3000" });
+      expect(parseUrlParams("h=1000-")).toEqual({ heightBand: "1000-" });
+    });
+
+    it("ignores a band that is not two heights", () => {
+      for (const band of ["", "500", "-3000", "500-3000-", "a-b", "123456-"]) {
+        expect(parseUrlParams(`y=2025&h=${band}`), band).toEqual({
+          selectedYear: "2025",
+        });
+      }
+    });
+
+    it("writes the band, and nothing for every height", () => {
+      expect(encodeStateToUrl({ heightBand: "500-3000" })).toBe("h=500-3000");
+      expect(encodeStateToUrl({ heightBand: "1000-" })).toBe("h=1000-");
+      expect(encodeStateToUrl({ heightBand: "" })).toBe("");
+    });
+
+    it("comes back from a link as it was written, with the rest of the view", () => {
+      const state: AppState = {
+        selectedYear: "2025",
+        threeDVisible: true,
+        pitch: 60,
+        heightBand: "0-1500",
+      };
+      const link = encodeStateToUrl(state);
+      expect(link).toBe("y=2025&t=60&d=1&h=0-1500");
+      expect(parseUrlParams(link)).toEqual(state);
+    });
+  });
 });

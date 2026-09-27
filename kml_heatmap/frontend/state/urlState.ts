@@ -71,6 +71,13 @@ function parsePathId(text: string, radix: number): number | null {
   return isPathId(id) ? id : null;
 }
 
+/**
+ * The heat cloud's band of heights as a link writes it, feet above ground
+ * from and to, the top left out for none: `500-3000`, `1000-` (see
+ * calculations/heightBand.ts, which takes the stops of its control only)
+ */
+export const HEIGHT_BAND_TEXT = /^(\d{1,5})-(\d{0,5})$/;
+
 /** The link's `v` string of a first visit, which a link leaves out */
 const INITIAL_VISIBILITY = visibilityString(initialToggles());
 
@@ -144,6 +151,8 @@ function parsePathIds(urlParams: URLSearchParams): number[] | undefined {
  *   g, d, s, l - toggles with a parameter of their own, '1' when on: the
  *       globe, 3D, satellite imagery and the Flights tab of the
  *       statistics rail (absent: off)
+ *   h - the heights above ground the 3D view's heat cloud shows, in feet:
+ *       '500-3000', '1000-' without a top (absent: all of them)
  * @param params - URLSearchParams object or search string
  * @returns Parsed state or null if no params
  */
@@ -187,6 +196,8 @@ export function parseUrlParams(
   if (bearing !== null) state.bearing = bearing;
   const pitch = toMapPitch(parseFloat(urlParams.get("t") ?? ""));
   if (pitch !== null) state.pitch = pitch;
+  const band = urlParams.get("h") ?? "";
+  if (HEIGHT_BAND_TEXT.test(band)) state.heightBand = band;
 
   return state;
 }
@@ -255,6 +266,7 @@ export function encodeStateToUrl(state: AppState): string {
     const url: ToggleUrl = toggle.url;
     if ("param" in url && state[toggle.key]) params.set(url.param, "1");
   }
+  if (state.heightBand) params.set("h", state.heightBand);
 
   return params.toString();
 }
