@@ -223,6 +223,8 @@ export const WRAPPED_UNAVAILABLE_MESSAGE =
   "Wrapped is unavailable: its code could not be loaded";
 export const STATS_UNAVAILABLE_MESSAGE =
   "The statistics are unavailable: their code could not be loaded";
+export const CROSS_SECTION_UNAVAILABLE_MESSAGE =
+  "The cross-section is unavailable: its code could not be loaded";
 
 /** The messages of the one file that carries Wrapped and the statistics */
 const WRAPPED_BUNDLE_MESSAGES = [
@@ -286,6 +288,8 @@ export class MapApp {
   private pendingReplayToggle: Promise<void> | null = null;
   /** Set while a click on Replay all waits for the feature bundle */
   private pendingReplayAllToggle: Promise<void> | null = null;
+  /** Set while a click on Cross-section waits for the feature bundle */
+  private pendingSectionToggle: Promise<void> | null = null;
   /**
    * Where the last fit to the start view takes the camera: the one of a
    * first visit, measured as the map opens, then that of every Reset view.
@@ -1158,6 +1162,20 @@ export class MapApp {
         this.pendingReplayAllToggle = null;
         logError(error);
       });
+  }
+
+  /**
+   * Open or close the cross-section (ui/crossSection.ts), which comes with
+   * the feature bundle, dropping clicks while it is on its way as above
+   */
+  toggleCrossSection(): void {
+    this.pendingSectionToggle ??= this.loadLazyBundle(
+      loadFeatures,
+      CROSS_SECTION_UNAVAILABLE_MESSAGE,
+    ).then((features) => {
+      this.pendingSectionToggle = null;
+      if (!this.destroyed) features?.toggleCrossSection(this);
+    });
   }
 
   /**

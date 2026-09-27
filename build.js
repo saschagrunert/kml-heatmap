@@ -295,14 +295,16 @@ function analyzeBundleComposition(metafile, fileName) {
 // (DataManager.newAreaKm2) so that Wrapped never fetches the feature
 // bundle: 150.26 KB raw and 51.51 KB gzipped before, 153.41 KB raw and
 // 52.81 KB gzipped after, in a local build. The heat legend with its
-// scale on top of that: 154.56 KB raw and 53.28 KB gzipped.
+// scale on top of that: 154.56 KB raw and 53.28 KB gzipped. The
+// cross-section's control and its row in the phone's More sheet on top of
+// that: 155.06 KB raw and 53.4 KB gzipped.
 const BUDGET_APP = { raw: 156 * 1024, gzip: 54 * 1024 };
 // The feature bundle is fetched only when replay is opened, the relief, the
 // heat cloud and the ribbons of a selection of the 3D view are first drawn,
-// the Satellite or New areas switch is first on or a single flight is first
-// selected, so it is not part of what a first visit downloads; it still
-// gets a budget so it cannot grow without anyone noticing. 41.01 KB raw and
-// 14.53 KB gzipped.
+// the Satellite or New areas switch is first on, a single flight is first
+// selected or the cross-section is first opened, so it is not part of what a
+// first visit downloads; it still gets a budget so it cannot grow without
+// anyone noticing. 41.01 KB raw and 14.53 KB gzipped.
 // Raised from 43 KB for the replay camera's own rest and the relief and
 // imagery placed on the ground: 43.19 KB raw and 15.18 KB gzipped then,
 // 42.68 KB raw and 15.12 KB gzipped in CI before the flight list of the
@@ -360,8 +362,12 @@ const BUDGET_APP = { raw: 156 * 1024, gzip: 54 * 1024 };
 // 38.25 KB for the marks of the way flown in the heat cloud (their blocks
 // of its shaders, and the directions of its cells,
 // calculations/cloudCells.ts): 108.32 KB raw and 39.68 KB gzipped after, in
-// a local build, about 39.84 KB in CI.
-const BUDGET_FEATURES = { raw: 108.5 * 1024, gzip: 40.25 * 1024 };
+// a local build, about 39.84 KB in CI. Raised from 108.5 KB and 40.25 KB
+// for the cross-section (ui/crossSection.ts, calculations/crossSection.ts):
+// the line drawn on the map with its corridor, and the chart of the heat
+// along it with its panel, readout and summary. 127.38 KB raw and 46.69 KB
+// gzipped after, in a local build, about 46.88 KB in CI.
+const BUDGET_FEATURES = { raw: 127.75 * 1024, gzip: 47.25 * 1024 };
 
 // The Wrapped bundle is fetched only when the Wrapped dialog or the
 // statistics panel is first opened, and not with replay's code or replay

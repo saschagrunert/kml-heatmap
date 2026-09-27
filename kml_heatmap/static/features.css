@@ -1,5 +1,5 @@
-/* The styles of replay and of the flight profile, loaded with
-   features.bundle.js.
+/* The styles of replay, of the flight profile and of the cross-section,
+   loaded with features.bundle.js.
 
    Not in the page up front: see the header of styles.css for why, and for
    which rule belongs where.
@@ -541,6 +541,214 @@ body.profile-open .toast-stack {
 }
 
 /* ==========================================================================
+   Cross-section (ui/crossSection.ts)
+   ========================================================================== */
+/* Where the flight profile goes, which steps aside for it, and a little
+   wider: 300 px or more from the left edge, clear of a colour legend, as
+   long as the panel has its least width (see below) */
+#cross-section {
+  position: fixed;
+  left: 50%;
+  bottom: calc(var(--attribution-h) + var(--space-sm) + var(--safe-bottom));
+  transform: translateX(-50%);
+  width: clamp(280px, calc(100vw - 600px), 640px);
+  box-sizing: border-box;
+  padding: var(--space-sm) var(--space-md);
+  background-color: var(--color-bg-edge);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-panel);
+  box-shadow: var(--shadow-panel);
+  z-index: var(--z-legend);
+  color: var(--color-text);
+  font-size: var(--text-sm);
+}
+/* The attribute has to outrank the displays below */
+#cross-section [hidden] {
+  display: none;
+}
+.section-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  margin-bottom: var(--space-xs);
+}
+.section-title {
+  margin: 0 auto 0 0;
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+.section-select,
+.section-btn {
+  justify-content: center;
+  padding: 0 var(--space-sm);
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+.section-btn {
+  min-width: var(--btn-min-height);
+  padding: 0;
+}
+.section-place {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-xs) var(--space-md);
+}
+.section-hint {
+  flex: 1 1 200px;
+  margin: 0;
+  color: var(--color-text-secondary);
+}
+.section-place-btn {
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+.section-plot {
+  position: relative;
+  height: 120px;
+  margin-top: var(--space-xs);
+  overflow: hidden;
+  border-radius: var(--radius-control);
+  background-color: rgba(var(--color-text-rgb), 0.04);
+  /* A finger on it reads the chart rather than scrolling the page */
+  touch-action: none;
+  cursor: crosshair;
+}
+.section-density,
+.section-chart,
+.section-ticks {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+.section-chart * {
+  vector-effect: non-scaling-stroke;
+}
+.section-grid {
+  fill: none;
+  stroke: rgba(var(--color-text-rgb), 0.12);
+}
+.section-ground {
+  fill: rgba(var(--color-text-rgb), 0.14);
+}
+.section-hover {
+  stroke: var(--color-text-muted);
+  stroke-dasharray: 3 3;
+}
+.section-window {
+  fill: none;
+  stroke: var(--color-text);
+}
+.section-ticks {
+  pointer-events: none;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: 1;
+  color: var(--color-text-muted);
+  /* Readable over the density it may stand on */
+  text-shadow: 0 0 3px var(--color-bg-primary);
+}
+.section-tick {
+  position: absolute;
+  left: var(--space-xs);
+  margin-bottom: 2px;
+}
+.section-unit {
+  top: 2px;
+  right: var(--space-xs);
+  left: auto;
+}
+/* The ends of the line on the map */
+.section-handle {
+  width: 22px;
+  height: 22px;
+  box-sizing: border-box;
+  border: 2px solid var(--color-text);
+  border-radius: var(--radius-pill);
+  background-color: var(--color-accent-blue);
+  color: var(--color-bg-primary);
+  font: 700 11px/18px var(--font-ui);
+  text-align: center;
+  cursor: grab;
+}
+.section-handle:focus-visible {
+  outline: 2px solid var(--color-text);
+  outline-offset: 2px;
+}
+/* While a line is drawn the map takes presses as points, and a finger
+   drags a line rather than scrolling */
+#map.is-drawing-section .maplibregl-canvas-container {
+  cursor: crosshair;
+  touch-action: none;
+}
+#map.is-drawing-section .section-handle {
+  pointer-events: none;
+}
+body.cross-section-open .toast-stack {
+  bottom: calc(
+    var(--attribution-h) + var(--space-sm) + var(--safe-bottom) +
+      var(--cross-section-h, 0px) + var(--space-sm)
+  );
+}
+@media (min-width: 768px) {
+  body.stats-open #cross-section {
+    left: calc(50% + var(--stats-rail-w) / 2);
+    width: clamp(280px, calc(100vw - var(--stats-rail-w) - 600px), 640px);
+  }
+}
+/* Narrower than that, the legend stands on top of the panel */
+@media (min-width: 768px) and (max-width: 859.98px) {
+  body.cross-section-open .color-legend {
+    bottom: calc(
+      var(--attribution-h) + var(--space-sm) + var(--safe-bottom) +
+        var(--cross-section-h, 0px) + var(--space-sm)
+    );
+  }
+}
+@media (min-width: 860px) and (max-width: 1175.98px) {
+  body.stats-open.cross-section-open .color-legend {
+    bottom: calc(
+      var(--attribution-h) + var(--space-sm) + var(--safe-bottom) +
+        var(--cross-section-h, 0px) + var(--space-sm)
+    );
+  }
+}
+/* On a phone it spans the width above the bar and the credit, as the
+   profile does, and the legend it would cover steps aside */
+@media (max-width: 767.98px) {
+  #cross-section {
+    left: calc(var(--edge-gap) + var(--safe-left));
+    right: calc(var(--edge-gap) + var(--safe-right));
+    width: auto;
+    transform: none;
+  }
+  body:has(.mobile-bar) #cross-section {
+    bottom: calc(
+      var(--mobile-bar-h) + var(--attribution-h) + var(--space-sm) +
+        var(--safe-bottom)
+    );
+  }
+  body.cross-section-open .color-legend {
+    visibility: hidden;
+  }
+  body:has(.mobile-bar).cross-section-open .toast-stack {
+    bottom: calc(
+      var(--mobile-bar-h) + var(--attribution-h) + var(--space-sm) +
+        var(--safe-bottom) + var(--cross-section-h, 0px) + var(--space-sm)
+    );
+  }
+  .section-plot {
+    height: 96px;
+  }
+}
+@media (prefers-contrast: more) {
+  #cross-section {
+    border-width: 2px;
+  }
+}
+
+/* ==========================================================================
    Mobile layout (narrow viewports)
    ========================================================================== */
 @media (max-width: 767.98px) {
@@ -849,7 +1057,8 @@ body.profile-open .toast-stack {
 }
 
 @media print {
-  #flight-profile {
+  #flight-profile,
+  #cross-section {
     display: none !important;
   }
 }

@@ -412,6 +412,13 @@ export class MobileBar {
         label: "Replay all",
         onSelect: () => runAction(app, "toggleReplayAll"),
       },
+      {
+        kind: "action",
+        id: "cross-section",
+        icon: "ruler",
+        label: "Cross-section",
+        onSelect: () => runAction(app, "toggleCrossSection"),
+      },
       ...this.toggleRows("more"),
       {
         kind: "action",

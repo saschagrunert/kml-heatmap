@@ -83,6 +83,7 @@ const REPLAY_DISABLED_CONTROL_IDS = [
   "selection-clear-btn",
   "reset-view-btn",
   "replay-all-btn",
+  "cross-section-btn",
 ];
 
 /** Custom property holding the replay panel's height, read by styles.css */

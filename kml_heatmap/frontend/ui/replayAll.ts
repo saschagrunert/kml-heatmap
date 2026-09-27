@@ -522,6 +522,7 @@ const HELD_CONTROL_IDS = [
   "selection-clear-btn",
   "reset-view-btn",
   "replay-btn",
+  "cross-section-btn",
 ];
 
 /** The control that opens and closes the replay of all flights */

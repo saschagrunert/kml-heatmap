@@ -9,10 +9,11 @@
  * ribbons of a selection of the 3D view, which the layer manager fetches as
  * they are first wanted, the satellite imagery, which its switch fetches,
  * the profile of a single selected flight, which the app fetches as one
- * is first selected, and the places new in a year, which their switch
- * fetches (ui/newAreas.ts). Wrapped has a bundle of its own (wrapped.ts),
- * and never fetches this one: not even for the airspace new in a year,
- * which it counts with the app's code (DataManager.newAreaKm2).
+ * is first selected, the places new in a year, which their switch fetches
+ * (ui/newAreas.ts), and the cross-section, which its control fetches.
+ * Wrapped has a bundle of its own (wrapped.ts), and never fetches this
+ * one: not even for the airspace new in a year, which it counts with the
+ * app's code (DataManager.newAreaKm2).
  *
  * The app is imported for the bundler's sake. esbuild puts every module in
  * a chunk by the set of entry points that reach it, so with three of them a
@@ -32,6 +33,7 @@ import { followSelectionRibbons } from "./ui/selectionRibbons";
 import { ReplayAllPlayer, toggleReplayAll } from "./ui/replayAll";
 import { followFlightProfile } from "./ui/flightProfile";
 import { drawNewAreas } from "./ui/newAreas";
+import { toggleCrossSection } from "./ui/crossSection";
 
 export interface FeatureModule {
   ReplayManager: typeof ReplayManager;
@@ -44,6 +46,7 @@ export interface FeatureModule {
   toggleReplayAll: typeof toggleReplayAll;
   followFlightProfile: typeof followFlightProfile;
   drawNewAreas: typeof drawNewAreas;
+  toggleCrossSection: typeof toggleCrossSection;
 }
 
 export {
@@ -57,4 +60,5 @@ export {
   toggleReplayAll,
   followFlightProfile,
   drawNewAreas,
+  toggleCrossSection,
 };

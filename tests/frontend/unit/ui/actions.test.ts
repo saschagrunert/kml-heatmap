@@ -22,6 +22,7 @@ const BUTTON_ACTIONS = [
   "resetView",
   "toggleReplay",
   "toggleReplayAll",
+  "toggleCrossSection",
   "exportMap",
   "shareLink",
   "showWrapped",
@@ -161,6 +162,12 @@ describe("bindActions", () => {
     elements["toggleReplayAll"]!.click();
 
     expect(app.toggleReplayAll).toHaveBeenCalledTimes(1);
+  });
+
+  it("binds Cross-section, which the app fetches with the feature bundle", () => {
+    elements["toggleCrossSection"]!.click();
+
+    expect(app.toggleCrossSection).toHaveBeenCalledTimes(1);
   });
 
   it("binds the filters to the change event", () => {

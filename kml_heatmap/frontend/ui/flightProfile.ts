@@ -17,7 +17,8 @@
  * follows the replay's time, a drag seeks, and the plain slider stays
  * underneath for the keyboard. The replay of every flight at once is not
  * of this one: the strip and its toggle stay away while it runs, and its
- * panel stays its own.
+ * panel stays its own. So do they while the cross-section, which takes the
+ * same place at the bottom of the map, is open (ui/crossSection.ts).
  *
  * Whether it shows is remembered in the browser, and the selection chip
  * carries the toggle. It comes with the feature bundle, which the app
@@ -48,6 +49,7 @@ import type { Coordinate } from "../utils/geometry";
 import { setControlIcon } from "../utils/icons";
 import { toLngLat } from "../utils/mapHelpers";
 import { REPLAY_PANEL_HEIGHT_VAR } from "./replayManager";
+import { crossSectionOpen, followCrossSection } from "./crossSection";
 
 /** The chart's own units: it is stretched to the strip (see the CSS) */
 const VIEW_W = 1000;
@@ -338,12 +340,13 @@ export function followFlightProfile(app: MapApp): HTMLElement {
 
   /** Show or hide the strip and its toggle, and put the panel in step */
   const sync = (): void => {
-    const all = replayingAll();
-    const shown = !!profile && !collapsed && !app.wrappedVisible && !all;
+    // The replay of all flights and the cross-section have the place
+    const away = replayingAll() || crossSectionOpen(app);
+    const shown = !!profile && !collapsed && !app.wrappedVisible && !away;
     const replay = replaying();
     root.hidden = !shown;
     root.classList.toggle("is-timed", !!profile?.timed);
-    toggle.hidden = !profile || all;
+    toggle.hidden = !profile || away;
     toggle.setAttribute("aria-expanded", String(!collapsed));
     toggle.title = `${collapsed ? "Show" : "Hide"} the altitude profile`;
     document.body.classList.toggle("profile-open", shown && !replay);
@@ -548,6 +551,7 @@ export function followFlightProfile(app: MapApp): HTMLElement {
   store.subscribeKeys(["selectedPathIds", "currentData"], refresh);
   store.subscribeKeys(["replayActive"], place);
   store.subscribeKeys(["wrappedVisible"], sync);
+  followCrossSection(app, sync, app.signal);
   // The flight under the pointer on the map: the cursor goes to the middle
   // of the segment, which runs from its start to the next one's
   const pathHover = app.layerManager.pathHover;
