@@ -327,7 +327,14 @@ const BUDGET_APP = { raw: 152 * 1024, gzip: 52.5 * 1024 };
 // (ui/heightBand.ts, calculations/heightBand.ts): 84.19 KB raw and 30.05 KB
 // gzipped before, 87.06 KB raw and 31.06 KB gzipped after, in a local build,
 // about 31.18 KB in CI going by the 0.4 % above.
-const BUDGET_FEATURES = { raw: 89 * 1024, gzip: 32 * 1024 };
+// Raised from 89 KB and 32 KB for the fixes of the heat cloud's rendering
+// (the shadow kept at its brightest, cheaper and left out while dimmed, the
+// glow near the ground pulled clear of the ground in front, the dimmed cloud
+// filled towards its strength, pulses that fade where they would comb, rest
+// sooner and hold still for an export, far lines that fade):
+// 87.06 KB raw and 31.06 KB gzipped before, 89.3 KB raw and 31.9 KB gzipped
+// after, in a local build, about 32.03 KB in CI going by the 0.4 % above.
+const BUDGET_FEATURES = { raw: 91.5 * 1024, gzip: 33 * 1024 };
 
 // The Wrapped bundle is fetched only when the Wrapped dialog or the
 // statistics panel is first opened, and not with replay's code or replay

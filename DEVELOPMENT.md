@@ -687,9 +687,11 @@ The layer draws every stretch between two points as one instance of a quad
 on the screen, reaching three blurs around it (`CLOUD_STOPS`: 7 CSS px in
 the middle of the map out to map zoom 9.5, `z` 10.5, narrowing to 4.5 px at
 10.5 and 2.5 px from 13 in, and wider in front and narrower behind in a
-tilted view, held between 0.15 and 3 times that). Close in its gain goes
-down with it, to half at 13: at the full width and gain the glow of every
-track around a busy field covered twice the map the flat heatmap does at
+tilted view, held between 0.8 device pixels and 3 times that; a far
+flight narrower than that is drawn as much fainter, so it fades rather than
+sharpening into a flickering line). Close in its gain goes down with it,
+to half at 13: at the full width and gain the glow of every track around
+a busy field covered twice the map the flat heatmap does at
 `z` 12 and 25 times as much at `z` 14, over the roads and place names,
 where the flat heatmap has handed over to thin heat lines. Now it covers
 about as much as the flat heatmap at `z` 12 (7 % of the map lifted by the
@@ -706,27 +708,86 @@ track alike by zoom. Each channel is `1 - exp(-heat * k)` of full, blended
 as a screen (`ONE, ONE_MINUS_SRC_COLOR`), which adds up the same over every
 glow on a pixel whatever the order: blue fills first, then green, then red
 (`CLOUD_COLOUR`), a lone cruise faint azure, four cyan, and some sixty white,
-the stops of the heatmap's gradient. The vertex shader projects with the
-code MapLibre hands a custom layer (`shaderData.vertexShaderPrelude`,
-`projectTileFor3D`), so the same shaders work on the globe, which gets its
-own matrix and the flat map's (`fallbackMatrix`, scaled to heights in
-metres) for the way into and out of it; a program is compiled per variant.
-Where the flights are lifted, the same buffers are drawn a second time
-first, on the ground (no lift), in a muted grey blue that fills to 18 % at
-most (`CLOUD_SHADOW_COLOUR`, `CLOUD_SHADOW_CEILING`): a shadow that shows
-how high the glow above it is. The exposure (`cloudExposure`) scales the
-heat so the busiest cells, at the gain of the zoom, glow no hotter than
-`CLOUD_WHITE_HEAT` (white), down to a quarter and never above 1, eased over
-a fraction of a second as the level or the zoom changes; the two years of
-the sample data never reach it. The pulses of the flow brighten and dim the glow by
-the time of each pixel's stretch, a comet brightest at its head moving the
-way the flights went, about 90 px of a cruise apart at any zoom (two
-spacings a power of two apart, blended by the zoom so they do not jump) and
-a mean of 1, so the heat as a whole stays as it was. They fade in while the
-map is used (`mousemove`, `touchstart`, `move`) and out 20 s after, and the
-layer asks for another frame (`triggerRepaint`) only while they run or fade
-or the exposure moves, so an idle map draws nothing. They are off under
-reduced motion, read in every frame, and during a replay.
+the stops of the heatmap's gradient. A dimmed cloud has the strength it is
+drawn with as its source factor (`CONSTANT_COLOR` and `blendColor`, which is
+`ONE` at full strength): each glow moves a pixel by
+`glow * (strength - pixel)`, so however many glows there are, it fills
+towards that much of white and no further. A quarter of the heat, which it
+was before, still filled the home field to white. The cost is the map under
+the brightest of it, which goes towards the same grey: over dark ground a
+haze, but over satellite imagery a flat grey where the circuits of the home
+field are. The opacity of a layer proper, `map + strength * (screen - map)`,
+cannot be blended a glow at a time (it needs the screen of all of them
+first, in a texture of its own); a quarter of each glow's colour instead
+screens up to white again under enough of them. The vertex shader projects
+with the code MapLibre hands a custom layer
+(`shaderData.vertexShaderPrelude`, `projectTileFor3D`), so the same shaders
+work on the globe, which gets its own matrix and the flat map's
+(`fallbackMatrix`, scaled to heights in metres) for the way into and out of
+it; a program is compiled per variant.
+Where the flights are lifted and the cloud is not dimmed, the same buffers
+are drawn a second time first, on the ground (no lift), in a muted grey
+blue that fills to 18 % at most (`CLOUD_SHADOW_COLOUR`,
+`CLOUD_SHADOW_CEILING`): a shadow that shows how high the glow above it
+is. The brightest shadow on a pixel is kept (`blendEquation(MAX)`, put back
+to `FUNC_ADD` for the glow) rather than screened: the screen of a busy
+field's hundreds of circuits filled to white, most of the white of the
+cloud there. A stretch on the ground (the taxiing, the take-off run) casts
+none, one 30 to 100 ft up fades in (`CLOUD_SHADOW_LIFT_FT`), and the
+shadow is a Gaussian of the distance to its stretch reaching 2 blurs
+(`CLOUD_SHADOW_REACH`), with a stretch shorter than its blur as bright as
+the glow's `erf` makes it in its middle: on a Radeon RX 9070 XT it took
+0.22 to 0.40 ms a frame against 0.27 to 0.90 ms as a copy of the glow.
+MapLibre puts the blend equation back to `FUNC_ADD` after every custom
+layer (`setBaseState`) and sets its blend function again, so neither leaks
+into its own layers or the replay of all flights.
+
+The maximum has a cost: it is taken against what the pixel already has,
+the map under the cloud, not against the other shadows alone. The shadow is
+a light haze of at most 18 % grey blue, so over ground brighter than that
+it is gone: roads and the light parts of the base map, and most satellite
+imagery. At EDAQ (`z` 13, pitch 60) the shadow alone lifts 36 % of the
+pixels over the dark map and 7 % over the imagery, where the old screen
+lifted 49 % of both (and filled the circuits to white). Keeping the
+brightest shadow and then screening it onto the map takes a texture of
+its own, the size of the canvas: the shadows drawn into it with `MAX`,
+then one pass that screens it over the map, a framebuffer to resize with
+the canvas and to make again after a lost context. The alpha of the
+canvas cannot stand in for it, as the page is composed with it, and the
+stencil keeps the first shadow on a pixel, not the brightest. The shadow
+is also left out while the cloud is dimmed for what is drawn over it
+(`dimsHeatmap`), where it cost as much as the glow for a haze no one could
+see.
+
+The exposure (`cloudExposure`) scales the heat so the busiest cells, at
+the gain of the zoom, glow no hotter than `CLOUD_WHITE_HEAT` (white), down
+to a quarter and never above 1, eased over a fraction of a second as the
+level or the zoom changes; the two years of the sample data never reach
+it. The pulses of the flow brighten and dim the glow by the time of each
+pixel's stretch, a comet brightest at its head moving the way the flights
+went, about 90 px of a cruise apart at any zoom (two spacings a power of
+two apart, blended by the zoom so they do not jump: the longer of one
+octave is the shorter of the next, at the same phase) and a mean of 1, so
+the heat as a whole stays as it was. A pulse is a raised cosine skewed
+forward (`cloudPulse`, `1 - cos(2 pi phase^2)`, scaled by
+`1 / (1 - C(2) / 2)` with the Fresnel integral `C`): it rises along its
+tail to its head at 0.71 of the period and falls ahead of it a little
+quicker, with no step and no kink where one pulse hands over to the next.
+The comet before fell from its head to nothing in the last 15 % of the
+period, which read as a jerk as each head passed. Along a stretch where
+they come closer than 8 blurs on the screen (`CLOUD_FLOW_CLOSEST`), slow
+taxiing close in or any track near the horizon, they fade out, gone at 4:
+there they ran together into a comb. They fade in while the map is used
+(`move` of its camera, `touchstart`; not the pointer moving over it,
+which kept the map drawing every frame while it rested on it) and out 8 s
+after, and the layer asks for another frame only while they run or fade or
+the exposure moves, every frame the screen shows, so an idle map draws
+nothing. Frames held to 30 a second (25 ms after the last) moved them
+visibly in steps. A frame slower than 100 ms moves them on by 100 ms: they
+slow for it rather than jump. They are off
+under reduced motion, read in every frame, and during a replay, and hold
+still in the frame `withMapStill` takes for an export (`isMapStill`),
+whose resizes do not wake them either.
 It is a 3D layer, right below the first ribbon layer: above every layer
 of the app that lies on the ground, the flat lines of the selection, the
 flights and the replay's route and trail among them, and below the ribbons
@@ -741,19 +802,33 @@ Safari's engine (the Playwright image, 800x500) took about 90 ms instead of 30. 
 without writing to it, so a ridge in front of a flight hides its glow and no
 glow hides another. Each glow is pulled towards the camera by its reach for
 the test, so a fix on the ground glows round rather than cut by the ground
-in front of it. Its GL objects are made in its first frame, where MapLibre
-takes up the state of its context anew after a custom layer; a lost context
-drops them (`webglcontextlost`), and the style MapLibre gets back has no
-custom layers, so `ui/heatCloud.ts` adds the layer again on `style.load`,
-and on `styledata` after a new base style. Shaders that do not compile turn
-it off with one logged error, and the flat heatmap stays, until the context
-is restored, where they are tried again (the replay of all flights alike);
-what fails while the context is lost (`isContextLost`: every GL object is
-null and no shader compiles) is no failure (`LayerGl`). It only
+in front of it. Near the ground (within its reach) a corner of a quad is
+pulled further, to where its ray meets the plane of the ground under its
+end, 30 ft higher (`CLOUD_GROUND_SLACK_FT`, where the relief MapLibre draws
+can lie over the cloud's ground), and 12 blurs at most
+(`CLOUD_GROUND_PULL`), never nearer than its near plane: the steeper the
+ground rises into a flat view, the more of a glow it cut, in a straight line
+along a runway. The pull only moves the glow in front of ground up to 30 ft
+over its own, so a ridge higher than that still hides the glow behind it,
+and flights higher up keep their reach. The plane is the ground's through
+three points 100 px apart (`u_ground`); where the view runs along it (no
+meeting) or its ray meets it behind the camera, the corner keeps its reach.
+On the globe the plane is a chord of the curved ground, off by a few
+hundredths of a blur at most (about 1 km at `z` 5, where a blur is some 30
+km across, and metres at `z` 8). Its GL objects are made in its first frame,
+where MapLibre takes up the state of its context anew after a custom layer;
+a lost context drops them (`webglcontextlost`), and the style MapLibre gets
+back has no custom layers, so `ui/heatCloud.ts` adds the layer again on
+`style.load`, and on `styledata` after a new base style. Shaders that do not
+compile turn it off with one logged error, and the flat heatmap stays, until
+the context is restored, where they are tried again (the replay of all
+flights alike); what fails while the context is lost (`isContextLost`: every
+GL object is null and no shader compiles) is no failure (`LayerGl`). It only
 draws: a custom layer has no features for `queryRenderedFeatures`, and the
-ribbons stay what is hovered and clicked. An exported image has it, since
-the canvas is read in the frame that drew it (`withMapStill`). It is drawn
-in the world copy of the flights only, where the flat map shows several.
+ribbons stay what is hovered and clicked. An exported image has it, without
+its pulses, since the canvas is read in the frame that drew it
+(`withMapStill`). It is drawn in the world copy of the flights only, where
+the flat map shows several.
 
 The band of heights (`heightBand` in the store, `h` in the link, the text
 `500-3000` or `1000-` of `calculations/heightBand.ts`, empty for every

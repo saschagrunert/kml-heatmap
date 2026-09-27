@@ -9,6 +9,7 @@ import {
   firstSymbolLayerId,
   fromLngLat,
   isBehindGlobe,
+  isMapStill,
   isOnMarker,
   keepMarkerTapsFromZoom,
   MAP_STILL_TIMEOUT_MS,
@@ -618,6 +619,30 @@ describe("mapHelpers", () => {
       expect(canvas.toDataURL).toHaveBeenCalledWith("image/png");
       expect(parent.contains(canvas)).toBe(true);
       expect(parent.querySelector("img")).toBeNull();
+    });
+
+    it("tells what moves on the map by itself to hold still, from the frame it takes until the canvas is back", async () => {
+      const map = stillMap();
+      const repaint = map.triggerRepaint.getMockImplementation();
+      const inFrame: boolean[] = [];
+      map.triggerRepaint.mockImplementation(() => {
+        inFrame.push(isMapStill(map));
+        repaint?.();
+      });
+      expect(isMapStill(map)).toBe(false);
+
+      await withMapStill(map, () => {
+        expect(isMapStill(map)).toBe(true);
+        // Another map is not held
+        expect(isMapStill(mapStub())).toBe(false);
+      });
+
+      expect(inFrame).toEqual([true]);
+      expect(isMapStill(map)).toBe(false);
+      await expect(
+        withMapStill(map, () => Promise.reject(new Error("capture failed"))),
+      ).rejects.toThrow("capture failed");
+      expect(isMapStill(map)).toBe(false);
     });
 
     it("reads the canvas inside the render event, not before", async () => {
