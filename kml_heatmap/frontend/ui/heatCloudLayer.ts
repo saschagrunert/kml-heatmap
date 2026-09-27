@@ -33,6 +33,15 @@
  * custom layer) projects the points, which makes the same shaders work on
  * the globe; the points are given from an origin near them, so a 32-bit
  * float keeps them to a fraction of a pixel close in.
+ *
+ * Three things help to read it. A faint copy of the glow on the ground
+ * under the flights, its shadow, shows how high they were. Pulses run
+ * along every track the way it was flown, by the time of its points,
+ * which shows the direction of a circuit and the usual ways in and out;
+ * they rest while the map is not used and under reduced motion, and the
+ * map draws no frame for them then. And the exposure follows the heat:
+ * the busiest cells of the cloud glow no brighter than white, however
+ * many flights the filters keep (see cloudExposure).
  */
 import type {
   CustomLayerInterface,
@@ -44,6 +53,7 @@ import {
   mercatorOf,
   type CloudPoints,
 } from "../calculations/heatCloud";
+import { prefersReducedMotion } from "../utils/motion";
 
 /** The id of the cloud's layer on the map */
 export const HEAT_CLOUD_LAYER = "heat-cloud";
@@ -123,6 +133,64 @@ const CLOUD_REFERENCE_SPEED_MS = 51.4;
 const CLOUD_COLOUR = [0.04, 0.26, 0.62] as const;
 
 /**
+ * The heat the busiest cells of the cloud (see CloudPoints.busiest) are
+ * drawn with at most: white (see CLOUD_COLOUR). Where more than a
+ * hundredth of its cells would glow hotter, the whole cloud is drawn
+ * darker, down to the least of CLOUD_EXPOSURE_RANGE, so a home field
+ * flown for years does not wash out its circuits and the routes out of
+ * it. It is never drawn brighter than its colours are made for: the two
+ * years of flights of the sample data have their busiest cells at a heat
+ * of 6 to 18 (cyan), a lone flight at about 3 to 6, and drawn near white
+ * they glowed white along every route.
+ */
+const CLOUD_WHITE_HEAT = 60;
+const CLOUD_EXPOSURE_RANGE = [0.25, 1] as const;
+
+/**
+ * The shadow of the cloud: how fast each colour channel fills with heat (see
+ * CLOUD_COLOUR), a muted grey blue, and the most it fills, so that under a
+ * busy field it stays a haze rather than a second white blot under the
+ * glow's
+ */
+const CLOUD_SHADOW_COLOUR = [0.1, 0.12, 0.16] as const;
+const CLOUD_SHADOW_CEILING = 0.18;
+
+/**
+ * The pulses of the flow: how many CSS pixels a cruise flies between two
+ * (see CLOUD_REFERENCE_SPEED_MS), in how many seconds one moves on to the
+ * next, and how strongly they bring out and take back the glow
+ */
+const CLOUD_FLOW_SPACING_PX = 90;
+const CLOUD_FLOW_CYCLE_S = 2.5;
+const CLOUD_FLOW_STRENGTH = 0.6;
+
+/**
+ * How long after the map was last used the pulses keep running, and in
+ * how many seconds they fade in and out (and the exposure follows a new
+ * level's)
+ */
+const CLOUD_FLOW_IDLE_MS = 20000;
+const CLOUD_FADE_S = 0.8;
+
+/** What the map does when it is used: each wakes the flow */
+const CLOUD_FLOW_WAKE = ["mousemove", "touchstart", "move"] as const;
+
+/**
+ * How brightly the cloud is drawn for its busiest heat per metre
+ * `busiest` (see CloudPoints.busiest), times the gain of CLOUD_STOPS it
+ * is drawn with: a factor of its heat that draws those cells in
+ * CLOUD_WHITE_HEAT, within CLOUD_EXPOSURE_RANGE; 1 without any heat
+ */
+export function cloudExposure(busiest: number): number {
+  if (!(busiest > 0)) return 1;
+  const [least, most] = CLOUD_EXPOSURE_RANGE;
+  return Math.min(
+    Math.max(CLOUD_WHITE_HEAT / (busiest * CLOUD_REFERENCE_SPEED_MS), least),
+    most,
+  );
+}
+
+/**
  * MapLibre's sphere, whose circumference its Mercator heights are in
  * (mercatorZfromAltitude): the app's EARTH_CIRCUMFERENCE_M is the WGS84
  * equator's
@@ -141,16 +209,36 @@ export interface HeatCloudStyle {
   liftM: number;
   /** How strongly the cloud is drawn, from 0 to 1 (see dimsHeatmap) */
   opacity: number;
+  /** Whether its pulses may run (see CLOUD_FLOW_SPACING_PX) */
+  flow: boolean;
 }
 
+/**
+ * The quad of a stretch, and what its pixels need to know of it. Its
+ * comments are here rather than in the shader, which is shipped as it is
+ * written:
+ * - The joins, where the stretch hands over to the one before and the one
+ *   after, are the bisectors of the angles between them, which are as far
+ *   from either line, so their glows meet without a gap or an overlap
+ *   where it bends.
+ * - Across a stretch shorter than its blur the two joins would open into a
+ *   wedge far longer than the stretch, all of it lit with the heat of that
+ *   stretch: those meet the next straight across (`bend`), as the heat of
+ *   a short stretch is a soft point anyway.
+ * - The quad reaches past each end by the reach of the glow, and as far
+ *   again as the bisector slants away from the end at that distance
+ *   across.
+ * - It is pulled towards the camera by CLOUD_DEPTH_PULL blurs, where it is
+ *   still on the same pixels, with the depth the projection gives there.
+ */
 const VERTEX_SHADER = `
 in vec2 a_corner;
 in vec4 a_before;
 in float a_in;
 in vec4 a_start;
-in float a_heat;
+in vec2 a_heat;
 in vec4 a_end;
-in float a_out;
+in vec2 a_out;
 in vec4 a_after;
 uniform vec2 u_heights;
 uniform vec3 u_centre;
@@ -162,6 +250,7 @@ flat out vec4 v_ends;
 flat out vec4 v_joins;
 flat out vec4 v_blur;
 flat out float v_heat;
+flat out vec2 v_time;
 
 vec4 project(vec4 point) {
   return projectTileFor3D(point.xy, point.z * u_heights.x + point.w * u_heights.y);
@@ -180,7 +269,7 @@ void main() {
   vec4 a = project(a_start);
   vec4 b = project(a_end);
   float near = u_depth.z;
-  if (a_heat <= 0.0 || (a.w < near && b.w < near)) {
+  if (a_heat.x <= 0.0 || (a.w < near && b.w < near)) {
     gl_Position = vec4(0.0, 0.0, 2.0, 1.0);
     return;
   }
@@ -193,38 +282,27 @@ void main() {
   vec2 pb = onScreen(b);
   float length_px = distance(pa, pb);
   vec2 dir = unit(pb - pa, vec2(1.0, 0.0));
-  // Where the stretch hands over to the one before and the one after: the
-  // bisector of the angle between the two, which is as far from either
-  // line, so their glows meet without a gap or an overlap where it bends
   vec2 joinA = dir;
   vec2 joinB = dir;
   if (a_in > 0.0) {
     vec4 c = project(a_before);
     if (c.w > near) joinA = unit(unit(pa - onScreen(c), dir) + dir, dir);
   }
-  if (a_out > 0.0) {
+  if (a_out.x > 0.0) {
     vec4 c = project(a_after);
     if (c.w > near) joinB = unit(dir + unit(onScreen(c) - pb, dir), dir);
   }
-  // Across a stretch shorter than its blur the two joins would open into a
-  // wedge far longer than the stretch, all of it lit with the heat of that
-  // stretch: those meet the next straight across, as the heat of a short
-  // stretch is a soft point anyway
   float bend = smoothstep(0.5, 2.0, length_px / min(sigmas.x, sigmas.y));
   joinA = unit(mix(dir, joinA, bend), dir);
   joinB = unit(mix(dir, joinB, bend), dir);
   bool atEnd = a_corner.x > 0.0;
   float sigma = atEnd ? sigmas.y : sigmas.x;
   float w = atEnd ? b.w : a.w;
-  // Past its end by the reach of the glow, and as far again as the
-  // bisector slants away from the end at that distance across
   float slant = clamp(dot(atEnd ? joinB : joinA, dir), 0.5, 1.0);
   float reach = ${CLOUD_REACH.toFixed(1)} * sigma;
   vec2 corner = (atEnd ? pb : pa)
     + dir * a_corner.x * reach * (1.0 + sqrt(max(1.0 - slant * slant, 0.0)) / slant)
     + vec2(-dir.y, dir.x) * a_corner.y * reach;
-  // Towards the camera by CLOUD_DEPTH_PULL blurs, where it is still on
-  // the same pixels, with the depth the projection gives there
   float pulled = max(w - ${CLOUD_DEPTH_PULL.toFixed(1)} * sigma * w / u_depth.w, 0.5 * w);
   gl_Position = vec4(
     (corner / u_viewport * 2.0 - 1.0) * pulled,
@@ -234,18 +312,35 @@ void main() {
   v_ends = vec4(pa, pb);
   v_joins = vec4(joinA, joinB);
   v_blur = vec4(sigmas, scales);
-  v_heat = u_gain * a_heat / max(length_px, 1e-3);
+  v_heat = u_gain * a_heat.x / max(length_px, 1e-3);
+  v_time = vec2(a_heat.y, a_out.y);
 }
 `;
 
+/**
+ * The glow of a pixel of a stretch: the Gaussian across the stretch,
+ * integrated along it from the join with the one before to the join with
+ * the one after. With the flow, times its pulses at the time the pixel
+ * was flown at, in two periods, one twice the other, blended as the zoom
+ * goes from one to the next; a pulse is brightest at its head and fades
+ * along where it has been, and is 1 on average.
+ */
 const FRAGMENT_SHADER = `#version 300 es
 precision highp float;
 flat in vec4 v_ends;
 flat in vec4 v_joins;
 flat in vec4 v_blur;
 flat in float v_heat;
+flat in vec2 v_time;
 uniform vec4 u_colour;
+uniform float u_ceiling;
+uniform vec4 u_flow;
+uniform vec2 u_flowMix;
 out vec4 fragColor;
+
+float pulse(float phase) {
+  return phase * phase * (1.0 - smoothstep(0.85, 1.0, phase)) * 3.776;
+}
 
 // Abramowitz and Stegun 7.1.26, to 1.5e-7
 float erf(float x) {
@@ -266,11 +361,18 @@ void main() {
   float sigma = mix(v_blur.x, v_blur.y, t);
   float scale = mix(v_blur.z, v_blur.w, t);
   float spread = 0.70710678 / sigma;
-  // The Gaussian across the stretch, integrated along it from the join
-  // with the one before to the join with the one after
   float glow = v_heat * scale * exp(-0.5 * across * across / (sigma * sigma))
     * 0.5 * (erf(dot(p - a, v_joins.xy) * spread) + erf(dot(b - p, v_joins.zw) * spread));
-  vec3 filled = 1.0 - exp(-glow * u_colour.a * u_colour.rgb);
+  if (u_flowMix.y > 0.0) {
+    float time = mix(v_time.x, v_time.y, t);
+    float pulses = mix(
+      pulse(fract(time * u_flow.x - u_flow.z)),
+      pulse(fract(time * u_flow.y - u_flow.w)),
+      u_flowMix.x
+    );
+    glow *= 1.0 + u_flowMix.y * (pulses - 1.0);
+  }
+  vec3 filled = u_ceiling * (1.0 - exp(-glow * u_colour.a * u_colour.rgb / u_ceiling));
   if (filled.b < 0.002) discard;
   fragColor = vec4(filled, max(filled.r, max(filled.g, filled.b)));
 }
@@ -307,6 +409,9 @@ const UNIFORMS = [
   "u_depth",
   "u_gain",
   "u_colour",
+  "u_ceiling",
+  "u_flow",
+  "u_flowMix",
 ] as const;
 
 /** The GL objects of the layer, made for one context */
@@ -359,6 +464,20 @@ export class HeatCloudLayer implements CustomLayerInterface {
   private map: MapLibreMap | null = null;
   private resources: Resources | null = null;
   private cloud: CloudPoints | null = null;
+  /** When the last frame was drawn, and the map last used (performance.now) */
+  private drawnAt = 0;
+  private usedAt = 0;
+  /** How strongly the pulses show, from 0 to 1 as they fade in and out */
+  private flow = 0;
+  /** How far they have moved on, in seconds of the flights */
+  private flowS = 0;
+  /**
+   * Whether they rest, for a map not used or under reduced motion, until
+   * the map is used again
+   */
+  private resting = false;
+  /** The exposure drawn with, which follows cloudExposure of the points */
+  private exposure = 0;
 
   /**
    * `style` is asked on every frame, and draws nothing where it gives null;
@@ -372,8 +491,21 @@ export class HeatCloudLayer implements CustomLayerInterface {
   /** Draw the points `cloud` from the next frame on, or none */
   setPoints(cloud: CloudPoints | null): void {
     this.cloud = cloud;
+    this.usedAt = performance.now();
+    this.resting = false;
     this.map?.triggerRepaint();
   }
+
+  /**
+   * The map is used: the pulses run again, from a frame on if they rest,
+   * and so once reduced motion is turned off
+   */
+  private readonly wake = (): void => {
+    this.usedAt = performance.now();
+    if (!this.resting || prefersReducedMotion()) return;
+    this.resting = false;
+    this.map?.triggerRepaint();
+  };
 
   /**
    * The GL objects of a lost context are gone with it, and a context
@@ -390,7 +522,9 @@ export class HeatCloudLayer implements CustomLayerInterface {
    */
   onAdd(map: MapLibreMap): void {
     this.map = map;
+    this.usedAt = performance.now();
     map.on("webglcontextlost", this.lost);
+    for (const type of CLOUD_FLOW_WAKE) map.on(type, this.wake);
   }
 
   onRemove(map: MapLibreMap, gl: WebGL2RenderingContext): void {
@@ -398,6 +532,7 @@ export class HeatCloudLayer implements CustomLayerInterface {
     this.resources = null;
     this.map = null;
     map.off("webglcontextlost", this.lost);
+    for (const type of CLOUD_FLOW_WAKE) map.off(type, this.wake);
     if (!resources || resources.gl !== gl || gl.isContextLost()) return;
     gl.deleteBuffer(resources.corners);
     gl.deleteBuffer(resources.points);
@@ -411,6 +546,7 @@ export class HeatCloudLayer implements CustomLayerInterface {
     const map = this.map;
     const cloud = this.cloud;
     this.drawn = 0;
+    this.resting = false;
     if (!map || !cloud || cloud.count < 2) return;
     const style = this.style();
     if (!style || style.opacity <= 0) return;
@@ -457,7 +593,6 @@ export class HeatCloudLayer implements CustomLayerInterface {
     const ratio = map.getPixelRatio();
     const zoom = map.getZoom();
     const [mx, my] = mercatorOf([center.lat, center.lng]);
-    gl.uniform2f(u.u_heights, style.groundM, style.liftM);
     gl.uniform3f(
       u.u_centre,
       mx - cloud.origin[0],
@@ -491,18 +626,41 @@ export class HeatCloudLayer implements CustomLayerInterface {
         MAPLIBRE_EARTH_RADIUS_M *
         Math.cos((center.lat * Math.PI) / 180)) /
       (512 * 2 ** zoom);
-    gl.uniform1f(
-      u.u_gain,
-      (look.gain * CLOUD_REFERENCE_SPEED_MS * ratio) / metresPerPixel,
+
+    // The pulses and the exposure, eased from the last frame's
+    const now = performance.now();
+    const seconds = Math.min(Math.max(now - this.drawnAt, 0), 100) / 1000;
+    this.drawnAt = now;
+    const step = seconds / CLOUD_FADE_S;
+    const wanted = style.flow && !prefersReducedMotion();
+    const awake = wanted && now - this.usedAt < CLOUD_FLOW_IDLE_MS;
+    this.flow = wanted
+      ? Math.min(Math.max(this.flow + (awake ? step : -step), 0), 1)
+      : 0;
+    const exposure = cloudExposure(cloud.busiest * look.gain);
+    this.exposure = this.exposure
+      ? this.exposure + (exposure - this.exposure) * Math.min(step * 4, 1)
+      : exposure;
+    // The seconds of the flights between two pulses, as a power of two and
+    // the part of the way to the next: both are drawn, and blended
+    const octave = Math.log2(
+      (CLOUD_FLOW_SPACING_PX * metresPerPixel) / CLOUD_REFERENCE_SPEED_MS,
     );
+    const period = 2 ** Math.floor(octave);
+    this.flowS += (seconds * 2 ** octave) / CLOUD_FLOW_CYCLE_S;
     gl.uniform4f(
-      u.u_colour,
-      CLOUD_COLOUR[0],
-      CLOUD_COLOUR[1],
-      CLOUD_COLOUR[2],
-      style.opacity,
+      u.u_flow,
+      1 / period,
+      0.5 / period,
+      (this.flowS / period) % 1,
+      (this.flowS / period / 2) % 1,
     );
 
+    gl.uniform1f(
+      u.u_gain,
+      (look.gain * this.exposure * CLOUD_REFERENCE_SPEED_MS * ratio) /
+        metresPerPixel,
+    );
     gl.bindVertexArray(resources.vao);
     gl.enable(gl.BLEND);
     gl.blendFuncSeparate(
@@ -515,11 +673,35 @@ export class HeatCloudLayer implements CustomLayerInterface {
     gl.depthMask(false);
     gl.disable(gl.CULL_FACE);
     gl.disable(gl.STENCIL_TEST);
-    gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, cloud.count - 1);
+    // The shadow on the ground, where the flights are lifted off it, then
+    // the glow at their heights
+    const passes = [
+      [0, CLOUD_SHADOW_COLOUR, CLOUD_SHADOW_CEILING, 0],
+      [style.liftM, CLOUD_COLOUR, 1, this.flow * CLOUD_FLOW_STRENGTH],
+    ] as const;
+    for (const [liftM, colour, ceiling, flow] of passes.slice(
+      style.liftM > 0 ? 0 : 1,
+    )) {
+      gl.uniform2f(u.u_heights, style.groundM, liftM);
+      gl.uniform4f(u.u_colour, colour[0], colour[1], colour[2], style.opacity);
+      gl.uniform1f(u.u_ceiling, ceiling);
+      gl.uniform2f(u.u_flowMix, octave - Math.floor(octave), flow);
+      gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, cloud.count - 1);
+    }
     gl.bindVertexArray(null);
     gl.depthMask(true);
     this.frames++;
     this.drawn = cloud.count - 1;
+    // Another frame while the pulses run or fade, or the exposure moves;
+    // none at all once they rest, for the map or for reduced motion
+    this.resting = style.flow && !awake && !this.flow;
+    if (
+      awake ||
+      this.flow > 0 ||
+      Math.abs(this.exposure - exposure) > exposure / 100
+    ) {
+      map.triggerRepaint();
+    }
   }
 
   /**
@@ -581,8 +763,8 @@ function makeResources(gl: WebGL2RenderingContext): Resources {
   gl.bindBuffer(gl.ARRAY_BUFFER, points);
   const stride = CLOUD_POINT_FLOATS * 4;
   // A stretch is the point it starts from and the one after it, with the
-  // points on either side of them for the joins, and the heat of the
-  // stretches before and after it
+  // points on either side of them for the joins, the heat of the stretches
+  // before and after it, and the time at either end
   for (let point = 0; point < 4; point++) {
     const location = 1 + 2 * point;
     gl.enableVertexAttribArray(location);
@@ -599,7 +781,7 @@ function makeResources(gl: WebGL2RenderingContext): Resources {
     gl.enableVertexAttribArray(location + 1);
     gl.vertexAttribPointer(
       location + 1,
-      1,
+      point ? 2 : 1,
       gl.FLOAT,
       false,
       stride,

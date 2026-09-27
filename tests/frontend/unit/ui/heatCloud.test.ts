@@ -20,6 +20,7 @@ import {
   type HeatCloudStyle,
 } from "../../../../kml_heatmap/frontend/ui/heatCloudLayer";
 import {
+  CLOUD_POINT_FLOATS,
   mercatorOf,
   type CloudPoints,
 } from "../../../../kml_heatmap/frontend/calculations/heatCloud";
@@ -81,7 +82,7 @@ function latitudesOf(cloud: CloudPoints | null): number[] {
   if (!cloud) return [];
   const lats = new Set<number>();
   for (let k = 1; k <= cloud.count; k++) {
-    const y = cloud.points[k * 5 + 1]! + cloud.origin[1];
+    const y = cloud.points[k * CLOUD_POINT_FLOATS + 1]! + cloud.origin[1];
     const lat = (Math.atan(Math.sinh(Math.PI * (1 - 2 * y))) * 180) / Math.PI;
     lats.add(Math.round(lat));
   }
@@ -169,8 +170,14 @@ describe("the heat cloud", () => {
     const cloud = drawn()!;
     // The first point of the cloud is the first of the first curve
     const [x, y] = mercatorOf(chain.points[0]!);
-    expect(cloud.points[5]! + cloud.origin[0]).toBeCloseTo(x, 9);
-    expect(cloud.points[6]! + cloud.origin[1]).toBeCloseTo(y, 9);
+    expect(cloud.points[CLOUD_POINT_FLOATS]! + cloud.origin[0]).toBeCloseTo(
+      x,
+      9,
+    );
+    expect(cloud.points[CLOUD_POINT_FLOATS + 1]! + cloud.origin[1]).toBeCloseTo(
+      y,
+      9,
+    );
   });
 
   it("starts in 3D, as a link or a saved view opens it", async () => {
@@ -181,7 +188,7 @@ describe("the heat cloud", () => {
     expect(latitudesOf(drawn())).toEqual([47, 48, 49]);
   });
 
-  it("draws nothing while the heatmap is off or a replay runs, as the heatmap", async () => {
+  it("draws nothing while the heatmap is off, as the heatmap", async () => {
     app.threeDVisible = true;
     await follow();
     expect(style()).not.toBeNull();
@@ -191,12 +198,30 @@ describe("the heat cloud", () => {
     // Still on the map, and the flat heatmap still stepped aside
     expect(map().getLayer(HEAT_CLOUD_LAYER)).toBeDefined();
     expect(app.store.get("heatCloud")).toBe(true);
-
     app.heatmapVisible = true;
+    expect(style()).not.toBeNull();
+  });
+
+  it("stays faintly and without its pulses while a replay runs, where the heatmap goes", async () => {
+    app.threeDVisible = true;
+    await follow();
+    expect(style()).toMatchObject({ opacity: 1, flow: true });
+
+    // Under a colour layer as well: fainter still than it steps back there
+    app.altitudeVisible = true;
+    app.replayActive = true;
+    const faint = style()!;
+    expect(faint.flow).toBe(false);
+    expect(faint.opacity).toBeGreaterThanOrEqual(0.2);
+    expect(faint.opacity).toBeLessThanOrEqual(0.3);
+    expect(latitudesOf(drawn())).toEqual([47, 48, 49]);
+
+    app.replayActive = false;
+    app.altitudeVisible = false;
+    expect(style()).toMatchObject({ opacity: 1, flow: true });
+    app.heatmapVisible = false;
     app.replayActive = true;
     expect(style()).toBeNull();
-    app.replayActive = false;
-    expect(style()).not.toBeNull();
   });
 
   it("steps back under a colour layer, as far as the heatmap does", async () => {
@@ -293,8 +318,11 @@ describe("the heat cloud", () => {
     await follow();
     const ground = levelGroundFt(sampled, true, 8);
     const cloud = drawn()!;
-    expect(cloud.points[5 + 2]).toBeCloseTo(ground[0]!, 3);
-    expect(cloud.points[5 + 3]).toBeCloseTo(4000 - ground[0]!, 3);
+    expect(cloud.points[CLOUD_POINT_FLOATS + 2]).toBeCloseTo(ground[0]!, 3);
+    expect(cloud.points[CLOUD_POINT_FLOATS + 3]).toBeCloseTo(
+      4000 - ground[0]!,
+      3,
+    );
 
     // The relief's exaggeration, or the level's without a relief
     const metres = liftExaggeration(8) * FEET_TO_METERS;

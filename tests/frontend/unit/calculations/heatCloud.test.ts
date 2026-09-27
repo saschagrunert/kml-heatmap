@@ -1,7 +1,8 @@
 /**
  * The points of the heat cloud of the 3D view: the fixes of the flights the
  * heatmap shows, at the heights of the ribbons, merged for the level, with
- * the seconds spent on each stretch between them.
+ * the seconds spent on each stretch between them, the time each was flown
+ * at, and the heat of the busiest cells for the exposure.
  */
 import { describe, it, expect } from "vitest";
 import {
@@ -29,6 +30,7 @@ interface Point {
   ground: number;
   lift: number;
   heat: number;
+  time: number;
 }
 
 /** The points of a cloud, without the empty one before and after them */
@@ -43,6 +45,7 @@ function pointsOf(cloud: CloudPoints): Point[] {
       ground: p[at + 2]!,
       lift: p[at + 3]!,
       heat: p[at + 4]!,
+      time: p[at + 5]!,
     });
   }
   return out;
@@ -155,8 +158,9 @@ describe("cloudPoints", () => {
     expect(cloud.origin[1]).toBeCloseTo(mercatorOf([47, 11])[1], 12);
     const floats = cloud.points;
     expect(floats).toHaveLength((cloud.count + 2) * CLOUD_POINT_FLOATS);
-    expect([...floats.slice(0, CLOUD_POINT_FLOATS)]).toEqual([0, 0, 0, 0, 0]);
-    expect([...floats.slice(-CLOUD_POINT_FLOATS)]).toEqual([0, 0, 0, 0, 0]);
+    const empty = new Array(CLOUD_POINT_FLOATS).fill(0);
+    expect([...floats.slice(0, CLOUD_POINT_FLOATS)]).toEqual(empty);
+    expect([...floats.slice(-CLOUD_POINT_FLOATS)]).toEqual(empty);
     // Small numbers around the origin, which a 32-bit float holds exactly
     expect(Math.abs(floats[CLOUD_POINT_FLOATS]!)).toBeLessThan(0.002);
   });
@@ -367,5 +371,177 @@ describe("cloudPoints", () => {
     const bend = points.slice(from[1], to[1]).map((p) => p.heat);
     expect(bend.reduce((sum, t) => sum + t, 0)).toBeCloseTo(20, 3);
     for (const heat of bend) expect(heat).toBeLessThan(20);
+  });
+});
+
+/** The seconds each of `seconds` adds up to, from 0 */
+function runningSum(seconds: number[]): number[] {
+  let sum = 0;
+  return [0, ...seconds.map((s) => (sum += s))];
+}
+
+describe("the time of the cloud's points", () => {
+  it("is the seconds into its flight each was flown at, from 0 at the first fix", () => {
+    const segments = flight(1, line(4), undefined, 7);
+    const points = pointsOf(cloudOf(segments, everything, [0, 0, 0], 11));
+    expect(points.map((p) => p.time)).toEqual(
+      runningSum(secondsOf(segments)).map((s) => Math.fround(s)),
+    );
+  });
+
+  it("runs on across a gap in the log, and starts anew with the next flight", () => {
+    const a = flight(1, line(3, 47));
+    const b = flight(1, line(3, 47.5));
+    const c = flight(2, [line(3, 47.5)[2]!, [47.6, 11]]);
+    const segments = [...a, ...b, ...c];
+    const points = pointsOf(
+      cloudOf(segments, everything, new Array(segments.length).fill(0), 11),
+    );
+    const seconds = secondsOf(segments);
+    const times = points.map((p) => p.time);
+    // The first path's two chains on one clock, the second chain from
+    // where the first ended, and the second path on its own
+    const run = runningSum(seconds.slice(0, 4)).map((t) => Math.fround(t));
+    expect(times.slice(0, 6)).toEqual([
+      run[0],
+      run[1],
+      run[2],
+      run[2],
+      run[3],
+      run[4],
+    ]);
+    expect(times.slice(6)).toEqual([0, Math.fround(seconds[4]!)]);
+  });
+
+  it("is the same for a flight whatever else the filter keeps", () => {
+    const segments = [
+      ...flight(1, line(3, 47), undefined, 9),
+      ...flight(2, line(3, 48)),
+    ];
+    const ground = new Array(segments.length).fill(0);
+    const alone = pointsOf(cloudOf(segments, (id) => id === 1, ground, 11));
+    const both = pointsOf(cloudOf(segments, everything, ground, 11));
+    expect(alone.map((p) => p.time)).toEqual(
+      both.slice(0, 3).map((p) => p.time),
+    );
+  });
+
+  it("keeps running through the fixes merged at a level, to the whole flight's seconds at the last", () => {
+    const fixes = line(21, 47, 11, 0.004);
+    const segments = flight(1, fixes, undefined, 6);
+    const points = pointsOf(
+      cloudOf(segments, everything, new Array(20).fill(0), 4),
+    );
+    expect(points.length).toBeLessThan(21);
+    const times = points.map((p) => p.time);
+    expect(times[0]).toBe(0);
+    for (let k = 1; k < times.length; k++) {
+      // The time of a point is the one before and the heat between them
+      expect(times[k]).toBeCloseTo(times[k - 1]! + points[k - 1]!.heat, 3);
+    }
+    const total = secondsOf(segments).reduce((sum, t) => sum + t, 0);
+    expect(times[times.length - 1]).toBeCloseTo(total, 3);
+  });
+
+  it("is the log's own time where it has one, from chain to chain", () => {
+    const a = flight(1, line(3, 47));
+    // A fix on its own, logged at 10 s: a segment of no length
+    const alone: PathSegment = {
+      ...a[0]!,
+      coords: [
+        [47.5, 11],
+        [47.5, 11],
+      ],
+      time: 10,
+    };
+    const b = flight(1, line(3, 48)).map((segment) => ({
+      ...segment,
+      time: segment.time! + 20,
+    }));
+    const segments = [...a, alone, ...b];
+    const points = pointsOf(
+      cloudOf(segments, everything, new Array(segments.length).fill(0), 11),
+    );
+    expect(points.map((p) => p.time).slice(0, 7)).toEqual([
+      0, 5, 10, 10, 20, 20, 25,
+    ]);
+  });
+
+  it("stands still over a stretch without times or speeds", () => {
+    const segments = flight(1, line(3)).map((segment) => ({
+      ...segment,
+      time: undefined,
+      groundspeed_knots: 0,
+    }));
+    const points = pointsOf(cloudOf(segments, everything, [0, 0], 11));
+    expect(points.map((p) => p.time)).toEqual([0, 0, 0]);
+  });
+});
+
+describe("the busiest heat of the cloud", () => {
+  /** 100 kt in metres per second, the groundspeed of flight() */
+  const CRUISE_MS = (100 * 1852) / 3600;
+  /** A cruise along the latitude 47 at 100 kt, a fix every 100 m */
+  function cruise(path_id: number, count = 200, lat = 47): PathSegment[] {
+    const stepDeg = 100 / (111320 * Math.cos(lat * DEGREES_TO_RADIANS));
+    return flight(
+      path_id,
+      line(count, lat, 11, stepDeg),
+      undefined,
+      100 / CRUISE_MS,
+    );
+  }
+  const busiest = (segments: PathSegment[], level = 11): number =>
+    cloudOf(segments, everything, new Array(segments.length).fill(0), level)
+      .busiest;
+
+  it("is none without any heat", () => {
+    expect(busiest([])).toBe(0);
+    expect(
+      cloudOf(cruise(1), () => false, new Array(199).fill(0), 11).busiest,
+    ).toBe(0);
+  });
+
+  it("is about the seconds a cruise spends on a metre, over its cells", () => {
+    const heat = busiest(cruise(1)) * CRUISE_MS;
+    expect(heat).toBeGreaterThan(0.9);
+    expect(heat).toBeLessThan(1.5);
+  });
+
+  it("adds up the flights that overlap, and the time a slower one spends", () => {
+    const once = busiest(cruise(1));
+    expect(busiest([...cruise(1), ...cruise(2)])).toBeCloseTo(2 * once, 9);
+    const slow = cruise(1).map((segment) => ({
+      ...segment,
+      time: segment.time! * 2,
+      groundspeed_knots: 50,
+    }));
+    expect(busiest(slow)).toBeCloseTo(2 * once, 9);
+  });
+
+  it("is not set by the few busiest cells alone", () => {
+    // Ten minutes on one spot, next to a long cruise
+    const standing = flight(3, [
+      [47.5, 11],
+      [47.5, 11.00001],
+    ]).map((segment) => ({ ...segment, groundspeed_knots: 0, time: 0 }));
+    const next = { ...standing[0]!, time: 600 };
+    const cruising = [
+      ...cruise(1, 400),
+      ...cruise(2, 400, 47.2),
+      ...standing,
+      { ...next, coords: [standing[0]!.coords[1], [47.5, 11.00002]] },
+    ] as PathSegment[];
+    const cruiseOnly = busiest([...cruise(1, 400), ...cruise(2, 400, 47.2)]);
+    expect(busiest(cruising)).toBeCloseTo(cruiseOnly, 9);
+  });
+
+  it("is of cells as wide as the glow at the level, so a closer one tells the flights apart", () => {
+    // Two cruises 400 m apart: one cell out at level 6, two at 11
+    const stepDeg = 400 / 111320;
+    const apart = [...cruise(1), ...cruise(2, 200, 47 + stepDeg)];
+    const alone = cruise(1);
+    expect(busiest(apart, 6) / busiest(alone, 6)).toBeCloseTo(2, 1);
+    expect(busiest(apart, 11) / busiest(alone, 11)).toBeCloseTo(1, 1);
   });
 });

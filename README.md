@@ -843,8 +843,15 @@ the other once it has started.
   glow narrows to a crisp line along each track, so the roads and place
   names stay readable. A route flown once is a faint blue, the circuits
   and the climbs out of a busy field glow white, and a ridge in front of a
-  flight hides its glow. It follows the same switch, filters, Isolate and replay
-  as the heatmap, and steps back under a colour layer as it does; it only
+  flight hides its glow. Where so many flights overlap that more than a
+  hundredth of the cloud would glow past white, the whole cloud is drawn
+  darker; it is never drawn brighter. A faint copy of the glow on the ground
+  under the flights shows how high they were, and pulses run along every
+  track the way it was flown, for 20 seconds after the map was last used
+  and not at all with reduced motion. It follows the same switch, filters
+  and Isolate as the heatmap, and steps back under a colour layer as it
+  does; during a replay it stays at a quarter of its strength and without
+  its pulses, so the chase view flies through the flights of before. It only
   draws, so hovering and clicking still go to the flights. Should the
   browser not run its shaders, the flat heatmap stays
 - **Altitude** (toggle) - Paths coloured by elevation, on a scale that runs

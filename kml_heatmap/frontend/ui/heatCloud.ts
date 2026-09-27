@@ -7,8 +7,10 @@
  * valley, the climbs out and the descents in. It shows what the heatmap
  * would: the fixes of the flights the year and aircraft filters keep, of
  * the selection alone while it is isolated, nothing while the Heatmap
- * switch is off or a replay runs; and it steps back under a colour layer
- * as the heatmap does (dimsHeatmap). The flat heatmap steps aside for it
+ * switch is off; and it steps back under a colour layer as the heatmap
+ * does (dimsHeatmap). While a replay runs it stays, faintly and without
+ * its pulses, so the chase camera flies through the flights of before.
+ * The flat heatmap steps aside for it
  * (heatCloud in the store, see ui/layerVisibility.ts) from the moment the
  * cloud's layer is on the map until the 3D view is turned off, or for good
  * where the cloud's shaders do not work, which leaves the heatmap as it was.
@@ -49,6 +51,9 @@ import {
  * the Heatmap switch off.
  */
 const CLOUD_BEFORE = MAP_LAYERS.pathsAltitudeRibbons;
+
+/** How strongly the cloud is drawn while a replay runs */
+const CLOUD_REPLAY_OPACITY = 0.25;
 
 /** The keys the cloud follows */
 const CLOUD_KEYS: readonly (keyof StoreState)[] = [
@@ -129,7 +134,7 @@ export function followHeatCloud(app: MapApp): void {
   };
 
   const shown = (): boolean =>
-    app.threeDVisible && app.heatmapVisible && !app.replayActive && !broken;
+    app.threeDVisible && app.heatmapVisible && !broken;
 
   const style = (): HeatCloudStyle | null => {
     if (!shown()) return null;
@@ -142,6 +147,7 @@ export function followHeatCloud(app: MapApp): void {
       groundM: app.terrainActive ? metres : 0,
       liftM: lifted ? metres : 0,
       opacity,
+      flow: !app.replayActive,
     };
   };
 
@@ -233,7 +239,11 @@ export function followHeatCloud(app: MapApp): void {
       layer.setPoints(null);
       return;
     }
-    opacity = dimsHeatmap(app) ? dimmedHeatmapOpacity() : 1;
+    opacity = app.replayActive
+      ? CLOUD_REPLAY_OPACITY
+      : dimsHeatmap(app)
+        ? dimmedHeatmapOpacity()
+        : 1;
     if (!map.isZooming()) lifted = isLiftedAt(map.getZoom());
     if (shown()) updatePoints();
     map.triggerRepaint();
