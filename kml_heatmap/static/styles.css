@@ -1,21 +1,20 @@
 /* The stylesheet the page loads up front.
 
-   Everything replay needs is in features.css instead, and everything
-   Wrapped and the content of the statistics panel need in wrapped.css,
-   which services/featureLoader.ts fetches next to features.bundle.js and
-   wrapped.bundle.js the first time one of them is opened. Most visits open
-   none of them, and the two are more than a third of the styles; keeping
-   them out of the critical path is the same trade the lazy bundles make for
-   the JavaScript.
+   Everything replay and the flight profile need is in features.css
+   instead, and everything Wrapped and the content of the statistics panel
+   need in wrapped.css, which services/featureLoader.ts fetches next to
+   features.bundle.js and wrapped.bundle.js the first time one of them is
+   opened. Most visits open none of them, and the two are more than a third
+   of the styles; keeping them out of the critical path is the same trade
+   the lazy bundles make for the JavaScript.
 
-   A rule belongs in features.css when its selector names replay, in
-   wrapped.css when it names Wrapped or what the statistics panel renders
-   (.kh-stats-*, bar the rail's title and loading state), and here
-   otherwise; a selector list
-   that names more than one is written out in each file, with the selectors
-   that belong there. Design tokens, the control surfaces the feature panels
-   reuse (.btn-surface and friends) and every shared media query stay
-   here. */
+   A rule belongs in features.css when its selector names replay or the
+   flight profile, in wrapped.css when it names Wrapped or what the
+   statistics panel renders (.kh-stats-*, bar the rail's title and loading
+   state), and here otherwise; a selector list that names more than one is
+   written out in each file, with the selectors that belong there. Design
+   tokens, the control surfaces the feature panels reuse (.btn-surface and
+   friends) and every shared media query stay here. */
 
 /* ==========================================================================
    Design tokens

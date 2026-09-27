@@ -547,6 +547,11 @@ export class ReplayRenderer {
    * lift. A trail whose ribbons are cut for another zoom is written again.
    */
   private readonly camera: ReplayCamera;
+  /**
+   * Told the replay's time on every display, a seek's and a frame's: the
+   * flight profile's cursor follows it (ui/flightProfile.ts)
+   */
+  onTime: ((state: ReplayState) => void) | null = null;
 
   constructor(app: MapApp) {
     this.app = app;
@@ -765,6 +770,7 @@ export class ReplayRenderer {
    */
   updateDisplay(state: ReplayState, isManualSeek: boolean = false): void {
     this.updateTransport(state);
+    this.onTime?.(state);
     // Nothing of the map moves while it has lost its WebGL context, and
     // every frame threw asking it: the frames after the restore catch up,
     // the trail from the last segment it has drawn

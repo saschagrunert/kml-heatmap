@@ -34,18 +34,20 @@ from kml_heatmap.site_assets import CSS_FILES, STATIC_DIR, _copy_and_minify_css
 # when the content of the statistics panel moved to wrapped.css with its code
 # (38,394 B after).
 #
-# features.css and wrapped.css are fetched only when replay or Wrapped is
-# opened, so they are the more forgiving. The two were one 28.8 KB sheet until
-# Wrapped got a bundle of its own; split, they minify to 5.0 KB (replay) and
-# 23.2 KB (Wrapped), and each budget keeps about 2 KB over that. wrapped.css
-# was raised from 26 KB for the statistics panel, which comes with the
-# Wrapped bundle (28,811 B after), and from 30 KB for the flight list and the
-# tabs of the statistics rail, which show once it is in (28,603 B before,
+# features.css and wrapped.css are fetched with their lazy bundles, not by a
+# first visit, so they are the more forgiving. The two were one 28.8 KB sheet
+# until Wrapped got a bundle of its own; split, they minify to 5.0 KB (replay)
+# and 23.2 KB (Wrapped), and each budget keeps about 2 KB over that.
+# wrapped.css was raised from 26 KB for the statistics panel, which comes with
+# the Wrapped bundle (28,811 B after), and from 30 KB for the flight list and
+# the tabs of the statistics rail, which show once it is in (28,603 B before,
 # 31,495 B after). features.css was raised from 7 KB for the panel of the
-# replay of all flights (6,298 B before, 7,551 B after).
+# replay of all flights (6,298 B before, 7,551 B after), and from 8 KB for
+# the flight profile, whose strip, chart, chip toggle and place in the replay
+# panel it carries (7,551 B before, 11,596 B after).
 STYLESHEET_BUDGET_BYTES = {
     "styles.css": 40 * 1024,
-    "features.css": 8 * 1024,
+    "features.css": int(13.5 * 1024),
     "wrapped.css": 33 * 1024,
 }
 

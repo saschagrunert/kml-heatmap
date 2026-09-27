@@ -167,6 +167,11 @@ export class PathHover {
   private hovered: PathSegment | null = null;
   /** The popup a tap opened; a tap elsewhere replaces it */
   private touchPopup: Popup | null = null;
+  /**
+   * Told the segment the tooltip comes to describe, and null as it closes:
+   * the flight profile moves its cursor along (ui/flightProfile.ts)
+   */
+  onHover: ((segment: PathSegment | null) => void) | null = null;
 
   private readonly handleMouseMove = (e: MapMouseEvent): void => {
     // The overview of the Wrapped dialog is this map, but there to be
@@ -459,6 +464,7 @@ export class PathHover {
     if (segment !== this.hovered) {
       this.hovered = segment;
       tooltip.setHTML(this.paths.describe(segment));
+      this.onHover?.(segment);
     }
     if (!tooltip.isOpen()) {
       // A popup that tracks the pointer has no place until the pointer
@@ -473,6 +479,7 @@ export class PathHover {
     this.hovered = null;
     if (!this.tooltip?.isOpen()) return;
     this.tooltip.remove();
+    this.onHover?.(null);
     const canvas = this.app.map?.getCanvas();
     if (canvas) canvas.style.cursor = "";
   }

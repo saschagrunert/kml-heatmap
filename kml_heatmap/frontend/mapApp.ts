@@ -950,6 +950,7 @@ export class MapApp {
     followSelectionHighlight(this);
     followStatsPanel(this);
     this.followReplayAvailability();
+    this.followFlightProfile();
     this.store.subscribeKeys(
       [
         ...TOGGLE_KEYS,
@@ -1137,6 +1138,32 @@ export class MapApp {
       refresh,
     );
     refresh();
+  }
+
+  /**
+   * Fetch the feature bundle as a single flight is first selected: it
+   * draws that flight's profile from then on (ui/flightProfile.ts). A
+   * failed fetch is tried again with the next single selection, or as a
+   * replay of it opens, which fetched the bundle itself.
+   */
+  private followFlightProfile(): void {
+    let pending = false;
+    const check = (): void => {
+      if (pending || this.selectedPathIds.size !== 1) return;
+      pending = true;
+      void loadFeatures().then((features) => {
+        pending = false;
+        if (!features || !stop) return;
+        stop();
+        stop = null;
+        if (!this.destroyed) features.followFlightProfile(this);
+      });
+    };
+    let stop: (() => void) | null = this.store.subscribeKeys(
+      ["selectedPathIds", "replayActive"],
+      check,
+    );
+    check();
   }
 
   /**

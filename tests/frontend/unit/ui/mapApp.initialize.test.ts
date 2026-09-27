@@ -91,6 +91,8 @@ vi.mock("../../../../kml_heatmap/frontend/services/featureLoader", () => ({
       }),
       // The satellite switch hands itself over to the bundle
       followSatellite: vi.fn(),
+      // And a single selected flight to its profile
+      followFlightProfile: vi.fn(),
     }),
   ),
   loadWrapped: vi.fn(() =>

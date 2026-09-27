@@ -1,16 +1,17 @@
-/* The styles of replay, loaded with features.bundle.js.
+/* The styles of replay and of the flight profile, loaded with
+   features.bundle.js.
 
    Not in the page up front: see the header of styles.css for why, and for
    which rule belongs where.
 
    The dependency runs one way. This file may use the tokens and shared
    classes styles.css defines; nothing in styles.css may depend on a rule
-   here, because this file is absent until replay is opened. It is appended
-   after styles.css, so a rule here wins a tie on specificity: do not set a
-   property here that styles.css relies on winning, `.initially-hidden` in
-   particular (see the note on it there). wrapped.css is fetched by the
-   other lazy bundle and may land before or after this file, so the two
-   must not style the same elements. */
+   here, because this file is absent until that bundle is first fetched. It
+   is appended after styles.css, so a rule here wins a tie on specificity:
+   do not set a property here that styles.css relies on winning,
+   `.initially-hidden` in particular (see the note on it there).
+   wrapped.css is fetched by the other lazy bundle and may land before or
+   after this file, so the two must not style the same elements. */
 
 /* `.btn-surface` in styles.css sets a display of its own, so the play and
    pause controls need the attribute selector to outrank it. */
@@ -345,6 +346,201 @@ body.replay-all-active .color-legend {
 }
 
 /* ==========================================================================
+   Flight profile (ui/flightProfile.ts)
+   ========================================================================== */
+/* Bottom centre, above the map's credit, and 300 px or more from the left
+   edge, clear of a colour legend up to 270 px wide in the bottom left
+   corner, as long as the strip has its least width (see below) */
+#flight-profile {
+  position: fixed;
+  left: 50%;
+  bottom: calc(var(--attribution-h) + var(--space-sm) + var(--safe-bottom));
+  transform: translateX(-50%);
+  width: clamp(240px, calc(100vw - 600px), 560px);
+  box-sizing: border-box;
+  padding: var(--space-sm) var(--space-md);
+  background-color: var(--color-bg-edge);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-panel);
+  box-shadow: var(--shadow-panel);
+  z-index: var(--z-legend);
+  color: var(--color-text);
+  font-size: var(--text-sm);
+}
+/* The figures, or while the chart is pointed at the values there, in the
+   same place so the strip keeps its height */
+.profile-head {
+  display: grid;
+}
+.profile-stats,
+.profile-readout {
+  grid-area: 1 / 1;
+}
+.profile-stats {
+  display: flex;
+  flex-wrap: wrap;
+  column-gap: var(--space-md);
+}
+.profile-head:has(.profile-readout:not(:empty)) .profile-stats {
+  visibility: hidden;
+}
+.profile-stat-label {
+  color: var(--color-text-muted);
+}
+.profile-readout {
+  font-family: var(--font-mono);
+}
+.profile-plot {
+  position: relative;
+  height: 64px;
+  margin-top: var(--space-xs);
+  /* A finger on it reads the flight rather than scrolling the page */
+  touch-action: none;
+  cursor: crosshair;
+}
+#flight-profile.is-timed .profile-plot {
+  cursor: pointer;
+}
+.profile-chart {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+.profile-chart * {
+  vector-effect: non-scaling-stroke;
+}
+.profile-ground {
+  fill: rgba(var(--color-text-rgb), 0.14);
+}
+.profile-line {
+  fill: none;
+  stroke: var(--color-accent-blue);
+  stroke-width: 1.5;
+  stroke-linejoin: round;
+}
+.profile-cursor {
+  stroke: var(--color-text);
+  stroke-width: 1.5;
+}
+.profile-hover {
+  stroke: var(--color-text-muted);
+  stroke-dasharray: 3 3;
+}
+.profile-dot,
+.profile-map-dot {
+  border-radius: var(--radius-pill);
+  background-color: var(--color-accent-blue);
+  pointer-events: none;
+}
+.profile-dot {
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  margin: -4px 0 0 -4px;
+}
+.profile-map-dot {
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--color-text);
+  box-sizing: border-box;
+}
+.profile-axis {
+  display: flex;
+  justify-content: space-between;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+/* The toasts go above the strip, as they go above the replay panel */
+body.profile-open .toast-stack {
+  bottom: calc(
+    var(--attribution-h) + var(--space-sm) + var(--safe-bottom) +
+      var(--flight-profile-h, 0px) + var(--space-sm)
+  );
+}
+/* During a replay the strip is the panel's scrubber, over the slider's own
+   two ends. Its width is the panel's: at zero with a minimum of all of it,
+   the readout does not widen the panel as it changes. */
+#replay-controls #flight-profile {
+  position: static;
+  transform: none;
+  width: 0;
+  min-width: 100%;
+  padding: 0;
+  border: none;
+  background: none;
+  box-shadow: none;
+}
+#replay-controls #flight-profile .profile-axis {
+  display: none;
+}
+/* The slider stays for the keyboard, drawn by the chart and its focus */
+#replay-controls.has-profile #replay-slider {
+  height: 4px;
+  opacity: 0;
+}
+#replay-controls:has(#replay-slider:focus-visible) .profile-plot {
+  outline: 2px solid var(--color-accent-blue);
+  outline-offset: 2px;
+}
+/* The toggle on the selection chip, beside its Clear */
+.profile-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  min-height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-pill);
+  background-color: var(--color-bg-raised);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+.profile-toggle[hidden] {
+  display: none;
+}
+.profile-toggle[aria-expanded="true"] {
+  color: var(--color-accent-blue);
+}
+.profile-toggle:focus-visible {
+  outline: 2px solid var(--color-accent-blue);
+  outline-offset: 2px;
+}
+@media (hover: hover) {
+  .profile-toggle:hover {
+    background-color: var(--color-bg-active);
+    color: var(--color-text);
+  }
+}
+@media (min-width: 768px) {
+  body.stats-open #flight-profile {
+    left: calc(50% + var(--stats-rail-w) / 2);
+    width: clamp(240px, calc(100vw - var(--stats-rail-w) - 600px), 560px);
+  }
+}
+/* Narrower than that, the legend stands on top of the strip, as it does on
+   the replay panel */
+@media (min-width: 768px) and (max-width: 839.98px) {
+  body.profile-open .color-legend {
+    bottom: calc(
+      var(--attribution-h) + var(--space-sm) + var(--safe-bottom) +
+        var(--flight-profile-h, 0px) + var(--space-sm)
+    );
+  }
+}
+@media (min-width: 840px) and (max-width: 1155.98px) {
+  body.stats-open.profile-open .color-legend {
+    bottom: calc(
+      var(--attribution-h) + var(--space-sm) + var(--safe-bottom) +
+        var(--flight-profile-h, 0px) + var(--space-sm)
+    );
+  }
+}
+
+/* ==========================================================================
    Mobile layout (narrow viewports)
    ========================================================================== */
 @media (max-width: 767.98px) {
@@ -421,6 +617,29 @@ body.replay-all-active .color-legend {
         var(--replay-panel-h, 0px) + var(--space-sm)
     );
   }
+  /* The strip spans the width above the bar and the credit, like the
+     replay panel, and the legend it would cover steps aside for it */
+  #flight-profile {
+    left: calc(var(--edge-gap) + var(--safe-left));
+    right: calc(var(--edge-gap) + var(--safe-right));
+    width: auto;
+    transform: none;
+  }
+  body.profile-open .color-legend {
+    visibility: hidden;
+  }
+  body:has(.mobile-bar) #flight-profile {
+    bottom: calc(
+      var(--mobile-bar-h) + var(--attribution-h) + var(--space-sm) +
+        var(--safe-bottom)
+    );
+  }
+  body:has(.mobile-bar).profile-open .toast-stack {
+    bottom: calc(
+      var(--mobile-bar-h) + var(--attribution-h) + var(--space-sm) +
+        var(--safe-bottom) + var(--flight-profile-h, 0px) + var(--space-sm)
+    );
+  }
   body:has(.mobile-bar) #replay-controls {
     bottom: calc(
       var(--mobile-bar-h) + var(--attribution-h) + var(--space-sm) +
@@ -433,7 +652,8 @@ body.replay-all-active .color-legend {
    this one's rule comes after that list, so it is repeated here */
 @media (prefers-contrast: more) {
   #replay-controls,
-  #replay-all-controls {
+  #replay-all-controls,
+  #flight-profile {
     border-width: 2px;
   }
 }
@@ -459,5 +679,11 @@ body.replay-all-active .color-legend {
   .replay-btn,
   .replay-airplane-icon {
     transition: none;
+  }
+}
+
+@media print {
+  #flight-profile {
+    display: none !important;
   }
 }

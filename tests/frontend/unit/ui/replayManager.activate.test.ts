@@ -190,6 +190,24 @@ describe("ReplayManager activation", () => {
       expect(document.body.classList.contains("replay-active")).toBe(true);
     });
 
+    it("goes to the start of the flight, unless asked to stay", () => {
+      mockApp.selectedPathIds = new Set([1]);
+      const easeTo = vi.mocked(mockApp.map!.easeTo);
+      easeTo.mockClear();
+
+      replayManager.toggleReplay();
+      expect(easeTo).toHaveBeenCalledWith(
+        expect.objectContaining({ center: [16.0, 48.0] }),
+      );
+      replayManager.toggleReplay();
+      easeTo.mockClear();
+
+      // The flight profile opens it where the map is, and seeks from there
+      replayManager.toggleReplay(false);
+      expect(mockApp.replayActive).toBe(true);
+      expect(easeTo).not.toHaveBeenCalled();
+    });
+
     it("leaves persistence to the store subscription", () => {
       mockApp.selectedPathIds = new Set([1]);
 

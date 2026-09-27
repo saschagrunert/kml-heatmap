@@ -1908,6 +1908,19 @@ describe("LayerManager", () => {
       expect(tooltips()[0]!.isOpen()).toBe(false);
     });
 
+    it("tells the flight profile the segment it comes to describe", () => {
+      const told: (PathSegment | null)[] = [];
+      layerManager.pathHover.onHover = (segment) => told.push(segment);
+
+      moveTo(pointAt(48.19, 16.19));
+      // The same segment again: nothing new to tell
+      moveTo(pointAt(48.18, 16.18));
+      mockApp.map!.emit("mouseout");
+
+      const segments = mockApp.currentData!.path_segments;
+      expect(told).toEqual([segments[1], null]);
+    });
+
     it("colours the tooltip chips on the range the runs use", () => {
       // Path 2 is selected: its range, not the full one, colours the map
       mockApp.currentData!.path_info.push({

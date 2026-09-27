@@ -237,6 +237,19 @@ describe("ReplayManager display", () => {
   });
 
   describe("updateReplayDisplay", () => {
+    it("tells a follower the time of every display", () => {
+      const follow = vi.fn();
+      replayManager.followTime(follow);
+      replayManager.state.currentTime = 60;
+
+      replayManager.updateReplayDisplay();
+      expect(follow).toHaveBeenCalledWith(replayManager.state);
+
+      replayManager.followTime(null);
+      replayManager.updateReplayDisplay();
+      expect(follow).toHaveBeenCalledOnce();
+    });
+
     it("updates time display and slider value text", () => {
       replayManager.state.currentTime = 60;
 
