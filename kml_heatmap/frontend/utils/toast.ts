@@ -109,11 +109,12 @@ function toastButton(
 }
 
 /**
- * Take the error toast with this message off the screen, if one is there,
- * or every error toast without one
+ * Take the toast with this message off the screen, if one is there, or
+ * every error toast without one
  */
 export function dismissToast(message?: string): void {
-  for (const toast of document.querySelectorAll<HTMLElement>(".toast-error")) {
+  const shown = message === undefined ? ".toast-error" : ".toast-notification";
+  for (const toast of document.querySelectorAll<HTMLElement>(shown)) {
     if (message === undefined || toast.dataset["message"] === message) {
       removeToast(toast);
     }
@@ -123,8 +124,10 @@ export function dismissToast(message?: string): void {
 /**
  * Show a message. Info goes after TOAST_DURATION_MS; an error stays until it
  * is dismissed, since it says something is wrong until someone acts on it,
- * and it can carry the action that puts it right. The same error shown
- * again replaces the one on screen rather than stacking a copy.
+ * and it can carry the action that puts it right. Info with an action stays
+ * as well: a button that went away after a few seconds could not be reached
+ * in time by keyboard. The same message shown again replaces the one on
+ * screen rather than stacking a copy.
  */
 export function showToast(
   message: string,
@@ -143,7 +146,7 @@ export function showToast(
   toast.dataset["message"] = message;
   announceInRegion(toastRegion(type), message);
 
-  if (type === "info") {
+  if (type === "info" && !action) {
     // The live region speaks the message; this is only its picture
     toast.setAttribute("aria-hidden", "true");
     setTimeout(() => removeToast(toast), TOAST_DURATION_MS);

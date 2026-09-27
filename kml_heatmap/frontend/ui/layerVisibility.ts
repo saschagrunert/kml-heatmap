@@ -59,6 +59,17 @@ export function dimsHeatmap(app: MapApp): boolean {
 }
 
 /**
+ * Whether the heat cloud of the 3D view steps back (ui/heatCloud.ts): for
+ * the aviation chart and a selection's lines, as the heatmap does, but not
+ * for a colour layer. Its ribbons are drawn in front of the cloud, not
+ * washed out by a bloom under them, and a cloud dimmed for them was a faint
+ * halo round the flights it is meant to show.
+ */
+export function dimsHeatCloud(app: MapApp): boolean {
+  return app.aviationVisible || highlightsSelection(app);
+}
+
+/**
  * Whether paths are coloured by altitude: the altitude layer, or a replay
  * trail, which takes altitude colours unless the speed layer is on. The
  * trails of the replay of every flight take none.
@@ -98,12 +109,18 @@ export function followLayerVisibility(app: MapApp): void {
     app.selectionHighlightLayer.setVisible(highlightsSelection(app));
 
     // The heatmap is hidden for a replay, so its toggle must not report it
-    // as on. The replay trail is coloured by altitude unless the speed
+    // as on; the 3D view's cloud stays through one, faintly, and its toggle
+    // says so. The replay trail is coloured by altitude unless the speed
     // layer is on, so it needs the altitude scale with neither layer on,
     // and the altitude toggle says so: it said off over a trail and a
     // legend in altitude colours.
     const button = domCache.get("heatmap-btn");
-    if (button) applyToggleButtonState(button, heatmap);
+    if (button) {
+      applyToggleButtonState(
+        button,
+        heatmap || (app.heatCloud && app.heatmapVisible),
+      );
+    }
     const altitude = altitudeColours(app);
     const altitudeButton = domCache.get("altitude-btn");
     if (altitudeButton) applyToggleButtonState(altitudeButton, altitude);

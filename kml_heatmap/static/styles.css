@@ -1501,7 +1501,10 @@ body.stats-open #left-buttons {
 }
 .toast-notification.toast-error {
   border-color: var(--color-error);
-  /* An error stays until it is dismissed, and carries the buttons to do it */
+}
+/* An error, or a hint with an action, stays until it is dismissed, and
+   carries the buttons to do it */
+.toast-notification:has(.toast-button) {
   display: flex;
   align-items: center;
   gap: var(--space-sm);

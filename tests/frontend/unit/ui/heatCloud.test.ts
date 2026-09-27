@@ -14,6 +14,7 @@ import {
 } from "vitest";
 import type { StyleSpecification } from "maplibre-gl";
 import {
+  CLOUD_IDLE_MS,
   followHeatCloud,
   prepareHeatCloud,
 } from "../../../../kml_heatmap/frontend/ui/heatCloud";
@@ -35,6 +36,7 @@ import {
 } from "../../../../kml_heatmap/frontend/calculations/heightBand";
 import {
   groundedFlights,
+  heldFlights,
   heldGroundedFlights,
   levelGroundFt,
   releaseGroundProfiles,
@@ -235,8 +237,9 @@ describe("the heat cloud", () => {
     await follow();
     expect(style()).toMatchObject({ opacity: 1, flow: true });
 
-    // Under a colour layer as well: fainter still than it steps back there
-    app.altitudeVisible = true;
+    // Under the aviation chart as well: fainter still than it steps back
+    // there
+    app.aviationVisible = true;
     app.replayActive = true;
     const faint = style()!;
     expect(faint.flow).toBe(false);
@@ -245,22 +248,40 @@ describe("the heat cloud", () => {
     expect(latitudesOf(drawn())).toEqual([47, 48, 49]);
 
     app.replayActive = false;
-    app.altitudeVisible = false;
+    app.aviationVisible = false;
     expect(style()).toMatchObject({ opacity: 1, flow: true });
     app.heatmapVisible = false;
     app.replayActive = true;
     expect(style()).toBeNull();
   });
 
-  it("steps back under a colour layer, as far as the heatmap does", async () => {
+  it("stays at full strength under the ribbons of a colour layer, which the 3D button turns on, as a link without them opens it", async () => {
     app.threeDVisible = true;
     await follow();
     expect(style()!.opacity).toBe(1);
     app.altitudeVisible = true;
+    expect(style()!.opacity).toBe(1);
+    app.store.batch(() => {
+      app.altitudeVisible = false;
+      app.airspeedVisible = true;
+    });
+    expect(style()!.opacity).toBe(1);
+    // Nor for a selection the colour layer draws
+    app.selectedPathIds = new Set([1]);
+    expect(style()!.opacity).toBe(1);
+  });
+
+  it("steps back under the aviation chart and a selection's lines, as far as the heatmap does", async () => {
+    app.threeDVisible = true;
+    await follow();
+    app.aviationVisible = true;
     expect(style()!.opacity).toBeGreaterThan(0);
     expect(style()!.opacity).toBeLessThan(1);
-    app.altitudeVisible = false;
+    app.aviationVisible = false;
     expect(style()!.opacity).toBe(1);
+    app.selectedPathIds = new Set([1]);
+    expect(style()!.opacity).toBeGreaterThan(0);
+    expect(style()!.opacity).toBeLessThan(1);
   });
 
   it("draws the band of heights of its control in the 3D view, and every height in Wrapped", async () => {
@@ -455,11 +476,58 @@ describe("the heat cloud", () => {
       expect(logger.logError).toHaveBeenCalledOnce();
       expect(map().getLayer(HEAT_CLOUD_LAYER)).toBeUndefined();
       expect(app.store.get("heatCloud")).toBe(false);
-      // For good
+      // For as long as the map keeps its context
       app.threeDVisible = false;
       app.threeDVisible = true;
       expect(map().getLayer(HEAT_CLOUD_LAYER)).toBeUndefined();
       expect(app.store.get("heatCloud")).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("tries its shaders again in the context the map gets back after a loss, which is what they may have failed with", async () => {
+    vi.useFakeTimers();
+    try {
+      app.threeDVisible = true;
+      await follow();
+      (layer() as unknown as { failed: (e: unknown) => void }).failed(
+        new Error("the cloud's buffers could not be made"),
+      );
+      vi.runOnlyPendingTimers();
+      expect(app.store.get("heatCloud")).toBe(false);
+      map().emit("webglcontextlost");
+
+      map().emit("webglcontextrestored");
+      map().emit("style.load");
+      expect(map().getLayer(HEAT_CLOUD_LAYER)).toBeDefined();
+      expect(app.store.get("heatCloud")).toBe(true);
+      expect(style()).not.toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("lets go of its points a while after the Heatmap switch went off, and cuts them again as it comes back", async () => {
+    vi.useFakeTimers();
+    try {
+      app.threeDVisible = true;
+      await follow();
+      const points = drawn();
+      cuts.count = 0;
+      // Back in time: nothing to cut
+      app.heatmapVisible = false;
+      vi.advanceTimersByTime(CLOUD_IDLE_MS - 1);
+      app.heatmapVisible = true;
+      expect(cuts.count).toBe(0);
+      expect(drawn()).toBe(points);
+
+      app.heatmapVisible = false;
+      vi.advanceTimersByTime(CLOUD_IDLE_MS);
+      expect(drawn()).toBeNull();
+      app.heatmapVisible = true;
+      expect(cuts.count).toBe(1);
+      expect(latitudesOf(drawn())).toEqual([47, 48, 49]);
     } finally {
       vi.useRealTimers();
     }
@@ -489,15 +557,158 @@ describe("the heat cloud", () => {
         opacity: 1,
         flow: true,
       });
-      // It is the heatmap still: its switch hides it
-      app.heatmapVisible = false;
-      expect(style()).toBeNull();
-      app.heatmapVisible = true;
-
       app.forcedHeatCloud = false;
       expect(map().getLayer(HEAT_CLOUD_LAYER)).toBeUndefined();
       expect(app.store.get("heatCloud")).toBe(false);
       expect(drawn()).toBeNull();
+    });
+
+    it("draws the year of the cards, whatever the Heatmap switch, Isolate, a colour layer or a selection say, and leaves them as they were", async () => {
+      app.store.batch(() => {
+        app.heatmapVisible = false;
+        app.selectedPathIds = new Set([1]);
+        app.isolateSelection = true;
+        app.altitudeVisible = true;
+        app.aviationVisible = true;
+      });
+      await follow();
+      app.forcedHeatCloud = true;
+
+      expect(style()).toMatchObject({ opacity: 1, flow: true });
+      expect(latitudesOf(drawn())).toEqual([47, 48, 49]);
+      // Still the year and aircraft filters'
+      app.selectedYear = "2026";
+      expect(latitudesOf(drawn())).toEqual([48, 49]);
+
+      app.forcedHeatCloud = false;
+      expect(map().getLayer(HEAT_CLOUD_LAYER)).toBeUndefined();
+      expect(app.store.get("heatCloud")).toBe(false);
+      expect(app.heatmapVisible).toBe(false);
+      expect(app.isolateSelection).toBe(true);
+    });
+
+    it("gives the 3D view its own cloud back as it goes: isolated, dimmed, or none with the Heatmap switch off", async () => {
+      app.store.batch(() => {
+        app.threeDVisible = true;
+        app.reliefLevel = 7;
+        app.selectedPathIds = new Set([1]);
+        app.isolateSelection = true;
+      });
+      await follow();
+      const isolated = drawn();
+      expect(latitudesOf(isolated)).toEqual([47]);
+      const dimmed = style()!.opacity;
+      expect(dimmed).toBeLessThan(1);
+
+      app.forcedHeatCloud = true;
+      expect(latitudesOf(drawn())).toEqual([47, 48, 49]);
+      expect(style()!.opacity).toBe(1);
+      app.forcedHeatCloud = false;
+      expect(latitudesOf(drawn())).toEqual([47]);
+      expect(style()!.opacity).toBe(dimmed);
+      expect(app.store.get("heatCloud")).toBe(true);
+
+      app.heatmapVisible = false;
+      app.forcedHeatCloud = true;
+      expect(style()).not.toBeNull();
+      app.forcedHeatCloud = false;
+      expect(style()).toBeNull();
+      expect(map().getLayer(HEAT_CLOUD_LAYER)).toBeDefined();
+    });
+
+    it("cuts ahead of time for the flat ground of the intro's globe, and leaves the flights the ribbons stand on on the relief", async () => {
+      app.store.batch(() => {
+        app.threeDVisible = true;
+        app.reliefLevel = 7;
+        app.terrainActive = true;
+      });
+      await follow();
+      const segments = DATA.path_segments;
+      const ribbons = heldFlights(segments, true, 7);
+      expect(ribbons).not.toBeNull();
+      cuts.count = 0;
+
+      prepareHeatCloud(asMapApp(app), [6, 7]);
+      expect(cuts.count).toBe(2);
+      expect(heldFlights(segments, true, 7)).toBe(ribbons);
+
+      // The intro: the cloud forced, then the relief gone with the globe,
+      // a round of the store later
+      app.forcedHeatCloud = true;
+      // On the ground its points were cut on from the first
+      expect(style()!.groundM).toBe(0);
+      app.terrainActive = false;
+      expect(cuts.count).toBe(2);
+    });
+
+    it("keeps the 3D view's own points while its button cuts Wrapped's ahead of time, and lets go of those that are not drawn", async () => {
+      vi.useFakeTimers();
+      try {
+        app.store.batch(() => {
+          app.threeDVisible = true;
+          app.reliefLevel = 7;
+          app.terrainActive = true;
+        });
+        await follow();
+        app.reliefLevel = 6;
+        const six = drawn();
+        cuts.count = 0;
+
+        prepareHeatCloud(asMapApp(app), [6, 7]);
+        expect(cuts.count).toBe(2);
+        // What changes nothing of its points cuts nothing, nor does a zoom
+        // back into a level it drew
+        app.selectedPathIds = new Set([1]);
+        expect(drawn()).toBe(six);
+        app.reliefLevel = 7;
+        app.reliefLevel = 6;
+        expect(drawn()).toBe(six);
+        expect(cuts.count).toBe(2);
+
+        // Those cut ahead go unless the intro draws them, the 3D view's
+        // stay while it draws them
+        vi.advanceTimersByTime(CLOUD_IDLE_MS);
+        app.forcedHeatCloud = true;
+        expect(cuts.count).toBe(3);
+        app.forcedHeatCloud = false;
+        expect(drawn()).toBe(six);
+        expect(cuts.count).toBe(3);
+        // And the 3D view's go while Wrapped's cloud draws in their place
+        app.forcedHeatCloud = true;
+        vi.advanceTimersByTime(CLOUD_IDLE_MS);
+        app.forcedHeatCloud = false;
+        expect(cuts.count).toBe(4);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("holds nothing of what it cut ahead of time for long, flights nor points, unless the intro draws it", async () => {
+      vi.useFakeTimers();
+      try {
+        await follow();
+        prepareHeatCloud(asMapApp(app), [7]);
+        expect(cuts.count).toBe(1);
+        // Nothing left for the layer manager to let go of
+        expect(heldGroundedFlights()).toBeNull();
+
+        vi.advanceTimersByTime(CLOUD_IDLE_MS - 1);
+        prepareHeatCloud(asMapApp(app), [7]);
+        expect(cuts.count).toBe(1);
+        vi.advanceTimersByTime(CLOUD_IDLE_MS);
+        app.forcedHeatCloud = true;
+        expect(cuts.count).toBe(2);
+
+        // Not while it draws them
+        vi.advanceTimersByTime(CLOUD_IDLE_MS);
+        expect(drawn()).not.toBeNull();
+        app.forcedHeatCloud = false;
+        vi.advanceTimersByTime(CLOUD_IDLE_MS);
+        prepareHeatCloud(asMapApp(app), [7]);
+        expect(cuts.count).toBe(3);
+      } finally {
+        vi.useRealTimers();
+      }
     });
 
     it("is cut for the zoom the map comes to rest at, not for the moves of a scripted camera", async () => {
@@ -555,7 +766,7 @@ describe("the heat cloud", () => {
       expect(latitudesOf(drawn())).toEqual([48, 49]);
     });
 
-    it("keeps the points it drew once the store lets go, for the next opening, but not those of the 3D view", async () => {
+    it("keeps the points it drew once the store lets go, for the next opening, and shares them with the 3D view on flat ground", async () => {
       await follow();
       app.forcedHeatCloud = true;
       const seven = drawn();
@@ -567,14 +778,17 @@ describe("the heat cloud", () => {
       expect(drawn()).toBe(seven);
       app.forcedHeatCloud = false;
 
+      // The same points: flat ground, nothing isolated
       app.store.batch(() => {
         app.threeDVisible = true;
         app.reliefLevel = 7;
       });
+      expect(drawn()).toBe(seven);
       expect(cuts.count).toBe(1);
+      // The 3D view's go with it, Wrapped's stay a while
       app.threeDVisible = false;
       prepareHeatCloud(asMapApp(app), [7]);
-      expect(cuts.count).toBe(2);
+      expect(cuts.count).toBe(1);
     });
 
     it("prepares nothing before it is followed, and is followed once", async () => {

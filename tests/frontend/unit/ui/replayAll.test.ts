@@ -729,6 +729,26 @@ describe("the replay of all flights", () => {
       expect(controls.isOpen).toBe(false);
     });
 
+    it("plays again in the context the map gets back after a loss, which is what its shaders may have failed with", async () => {
+      const layer = (
+        controls.player as unknown as {
+          layer: { failed: (error: unknown) => void };
+        }
+      ).layer;
+      vi.spyOn(console, "error").mockImplementation(() => {});
+      layer.failed(new Error("the replay's buffers could not be made"));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(controls.player.unavailable).toBe(true);
+      app.map!.emit("webglcontextlost");
+
+      app.map!.emit("webglcontextrestored");
+      app.map!.emit("style.load");
+      controls.show();
+
+      expect(controls.player.unavailable).toBe(false);
+      expect(controls.isOpen).toBe(true);
+    });
+
     it("stays shut while the replay of one flight runs", () => {
       app.replayActive = true;
 

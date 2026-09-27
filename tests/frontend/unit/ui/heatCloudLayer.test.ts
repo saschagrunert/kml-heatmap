@@ -414,6 +414,30 @@ describe("the heat cloud's layer", () => {
     expect(gl.deleteBuffer).not.toHaveBeenCalled();
   });
 
+  it("tells of no failure while its context is lost, where nothing can be made, and makes it all once the context is back", () => {
+    layer.onAdd(map);
+    layer.setPoints(points());
+    gl.isContextLost.mockReturnValue(true);
+    gl.createBuffer.mockReturnValue(null as never);
+    render();
+    expect(failed).not.toHaveBeenCalled();
+
+    gl.isContextLost.mockReturnValue(false);
+    gl.createBuffer.mockImplementation(() => ({ kind: "buffer", n: -1 }));
+    render();
+    // A program the lost context could not compile is compiled anew
+    gl.isContextLost.mockReturnValue(true);
+    gl.getShaderParameter.mockReturnValue(null as never);
+    render(frame(true));
+    expect(failed).not.toHaveBeenCalled();
+    gl.isContextLost.mockReturnValue(false);
+    gl.getShaderParameter.mockReturnValue(true);
+    gl.drawArraysInstanced.mockClear();
+    render(frame(true));
+    expect(failed).not.toHaveBeenCalled();
+    expect(gl.drawArraysInstanced).toHaveBeenCalledTimes(PASSES);
+  });
+
   it("makes everything anew in the context MapLibre gets back after a loss, which is the same object", () => {
     layer.onAdd(map);
     layer.setPoints(points());

@@ -73,7 +73,11 @@ interface Resources<U extends string> {
 export class LayerGl<U extends string> {
   private resources: Resources<U> | null = null;
 
-  /** `failed` is told when the shaders or buffers do not work in a context */
+  /**
+   * `failed` is told when the shaders or buffers do not work in a context.
+   * Not while the context is lost: every GL object is null then and no
+   * shader compiles, which says nothing of the next context.
+   */
   constructor(
     private readonly shaders: LayerShaders<U>,
     private readonly failed: (error: unknown) => void,
@@ -130,7 +134,7 @@ export class LayerGl<U extends string> {
     try {
       this.resources = this.makeResources(gl);
     } catch (error) {
-      this.failed(error);
+      if (!gl.isContextLost()) this.failed(error);
     }
     return this.resources;
   }
@@ -150,6 +154,8 @@ export class LayerGl<U extends string> {
         `#version 300 es\n${vertexShaderPrelude}\n${define}\n${this.shaders.vertex}`,
       );
     } catch (error) {
+      // Compiled again in a frame after the context is back
+      if (resources.gl.isContextLost()) return null;
       this.failed(error);
     }
     resources.programs.set(variantName, program);

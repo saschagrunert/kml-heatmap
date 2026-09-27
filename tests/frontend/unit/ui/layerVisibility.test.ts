@@ -170,6 +170,26 @@ describe("layer visibility", () => {
     expect(visibility(MAP_LAYERS.heat)).toBe("visible");
   });
 
+  it("reports the heatmap on through a replay while the 3D view's cloud still draws it", () => {
+    followLayerVisibility(asMapApp(app));
+    app.store.batch(() => {
+      app.store.set("heatCloud", true);
+      app.replayActive = true;
+    });
+    expect(el("heatmap-btn").getAttribute("aria-pressed")).toBe("true");
+    for (const id of app.heatmapLayer.ids) {
+      expect(visibility(id), id).toBe("none");
+    }
+
+    // Off, the cloud draws nothing either
+    app.heatmapVisible = false;
+    expect(el("heatmap-btn").getAttribute("aria-pressed")).toBe("false");
+    app.heatmapVisible = true;
+    // Nor where it did not work and the flat heatmap stays hidden
+    app.store.set("heatCloud", false);
+    expect(el("heatmap-btn").getAttribute("aria-pressed")).toBe("false");
+  });
+
   it("draws a colour layer anew as the replay ends", () => {
     // Its legend shows the range of the replayed flight until then
     app.altitudeVisible = true;
