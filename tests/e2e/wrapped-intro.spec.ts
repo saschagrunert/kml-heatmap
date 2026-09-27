@@ -29,6 +29,30 @@ async function openWithIntro(page: Page) {
   return modal;
 }
 
+/**
+ * Press Skip the moment the intro offers it. A click from here waits for the
+ * button to hold still over two frames, and in software WebGL those frames
+ * are slow enough for the flight to end first and take Skip away. Resolves
+ * to whether the intro was playing when Skip was pressed.
+ */
+async function skipOnceOffered(page: Page) {
+  await page.evaluate(() => {
+    const skip = document.getElementById("wrapped-skip-btn")!;
+    const modal = document.getElementById("wrapped-modal")!;
+    const seen = window as unknown as { skippedIntro?: boolean };
+    new MutationObserver((_, observer) => {
+      if (skip.hidden) return;
+      observer.disconnect();
+      seen.skippedIntro = modal.classList.contains("is-intro");
+      skip.click();
+    }).observe(skip, { attributes: true, attributeFilter: ["hidden"] });
+  });
+  return () =>
+    page.evaluate(
+      () => (window as unknown as { skippedIntro?: boolean }).skippedIntro,
+    );
+}
+
 test.describe("Wrapped's intro", () => {
   test.beforeEach(async ({ page }) => {
     await gotoApp(page);
@@ -41,13 +65,11 @@ test.describe("Wrapped's intro", () => {
     page,
   }) => {
     const zoom = await getZoom(page);
+    const skipped = await skipOnceOffered(page);
     const modal = await openWithIntro(page);
     const skip = page.locator("#wrapped-skip-btn");
     // Offered from the moment the dialog opens until the camera settles
-    await expect(modal).toHaveClass(/is-intro/);
-    await expect(skip).toBeVisible();
-
-    await skip.click();
+    await expect.poll(skipped).toBe(true);
 
     // Wrapped as it opens without the intro: the cards, the flat overview
     // north up, no globe and no cloud
