@@ -130,6 +130,7 @@ test.describe("State Persistence", () => {
 
       await page.waitForFunction(
         () => window.mapApp!.selectedPathIds.size > 0,
+        undefined,
         { timeout: 15000 },
       );
       expect(
@@ -278,6 +279,7 @@ test.describe("State Persistence", () => {
 
       await page.waitForFunction(
         () => window.mapApp!.selectedPathIds.size > 0,
+        undefined,
         { timeout: 15000 },
       );
       const hasPath = await page.evaluate(

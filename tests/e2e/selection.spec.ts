@@ -148,6 +148,7 @@ test.describe("Path Selection", () => {
     });
     await page.waitForFunction(
       () => window.mapApp!.selectedPathIds.size === 1,
+      undefined,
       { timeout: 5000 },
     );
 
@@ -170,6 +171,7 @@ test.describe("Path Selection", () => {
 
     await page.waitForFunction(
       () => window.mapApp!.selectedPathIds.size === 0,
+      undefined,
       { timeout: 5000 },
     );
   });
@@ -202,6 +204,7 @@ test.describe("Path Selection", () => {
     // Heatmap and airports only, as the page opens
     await page.waitForFunction(
       () => (window.mapApp?.fullPathInfo?.length ?? 0) > 0,
+      undefined,
       { timeout: 15000 },
     );
     expect(await heatmapOnMap(page)).toBe(true);
@@ -300,6 +303,7 @@ test.describe("Path Selection", () => {
       .toMatch(/^rgb/);
     await page.waitForFunction(
       () => window.mapApp!.selectedPathIds.size === 1,
+      undefined,
       { timeout: 5000 },
     );
   });

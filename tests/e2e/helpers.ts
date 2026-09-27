@@ -127,6 +127,7 @@ export async function waitForAppReady(page: Page): Promise<void> {
       const app = window.mapApp;
       return !!app && !app.isInitializing && !!app.map;
     },
+    undefined,
     { timeout: 20000 },
   );
   // Initializing can zoom the map once more (a restored view, the bounds)
@@ -529,6 +530,7 @@ export async function waitForPathData(page: Page): Promise<void> {
       const app = window.mapApp;
       return !!app && (app.fullPathInfo?.length ?? 0) > 0;
     },
+    undefined,
     { timeout: 15000 },
   );
   await expect
@@ -591,9 +593,11 @@ async function startReplay(page: Page): Promise<void> {
 export async function playUntilProgress(page: Page): Promise<void> {
   await page.locator("#replay-play-btn").click();
   await expect(page.locator("#replay-pause-btn")).toBeVisible();
-  await page.waitForFunction(() => window.mapApp!.replayState.currentTime > 0, {
-    timeout: 5000,
-  });
+  await page.waitForFunction(
+    () => window.mapApp!.replayState.currentTime > 0,
+    undefined,
+    { timeout: 5000 },
+  );
 }
 
 const A11Y_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"];

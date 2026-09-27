@@ -106,6 +106,7 @@ export async function waitForMapReady(page: Page): Promise<void> {
       const map = window.mapApp?.map;
       return !!map && !map.isMoving();
     },
+    undefined,
     { timeout: 20000 },
   );
 }
@@ -113,7 +114,9 @@ export async function waitForMapReady(page: Page): Promise<void> {
 /**
  * Wait until the map has drawn what it was given: sources are handed to a
  * worker, so data set a moment ago is not on the canvas, and cannot be hit
- * by a pointer, until the map has loaded it and stands still
+ * by a pointer, until the map has loaded it and stands still. In CI it
+ * took up to 10.6 s in WebKit and 4.5 s in Chromium, so it is given about
+ * three times as long.
  */
 async function waitForMapIdle(page: Page): Promise<void> {
   await page.waitForFunction(
@@ -121,7 +124,38 @@ async function waitForMapIdle(page: Page): Promise<void> {
       const map = window.mapApp?.map;
       return !!map && map.loaded() && !map.isMoving();
     },
-    { timeout: 15000 },
+    undefined,
+    { timeout: 30000 },
+  );
+}
+
+/**
+ * Whether the map has drawn everything it was given and stands still, for a
+ * spec that polls for it with a timeout of its own (see waitForMapIdle)
+ */
+export function mapIsIdle(page: Page): Promise<boolean> {
+  return page.evaluate(() => {
+    const map = window.mapApp!.map!;
+    return map.loaded() && !map.isMoving();
+  });
+}
+
+/**
+ * Wait for the next `idle` of the map: a frame after which it has nothing
+ * left to do, no tile to load, no move, no paint transition and no label
+ * placement. mapIsIdle passes before the paint transitions end, such as
+ * the ribbons of the 3D view being shown once their tiles are in
+ * (settleRibbons in ui/terrain.ts). For a snapshot of the canvas, after
+ * mapIsIdle, which bounds the wait.
+ */
+export function waitForMapIdleEvent(page: Page): Promise<void> {
+  return page.evaluate(
+    () =>
+      new Promise<void>((resolve) => {
+        const map = window.mapApp!.map!;
+        map.once("idle", () => resolve());
+        map.triggerRepaint();
+      }),
   );
 }
 
@@ -364,6 +398,24 @@ export async function hideMapData(page: Page): Promise<void> {
     const sheet = new CSSStyleSheet();
     sheet.replaceSync(
       ".maplibregl-canvas, .maplibregl-marker, .maplibregl-popup " +
+        "{ visibility: hidden !important; }",
+    );
+    document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];
+  });
+}
+
+/**
+ * The other way round: take the page's chrome out of the picture, the
+ * map's own controls (its credit) included, and leave the map's drawing
+ * and its markers, for a snapshot of the map. Hidden rather than masked:
+ * a mask takes the size of what it covers, so the snapshot would change
+ * with the chrome. Through a constructed stylesheet, as above.
+ */
+export async function hideChrome(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const sheet = new CSSStyleSheet();
+    sheet.replaceSync(
+      "body > :not(#map), #map .maplibregl-control-container " +
         "{ visibility: hidden !important; }",
     );
     document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];
@@ -781,6 +833,82 @@ export function heatCloudOnMap(
       stepsIn: app.store.get("heatCloud"),
       drawn: layer?.implementation?.drawn ?? 0,
     };
+  });
+}
+
+/**
+ * The home field: where the airport marker is of the airport most flights
+ * start or end at
+ */
+export async function homeField(page: Page): Promise<[number, number]> {
+  const name = await page.evaluate(
+    () =>
+      Object.entries(window.mapApp!.airportToPaths).sort(
+        (a, b) => b[1].size - a[1].size,
+      )[0]![0],
+  );
+  return airportPosition(page, name);
+}
+
+/** How much of the middle of the map glows, as canvasGlow reads it */
+export interface CanvasGlow {
+  /** The part of its pixels in the colours of the heat, from 0 to 1 */
+  glow: number;
+  /** Their mean luminance, from 0 to 255 */
+  luminance: number;
+}
+
+/**
+ * Read the middle of the map (half its width and half its height) off the
+ * canvas, in the next frame the map draws, and say how much of it glows in
+ * the colours of the heat: blue, cyan or white, where the blue is well
+ * above the red and the green is not below it. The flights the colour
+ * layers draw are purple to orange, and the ground is grey.
+ *
+ * The canvas keeps no frame (the map has no preserveDrawingBuffer), so it
+ * is read as the image export reads it (withMapStill in mapHelpers.ts): in
+ * the `render` event of a frame asked for, before the browser presents it
+ * and clears the buffer. That is the frame as drawn, whatever the layers
+ * report of themselves: a custom layer counts what it asked GL to draw,
+ * not what landed on the screen.
+ */
+export function canvasGlow(page: Page): Promise<CanvasGlow> {
+  return page.evaluate(async () => {
+    const map = window.mapApp!.map!;
+    const canvas = map.getCanvas();
+    const url = await new Promise<string>((resolve, reject) => {
+      map.once("render", () => {
+        try {
+          resolve(canvas.toDataURL("image/png"));
+        } catch (error) {
+          reject(error instanceof Error ? error : new Error(String(error)));
+        }
+      });
+      map.triggerRepaint();
+    });
+    const image = new Image();
+    image.src = url;
+    await image.decode();
+    const copy = document.createElement("canvas");
+    copy.width = image.naturalWidth;
+    copy.height = image.naturalHeight;
+    const context = copy.getContext("2d")!;
+    context.drawImage(image, 0, 0);
+    const { data } = context.getImageData(
+      Math.round(copy.width / 4),
+      Math.round(copy.height / 4),
+      Math.round(copy.width / 2),
+      Math.round(copy.height / 2),
+    );
+    let glowing = 0;
+    let luminance = 0;
+    for (let i = 0; i < data.length; i += 4) {
+      const [r, g, b] = [data[i]!, data[i + 1]!, data[i + 2]!];
+      luminance += 0.2126 * r + 0.7152 * g + 0.0722 * b;
+      if (b >= 64 && b - r >= 32 && g >= r) glowing++;
+    }
+    const pixels = data.length / 4;
+    return { glow: glowing / pixels, luminance: luminance / pixels };
   });
 }
 

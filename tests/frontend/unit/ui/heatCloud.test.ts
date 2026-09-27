@@ -338,6 +338,46 @@ describe("the heat cloud", () => {
     expect(latitudesOf(drawn())).toEqual([48, 49]);
   });
 
+  it("draws every flight while Isolate has nothing to isolate, and follows the selection only while isolated", async () => {
+    app.threeDVisible = true;
+    await follow();
+    app.isolateSelection = true;
+    expect(latitudesOf(drawn())).toEqual([47, 48, 49]);
+
+    app.selectedPathIds = new Set([2]);
+    expect(latitudesOf(drawn())).toEqual([48]);
+    app.selectedPathIds = new Set([2, 3]);
+    expect(latitudesOf(drawn())).toEqual([48, 49]);
+    // The selection emptied: every flight again
+    app.selectedPathIds = new Set();
+    expect(latitudesOf(drawn())).toEqual([47, 48, 49]);
+
+    // Not isolated, a new selection cuts nothing anew
+    app.isolateSelection = false;
+    const calls = setPoints.mock.calls.length;
+    const cutsBefore = cuts.count;
+    app.selectedPathIds = new Set([1]);
+    expect(setPoints.mock.calls.length).toBe(calls);
+    expect(cuts.count).toBe(cutsBefore);
+  });
+
+  it("stays on the map with the same points as the globe comes and goes in 3D", async () => {
+    app.threeDVisible = true;
+    await follow();
+    const points = drawn();
+    const calls = setPoints.mock.calls.length;
+
+    app.globeVisible = true;
+    expect(map().getLayer(HEAT_CLOUD_LAYER)).toBeDefined();
+    expect(app.store.get("heatCloud")).toBe(true);
+    expect(style()).toMatchObject({ opacity: 1, flow: true });
+    app.globeVisible = false;
+
+    expect(drawn()).toBe(points);
+    expect(setPoints.mock.calls.length).toBe(calls);
+    expect(map().getLayer(HEAT_CLOUD_LAYER)).toBeDefined();
+  });
+
   it("works its points out again only for what changes them", async () => {
     app.threeDVisible = true;
     await follow();
