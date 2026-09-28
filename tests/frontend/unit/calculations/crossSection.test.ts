@@ -80,7 +80,6 @@ function request(
     halfWidthM: 500,
     reference: "agl",
     route: false,
-    airborne: false,
     columns: 100,
     rows: 50,
     ...overrides,
@@ -247,25 +246,15 @@ describe("crossSection", () => {
     expect(slow.totalSeconds).toBeLessThan(5 * 120);
   });
 
-  it("weighs like the heatmap: Routes by length, Airborne without the ground", () => {
+  it("weighs like the heatmap: by length with By distance", () => {
     // By time, 222 m every 10 s over the 1,000 m of the corridor
     const byTime = crossSection(request(crossing()));
     expect(byTime.route).toBe(false);
-    // By length, at the speed Routes counts every flight at
+    // By length, at the speed By distance counts every flight at
     const byRoute = crossSection(request(crossing(), { route: true }));
     expect(byRoute.route).toBe(true);
     expect(byRoute.totalSeconds * ROUTE_SPEED_MS).toBeCloseTo(1000, -1);
     expect(byRoute.totalSeconds).toBeLessThan(byTime.totalSeconds);
-
-    // Taxiing: counted by time, left out in the air only
-    const taxi = crossing({ knots: 10 });
-    expect(crossSection(request(taxi)).flights).toBe(1);
-    const airborne = crossSection(request(taxi, { airborne: true }));
-    expect(airborne.totalSeconds).toBe(0);
-    expect(airborne.flights).toBe(0);
-    expect(crossSection(request(crossing(), { airborne: true })).flights).toBe(
-      1,
-    );
   });
 
   it("counts the flights the filter keeps only", () => {

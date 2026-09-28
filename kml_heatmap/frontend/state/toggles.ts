@@ -68,45 +68,22 @@ export const TOGGLES = [
     label: "Heatmap",
     sheet: { group: "layers", id: "heatmap" },
   },
-  // How the heat is counted, for the heatmap, its lines, the cloud of the
-  // 3D view and the cross-section alike (heatWeight in
-  // calculations/heatLines.ts)
   {
-    // Every flight the same per kilometre: where I have been, rather than
-    // where I spend time
+    // How the heat is counted, for the heatmap, its lines, the cloud of the
+    // 3D view and the cross-section alike (heatWeight in
+    // calculations/heatLines.ts): every flight the same per kilometre,
+    // where I have been, rather than by the time spent, where I spend time.
+    // It changes the heat rather than adding a layer, so it sits in the
+    // Heat group with the heatmap, and the sheet names what it counts.
     key: "routeWeighting",
     initial: false,
     url: { param: "r" },
-    action: "toggleRoutes",
-    button: "routes-btn",
+    action: "toggleByDistance",
+    button: "by-distance-btn",
     icon: "distance",
-    label: "Routes",
+    label: "By distance",
     pressed: true,
-    sheet: { group: "layers", id: "routes" },
-  },
-  {
-    // Taxiing, run-ups and the apron left out
-    key: "airborneOnly",
-    initial: false,
-    url: { param: "o" },
-    action: "toggleAirborne",
-    button: "airborne-btn",
-    icon: "climb",
-    label: "Airborne",
-    pressed: true,
-    sheet: { group: "layers", id: "airborne" },
-  },
-  {
-    // The places no earlier year's flights passed, in warm colours
-    key: "newAreasVisible",
-    initial: false,
-    url: { param: "n" },
-    action: "toggleNewAreas",
-    button: "new-areas-btn",
-    icon: "milestone",
-    label: "New areas",
-    pressed: true,
-    sheet: { group: "layers", id: "new-areas" },
+    sheet: { group: "layers", id: "by-distance", label: "Heat by distance" },
   },
   {
     key: "airportsVisible",

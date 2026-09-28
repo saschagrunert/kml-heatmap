@@ -157,7 +157,7 @@ describe("followHeatLegend", () => {
     expect(labels()).toEqual(["≈2 flights", "8", "32", "128"]);
   });
 
-  it("says what the heat counts: the distance flown with Routes on", () => {
+  it("says what the heat counts: the distance flown with By distance on", () => {
     const title = (): string =>
       legend.querySelector("#heat-legend-what")!.textContent ?? "";
     followHeatLegend(asMapApp(app));
@@ -167,9 +167,6 @@ describe("followHeatLegend", () => {
     expect(title()).toBe("Distance flown");
     // The labels hold: a flight's worth is a pass, of any flight
     expect(labels()).toEqual(["≈1 flight", "4", "16", "64"]);
-    // So they do with only the flights in the air
-    app.airborneOnly = true;
-    expect(title()).toBe("Distance flown");
     app.routeWeighting = false;
     expect(title()).toBe("Time spent");
   });

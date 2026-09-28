@@ -71,7 +71,7 @@ function cruises(flights: number) {
 
 /** The heat the lines give those, weighed by time and scaled by `exposure` */
 function heatOfLines(flights: number, exposure: number): Set<number> {
-  const weigh = heatWeight(false, false);
+  const weigh = heatWeight(false);
   const { features } = heatLineFeatures(
     cruises(flights),
     () => true,
@@ -88,7 +88,7 @@ describe("heat scale", () => {
     expect(HEAT_FLIGHT_DENSITY).toBe(0.015);
   });
 
-  it("is about the density a lone cruise's ridge is drawn at, by time or by routes", () => {
+  it("is about the density a lone cruise's ridge is drawn at, by time or by distance", () => {
     // MapLibre's kernel of a point is GAUSS_COEF * exp(-4.5 * (d / radius)^2)
     // times weight times intensity, at the reference zoom 12 the intensity
     // HEATMAP_REFERENCE_INTENSITY. The ridge ripples between the fixes, so
@@ -100,7 +100,7 @@ describe("heat scale", () => {
       const { points, weights } = heatmapPoints(
         cruises(1),
         () => true,
-        heatWeight(route, false),
+        heatWeight(route),
       );
       let ridge = 0;
       const samples = 20;

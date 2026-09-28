@@ -7,9 +7,9 @@
  * 1 km" over "17 flights · mostly 800 to 1,200 ft AGL". It says what the
  * cloud there is made of: the flights the cloud draws (the filters,
  * Isolate) at the heights it draws them (the band of ui/heightBand.ts),
- * weighed as it weighs them (Routes, Airborne), along the line of sight
+ * weighed as it weighs them (By distance), along the line of sight
  * through the pointer (see calculations/cloudReadout.ts). It speaks of
- * time, or with Routes of the distance flown ("About 12 km flown within
+ * time, or by distance of the distance flown ("About 12 km flown within
  * 1 km"), never of the brightness, which the exposure of the cloud scales,
  * and of no date or hour.
  *
@@ -108,7 +108,6 @@ const READOUT_KEYS: readonly (keyof StoreState)[] = [
   "terrainActive",
   "reliefLevel",
   "routeWeighting",
-  "airborneOnly",
 ];
 
 /** The edges of a box on the map, in its pixels */
@@ -281,7 +280,7 @@ export function followCloudReadout(app: MapApp): void {
       segments,
       app.terrainActive,
       app.reliefLevel,
-      heatWeight(app.routeWeighting, app.airborneOnly),
+      heatWeight(app.routeWeighting),
     );
     // Lifted as the cloud is (ui/heatCloud.ts), and taken down the screen
     // by as much as a ribbon under the pointer is (PathHover.nearest)
@@ -486,7 +485,6 @@ export function followCloudReadout(app: MapApp): void {
       app.reliefLevel,
       app.heightBand,
       app.routeWeighting,
-      app.airborneOnly,
     ];
     // A selection that is not isolated changes nothing the readout says:
     // the click that clears one keeps the readout it showed

@@ -15,18 +15,13 @@ import type { Coordinate } from "../utils/geometry";
 import { DataLoader } from "../services/dataLoader";
 import { datasetIndex } from "../calculations/datasetIndex";
 import { segmentsForPathIds } from "../calculations/statistics";
-import {
-  datasetCells,
-  freshPoints,
-  newAreaKm2,
-} from "../calculations/newAreas";
+import { datasetCells, newAreaKm2 } from "../calculations/newAreas";
 import { calculateAltitudeRange } from "../features/layers";
 import {
   heatLineFeatures,
   heatWeight,
   type SegmentWeight,
 } from "../calculations/heatLines";
-import { loadFeatures } from "../services/featureLoader";
 import { HEAT_LINES, MAP_LAYERS, MAP_SOURCES } from "../utils/constants";
 import { domCache } from "../utils/domCache";
 import { formatFileSize } from "../utils/formatters";
@@ -54,12 +49,6 @@ export interface Heat {
   weights: readonly number[];
   /** What the heat is scaled by, see heatExposure */
   exposure: number;
-  /**
-   * The points that lie in places new in their year, 1 by index, while
-   * those are drawn apart (see showNewAreas); the heat source leaves them
-   * out then
-   */
-  fresh?: Uint8Array | undefined;
   segments: PathSegment[];
   keep: (pathId: number) => boolean;
   weigh: SegmentWeight;
@@ -82,9 +71,6 @@ const DRAWN_KEYS: readonly (keyof StoreState)[] = [
   "selectedPathIds",
   "isolateSelection",
   "routeWeighting",
-  "airborneOnly",
-  // Not drawn here, but its layer is loaded from here (see followStore)
-  "newAreasVisible",
 ];
 
 /** What the indicator says: "Loading 2026 flights (1.1 MB)…" */
@@ -121,9 +107,7 @@ export class DataManager {
    * What the heat source is to show: its points, and the flights its heat
    * lines are drawn from. Kept for a map that cannot take it yet (no
    * source, or a lost WebGL context), and for the heat lines, which are
-   * worked out only once they can show (see writeHeatLines). The places
-   * new in the year are those of it (ui/newAreas.ts), which reads it and
-   * marks them through showNewAreas.
+   * worked out only once they can show (see writeHeatLines).
    */
   heat: Heat | null = null;
   /**
@@ -151,8 +135,6 @@ export class DataManager {
   private isolatedWritten: Heat | null = null;
   /** The heat the heat lines source was last worked out for, if any */
   private heatLinesFor: Heat | null = null;
-  /** The source of the places new in the year holds some */
-  private freshWritten = false;
   /** Come to rest near the hand-over, the heat lines are worked out */
   private readonly handleZoomEnd = (): void => this.writeHeatLines();
   /** The indicator is up; asked on every chunk, so not asked of the DOM */
@@ -318,14 +300,11 @@ export class DataManager {
       ? dimmedHeatmapOpacity()
       : HEATMAP_OPACITY;
     // One of the two heatmaps is drawn, the one of an isolated selection
-    // while there is one; at no opacity the map leaves the other out. The
-    // places new in the year are drawn under the one that is not, while
-    // they are shown apart (see showNewAreas).
+    // while there is one; at no opacity the map leaves the other out
     const isolated = !!this.isolated;
     for (const [id, drawn] of [
       [MAP_LAYERS.heat, !isolated],
       [MAP_LAYERS.heatIsolated, isolated],
-      [MAP_LAYERS.heatNew, !isolated && !!this.heat?.fresh],
     ] as const) {
       map.setPaintProperty(
         id,
@@ -352,12 +331,10 @@ export class DataManager {
   private paintHeatmap(): void {
     const map = this.app.map;
     if (this.heatmapPainted || !map?.getLayer(MAP_LAYERS.heat)) return;
-    // The places new in a year get their colours with their code
     const paint = heatmapPaint();
     for (const name of Object.keys(paint) as (keyof typeof paint)[]) {
       map.setPaintProperty(MAP_LAYERS.heat, name, paint[name]);
       map.setPaintProperty(MAP_LAYERS.heatIsolated, name, paint[name]);
-      map.setPaintProperty(MAP_LAYERS.heatNew, name, paint[name]);
     }
     for (const [id, linePaint] of Object.entries(heatLinesPaint())) {
       if (!map.getLayer(id)) continue;
@@ -400,21 +377,6 @@ export class DataManager {
     this.writeHeat();
   }
 
-  /**
-   * Leave the points of `heat` that lie in places new in their year
-   * (`fresh`, see Heat) out of the heat source, or put them all back: the
-   * layer of those draws them instead, from a source written with the heat
-   * one (see writeHeat), in the colours ui/newAreas.ts gives it. Worked out
-   * for heat the source no longer shows, they are not its places.
-   */
-  showNewAreas(heat: Heat, fresh?: Uint8Array): void {
-    if (heat !== this.heat || heat.fresh === fresh) return;
-    heat.fresh = fresh;
-    this.heatWritten = null;
-    this.applyHeatmapEmphasis();
-    this.writeHeat();
-  }
-
   /** Write what the heat sources are to show and do not hold yet */
   private writeHeat(): void {
     const map = this.app.map;
@@ -427,14 +389,6 @@ export class DataManager {
     if (this.heatWritten !== heat) {
       this.heatWritten = heat;
       void source.setData(heatmapFeatures(heat));
-      // The places new in the year, which the heat source then leaves out
-      // (see showNewAreas), are the other part of the same heat
-      if (heat.fresh || this.freshWritten) {
-        this.freshWritten = !!heat.fresh;
-        void map
-          ?.getSource<GeoJSONSource>(MAP_SOURCES.heatNew)
-          ?.setData(heatmapFeatures(heat, 1));
-      }
     }
     const isolated = this.isolated;
     if (isolated && this.isolatedWritten !== isolated) {
@@ -488,17 +442,6 @@ export class DataManager {
     this.paintHeatmap();
     this.app.heatmapLayer.setVisible(true);
     this.writeHeatLines();
-  }
-
-  /**
-   * Load a year's dataset for something other than what the page shows
-   * (the places new in a year, which compare with the years before it):
-   * the loading indicator shows it, but the Retry and the failures of the
-   * page's own loads are left as they are, and a failure is the caller's
-   * to report
-   */
-  async loadOtherYear(year: string): Promise<KMLDataset | null> {
-    return await this.dataLoader.loadData(year);
   }
 
   /**
@@ -561,8 +504,8 @@ export class DataManager {
    * session holds already, without loading any: null for a year with none
    * before it, the view of all years, or while one of them is not loaded.
    * They are all a year's view has once all years or each of the earlier
-   * ones were shown, or the New areas switch was on for it; loading them
-   * for Wrapped alone would fetch more than the year itself.
+   * ones were shown; loading them for Wrapped alone would fetch more than
+   * the year itself.
    */
   newAreaKm2(year: string, segments: readonly PathSegment[]): number | null {
     const earlier = this.earlierCells(year);
@@ -596,11 +539,6 @@ export class DataManager {
   private followStore(): void {
     const { currentData, selectedYear, selectedAircraft, isolateSelection } =
       this.app;
-    // The places new in a year come with the feature bundle, and follow the
-    // heat while they are asked for
-    if (this.app.newAreasVisible || this.heat?.fresh) {
-      void loadFeatures().then((module) => module?.drawNewAreas(this.app));
-    }
     const drawn = this.drawn;
     if (
       !currentData ||
@@ -611,7 +549,7 @@ export class DataManager {
       this.updateLayers();
       return;
     }
-    // The heatmap is also weighed anew by its switches, which leave the
+    // The heatmap is also weighed anew by its switch, which leaves the
     // colour layers as they are
     if (drawn.isolate || isolateSelection || drawn.weigh !== this.weigh()) {
       this.drawHeatmap(currentData);
@@ -619,9 +557,9 @@ export class DataManager {
     this.app.layerManager.updateSelectionStyles();
   }
 
-  /** How the switches weigh the heat, see heatWeight */
+  /** How the switch weighs the heat, see heatWeight */
   private weigh(): SegmentWeight {
-    return heatWeight(this.app.routeWeighting, this.app.airborneOnly);
+    return heatWeight(this.app.routeWeighting);
   }
 
   /**
@@ -652,8 +590,7 @@ export class DataManager {
   /**
    * Give the heatmap the points of what the filter and isolation keep. The
    * heat of the filter is worked out again only for another dataset, filter
-   * or weighing: a change of the selection or of isolation keeps it, and
-   * with it the places new in its year (see showNewAreas).
+   * or weighing: a change of the selection or of isolation keeps it.
    */
   private drawHeatmap(data: KMLDataset): void {
     const { selectedYear: year, selectedAircraft: aircraft } = this.app;
@@ -682,13 +619,6 @@ export class DataManager {
       : (pathId: number): boolean => view.pathIds.has(pathId);
     const heat =
       same && this.heat ? this.heat : heatOf(segments, segments, keep, weigh);
-    // The places new in the year stay apart while they are shown. With the
-    // years before it held, they are worked out here, and the heat is sent
-    // once rather than whole and then again without them (see drawNewAreas)
-    if (heat !== this.heat && this.heat?.fresh && this.app.newAreasVisible) {
-      const earlier = this.earlierCells(year);
-      if (earlier) heat.fresh = freshPoints(heat.points, earlier);
-    }
     this.setHeatmapPoints(
       heat,
       this.app.isolateSelection && selected.size > 0
@@ -758,26 +688,22 @@ function heatOf(
 }
 
 /**
- * The content of a heat source: one Point per fix, with its heat as `w`;
- * of the fixes in places new in their year for `fresh` 1, and of the others
- * otherwise (see Heat). A MultiPoint of all of them would be cheaper to hand
- * to the worker, but the source can only merge features into clusters, not
- * the points of one feature (see HEATMAP_CLUSTER).
+ * The content of a heat source: one Point per fix, with its heat as `w`. A
+ * MultiPoint of all of them would be cheaper to hand to the worker, but the
+ * source can only merge features into clusters, not the points of one
+ * feature (see HEATMAP_CLUSTER).
  */
 export function heatmapFeatures(
-  heat: Pick<Heat, "points" | "weights" | "fresh">,
-  fresh = 0,
+  heat: Pick<Heat, "points" | "weights">,
 ): GeoJSON.FeatureCollection<GeoJSON.Point, { w: number }> {
-  const features: GeoJSON.Feature<GeoJSON.Point, { w: number }>[] = [];
-  heat.points.forEach((point, index) => {
-    if ((heat.fresh?.[index] ?? 0) !== fresh) return;
-    features.push({
+  return {
+    type: "FeatureCollection",
+    features: heat.points.map((point, index) => ({
       type: "Feature",
       properties: { w: heat.weights[index]! },
       geometry: { type: "Point", coordinates: toLngLat(point) },
-    });
-  });
-  return { type: "FeatureCollection", features };
+    })),
+  };
 }
 
 /**
@@ -820,8 +746,7 @@ const FIX_SECONDS = 4;
  * spent at a place rather than the fixes a logger wrote there: one that
  * writes a fix every 2 s no longer weighs two and a half times one that
  * writes every 5 s. The end of a flight has no time after it, and a point
- * of no heat (on the ground, while only the flights in the air are drawn)
- * is left out.
+ * of no heat is left out.
  */
 export function heatmapPoints(
   segments: PathSegment[],

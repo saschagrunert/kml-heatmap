@@ -34,6 +34,7 @@ import {
 import {
   ROUTE_SPEED_MS,
   heatWeight,
+  type SegmentWeight,
 } from "../../../../kml_heatmap/frontend/calculations/heatLines";
 
 /** Metres of a degree of latitude, as the module counts them */
@@ -417,13 +418,14 @@ describe("readoutAt", () => {
     ).toBeNull();
   });
 
-  it("counts no segment the cloud leaves out, as Airborne leaves out the slow ones", () => {
+  it("counts no segment of no heat, which the cloud leaves out", () => {
     const taxi = flight(1).map((segment) => ({
       ...segment,
       groundspeed_knots: 10,
     }));
     const segments = [...taxi, ...flight(2)];
-    const airborne = heatWeight(false, true);
+    const airborne: SegmentWeight = (segment, next) =>
+      segment.groundspeed_knots < 30 ? 0 : heatWeight(false)(segment, next);
     expect(
       readoutAt(
         readoutData(taxi, false, 10, airborne),
@@ -442,7 +444,7 @@ describe("readoutAt", () => {
         everyone,
       ),
     ).toMatchObject({ flights: 1 });
-    // Without Airborne both count
+    // Weighed by time both count
     expect(
       readoutAt(
         readoutData(segments, false, 10),
@@ -470,9 +472,9 @@ describe("readoutAt", () => {
     expect(readout.seconds).toBeCloseTo((2 * R) / ROUTE_SPEED_MS, 0);
   });
 
-  it("counts the distance flown with Routes, at the speed it is weighed at", () => {
+  it("counts the distance flown by distance, at the speed it is weighed at", () => {
     // 100 s over the kilometre across the place at the logged times; by
-    // Routes, the same kilometre at ROUTE_SPEED_MS
+    // distance, the same kilometre at ROUTE_SPEED_MS
     const segments = flight(1, { step: 100 });
     const byTime = readoutAt(
       readoutData(segments, false, 10),
@@ -483,7 +485,7 @@ describe("readoutAt", () => {
     )!;
     expect(byTime.seconds).toBeGreaterThan(100);
     const byRoute = readoutAt(
-      readoutData(segments, false, 10, heatWeight(true, false)),
+      readoutData(segments, false, 10, heatWeight(true)),
       segmentGrid(segments, R),
       down([LAT, LNG]),
       R,
@@ -658,7 +660,7 @@ describe("the words of a readout", () => {
     expect(formatDistanceFlown(42400)).toBe("About 42 km");
   });
 
-  it("says the distance flown with Routes, and the flights and the band alike", () => {
+  it("says the distance flown by distance, and the flights and the band alike", () => {
     expect(
       readoutText({ ...readout, seconds: 5000 / ROUTE_SPEED_MS }, true),
     ).toEqual({

@@ -89,8 +89,7 @@ const HELD = [
   "heatmap-btn",
   "three-d-btn",
   "year-select",
-  "routes-btn",
-  "airborne-btn",
+  "by-distance-btn",
   "isolate-btn",
   "replay-all-btn",
   "wrapped-btn",
@@ -482,7 +481,7 @@ describe("hotspot tour", () => {
     expect(text("hotspot-tour-name")).toBe("Home field EDAQ Halle-Oppin");
   });
 
-  it("weighs the places as the heatmap does, and says the distance flown with Routes", () => {
+  it("weighs the places as the heatmap does, and says the distance flown by distance", () => {
     app.store.set("routeWeighting", true);
 
     tour.start();

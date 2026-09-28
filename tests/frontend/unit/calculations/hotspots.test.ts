@@ -230,12 +230,8 @@ describe("findHotspots", () => {
 
     // By time the stand at home is the busiest place
     expect(nearHome(findHotspots(segments, all)[0]!)).toBe(true);
-    // Airborne leaves it out
-    expect(
-      findHotspots(segments, all, heatWeight(false, true)).some(nearHome),
-    ).toBe(false);
-    // Routes counts the way flown, which the stand has little of
-    const routes = findHotspots(segments, all, heatWeight(true, false));
+    // By distance counts the way flown, which the stand has little of
+    const routes = findHotspots(segments, all, heatWeight(true));
     expect(nearHome(routes[0]!)).toBe(false);
     expect(routes.some(nearHome)).toBe(false);
   });
@@ -327,7 +323,7 @@ describe("the time of a place", () => {
     );
   });
 
-  it("says the distance flown there with Routes, never a time", () => {
+  it("says the distance flown there by distance, never a time", () => {
     const hotspot = (metres: number, share: number): Hotspot => ({
       center: HOME,
       seconds: metres / ROUTE_SPEED_MS,

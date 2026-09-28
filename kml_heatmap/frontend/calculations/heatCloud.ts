@@ -414,7 +414,7 @@ export function cloudPoints(
   detail = level,
   box: Box | null = null,
   busiest?: number,
-  weigh: SegmentWeight = heatWeight(false, false),
+  weigh: SegmentWeight = heatWeight(false),
 ): CloudPoints {
   const exaggeration = liftExaggeration(level);
   const values: number[] = [];

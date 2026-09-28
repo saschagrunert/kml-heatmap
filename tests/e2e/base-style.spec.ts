@@ -30,14 +30,9 @@ import {
   segmentDetails,
 } from "./map";
 
-/**
- * The layers of the flights, bottom to top (MAP_LAYERS in constants.ts).
- * The places new in a year lie under the heat, which draws the places
- * flown before over them (ui/newAreas.ts).
- */
+/** The layers of the flights, bottom to top (MAP_LAYERS in constants.ts) */
 const FLIGHT_LAYERS = [
   "aviation",
-  "heat-new",
   "heat",
   "heat-isolated",
   "heat-lines-glow",

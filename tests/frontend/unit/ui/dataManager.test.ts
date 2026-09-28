@@ -76,13 +76,6 @@ const toastMock = vi.hoisted(() => ({
 }));
 vi.mock("../../../../kml_heatmap/frontend/utils/toast", () => toastMock);
 
-const featureMocks = vi.hoisted(() => ({
-  drawNewAreas: vi.fn(() => Promise.resolve()),
-}));
-vi.mock("../../../../kml_heatmap/frontend/services/featureLoader", () => ({
-  loadFeatures: () => Promise.resolve(featureMocks),
-}));
-
 /** A state of the loader, one year of unknown size unless said otherwise */
 function loading(overrides: Partial<LoadingState> = {}): LoadingState {
   return {
@@ -723,33 +716,6 @@ describe("DataManager", () => {
       expect(toastMock.dismissToast).not.toHaveBeenCalled();
     });
 
-    it("loads a year aside without touching the page's Retry or its failures", async () => {
-      const retry = { label: "Retry", run: vi.fn() };
-      loaderMocks.loadData.mockImplementationOnce(() => {
-        loaderMocks.options!.onLoadError!(["2025"]);
-        return Promise.resolve(null);
-      });
-      await dataManager.loadData("2025", undefined, retry);
-      toastMock.showToast.mockClear();
-
-      // One that loads takes no failure away, and one that fails says
-      // nothing: the caller does (see ui/newAreas.ts)
-      loaderMocks.loadData.mockResolvedValueOnce(baseData());
-      expect(await dataManager.loadOtherYear("2023")).not.toBeNull();
-      loaderMocks.loadData.mockResolvedValueOnce(null);
-      expect(await dataManager.loadOtherYear("2022")).toBeNull();
-      expect(toastMock.dismissToast).not.toHaveBeenCalled();
-      expect(toastMock.showToast).not.toHaveBeenCalled();
-
-      // The page's own load still fails with its Retry
-      loaderMocks.options!.onLoadError!(["2025"]);
-      expect(toastMock.showToast).toHaveBeenLastCalledWith(
-        "Failed to load flight data for 2025",
-        "error",
-        retry,
-      );
-    });
-
     it("asks for a reload when the site changed since the page loaded", () => {
       loaderMocks.options!.onLoadError!(["2024", "2025"], true);
 
@@ -1033,7 +999,7 @@ describe("DataManager", () => {
         const { points, weights } = heatmapPoints(
           data.path_segments,
           keep,
-          heatWeight(false, false),
+          heatWeight(false),
         );
         return heatExposure(points, weights);
       };
@@ -1226,7 +1192,7 @@ describe("DataManager", () => {
       const { points, weights } = heatmapPoints(
         data.path_segments,
         () => true,
-        heatWeight(false, false),
+        heatWeight(false),
       );
       const exposure = heatExposure(points, weights);
       expect(exposure).not.toBe(1);
@@ -1246,25 +1212,7 @@ describe("DataManager", () => {
       );
     });
 
-    it("leaves the ground out while only the flights in the air are asked for", () => {
-      publish(departure());
-      expect(heatPoints()).toHaveLength(3);
-      vi.mocked(mockApp.layerManager.syncModes).mockClear();
-
-      mockApp.airborneOnly = true;
-
-      expect(heatPoints()).toEqual([
-        [8.1, 50.1],
-        [8.2, 50.2],
-      ]);
-      // The colour layers draw every flight as it is
-      expect(mockApp.layerManager.syncModes).not.toHaveBeenCalled();
-
-      mockApp.airborneOnly = false;
-      expect(heatPoints()).toHaveLength(3);
-    });
-
-    it("counts every flight the same per kilometre for routes", () => {
+    it("counts every flight the same per kilometre by distance", () => {
       publish(departure());
       const byTime = heatOfPoints();
 
@@ -1285,7 +1233,7 @@ describe("DataManager", () => {
       expect(byRoute[0]! / byRoute[1]!).toBeLessThan(byTime[0]! / byTime[1]!);
     });
 
-    it("weighs an isolated selection anew with the switches", () => {
+    it("weighs an isolated selection anew with the switch", () => {
       publish(departure());
       mockApp.store.batch(() => {
         mockApp.selectedPathIds = new Set([1]);
@@ -1293,235 +1241,67 @@ describe("DataManager", () => {
       });
       expect(isolatedSource().setData).toHaveBeenCalledOnce();
 
-      mockApp.airborneOnly = true;
+      mockApp.routeWeighting = true;
 
       expect(isolatedSource().setData).toHaveBeenCalledTimes(2);
-      expect(drawnHeatPoints()).toHaveLength(2);
+      expect(drawnHeatPoints()).toHaveLength(3);
     });
   });
 
-  describe("places new in a year", () => {
-    const publish = (data: KMLDataset): void => {
-      mockApp.currentData = data;
+  describe("the airspace new in a year, counted for Wrapped", () => {
+    /** A flight along the latitude `lat`, a segment of about 700 m a fix */
+    const flightAt = (lat: number): KMLDataset["path_segments"] =>
+      Array.from({ length: 4 }, (_, i) =>
+        createSegment({
+          path_id: 1,
+          coords: [
+            [lat, 12 + i * 0.01],
+            [lat, 12 + (i + 1) * 0.01],
+          ],
+        }),
+      );
+    const years: Record<string, KMLDataset> = {
+      "2023": createDataset([], flightAt(50)),
+      "2024": createDataset([], flightAt(51)),
     };
 
-    it("are drawn by the feature bundle while asked for", async () => {
-      publish(baseData());
-      expect(featureMocks.drawNewAreas).not.toHaveBeenCalled();
-
-      mockApp.newAreasVisible = true;
-      await vi.waitFor(() =>
-        expect(featureMocks.drawNewAreas).toHaveBeenCalledWith(mockApp),
-      );
+    beforeEach(() => {
+      siteData.metadata = {
+        available_years: [2023, 2024, 2025],
+      } as Metadata;
+      loaderMocks.cachedData.mockImplementation((year: string) => years[year]);
     });
 
-    it("leave the heat source for their own, and come back to it", () => {
-      const newSource = (): MockSource =>
-        mockApp.map!.source(MAP_SOURCES.heatNew);
-      publish(baseData());
-      const heat = dataManager.heat!;
-      // Nothing was ever shown apart
-      expect(newSource().setData).not.toHaveBeenCalled();
-
-      dataManager.showNewAreas(heat, Uint8Array.from([0, 1, 0]));
-
-      expect(heatSource().setData).toHaveBeenCalledTimes(2);
-      expect(heatPoints()).toEqual([
-        [8.0, 50.0],
-        [10.0, 52.0],
-      ]);
-      expect(pointsOf(newSource())).toEqual([[8.1, 50.1]]);
-
-      dataManager.showNewAreas(heat, undefined);
-      expect(heatPoints()).toEqual(HEAT_POINTS);
-      expect(pointsOf(newSource())).toEqual([]);
-      // And, empty, is not written again for the heat that follows
-      mockApp.airborneOnly = true;
-      expect(newSource().setData).toHaveBeenCalledTimes(2);
+    afterEach(() => {
+      resetSiteData();
     });
 
-    describe("while shown", () => {
-      /** A flight of 2025 whose first stretch was flown in 2024 as well */
-      const year = (): KMLDataset =>
-        createDataset(
-          [{ id: 1, year: 2025 }],
-          [
-            createSegment(),
-            createSegment({
-              coords: [
-                [50.1, 8.1],
-                [50.2, 8.2],
-              ],
-            }),
-            createSegment({
-              coords: [
-                [52.0, 10.0],
-                [53.0, 11.0],
-              ],
-            }),
-          ],
-        );
-      const before = createDataset(
-        [{ id: 2, year: 2024 }],
-        [createSegment({ path_id: 2 })],
+    it("from the earlier years the page holds, without loading any", () => {
+      const segments = [...flightAt(51), ...flightAt(52)];
+
+      const km2 = dataManager.newAreaKm2("2025", segments);
+
+      // The year before flew the first flight: only the second is new,
+      // about 3 km along the latitude, over a cell or two either side
+      expect(km2).toBeGreaterThanOrEqual(3);
+      expect(km2).toBeLessThanOrEqual(8);
+      expect(dataManager.newAreaKm2("2025", flightAt(50))).toBe(0);
+      // 2024 is compared with 2023 alone, which flew elsewhere
+      expect(dataManager.newAreaKm2("2024", flightAt(51))).toBeGreaterThan(0);
+      expect(loaderMocks.cachedData).not.toHaveBeenCalledWith("2025");
+      expect(loaderMocks.loadData).not.toHaveBeenCalled();
+    });
+
+    it("not while an earlier year is not loaded, nor where there is none", () => {
+      const segments = flightAt(52);
+      loaderMocks.cachedData.mockImplementation((year: string) =>
+        year === "2023" ? undefined : years[year],
       );
 
-      beforeEach(() => {
-        siteData.metadata = { available_years: [2024, 2025] } as Metadata;
-        loaderMocks.cachedData.mockImplementation((known: string) =>
-          known === "2024" ? before : undefined,
-        );
-        mockApp.selectedYear = "2025";
-        publish(year());
-        mockApp.newAreasVisible = true;
-        dataManager.showNewAreas(dataManager.heat!, Uint8Array.from([0, 0, 1]));
-      });
-
-      afterEach(() => {
-        resetSiteData();
-      });
-
-      it("send the heat once to each source when it is weighed anew, from the years before held", () => {
-        const writes = heatSource().setData.mock.calls.length;
-
-        mockApp.routeWeighting = true;
-
-        expect(heatSource().setData).toHaveBeenCalledTimes(writes + 1);
-        // Worked out here: the drawing of them finds nothing to send again
-        expect(Array.from(dataManager.heat!.fresh!)).toEqual([0, 0, 1]);
-        expect(heatPoints()).toEqual([
-          [8.0, 50.0],
-          [8.1, 50.1],
-        ]);
-      });
-
-      it("are left to the drawing of them while a year before is not held", () => {
-        loaderMocks.cachedData.mockReturnValue(undefined);
-
-        mockApp.routeWeighting = true;
-
-        expect(dataManager.heat!.fresh).toBeUndefined();
-        expect(heatPoints()).toHaveLength(3);
-      });
-    });
-
-    it("are not taken for heat the source no longer shows", () => {
-      publish(baseData());
-      const before = dataManager.heat!;
-      mockApp.airborneOnly = true;
-      const writes = heatSource().setData.mock.calls.length;
-
-      dataManager.showNewAreas(before, Uint8Array.from([1, 1, 1]));
-
-      expect(dataManager.heat!.fresh).toBeUndefined();
-      expect(heatSource().setData).toHaveBeenCalledTimes(writes);
-    });
-
-    it("stay with the heat while a selection is isolated", () => {
-      const data = baseData();
-      // Weighed only for the heat of the filter: path 2 is not isolated
-      const weighed = vi.fn(() => 100);
-      Object.defineProperty(data.path_segments[2]!, "groundspeed_knots", {
-        get: weighed,
-      });
-      publish(data);
-      const heat = dataManager.heat!;
-      const weighings = weighed.mock.calls.length;
-      expect(weighings).toBeGreaterThan(0);
-      dataManager.showNewAreas(heat, Uint8Array.from([0, 1, 0]));
-      const writes = heatSource().setData.mock.calls.length;
-
-      mockApp.store.batch(() => {
-        mockApp.selectedPathIds = new Set([1]);
-        mockApp.isolateSelection = true;
-      });
-      mockApp.isolateSelection = false;
-
-      // Neither worked out nor written again
-      expect(weighed).toHaveBeenCalledTimes(weighings);
-      expect(dataManager.heat).toBe(heat);
-      expect(heat.fresh).toEqual(Uint8Array.from([0, 1, 0]));
-      expect(heatSource().setData).toHaveBeenCalledTimes(writes);
-    });
-
-    it("are drawn as the heatmap is while shown apart, and not for an isolated selection", () => {
-      const newOpacity = (): unknown =>
-        mockApp.map!.layer(MAP_LAYERS.heatNew).paint["heatmap-opacity"];
-      publish(baseData());
-      // Nothing to draw, so the map leaves the layer out
-      expect(newOpacity()).toBe(0);
-
-      dataManager.showNewAreas(dataManager.heat!, Uint8Array.from([0, 1, 0]));
-      expect(newOpacity()).toEqual(heatLayer().paint["heatmap-opacity"]);
-      // Stepping back under a colour layer alike
-      mockApp.altitudeVisible = true;
-      dataManager.applyHeatmapEmphasis();
-      expect(newOpacity()).toEqual(heatLayer().paint["heatmap-opacity"]);
-
-      mockApp.store.batch(() => {
-        mockApp.selectedPathIds = new Set([1]);
-        mockApp.isolateSelection = true;
-      });
-      expect(newOpacity()).toBe(0);
-    });
-
-    describe("counted for Wrapped", () => {
-      /** A flight along the latitude `lat`, a segment of about 700 m a fix */
-      const flightAt = (lat: number): KMLDataset["path_segments"] =>
-        Array.from({ length: 4 }, (_, i) =>
-          createSegment({
-            path_id: 1,
-            coords: [
-              [lat, 12 + i * 0.01],
-              [lat, 12 + (i + 1) * 0.01],
-            ],
-          }),
-        );
-      const years: Record<string, KMLDataset> = {
-        "2023": createDataset([], flightAt(50)),
-        "2024": createDataset([], flightAt(51)),
-      };
-
-      beforeEach(() => {
-        siteData.metadata = {
-          available_years: [2023, 2024, 2025],
-        } as Metadata;
-        loaderMocks.cachedData.mockImplementation(
-          (year: string) => years[year],
-        );
-      });
-
-      afterEach(() => {
-        resetSiteData();
-      });
-
-      it("from the earlier years the page holds, without loading any", () => {
-        const segments = [...flightAt(51), ...flightAt(52)];
-
-        const km2 = dataManager.newAreaKm2("2025", segments);
-
-        // The year before flew the first flight: only the second is new,
-        // about 3 km along the latitude, over a cell or two either side
-        expect(km2).toBeGreaterThanOrEqual(3);
-        expect(km2).toBeLessThanOrEqual(8);
-        expect(dataManager.newAreaKm2("2025", flightAt(50))).toBe(0);
-        // 2024 is compared with 2023 alone, which flew elsewhere
-        expect(dataManager.newAreaKm2("2024", flightAt(51))).toBeGreaterThan(0);
-        expect(loaderMocks.cachedData).not.toHaveBeenCalledWith("2025");
-        expect(loaderMocks.loadData).not.toHaveBeenCalled();
-      });
-
-      it("not while an earlier year is not loaded, nor where there is none", () => {
-        const segments = flightAt(52);
-        loaderMocks.cachedData.mockImplementation((year: string) =>
-          year === "2023" ? undefined : years[year],
-        );
-
-        expect(dataManager.newAreaKm2("2025", segments)).toBeNull();
-        expect(dataManager.newAreaKm2("2023", segments)).toBeNull();
-        expect(dataManager.newAreaKm2("all", segments)).toBeNull();
-        expect(loaderMocks.loadData).not.toHaveBeenCalled();
-      });
+      expect(dataManager.newAreaKm2("2025", segments)).toBeNull();
+      expect(dataManager.newAreaKm2("2023", segments)).toBeNull();
+      expect(dataManager.newAreaKm2("all", segments)).toBeNull();
+      expect(loaderMocks.loadData).not.toHaveBeenCalled();
     });
   });
 
@@ -1956,7 +1736,7 @@ describe("DataManager", () => {
       createSegment({ path_id: 1, coords: [mid, end], time: 8 }),
       createSegment({ path_id: 2, coords: [other, otherEnd] }),
     ];
-    const byTime = heatWeight(false, false);
+    const byTime = heatWeight(false);
 
     it("lists every start point once, with the time until the next fix", () => {
       const { points, weights } = heatmapPoints(segments, () => true, byTime);
@@ -2029,8 +1809,12 @@ describe("DataManager", () => {
         mid,
       ]);
       expect(
-        heatmapPoints([taxi, climb], () => true, heatWeight(false, true))
-          .points,
+        heatmapPoints(
+          [taxi, climb],
+          () => true,
+          (segment, next) =>
+            segment.groundspeed_knots < 30 ? 0 : byTime(segment, next),
+        ).points,
       ).toEqual([mid]);
     });
   });
@@ -2051,21 +1835,6 @@ describe("DataManager", () => {
           geometry: { type: "Point", coordinates: [lng, lat] },
         })),
       });
-    });
-
-    it("leaves out the points in places new in their year, or keeps only them", () => {
-      const heat = {
-        points: line(3),
-        weights: [1, 2, 3],
-        fresh: Uint8Array.from([0, 1, 0]),
-      };
-      const weights = (fresh?: number): unknown[] =>
-        heatmapFeatures(heat, fresh).features.map(
-          (feature) => feature.properties.w,
-        );
-
-      expect(weights()).toEqual([1, 3]);
-      expect(weights(1)).toEqual([2]);
     });
 
     it("has no features without any point", () => {

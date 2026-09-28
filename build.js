@@ -298,11 +298,13 @@ function analyzeBundleComposition(metafile, fileName) {
 // scale on top of that: 154.56 KB raw and 53.28 KB gzipped. The
 // cross-section's control and its row in the phone's More sheet on top of
 // that: 155.06 KB raw and 53.4 KB gzipped. The hotspot tour's on top of
-// that: 155.38 KB raw and 53.54 KB gzipped.
+// that: 155.38 KB raw and 53.54 KB gzipped. The Airborne and New areas
+// switches taken out again, and Routes turned into By distance in a Heat
+// group of its own: 154.11 KB raw and 53.18 KB gzipped.
 const BUDGET_APP = { raw: 156 * 1024, gzip: 54 * 1024 };
 // The feature bundle is fetched only when replay is opened, the relief, the
 // heat cloud and the ribbons of a selection of the 3D view are first drawn,
-// the Satellite or New areas switch is first on, a single flight is first
+// the Satellite switch is first on, a single flight is first
 // selected or the cross-section is first opened, so it is not part of what a
 // first visit downloads; it still gets a budget so it cannot grow without
 // anyone noticing. 41.01 KB raw and 14.53 KB gzipped.
@@ -372,7 +374,9 @@ const BUDGET_APP = { raw: 156 * 1024, gzip: 54 * 1024 };
 // calculations/hotspots.ts: the busiest places of the heat, its panel and
 // its steps) and the camera moves it shares with Wrapped's intro, which
 // came here from the Wrapped bundle (ui/cameraScript.ts): 137.78 KB raw
-// and 50.42 KB gzipped after, in a local build, about 50.62 KB in CI.
+// and 50.42 KB gzipped after, in a local build, about 50.62 KB in CI. The
+// places new in a year of the New areas switch taken out again: 136.28 KB
+// raw and 49.75 KB gzipped, in a local build.
 const BUDGET_FEATURES = { raw: 138 * 1024, gzip: 50.75 * 1024 };
 
 // The Wrapped bundle is fetched only when the Wrapped dialog or the

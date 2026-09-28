@@ -3,13 +3,13 @@
  * was spent within a corridor either side of it, by the distance along the
  * line and the height, as ui/crossSection.ts draws it.
  *
- * The time is the heatmap's, weighed by the same switches (heatWeight in
- * heatLines.ts): the seconds each segment took, at most two minutes, or
- * with Routes its length at a cruise speed, and without the time on the
- * ground with Airborne. It is shared out over the part of a segment inside
- * the corridor in proportion to its length there. A circuit flown every
- * week stands out against a route flown once, as it does on the map,
- * unless Routes counts every flight the same per kilometre.
+ * The time is the heatmap's, weighed by the same switch (heatWeight in
+ * heatLines.ts): the seconds each segment took, at most two minutes, or by
+ * distance its length at a cruise speed. It is shared out over the part of
+ * a segment inside the corridor in proportion to its length there. A
+ * circuit flown every week stands out against a route flown once, as it
+ * does on the map, unless By distance counts every flight the same per
+ * kilometre.
  *
  * The line is measured on a plane through its start: metres east scaled by
  * the cosine of its middle latitude, and metres north. Over the few dozen
@@ -203,9 +203,8 @@ export interface SectionRequest {
   end: Coordinate;
   halfWidthM: number;
   reference: HeightReference;
-  /** How the heat is weighed, as the switches of that name (heatWeight) */
+  /** Whether the heat is weighed by distance, as its switch (heatWeight) */
   route: boolean;
-  airborne: boolean;
   /** Cells of the grid along the line and up */
   columns: number;
   rows: number;
@@ -217,8 +216,8 @@ export interface CrossSection {
   halfWidthM: number;
   reference: HeightReference;
   /**
-   * Whether the seconds are lengths at ROUTE_SPEED_MS (Routes) rather than
-   * the time spent
+   * Whether the seconds are lengths at ROUTE_SPEED_MS (By distance) rather
+   * than the time spent
    */
   route: boolean;
   columns: number;
@@ -315,7 +314,7 @@ function corridorPieces(request: SectionRequest): {
   frame: LineFrame;
 } {
   const { segments, keep, halfWidthM, reference } = request;
-  const weigh = heatWeight(request.route, request.airborne);
+  const weigh = heatWeight(request.route);
   const frame = lineFrame(request.start, request.end);
   const { lengthM } = frame;
   // The corridor's box in degrees, to pass over most segments unmeasured

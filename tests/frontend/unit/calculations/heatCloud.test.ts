@@ -365,7 +365,7 @@ describe("cloudPoints", () => {
     }));
     const points = pointsOf(cloudOf(segments, everything, [0, 0], 11));
     const cruise = segments.reduce(
-      (sum, segment) => sum + heatWeight(false, false)(segment, undefined),
+      (sum, segment) => sum + heatWeight(false)(segment, undefined),
       0,
     );
     expect(cruise).toBeGreaterThan(1);
@@ -423,7 +423,7 @@ describe("cloudPoints", () => {
     for (const heat of bend) expect(heat).toBeLessThan(20);
   });
 
-  it("weighs a stretch as it is asked to: by length for routes", () => {
+  it("weighs a stretch as it is asked to: by length by distance", () => {
     /** The same stretch flown a segment every `seconds`, at that speed */
     const flown = (path: number, seconds: number): PathSegment[] =>
       flight(path, line(3), undefined, seconds).map((segment) => ({
@@ -443,7 +443,7 @@ describe("cloudPoints", () => {
           11,
           null,
           undefined,
-          heatWeight(route, false),
+          heatWeight(route),
         ),
       ).reduce((sum, point) => sum + point.heat, 0);
     const [fast, slow] = [flown(1, 5), flown(2, 60)];
@@ -895,14 +895,12 @@ describe("the time of the cloud's points", () => {
   });
 
   it("stays on the replay's clock however the heat is weighed", () => {
-    // Slow enough for the routes to weigh it less, and a taxi at the end
-    // that the airborne weighing leaves out
+    // Slow enough for the distance to weigh it less
     const segments = flight(1, line(4), undefined, 60);
-    segments[2] = { ...segments[2]!, groundspeed_knots: 10 };
     const flights = smoothFlights(segments, (i) => segments[i]!.altitude_ft, {
       groundOf: () => 0,
     });
-    const cloud = (weigh = heatWeight(false, false)): Point[] =>
+    const cloud = (weigh = heatWeight(false)): Point[] =>
       pointsOf(
         cloudPoints(
           segments,
@@ -916,22 +914,12 @@ describe("the time of the cloud's points", () => {
         ),
       );
     const timed = cloud();
-    const byRoute = cloud(heatWeight(true, false));
+    const byRoute = cloud(heatWeight(true));
     expect(byRoute.map((p) => p.heat)).not.toEqual(timed.map((p) => p.heat));
     expect(byRoute.map((p) => p.time)).toEqual(timed.map((p) => p.time));
-    // The taxi is left out, and what stays is timed as before
-    const heat = (points: Point[]): number =>
-      points.reduce((sum, point) => sum + point.heat, 0);
-    for (const route of [false, true]) {
-      const airborne = cloud(heatWeight(route, true));
-      expect(heat(airborne)).toBeLessThan(heat(route ? byRoute : timed));
-      // It ends where the taxi starts, two minutes into the flight
-      expect(airborne[0]!.time).toBe(0);
-      expect(airborne.at(-1)!.time).toBeCloseTo(120, 3);
-    }
   });
 
-  it("draws no stretch of what only the flights in the air leave out, and a new one after it", () => {
+  it("draws no stretch of segments of no heat, and a new one after it", () => {
     // A cruise, a taxi across, and a cruise again
     const segments = flight(1, line(6), undefined, 5);
     segments[2] = { ...segments[2]!, groundspeed_knots: 10 };
@@ -948,7 +936,8 @@ describe("the time of the cloud's points", () => {
         11,
         null,
         undefined,
-        heatWeight(false, true),
+        (segment, next) =>
+          segment.groundspeed_knots < 30 ? 0 : heatWeight(false)(segment, next),
       ),
     );
 
@@ -1045,7 +1034,7 @@ describe("the busiest heat of the cloud", () => {
 describe("the marks of the cloud's points", () => {
   const marksOf = (
     segments: PathSegment[],
-    weigh = heatWeight(false, false),
+    weigh = heatWeight(false),
   ): number[] => {
     const flights = smoothFlights(segments, (i) => segments[i]!.altitude_ft, {
       groundOf: () => 0,
@@ -1088,18 +1077,14 @@ describe("the marks of the cloud's points", () => {
     }));
     const count = (weigh: ReturnType<typeof heatWeight>): number[] =>
       marksOf([...out, ...back], weigh);
-    const timed = count(heatWeight(false, false));
+    const timed = count(heatWeight(false));
     // The slow way back is most of the time along the track: its marks
     // show, and not those of the way out
     expect(timed[0]).toBe(0);
     expect(timed.at(-1)).toBe(1);
     // Counted by the kilometre both ways are as much, and neither shows
-    const routes = count(heatWeight(true, false));
+    const routes = count(heatWeight(true));
     expect(routes).toEqual(new Array(routes.length).fill(0));
-    // Only in the air, the taxi is not there at all, and the way out
-    // shows in full
-    const airborne = count(heatWeight(false, true));
-    expect(airborne).toEqual(new Array(airborne.length).fill(1));
   });
 });
 
