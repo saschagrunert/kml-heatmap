@@ -19,7 +19,7 @@
  *   a lone track at the ramp's third colour, a density of 0.015
  *   (HEAT_FLIGHT_DENSITY, see HEATMAP_REFERENCE_INTENSITY), at every zoom,
  *   times the exposure of the flights it draws (heatmapExposure, see
- *   heatExposure in ui/heatmapPaint.ts).
+ *   heatExposure in calculations/heatExposure.ts).
  * - The heat lines it hands over to (HEAT_LINES) colour the seconds spent
  *   around a fix (see calculations/heatLines.ts), scaled by the same
  *   exposure: a lone pass leaves the time between two fixes there, which
@@ -41,7 +41,7 @@
  * cover less ground towards the poles. Hence "about" in the legend.
  */
 import type { MapApp } from "../mapApp";
-import { HEAT_FLIGHT_DENSITY } from "./heatmapPaint";
+import { HEAT_FLIGHT_DENSITY } from "../calculations/heatExposure";
 
 /**
  * The density on the heat ramp (from 0 to 1, see HEATMAP_GRADIENT) that a

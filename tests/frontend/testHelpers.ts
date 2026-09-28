@@ -105,6 +105,7 @@ interface MockManagers {
     dismissFailures: Mock;
     newAreaKm2: Mock;
     failureNote: ((message: string) => void) | null;
+    heatRequests: number;
   };
   layerManager: {
     clearLayer: Mock;
@@ -304,6 +305,7 @@ function createMockManagers(): MockManagers {
       dismissFailures: vi.fn(),
       newAreaKm2: vi.fn(() => null),
       failureNote: null,
+      heatRequests: 0,
     },
     layerManager: {
       clearLayer: vi.fn(),

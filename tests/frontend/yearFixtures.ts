@@ -38,10 +38,18 @@ export class FakeYearWorker {
     if (this.answers) queueMicrotask(() => this.answer(request));
   }
 
-  /** Answer `request` as the worker would */
+  /**
+   * Answer `request` as the worker would. A Blob crosses as a handle to the
+   * same bytes, which jsdom's cannot be cloned into, so it is kept as it is.
+   */
   answer(request: YearRequest): void {
     const { response, transfer } = handleRequest(request);
-    this.emit("message", { data: structuredClone(response, { transfer }) });
+    const data = structuredClone(response, { transfer });
+    if ("drawn" in response && "drawn" in data) {
+      data.drawn.source = response.drawn.source;
+    }
+    if ("source" in response && "source" in data) data.source = response.source;
+    this.emit("message", { data });
   }
 
   /** Send the page an answer of the test's own making */

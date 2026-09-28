@@ -68,10 +68,13 @@ describe("vendored third-party files", () => {
   );
 
   describe("the fixes of MapLibre", () => {
-    const entry = (): Buffer =>
-      readFileSync(
-        join(REPO_ROOT, "node_modules", VENDOR_FILES["maplibre-gl.mjs"]!),
-      );
+    /** A vendored module of MapLibre as node_modules has it */
+    const original = (published = "maplibre-gl.mjs"): Buffer =>
+      readFileSync(join(REPO_ROOT, "node_modules", VENDOR_FILES[published]!));
+    const entry = (): Buffer => original();
+    /** A vendored module of MapLibre with its fixes, as text */
+    const patchedText = (published: string): string =>
+      applyVendorPatches(original(published), published).toString("latin1");
 
     it("are made to vendored files only", () => {
       for (const published of Object.keys(VENDOR_PATCHES)) {
@@ -79,20 +82,56 @@ describe("vendored third-party files", () => {
       }
     });
 
-    it("each find their code once in the pinned version, and change it", () => {
-      // What the build asks as well, which fails it once MapLibre changes
-      const original = entry().toString("latin1");
-      const patched = applyVendorPatches(entry(), "maplibre-gl.mjs").toString(
-        "latin1",
-      );
-      for (const { find } of VENDOR_PATCHES["maplibre-gl.mjs"]!) {
-        expect([
-          ...original.matchAll(new RegExp(find.source, "g")),
-        ]).toHaveLength(1);
-        // Applied, a fix does not find its code again
-        expect(patched).not.toMatch(find);
-      }
-      expect(patched).not.toBe(original);
+    it.each(Object.keys(VENDOR_PATCHES))(
+      "each find their code once in the pinned version of %s, and change it",
+      (published) => {
+        // What the build asks as well, which fails it once MapLibre changes
+        const text = original(published).toString("latin1");
+        const patched = patchedText(published);
+        for (const { find } of VENDOR_PATCHES[published]!) {
+          expect([...text.matchAll(new RegExp(find.source, "g"))]).toHaveLength(
+            1,
+          );
+          // Applied, a fix does not find its code again
+          expect(patched).not.toMatch(find);
+        }
+        expect(patched).not.toBe(text);
+      },
+    );
+
+    it("let a worker fetch a Blob URL itself, as the main thread does", () => {
+      const patched = patchedText("maplibre-gl-shared.mjs");
+      // makeRequest: what is not http(s), file or blob goes to a protocol,
+      // or through the main thread for a worker
+      const [, , request] =
+        /(\w+)\.url\.includes\(`:\/\/`\)&&!(\/.*?\/)\.test\(\1\.url\)/.exec(
+          patched,
+        ) ?? [];
+      const passesBy = runInNewContext(request!) as RegExp;
+      expect(passesBy.test("blob:https://example.com/0f3a")).toBe(true);
+      expect(passesBy.test("https://example.com/a.json")).toBe(true);
+      expect(passesBy.test("file:///a.json")).toBe(true);
+      expect(passesBy.test("custom://tile/1/2/3")).toBe(false);
+    });
+
+    it("send GeoJSON back from a URL, but not from a Blob URL", () => {
+      const patched = patchedText("maplibre-gl-worker.mjs");
+      const [answer, params, result] =
+        /(\w+)\.request&&!\1\.request\.url\.startsWith\(`blob:`\)&&\((\w+)\.data=\1\.data\)/.exec(
+          patched,
+        ) ?? [];
+      expect(answer).toBeDefined();
+      // The expression the fix makes, run under the worker's own names
+      const answered = (url: string): unknown => {
+        const sent: { data?: unknown } = {};
+        runInNewContext(answer!, {
+          [params!]: { request: { url }, data: "parsed" },
+          [result!]: sent,
+        });
+        return sent.data;
+      };
+      expect(answered("https://example.com/a.geojson")).toBe("parsed");
+      expect(answered("blob:https://example.com/0f3a")).toBeUndefined();
     });
 
     it("keep the relief's tiles under a camera that looks at a point above it", () => {

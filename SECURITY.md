@@ -48,7 +48,14 @@ tiles, glyphs and sprite of the base map), the open flightmaps tile server
 3D view draws its relief from, and EOX's satellite imagery
 (`tiles.maps.eox.at`), which the browser asks for only while the Satellite
 switch is on, and which then sees the visitor's address and the area in view
-(see Privacy in the README). MapLibre fetches every tile, so `img-src` allows
+(see Privacy in the README). Besides those `connect-src` allows `blob:`:
+MapLibre's worker reads the heatmap's sources from Blob URLs of the GeoJSON
+the page's year worker wrote. Chrome holds that worker to the policy its
+own script is served with (GitHub Pages sends none), a browser may hold it
+to the page's, and the e2e tests read those URLs from the page. A Blob URL
+names data a script made in that browser and is read by its own origin
+alone, so `blob:` reaches no server and nothing another site made.
+MapLibre fetches every tile, so `img-src` allows
 only the site itself, `data:` and `blob:`. MapLibre GL JS is published with
 the site as ES modules and starts its worker from one of them, so
 `worker-src 'self'` is enough and no `blob:` worker is allowed. Colours

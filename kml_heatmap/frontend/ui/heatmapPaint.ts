@@ -1,8 +1,10 @@
 /**
  * The look of the heatmap and of the heat lines it hands over to: the
- * MapLibre paint expressions, pure functions of the constants below, and
- * how far the heat is scaled for them (heatExposure). The data manager
- * gives the layers this paint and changes their opacity.
+ * MapLibre paint expressions, pure functions of the constants below. How
+ * far the heat is scaled for them is worked out by the year worker (see
+ * calculations/heatExposure.ts, which also holds the reference of the
+ * kernel both are tuned for). The data manager gives the layers this paint
+ * and changes their opacity.
  */
 import type {
   ExpressionSpecification,
@@ -15,22 +17,22 @@ import {
   MAP_LAYERS,
   MAP_MAX_ZOOM,
 } from "../utils/constants";
-import { DEGREES_TO_RADIANS, type Coordinate } from "../utils/geometry";
 import { heatTone } from "../calculations/heatTone";
+import {
+  HEAT_FLIGHT_DENSITY,
+  HEATMAP_REFERENCE_INTENSITY,
+  HEATMAP_REFERENCE_RADIUS_PX,
+  HEATMAP_REFERENCE_ZOOM,
+} from "../calculations/heatExposure";
 
 /*
  * The look of the heatmap, tuned side by side against what leaflet.heat drew
  * for the same flights (radius 10, blur 15 and minOpacity 0.25). The numbers
- * live here so that a later visual pass has one place to turn.
+ * live here so that a later visual pass has one place to turn, all but the
+ * reference of the kernel, which the exposure shares
+ * (calculations/heatExposure.ts).
  */
 
-/**
- * The reach HEATMAP_REFERENCE_INTENSITY is chosen for. The ridge of a
- * track is as high as its kernel is wide (a sum along it of the kernels
- * of its fixes, each as high at its middle whatever its reach), so a
- * narrower reach takes as much more intensity (see intensityAt).
- */
-const HEATMAP_REFERENCE_RADIUS_PX = 22;
 /**
  * Reach of one point in pixels by map zoom, `[zoom, px]`, between the two
  * linearly. leaflet.heat's radius plus its blur was 25, and 22 is kept for
@@ -51,15 +53,6 @@ export const HEATMAP_RADIUS_PX: readonly [
   [HEATMAP_CLUSTER.maxZoom + 1, HEATMAP_REFERENCE_RADIUS_PX],
   [10, 13],
 ];
-/**
- * The zoom at which the fixes of a track (a few hundred metres apart) are
- * about one radius apart on screen, and the intensity a point of the
- * reference reach has there. With the radius above it puts the ridge of a
- * single track at a density of about 0.015, which the gradient below draws
- * in blue.
- */
-const HEATMAP_REFERENCE_ZOOM = 12;
-const HEATMAP_REFERENCE_INTENSITY = 0.0375;
 /** Opacity of the layer when no colour layer is drawn over it */
 export const HEATMAP_OPACITY = 1;
 /**
@@ -97,21 +90,13 @@ export const HEATMAP_GRADIENT: readonly (readonly [number, string, number])[] =
   [
     [0, "10, 40, 140", 0],
     [0.004, "30, 80, 210", 0.4],
-    [0.015, "30, 105, 230", 0.58],
+    [HEAT_FLIGHT_DENSITY, "30, 105, 230", 0.58],
     [0.03, "40, 150, 250", 0.72],
     [0.06, "60, 195, 255", 0.85],
     [0.25, "120, 225, 255", 0.9],
     [0.6, "200, 245, 255", 0.96],
     [1, "255, 255, 255", 1],
   ];
-
-/**
- * The density the ridge of a lone cruise is drawn at unscaled (see
- * heatExposure), the gradient's third stop, which
- * HEATMAP_REFERENCE_INTENSITY is chosen for (heatScale.test.ts holds the
- * two together): a flight's worth of heat (see ui/heatScale.ts)
- */
-export const HEAT_FLIGHT_DENSITY = HEATMAP_GRADIENT[2]![0];
 
 /**
  * The seconds around a stretch (see calculations/heatLines.ts) a lone pass
@@ -226,135 +211,6 @@ export function heatmapRadiusPx(zoom: number): number {
 }
 
 /**
- * Adaptive exposure: the heat of a year of flights, of one aircraft or of
- * one isolated flight is drawn so that its busiest places come out alike.
- * The heat is added up in a grid whose cells are two standard deviations
- * of the kernel of a point of the reference reach (a third of it) wide at
- * EXPOSURE_ZOOM, a region of a few airfields, counted at the intensity of
- * that reach (EXPOSURE_INTENSITY: the narrower reach the heatmap draws
- * with there does not change the exposure), and scaled so that the cell at
- * EXPOSURE_PERCENTILE of those with any heat reaches EXPOSURE_DENSITY, a
- * light cyan: the busiest routes and circuits, with the airfields white
- * beyond them. That is about where all the sample flights are drawn
- * unscaled, and a year of them came out far fainter. However few cells
- * there are, the EXPOSURE_TOP_CELLS busiest stay beyond it: a lone flight
- * has few, and its 99th percentile was the airfields it stood and taxied
- * on, which scaled to cyan left a quarter of the sample flights fainter
- * than unscaled. A lone flight comes
- * out as brightly as its routes do in a year of them instead of as a faint
- * trace, and a logbook of many years does not wash out to white. Within
- * EXPOSURE_RANGE: a single short flight is not lit like a year, nor a
- * hundred years dimmed to nothing.
- *
- * The heat itself is scaled, rather than the paint: the points' weights,
- * which leaves the least a point contributes where it was (see
- * heatmapWeight), and the heat of the lines the heatmap hands over to, so
- * they take over in the colours it had.
- */
-const EXPOSURE_ZOOM = 10;
-const EXPOSURE_PERCENTILE = 0.99;
-const EXPOSURE_DENSITY = 0.15;
-const EXPOSURE_TOP_CELLS = 4;
-const EXPOSURE_RANGE = [0.25, 3] as const;
-const EXPOSURE_INTENSITY =
-  HEATMAP_REFERENCE_INTENSITY / 2 ** (HEATMAP_REFERENCE_ZOOM - EXPOSURE_ZOOM);
-/**
- * The mean density over a cell two standard deviations wide of the heat in
- * it, per unit of weight times intensity: a kernel (MapLibre's Gaussian,
- * peak 1 / sqrt(2 pi)) holds 2 pi sigma^2 / sqrt(2 pi) of density in all,
- * spread over (2 sigma)^2
- */
-const DENSITY_PER_CELL_WEIGHT = Math.sqrt(2 * Math.PI) / 4;
-
-/**
- * The heat of `points`, each weighing `weights` of the same index (see
- * heatmapPoints in ui/dataManager.ts), added up in the cells of the
- * exposure: the key of the cell of each point, and the heat of each cell
- */
-function exposureCells(
-  points: readonly Coordinate[],
-  weights: ArrayLike<number>,
-): { keys: number[]; cells: Map<number, number> } {
-  // In degrees of longitude, and of the Mercator latitude in the same unit
-  const cell =
-    (720 * HEATMAP_REFERENCE_RADIUS_PX) / 3 / (512 * 2 ** EXPOSURE_ZOOM);
-  const cells = new Map<number, number>();
-  const keys = points.map(([lat, lng], index) => {
-    const y = Math.atanh(Math.sin(lat * DEGREES_TO_RADIANS));
-    // A key the engine keeps as a small integer: a row holds fewer than
-    // 2^15 columns either side of the meridian
-    const key =
-      Math.floor(y / DEGREES_TO_RADIANS / cell) * 2 ** 16 +
-      Math.floor(lng / cell);
-    cells.set(key, (cells.get(key) ?? 0) + weights[index]!);
-    return key;
-  });
-  return { keys, cells };
-}
-
-/** The exposure of heat of `cells` (see exposureCells) */
-function exposureOf(cells: Map<number, number>): number {
-  const sums = Float64Array.from(cells.values()).sort();
-  const rank = Math.min(
-    Math.floor((sums.length - 1) * EXPOSURE_PERCENTILE),
-    sums.length - 1 - EXPOSURE_TOP_CELLS,
-  );
-  const busy =
-    (sums[Math.max(rank, 0)] ?? 0) *
-    EXPOSURE_INTENSITY *
-    DENSITY_PER_CELL_WEIGHT;
-  return busy > 0
-    ? Math.min(
-        Math.max(EXPOSURE_DENSITY / busy, EXPOSURE_RANGE[0]),
-        EXPOSURE_RANGE[1],
-      )
-    : 1;
-}
-
-/**
- * The exposure of the heat of `points`, each weighing `weights` of the
- * same index (see heatmapPoints in ui/dataManager.ts): what the heat is
- * scaled by, 1 for no heat at all
- */
-export function heatExposure(
-  points: readonly Coordinate[],
-  weights: ArrayLike<number>,
-): number {
-  return exposureOf(exposureCells(points, weights).cells);
-}
-
-/**
- * The heat of `points` as the heatmap draws it: its exposure (see
- * heatExposure), and the weights scaled by it and rolled off (see
- * heatTone) by the heat of the cell of the exposure each point is in, its
- * mean density there in flights' worth. The busiest cells, a circuit flown
- * hundreds of times, are drawn at the few flights' worth their heat rolls
- * off to, and the points in them as much fainter; a cell up to the knee
- * keeps its heat, and within a cell every point keeps its share of it, so
- * the downwind, the base, the final and the runway of a circuit keep
- * their steps. The cells are about as wide as the reach of a point in a
- * region, so the roll-off changes from one to the next about as gradually
- * as the heat itself.
- */
-export function exposedHeat(
-  points: readonly Coordinate[],
-  weights: ArrayLike<number>,
-): { exposure: number; weights: number[] } {
-  const { keys, cells } = exposureCells(points, weights);
-  const exposure = exposureOf(cells);
-  const perFlight =
-    (exposure * EXPOSURE_INTENSITY * DENSITY_PER_CELL_WEIGHT) /
-    HEAT_FLIGHT_DENSITY;
-  return {
-    exposure,
-    weights: keys.map((key, index) => {
-      const drawn = cells.get(key)! * perFlight;
-      return weights[index]! * exposure * (heatTone(drawn) / drawn);
-    }),
-  };
-}
-
-/**
  * What heatmapIntensity comes to at `zoom`: halved per level out from the
  * reference zoom, and as much more as the reach of a point is narrower
  * than the reference reach
@@ -383,9 +239,9 @@ export const HEATMAP_LEAST_CONTRIBUTION = intensityAt(HEATMAP_FIXES_FROM_ZOOM);
 export const HEATMAP_LEAST_POINT_CONTRIBUTION = 0.001;
 
 /**
- * Weight of a drawn point by zoom: its heat, `w` (see heatmapFeatures in
- * ui/dataManager.ts), and a cluster (see HEATMAP_CLUSTER) the heat of the
- * fixes it stands for. A fix of a track weighs about 1, the time spent
+ * Weight of a drawn point by zoom: its heat, `w` (see drawHeat in
+ * services/heatSource.ts), and a cluster (see HEATMAP_CLUSTER) the heat of
+ * the fixes it stands for. A fix of a track weighs about 1, the time spent
  * around it in units of the few seconds a logger writes a fix in.
  *
  * But not every fix finds a cluster. The exporter keeps the vertices a KML

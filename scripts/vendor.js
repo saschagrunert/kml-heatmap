@@ -10,7 +10,8 @@
  * like any other dependency. The one thing left off a copy is the closing
  * comment that names a source map the site does not carry, and the one
  * thing changed in one is a few fixes of bugs of MapLibre or of a browser
- * under it (VENDOR_PATCHES).
+ * under it, and of work it does on the main thread that the app cannot
+ * spare it otherwise (VENDOR_PATCHES).
  * html-to-image is the exception to "as it is": the package has no module
  * in one file, so its module is bundled into one here (VENDOR_MODULES).
  *
@@ -162,8 +163,9 @@ export const LINUX_WEBKIT =
  * copied, each to the minified code of the version package-lock.json pins.
  *
  * Kept to bugs of MapLibre, or of a browser that MapLibre meets, that the
- * app cannot work around from the outside, each a few characters, with its
- * upstream issue text in the owner's hands.
+ * app cannot work around from the outside (a cost MapLibre puts on the main
+ * thread among them), each a few characters, with its upstream issue text
+ * in the owner's hands.
  * A fix whose code is no longer found exactly once fails the build: after a
  * bump, see whether the new version fixed the bug (drop the patch) or only
  * renamed the code around it (match it again). A patch in place of a copy
@@ -210,6 +212,38 @@ export const VENDOR_PATCHES = {
       name: "elevation tiles taken apart in the worker by Linux WebKit",
       find: /(\w+)=(\w+)\((\w+)\)&&(\w+)\(\)\?\3:await this\.readImageNow\(\3\)/,
       replace: `$1=$2($3)&&$4()&&!(${LINUX_WEBKIT})?$3:await this.readImageNow($3)`,
+    },
+  ],
+  "maplibre-gl-shared.mjs": [
+    {
+      // makeRequest: a URL of a scheme other than http(s) or file is fetched
+      // by the main thread for a worker (the "GR" message), so that a
+      // protocol added with addProtocol there can answer it. A blob: URL
+      // has no such protocol, and a worker can fetch it itself. The heat
+      // sources are given one of the GeoJSON the year worker wrote
+      // (services/heatSource.ts) to keep their 135,000 features for all
+      // years off the main thread; fetched there, the 16 MB of text would
+      // be parsed on it and the objects sent on to the worker after all.
+      name: "blob: URLs fetched by the main thread for a worker",
+      find: /(\w+)\.url\.includes\(`:\/\/`\)&&!\/\^https\?:\|\^file:\/\.test\(\1\.url\)/,
+      replace: "$1.url.includes(`://`)&&!/^https?:|^file:|^blob:/.test($1.url)",
+    },
+  ],
+  "maplibre-gl-worker.mjs": [
+    {
+      // GeoJSONWorkerSource.loadData: GeoJSON loaded from a URL is sent
+      // back to the main thread whole, so that getData() can answer with
+      // it, which the app never asks of a heat source. For all years that
+      // is 135,000 features cloned onto the main thread and copied there
+      // once more by MapLibre, which is what the heat sources are given a
+      // URL to spare it. Not for a blob: URL, which only the app's heat
+      // sources are given: getData() of such a source (and getBounds(),
+      // which asks it) waits for its next load and then fails, and nothing
+      // in the app asks either.
+      name: "GeoJSON of a blob: URL sent back to the main thread",
+      find: /(\w+)\.request&&\((\w+)\.data=\1\.data\)/,
+      replace:
+        "$1.request&&!$1.request.url.startsWith(`blob:`)&&($2.data=$1.data)",
     },
   ],
 };

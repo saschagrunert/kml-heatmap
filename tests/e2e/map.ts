@@ -113,16 +113,25 @@ export async function waitForMapReady(page: Page): Promise<void> {
 
 /**
  * Wait until the map has drawn what it was given: sources are handed to a
- * worker, so data set a moment ago is not on the canvas, and cannot be hit
- * by a pointer, until the map has loaded it and stands still. In CI it
- * took up to 10.6 s in WebKit and 4.5 s in Chromium, so it is given about
- * three times as long.
+ * worker (the heat sources to the year worker first, see heatRequests in
+ * ui/dataManager.ts), so data set a moment ago is not on the canvas, and
+ * cannot be hit by a pointer, until the map has loaded it and stands
+ * still. In CI it took up to 10.6 s in WebKit and 4.5 s in Chromium, so it
+ * is given about three times as long.
  */
 async function waitForMapIdle(page: Page): Promise<void> {
   await page.waitForFunction(
     () => {
-      const map = window.mapApp?.map;
-      return !!map && map.loaded() && !map.isMoving();
+      const app = window.mapApp;
+      const map = app?.map;
+      // The heat sources are given their data once the year worker has
+      // written it, and the map is idle meanwhile
+      return (
+        !!map &&
+        map.loaded() &&
+        !map.isMoving() &&
+        !app?.dataManager?.heatRequests
+      );
     },
     undefined,
     { timeout: 30000 },
@@ -135,8 +144,9 @@ async function waitForMapIdle(page: Page): Promise<void> {
  */
 export function mapIsIdle(page: Page): Promise<boolean> {
   return page.evaluate(() => {
-    const map = window.mapApp!.map!;
-    return map.loaded() && !map.isMoving();
+    const app = window.mapApp!;
+    const map = app.map!;
+    return map.loaded() && !map.isMoving() && !app.dataManager.heatRequests;
   });
 }
 

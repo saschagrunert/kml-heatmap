@@ -148,9 +148,23 @@ describe("the Content Security Policy", () => {
   it("names no foreign source that nothing fetches", () => {
     const used = [...fetched.map(({ url }) => url), ...CARTO_STYLE_URLS];
     const unused = connectSrc
-      .filter((source) => source !== "'self'")
+      .filter((source) => source !== "'self'" && source !== "blob:")
       .filter((source) => !used.some((url) => sourceMatches(source, url)));
     expect(unused).toEqual([]);
+  });
+
+  it("allows the Blob URLs of the heat sources, and no other scheme", () => {
+    // MapLibre's worker reads the heat sources from Blob URLs of what the
+    // year worker wrote (services/heatSource.ts), which a browser may hold
+    // it to the page's policy for
+    const heatSource = readFileSync(
+      join(FRONTEND_DIR, "ui/dataManager.ts"),
+      "utf8",
+    );
+    expect(heatSource).toContain("URL.createObjectURL(");
+    expect(connectSrc.filter((source) => /^[a-z-]+:$/.test(source))).toEqual([
+      "blob:",
+    ]);
   });
 
   it("allows only the elevation bucket on S3, not every bucket", () => {

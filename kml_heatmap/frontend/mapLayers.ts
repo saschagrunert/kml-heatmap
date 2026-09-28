@@ -238,7 +238,7 @@ function addDataLayersTo(map: MapLibreMap): void {
   // data manager, which sets it as paint properties. The source merges the
   // fixes into clusters for the zooms at which they are too many to draw
   // one by one (see HEATMAP_CLUSTER), adding up the heat of each point, `w`
-  // (see heatmapFeatures in ui/dataManager.ts). Isolate draws the selected
+  // (see drawHeat in services/heatSource.ts). Isolate draws the selected
   // flights from a source of their own, so neither is written again for
   // it.
   for (const id of [MAP_LAYERS.heat, MAP_LAYERS.heatIsolated]) {

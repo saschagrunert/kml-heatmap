@@ -30,26 +30,44 @@ const HEAT_GROUP =
 const LAYERS_GROUP =
   '#right-buttons .control-group[aria-labelledby="layers-group-title"]';
 
-/** How many points a GeoJSON source of the app holds, as handed to the map */
-function sourcePoints(page: Page, id: string): Promise<number> {
-  return page.evaluate((id) => {
+/**
+ * The features a GeoJSON source of the app holds, as handed to the map: a
+ * heat source is given a Blob URL of its GeoJSON (services/heatSource.ts),
+ * which stays valid while the source holds it. Null for none, and for one
+ * the source let go of while it was being read.
+ */
+function sourceFeatures(
+  page: Page,
+  id: string,
+): Promise<{ w?: unknown }[] | null> {
+  return page.evaluate(async (id) => {
     const source = window.mapApp!.map!.getStyle().sources[id];
-    return source?.type === "geojson" && typeof source.data !== "string"
-      ? (source.data as GeoJSON.FeatureCollection).features.length
-      : 0;
+    if (source?.type !== "geojson") return null;
+    let data: unknown = source.data;
+    if (typeof data === "string") {
+      try {
+        data = await ((await fetch(data)).json() as Promise<unknown>);
+      } catch {
+        return null;
+      }
+    }
+    return (data as GeoJSON.FeatureCollection).features.map((feature) => ({
+      w: feature.properties?.["w"] as unknown,
+    }));
   }, id);
 }
 
+/** How many points a GeoJSON source of the app holds, as handed to the map */
+async function sourcePoints(page: Page, id: string): Promise<number> {
+  return (await sourceFeatures(page, id))?.length ?? 0;
+}
+
 /** The heat a GeoJSON source of the app holds, its points' `w` added up */
-function sourceHeat(page: Page, id: string): Promise<number> {
-  return page.evaluate((id) => {
-    const source = window.mapApp!.map!.getStyle().sources[id];
-    if (source?.type !== "geojson" || typeof source.data === "string") return 0;
-    return (source.data as GeoJSON.FeatureCollection).features.reduce(
-      (sum, feature) => sum + Number(feature.properties?.["w"] ?? 0),
-      0,
-    );
-  }, id);
+async function sourceHeat(page: Page, id: string): Promise<number> {
+  return ((await sourceFeatures(page, id)) ?? []).reduce(
+    (sum, feature) => sum + Number(feature.w ?? 0),
+    0,
+  );
 }
 
 /** How many airport codes the map has placed in view */

@@ -8,6 +8,11 @@ import {
   type YearWorkerScope,
 } from "../../../../kml_heatmap/frontend/services/yearWorker";
 import { decodeYear } from "../../../../kml_heatmap/frontend/services/yearDecode";
+import {
+  drawHeat,
+  linesSource,
+} from "../../../../kml_heatmap/frontend/services/heatSource";
+import { heatColumns } from "../../../../kml_heatmap/frontend/calculations/heatExposure";
 import { path, rawYear, yearBytes } from "../../yearFixtures";
 
 const year = rawYear(2025, { "1": path([50, 8], [[50.1, 8.1, 500, 100]]) });
@@ -70,6 +75,52 @@ describe("handleRequest", () => {
 
     parse.mockRestore();
     expect(response).toEqual({ id: 5, error: "odd" });
+  });
+});
+
+describe("handleRequest for the heat sources", () => {
+  const heat = heatColumns(
+    [
+      [50, 8],
+      [50.01, 8.01],
+    ],
+    [1, 2],
+  );
+
+  it("draws a heat, a Blob and nothing to hand over", async () => {
+    const { response, transfer } = handleRequest({ id: 3, heat });
+
+    if (!("drawn" in response)) throw new Error("not drawn");
+    const expected = drawHeat(heat);
+    expect(response.id).toBe(3);
+    expect(response.drawn.exposure).toBe(expected.exposure);
+    expect(await response.drawn.source.text()).toBe(
+      await expected.source.text(),
+    );
+    expect(transfer).toEqual([]);
+  });
+
+  it("writes the heat lines, a Blob and nothing to hand over", async () => {
+    const lines = {
+      coordinates: new Float64Array([8, 50, 8.1, 50.1]),
+      ends: new Uint32Array([2]),
+      heats: new Float64Array([4]),
+    };
+
+    const { response, transfer } = handleRequest({ id: 4, lines });
+
+    if (!("source" in response)) throw new Error("not written");
+    expect(await response.source.text()).toBe(await linesSource(lines).text());
+    expect(transfer).toEqual([]);
+  });
+
+  it("answers a heat it fails over with the reason", () => {
+    const { response } = handleRequest({
+      id: 5,
+      heat: undefined as unknown as Float64Array,
+    });
+
+    expect(response).toEqual({ id: 5, error: expect.any(String) as string });
   });
 });
 
