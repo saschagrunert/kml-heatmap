@@ -23,6 +23,7 @@
  */
 import type { MapApp } from "../mapApp";
 import { domCache } from "../utils/domCache";
+import { heatUntone } from "../calculations/heatTone";
 import { HEAT_FLIGHT_DENSITY, HEATMAP_GRADIENT } from "./heatmapPaint";
 import { heatScale } from "./heatScale";
 
@@ -34,7 +35,9 @@ import { heatScale } from "./heatScale";
  * colour under the middle of each label is the one its count is drawn in.
  * The ramp's faintest colour, a quarter of one flight's, lies a step left
  * of the first label, off the bar; where it fades in from nothing, further
- * left still (on this scale infinitely far), is left out.
+ * left still (on this scale infinitely far), is left out. The colours
+ * beyond the knee of the heat stand for the flights' worth rolled off to
+ * them (see heatTone), further apart than their densities.
  */
 export function heatLegend(perFlight: number): {
   counts: number[];
@@ -47,7 +50,7 @@ export function heatLegend(perFlight: number): {
   // A step of four is two powers of two, a quarter of the bar
   const stops = HEATMAP_GRADIENT.slice(1).map(
     ([density, rgb, alpha]) =>
-      `rgba(${rgb}, ${alpha}) ${12.5 * (Math.log2(density / perFlight / first) + 1)}%`,
+      `rgba(${rgb}, ${alpha}) ${12.5 * (Math.log2((heatUntone(density / HEAT_FLIGHT_DENSITY) * HEAT_FLIGHT_DENSITY) / perFlight / first) + 1)}%`,
   );
   return {
     counts: [1, 4, 16, 64].map((step) => first * step),

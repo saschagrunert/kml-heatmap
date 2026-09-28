@@ -12,7 +12,9 @@
  * (routeWeighting) its length, counted at that speed (heatWeight in
  * calculations/heatLines.ts). The heat of flights that overlap adds up in
  * all three ways the heat is drawn, so n flights' worth is drawn at n
- * times the density of one:
+ * times the density of one, up to the knee all three roll it off from
+ * alike (see calculations/heatTone.ts, which the legend reads its colours
+ * back through):
  * - The flat heatmap weighs its points by that heat and puts the ridge of
  *   a lone track at the ramp's third colour, a density of 0.015
  *   (HEAT_FLIGHT_DENSITY, see HEATMAP_REFERENCE_INTENSITY), at every zoom,

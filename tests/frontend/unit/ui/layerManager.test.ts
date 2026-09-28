@@ -2819,7 +2819,8 @@ describe("LayerManager", () => {
       });
 
       it("reaches further around a tilted view, by as high as a flight is drawn", async () => {
-        await drawTwo(9.5);
+        // Twice the height, at the level of the least exaggeration
+        await drawTwo(10.5);
         mockApp.map!.jumpTo({ center: [15.6, 48], pitch: 0 });
         mockApp.map!.emit("moveend");
         expect(paths()).toEqual([1]);
@@ -3187,30 +3188,30 @@ describe("LayerManager", () => {
     });
 
     it("hides the ribbons that cannot follow the level while an older cut may still be drawn", async () => {
-      await drawOverHills(5.2);
+      await drawOverHills(6.2);
       mockApp.map!.emit("render");
-      // The cut for level 6 is still on its way as the zoom goes on
+      // The cut for level 7 is still on its way as the zoom goes on
       mockApp.map!.isSourceLoaded.mockImplementation((id) => id !== RIBBONS);
-      mockApp.map!.jumpTo({ zoom: 6.2 });
-      mockApp.map!.emit("zoomend");
-      // Level 5 has the exaggeration of 6: they stay in sight
-      expect(opacity()).toBeGreaterThan(0);
-
       mockApp.map!.jumpTo({ zoom: 7.2 });
       mockApp.map!.emit("zoomend");
-      // The map may still draw the cut for level 5, which it knows by no id
-      // and which cannot take the exaggeration of level 7
+      // Level 6 has the exaggeration of 7: they stay in sight
+      expect(opacity()).toBeGreaterThan(0);
+
+      mockApp.map!.jumpTo({ zoom: 8.2 });
+      mockApp.map!.emit("zoomend");
+      // The map may still draw the cut for level 6, which it knows by no id
+      // and which cannot take the exaggeration of level 8
       expect(opacity()).toBe(0);
 
-      // Had the cut for level 6 landed, they would have followed
+      // Had the cut for level 7 landed, they would have followed
       mockApp.map!.isSourceLoaded.mockReturnValue(true);
       mockApp.map!.emit("render");
       expect(opacity()).toBeGreaterThan(0);
-      mockApp.map!.jumpTo({ zoom: 6.2 });
+      mockApp.map!.jumpTo({ zoom: 7.2 });
       mockApp.map!.emit("zoomend");
       mockApp.map!.emit("render");
       mockApp.map!.isSourceLoaded.mockImplementation((id) => id !== RIBBONS);
-      mockApp.map!.jumpTo({ zoom: 7.2 });
+      mockApp.map!.jumpTo({ zoom: 8.2 });
       mockApp.map!.emit("zoomend");
       expect(opacity()).toBeGreaterThan(0);
     });

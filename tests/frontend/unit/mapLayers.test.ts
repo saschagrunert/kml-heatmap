@@ -11,10 +11,11 @@ import type {
 } from "maplibre-gl";
 import {
   AIRPORTS_HIDDEN_CLASS,
+  HEAT_SHOWN_STATE,
   setBaseStyle,
   withDataLayers,
 } from "../../../kml_heatmap/frontend/mapLayers";
-import { HEATMAP_RADIUS_PX } from "../../../kml_heatmap/frontend/ui/heatmapPaint";
+import { heatmapRadiusPx } from "../../../kml_heatmap/frontend/ui/heatmapPaint";
 import {
   HEAT_LINES,
   HEATMAP_CLUSTER,
@@ -316,9 +317,16 @@ describe("layer handles", () => {
   });
 
   it("keep the clusters finer than the reach of a point", () => {
-    // A cluster radius near the reach of a point turns tracks into beads
+    // A cluster radius near the reach of a point turns tracks into beads,
+    // and the clusters of the last level are drawn up to the next, scaled
+    // up to twice as far apart: the reach does not narrow before it
     expect(HEATMAP_CLUSTER.radius).toBeGreaterThan(0);
-    expect(HEATMAP_CLUSTER.radius * 2).toBeLessThan(HEATMAP_RADIUS_PX);
+    expect(HEATMAP_CLUSTER.radius * 2).toBeLessThan(
+      heatmapRadiusPx(HEATMAP_CLUSTER.maxZoom + 1),
+    );
+    expect(heatmapRadiusPx(HEATMAP_CLUSTER.maxZoom + 1)).toBe(
+      heatmapRadiusPx(0),
+    );
     expect(HEATMAP_CLUSTER.maxZoom).toBeGreaterThanOrEqual(MAP_MIN_ZOOM);
   });
 
@@ -486,6 +494,61 @@ describe("withDataLayers", () => {
       "place-labels",
       MAP_LAYERS.airportLabels,
     ]);
+  });
+
+  it("fades the new style's labels while the heat is drawn, and none of the app's", () => {
+    const next: StyleSpecification = {
+      version: 8,
+      sources: { places: { type: "geojson", data: "places" } },
+      layers: [
+        { id: "base", type: "background" },
+        {
+          id: "place-labels",
+          type: "symbol",
+          source: "places",
+          paint: { "text-color": "#fff" },
+        },
+        {
+          id: "own-opacity",
+          type: "symbol",
+          source: "places",
+          paint: { "text-opacity": 0.3 },
+        },
+      ],
+    };
+    const labelled: StyleSpecification = {
+      ...previous,
+      layers: [
+        ...previous.layers,
+        {
+          id: MAP_LAYERS.airportLabels,
+          type: "symbol",
+          source: MAP_SOURCES.heat,
+        },
+      ],
+    };
+
+    const style = withDataLayers(labelled, next);
+    const paint = (id: string): unknown =>
+      style.layers.find((layer) => layer.id === id)!.paint;
+
+    expect(paint("place-labels")).toEqual({
+      "text-color": "#fff",
+      "text-opacity": ["case", ["global-state", HEAT_SHOWN_STATE], 0.5, 1],
+    });
+    // Valid for MapLibre, as the style of the map is not validated
+    expect(
+      validateStyleMin({
+        ...style,
+        sources: next.sources,
+        layers: style.layers.filter((layer) => layer.id === "place-labels"),
+      }),
+    ).toEqual([]);
+    // An opacity of the style's own stays, the style it came in is left as
+    // it was, and the airport labels are the app's
+    expect(paint("own-opacity")).toEqual({ "text-opacity": 0.3 });
+    expect(next.layers[1]!.paint).toEqual({ "text-color": "#fff" });
+    expect(paint(MAP_LAYERS.airportLabels)).toBeUndefined();
   });
 
   it("keeps the sky of a tilted map, which the base style does not have", () => {

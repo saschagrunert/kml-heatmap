@@ -16,6 +16,7 @@ import {
   MAP_MAX_ZOOM,
 } from "../utils/constants";
 import { DEGREES_TO_RADIANS, type Coordinate } from "../utils/geometry";
+import { heatTone } from "../calculations/heatTone";
 
 /*
  * The look of the heatmap, tuned side by side against what leaflet.heat drew
@@ -23,16 +24,42 @@ import { DEGREES_TO_RADIANS, type Coordinate } from "../utils/geometry";
  * live here so that a later visual pass has one place to turn.
  */
 
-/** Reach of one point in pixels; leaflet.heat's radius plus its blur was 25 */
-export const HEATMAP_RADIUS_PX = 22;
+/**
+ * The reach HEATMAP_REFERENCE_INTENSITY is chosen for. The ridge of a
+ * track is as high as its kernel is wide (a sum along it of the kernels
+ * of its fixes, each as high at its middle whatever its reach), so a
+ * narrower reach takes as much more intensity (see intensityAt).
+ */
+const HEATMAP_REFERENCE_RADIUS_PX = 22;
+/**
+ * Reach of one point in pixels by map zoom, `[zoom, px]`, between the two
+ * linearly. leaflet.heat's radius plus its blur was 25, and 22 is kept for
+ * a map of a country, where the routes are to run together into a web.
+ * Closer in that reach was a haze: from zoom 8 to 10 the routes of a
+ * region, a few kilometres apart, merged into one blue fog around the home
+ * field, and its circuits into one blot. So it narrows over a region, to
+ * under two thirds at the zoom the heat lines take over from (see
+ * HEAT_LINES). Not while the clusters are drawn, up to the level after
+ * their last: scaled up towards it they lie up to twice their radius
+ * apart, and under a narrower reach a lone track fell apart into beads
+ * (see HEATMAP_CLUSTER).
+ */
+export const HEATMAP_RADIUS_PX: readonly [
+  readonly [number, number],
+  readonly [number, number],
+] = [
+  [HEATMAP_CLUSTER.maxZoom + 1, HEATMAP_REFERENCE_RADIUS_PX],
+  [10, 13],
+];
 /**
  * The zoom at which the fixes of a track (a few hundred metres apart) are
- * about one radius apart on screen, and the intensity a point has there.
- * With the radius above it puts the ridge of a single track at a density
- * of about 0.015, which the gradient below draws in teal.
+ * about one radius apart on screen, and the intensity a point of the
+ * reference reach has there. With the radius above it puts the ridge of a
+ * single track at a density of about 0.015, which the gradient below draws
+ * in blue.
  */
 const HEATMAP_REFERENCE_ZOOM = 12;
-export const HEATMAP_REFERENCE_INTENSITY = 0.0375;
+const HEATMAP_REFERENCE_INTENSITY = 0.0375;
 /** Opacity of the layer when no colour layer is drawn over it */
 export const HEATMAP_OPACITY = 1;
 /**
@@ -51,19 +78,30 @@ export const HEATMAP_OPACITY = 1;
  * a little warmer than one, not fifty times as hot. The map adds densities
  * up instead, so on an even scale one track is nearly invisible next to the
  * places flown over every week. The stops therefore sit closer together the
- * lower they are: each is about four times the one before, so a single
- * track is azure, a busy route cyan, and only the airfields themselves come
- * near white. The faintest stop keeps leaflet.heat's least opacity, below
- * which a lone track is lost on the map.
+ * lower they are: most are four times the one before, so a single
+ * track is blue, a busy route cyan, and only the airfields themselves come
+ * near white, and what is more than the knee of the heat is rolled off
+ * before it is drawn (see heatTone), so the stops beyond it stand for ever
+ * more flights.
+ *
+ * Most of the map is a route flown once to a few times, so the low end has
+ * the most steps of lightness, with a stop of its own at two flights: over
+ * the dark base map a quarter of a flight, one, two and four come out each
+ * about half as light again as the one before, four flights' worth well
+ * over twice as light as one where it was not quite twice, so a leg flown
+ * five times stands out from one flown once. The faintest stop, a quarter
+ * of a flight, is light enough to keep a rare leg off the base map; the
+ * colours in between are MapLibre's own blend of the stops either side.
  */
 export const HEATMAP_GRADIENT: readonly (readonly [number, string, number])[] =
   [
-    [0, "10, 30, 120", 0],
-    [0.004, "20, 60, 190", 0.25],
-    [0.015, "20, 120, 235", 0.5],
-    [0.06, "40, 190, 255", 0.7],
-    [0.25, "120, 230, 255", 0.85],
-    [0.6, "200, 248, 255", 0.95],
+    [0, "10, 40, 140", 0],
+    [0.004, "30, 80, 210", 0.4],
+    [0.015, "30, 105, 230", 0.58],
+    [0.03, "40, 150, 250", 0.72],
+    [0.06, "60, 195, 255", 0.85],
+    [0.25, "120, 225, 255", 0.9],
+    [0.6, "200, 245, 255", 0.96],
     [1, "255, 255, 255", 1],
   ];
 
@@ -95,6 +133,18 @@ const HEAT_LINE_FLIGHT_SECONDS = 4;
 const HEAT_LINE_SECONDS = HEATMAP_GRADIENT.slice(1).map(
   ([density]) => (HEAT_LINE_FLIGHT_SECONDS * density) / HEAT_FLIGHT_DENSITY,
 );
+
+/**
+ * The seconds around a stretch of the heat lines, as drawn, rolled off as
+ * the heatmap rolls off its heat (see heatTone): counted in flights' worth
+ * of HEAT_LINE_FLIGHT_SECONDS each, so the busiest circuits and taxiways
+ * keep the colours the heatmap gave them across the hand-over
+ */
+export function heatLineTone(seconds: number): number {
+  return (
+    HEAT_LINE_FLIGHT_SECONDS * heatTone(seconds / HEAT_LINE_FLIGHT_SECONDS)
+  );
+}
 /**
  * The lines are drawn as a wide blurred glow and a thin core over it, both
  * in the colour of their heat; the core is fainter where less time was
@@ -109,8 +159,8 @@ const HEAT_LINE_CORE = {
   /** Opacity by heat: `[seconds, opacity]` */
   opacity: [
     [HEAT_LINE_SECONDS[0]!, 0.45],
-    [HEAT_LINE_SECONDS[2]!, 0.8],
-    [HEAT_LINE_SECONDS[4]!, 1],
+    [HEAT_LINE_SECONDS[3]!, 0.8],
+    [HEAT_LINE_SECONDS[5]!, 1],
   ],
   /**
    * Width by zoom and heat, `[zoom, px of the coolest, px of the hottest]`:
@@ -141,27 +191,48 @@ const HEAT_LINE_CORE = {
  * fix moves further than twice the cluster radius, about half the kernel's,
  * and most far less, so the sum along a track is the one the fixes
  * themselves would give.
+ *
+ * The reach of a point narrows closer in (HEATMAP_RADIUS_PX), and the
+ * intensity grows as much, so the ridge of a track keeps its height: a
+ * stop per half level (HEATMAP_STOPS), between which the base 2 follows
+ * the halving exactly and the reach to within a few per cent.
  */
 function heatmapIntensity(): ExpressionSpecification {
   return [
     "interpolate",
     ["exponential", 2],
     ["zoom"],
-    0,
-    intensityAt(0),
-    HEATMAP_REFERENCE_ZOOM,
-    intensityAt(HEATMAP_REFERENCE_ZOOM),
+    ...HEATMAP_STOPS.flatMap((zoom) => [zoom, intensityAt(zoom)]),
     Math.max(MAP_MAX_ZOOM, HEATMAP_REFERENCE_ZOOM + 1),
     intensityAt(HEATMAP_REFERENCE_ZOOM),
-  ];
+  ] as ExpressionSpecification;
+}
+
+/**
+ * The zooms the intensity and the weight of the heatmap have a stop at:
+ * every half level up to the reference zoom, since the reach of a point
+ * narrows within one (see HEATMAP_RADIUS_PX)
+ */
+const HEATMAP_STOPS = Array.from(
+  { length: 2 * HEATMAP_REFERENCE_ZOOM + 1 },
+  (_, i) => i / 2,
+);
+
+/** The reach of a point at `zoom`, see HEATMAP_RADIUS_PX */
+export function heatmapRadiusPx(zoom: number): number {
+  const [[z0, r0], [z1, r1]] = HEATMAP_RADIUS_PX;
+  const t = Math.min(Math.max((zoom - z0) / (z1 - z0), 0), 1);
+  return r0 + (r1 - r0) * t;
 }
 
 /**
  * Adaptive exposure: the heat of a year of flights, of one aircraft or of
  * one isolated flight is drawn so that its busiest places come out alike.
  * The heat is added up in a grid whose cells are two standard deviations
- * of a point's kernel (a third of its radius) wide at EXPOSURE_ZOOM, a
- * region of a few airfields, and scaled so that the cell at
+ * of the kernel of a point of the reference reach (a third of it) wide at
+ * EXPOSURE_ZOOM, a region of a few airfields, counted at the intensity of
+ * that reach (EXPOSURE_INTENSITY: the narrower reach the heatmap draws
+ * with there does not change the exposure), and scaled so that the cell at
  * EXPOSURE_PERCENTILE of those with any heat reaches EXPOSURE_DENSITY, a
  * light cyan: the busiest routes and circuits, with the airfields white
  * beyond them. That is about where all the sample flights are drawn
@@ -185,6 +256,8 @@ const EXPOSURE_PERCENTILE = 0.99;
 const EXPOSURE_DENSITY = 0.15;
 const EXPOSURE_TOP_CELLS = 4;
 const EXPOSURE_RANGE = [0.25, 3] as const;
+const EXPOSURE_INTENSITY =
+  HEATMAP_REFERENCE_INTENSITY / 2 ** (HEATMAP_REFERENCE_ZOOM - EXPOSURE_ZOOM);
 /**
  * The mean density over a cell two standard deviations wide of the heat in
  * it, per unit of weight times intensity: a kernel (MapLibre's Gaussian,
@@ -192,6 +265,51 @@ const EXPOSURE_RANGE = [0.25, 3] as const;
  * spread over (2 sigma)^2
  */
 const DENSITY_PER_CELL_WEIGHT = Math.sqrt(2 * Math.PI) / 4;
+
+/**
+ * The heat of `points`, each weighing `weights` of the same index (see
+ * heatmapPoints in ui/dataManager.ts), added up in the cells of the
+ * exposure: the key of the cell of each point, and the heat of each cell
+ */
+function exposureCells(
+  points: readonly Coordinate[],
+  weights: ArrayLike<number>,
+): { keys: number[]; cells: Map<number, number> } {
+  // In degrees of longitude, and of the Mercator latitude in the same unit
+  const cell =
+    (720 * HEATMAP_REFERENCE_RADIUS_PX) / 3 / (512 * 2 ** EXPOSURE_ZOOM);
+  const cells = new Map<number, number>();
+  const keys = points.map(([lat, lng], index) => {
+    const y = Math.atanh(Math.sin(lat * DEGREES_TO_RADIANS));
+    // A key the engine keeps as a small integer: a row holds fewer than
+    // 2^15 columns either side of the meridian
+    const key =
+      Math.floor(y / DEGREES_TO_RADIANS / cell) * 2 ** 16 +
+      Math.floor(lng / cell);
+    cells.set(key, (cells.get(key) ?? 0) + weights[index]!);
+    return key;
+  });
+  return { keys, cells };
+}
+
+/** The exposure of heat of `cells` (see exposureCells) */
+function exposureOf(cells: Map<number, number>): number {
+  const sums = Float64Array.from(cells.values()).sort();
+  const rank = Math.min(
+    Math.floor((sums.length - 1) * EXPOSURE_PERCENTILE),
+    sums.length - 1 - EXPOSURE_TOP_CELLS,
+  );
+  const busy =
+    (sums[Math.max(rank, 0)] ?? 0) *
+    EXPOSURE_INTENSITY *
+    DENSITY_PER_CELL_WEIGHT;
+  return busy > 0
+    ? Math.min(
+        Math.max(EXPOSURE_DENSITY / busy, EXPOSURE_RANGE[0]),
+        EXPOSURE_RANGE[1],
+      )
+    : 1;
+}
 
 /**
  * The exposure of the heat of `points`, each weighing `weights` of the
@@ -202,39 +320,49 @@ export function heatExposure(
   points: readonly Coordinate[],
   weights: ArrayLike<number>,
 ): number {
-  // In degrees of longitude, and of the Mercator latitude in the same unit
-  const cell = (720 * HEATMAP_RADIUS_PX) / 3 / (512 * 2 ** EXPOSURE_ZOOM);
-  const cells = new Map<number, number>();
-  points.forEach(([lat, lng], index) => {
-    const y = Math.atanh(Math.sin(lat * DEGREES_TO_RADIANS));
-    // A key the engine keeps as a small integer: a row holds fewer than
-    // 2^15 columns either side of the meridian
-    const key =
-      Math.floor(y / DEGREES_TO_RADIANS / cell) * 2 ** 16 +
-      Math.floor(lng / cell);
-    cells.set(key, (cells.get(key) ?? 0) + weights[index]!);
-  });
-  const sums = Float64Array.from(cells.values()).sort();
-  const rank = Math.min(
-    Math.floor((sums.length - 1) * EXPOSURE_PERCENTILE),
-    sums.length - 1 - EXPOSURE_TOP_CELLS,
-  );
-  const busy =
-    (sums[Math.max(rank, 0)] ?? 0) *
-    intensityAt(EXPOSURE_ZOOM) *
-    DENSITY_PER_CELL_WEIGHT;
-  return busy > 0
-    ? Math.min(
-        Math.max(EXPOSURE_DENSITY / busy, EXPOSURE_RANGE[0]),
-        EXPOSURE_RANGE[1],
-      )
-    : 1;
+  return exposureOf(exposureCells(points, weights).cells);
 }
 
-/** What heatmapIntensity comes to at `zoom` */
-function intensityAt(zoom: number): number {
+/**
+ * The heat of `points` as the heatmap draws it: its exposure (see
+ * heatExposure), and the weights scaled by it and rolled off (see
+ * heatTone) by the heat of the cell of the exposure each point is in, its
+ * mean density there in flights' worth. The busiest cells, a circuit flown
+ * hundreds of times, are drawn at the few flights' worth their heat rolls
+ * off to, and the points in them as much fainter; a cell up to the knee
+ * keeps its heat, and within a cell every point keeps its share of it, so
+ * the downwind, the base, the final and the runway of a circuit keep
+ * their steps. The cells are about as wide as the reach of a point in a
+ * region, so the roll-off changes from one to the next about as gradually
+ * as the heat itself.
+ */
+export function exposedHeat(
+  points: readonly Coordinate[],
+  weights: ArrayLike<number>,
+): { exposure: number; weights: number[] } {
+  const { keys, cells } = exposureCells(points, weights);
+  const exposure = exposureOf(cells);
+  const perFlight =
+    (exposure * EXPOSURE_INTENSITY * DENSITY_PER_CELL_WEIGHT) /
+    HEAT_FLIGHT_DENSITY;
+  return {
+    exposure,
+    weights: keys.map((key, index) => {
+      const drawn = cells.get(key)! * perFlight;
+      return weights[index]! * exposure * (heatTone(drawn) / drawn);
+    }),
+  };
+}
+
+/**
+ * What heatmapIntensity comes to at `zoom`: halved per level out from the
+ * reference zoom, and as much more as the reach of a point is narrower
+ * than the reference reach
+ */
+export function intensityAt(zoom: number): number {
   return (
-    HEATMAP_REFERENCE_INTENSITY /
+    (HEATMAP_REFERENCE_INTENSITY * HEATMAP_REFERENCE_RADIUS_PX) /
+    heatmapRadiusPx(Math.min(zoom, HEATMAP_REFERENCE_ZOOM)) /
     2 ** Math.max(HEATMAP_REFERENCE_ZOOM - zoom, 0)
   );
 }
@@ -276,9 +404,11 @@ export const HEATMAP_LEAST_POINT_CONTRIBUTION = 0.001;
  *
  * A cluster of a normal track holds more heat than that at every zoom (see
  * HEATMAP_CLUSTER), so the floor leaves it alone. `zoom` may only be the
- * input of a top-level interpolation, hence a stop per level with the floor
- * inside. Between two levels the floor halves, which the base 1/2 follows
- * exactly; a heat above both floors is the same at both stops and stays.
+ * input of a top-level interpolation, hence a stop per half level with the
+ * floor inside (HEATMAP_STOPS). Between two the floor falls as the
+ * intensity grows, which the base 1/2 follows exactly where the reach
+ * stays and to within a few per cent where it narrows; a heat above both
+ * floors is the same at both stops and stays.
  *
  * Where the fixes are drawn as they are, a fix weighs its heat, which is
  * less than 1 for one a second or less on (a logger that writes every
@@ -289,20 +419,20 @@ export const HEATMAP_LEAST_POINT_CONTRIBUTION = 0.001;
  * intensity stays.
  */
 function heatmapWeight(): ExpressionSpecification {
-  const heat: ExpressionSpecification = ["get", "w"];
-  const stops: (number | ExpressionSpecification)[] = [];
-  for (let zoom = 0; zoom <= HEATMAP_REFERENCE_ZOOM; zoom++) {
-    const least =
-      zoom < HEATMAP_FIXES_FROM_ZOOM
-        ? HEATMAP_LEAST_CONTRIBUTION
-        : HEATMAP_LEAST_POINT_CONTRIBUTION;
-    stops.push(zoom, ["max", heat, least / intensityAt(zoom)]);
-  }
   return [
     "interpolate",
     ["exponential", 0.5],
     ["zoom"],
-    ...stops,
+    ...HEATMAP_STOPS.flatMap((zoom) => [
+      zoom,
+      [
+        "max",
+        ["get", "w"],
+        (zoom < HEATMAP_FIXES_FROM_ZOOM
+          ? HEATMAP_LEAST_CONTRIBUTION
+          : HEATMAP_LEAST_POINT_CONTRIBUTION) / intensityAt(zoom),
+      ],
+    ]),
   ] as ExpressionSpecification;
 }
 
@@ -365,7 +495,12 @@ export function heatmapPaint(): NonNullable<
   HeatmapLayerSpecification["paint"]
 > {
   return {
-    "heatmap-radius": HEATMAP_RADIUS_PX,
+    "heatmap-radius": [
+      "interpolate",
+      ["linear"],
+      ["zoom"],
+      ...HEATMAP_RADIUS_PX.flat(),
+    ] as ExpressionSpecification,
     "heatmap-weight": heatmapWeight(),
     "heatmap-intensity": heatmapIntensity(),
     "heatmap-color": heatmapColor(),

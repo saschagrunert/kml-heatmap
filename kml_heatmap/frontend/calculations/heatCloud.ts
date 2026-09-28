@@ -27,13 +27,14 @@
 import type { PathSegment } from "../types";
 import {
   DEGREES_TO_RADIANS,
+  EARTH_CIRCUMFERENCE_M,
   metresPerPixel,
   TILE_SIZE_PX,
   type Coordinate,
 } from "../utils/geometry";
 import { FEET_TO_METERS } from "../utils/constants";
 import { overlaps, type Box } from "../utils/viewBox";
-import { heatWeight, type SegmentWeight } from "./heatLines";
+import { heatWeight, ROUTE_SPEED_MS, type SegmentWeight } from "./heatLines";
 import { liftExaggeration } from "./lift";
 import { chainPieces, flightClockOf } from "./flightClock";
 import { markStretches } from "./cloudCells";
@@ -405,6 +406,12 @@ function cellHeat(): {
  * wherever the view is and at every zoom level beyond the last relief
  * level. Where it is known already, `busiest` hands it on, and the flights
  * that do not reach the box are left alone.
+ *
+ * `scaleOf` says how brightly the layer draws a flight's worth for the
+ * busiest heat per metre (see cloudExposure in ui/heatCloudLayer.ts), and
+ * with it the heat of the stretches written is rolled off by that of the
+ * cells they pass (see markStretches); without it the heat is left as it
+ * is.
  */
 export function cloudPoints(
   segments: readonly PathSegment[],
@@ -415,6 +422,7 @@ export function cloudPoints(
   box: Box | null = null,
   busiest?: number,
   weigh: SegmentWeight = heatWeight(false),
+  scaleOf?: (busiest: number) => number,
 ): CloudPoints {
   const exaggeration = liftExaggeration(level);
   const values: number[] = [];
@@ -625,13 +633,28 @@ export function cloudPoints(
     }
     i = end;
   }
-  // The marks of the stretches written, in cells of the level cut for
+  const busy = cells?.heats();
+  const most = !busy
+    ? busiest!
+    : busy.length > 0
+      ? nthSmallest(
+          busy,
+          Math.floor(CLOUD_BUSIEST_PERCENTILE * (busy.length - 1)),
+        )
+      : 0;
+  // The marks of the stretches written, in cells of the level cut for, and
+  // the roll-off of their heat: the flights' worth drawn of a second in a
+  // cell, a cruise crossing it taking its width at ROUTE_SPEED_MS
+  const markCell = CLOUD_CELL_PX / worldPx;
   markStretches(
     values,
     CLOUD_POINT_FLOATS,
     HEAT_FLOAT,
     MARKS_FLOAT,
-    CLOUD_CELL_PX / worldPx,
+    markCell,
+    scaleOf
+      ? (scaleOf(most) * ROUTE_SPEED_MS) / (markCell * EARTH_CIRCUMFERENCE_M)
+      : 0,
   );
   const origin: [number, number] =
     values.length > 0 ? [(west + east) / 2, (north + south) / 2] : [0.5, 0.5];
@@ -641,19 +664,11 @@ export function cloudPoints(
     points[k + CLOUD_POINT_FLOATS] = values[k]! - origin[0];
     points[k + CLOUD_POINT_FLOATS + 1] = values[k + 1]! - origin[1];
   }
-  const busy = cells?.heats();
   return {
     points,
     count: values.length / CLOUD_POINT_FLOATS,
     origin,
-    busiest: !busy
-      ? busiest!
-      : busy.length > 0
-        ? nthSmallest(
-            busy,
-            Math.floor(CLOUD_BUSIEST_PERCENTILE * (busy.length - 1)),
-          )
-        : 0,
+    busiest: most,
   };
 }
 

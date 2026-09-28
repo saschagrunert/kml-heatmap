@@ -730,8 +730,20 @@ describe("the heat cloud's layer", () => {
         .at(-1)!
         .slice(1) as number[];
       expect(narrowest).toBe(0.8);
-      expect(widest).toBeCloseTo(sigma! * 3, 9);
+      // Close to the camera no wider than half as wide again
+      expect(widest).toBeCloseTo(sigma! * 1.5, 9);
     }
+  });
+
+  it("fades the glow with its distance from the camera, behind the middle more than in front of it", () => {
+    layer.onAdd(map);
+    layer.setPoints(points());
+    render();
+    // The scale of each end is the middle's distance over its own
+    const source = vertexSource().replace(/\s+/g, " ");
+    expect(source).toContain(
+      "scales * min(blurs / sigmas, 1.0) * pow(min(scales, 1.0), vec2(1.50)) * pow(max(scales, 1.0), vec2(-0.60))",
+    );
   });
 
   it("draws no shadow where the flights are drawn on the ground", () => {

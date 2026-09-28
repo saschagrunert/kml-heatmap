@@ -64,9 +64,15 @@ describe("heatLegend", () => {
     // second: the colours a step of four apart are a quarter apart
     expect(positionOf(gradient, 0.015)).toBeCloseTo(12.5, 9);
     expect(positionOf(gradient, 0.06)).toBeCloseTo(37.5, 9);
-    // White (a density of 1) at about 67 flights, just past the last label
-    expect(positionOf(gradient, 1)).toBeGreaterThan(87.5);
-    expect(positionOf(gradient, 1)).toBeLessThan(90);
+    expect(positionOf(gradient, 0.03)).toBeCloseTo(25, 9);
+    // Past the knee the colours stand for the heat rolled off to them: the
+    // light cyan a density of 0.25 draws for about 20 flights, a little
+    // right of the label 16, the pale cyan for about 200 and white (a density of 1) for
+    // thousands, both off the bar, whose end at 128 is between the two
+    expect(positionOf(gradient, 0.25)).toBeGreaterThan(62.5);
+    expect(positionOf(gradient, 0.25)).toBeLessThan(70);
+    expect(positionOf(gradient, 0.6)).toBeGreaterThan(100);
+    expect(positionOf(gradient, 1)).toBeGreaterThan(positionOf(gradient, 0.6));
     // The faintest colour a step left of one flight's, off the bar
     expect(stops[0]![1]).toBeLessThan(0);
   });

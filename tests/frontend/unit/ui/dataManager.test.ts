@@ -11,12 +11,20 @@ import {
 } from "../../../../kml_heatmap/frontend/calculations/heatLines";
 import { segmentDistance } from "../../../../kml_heatmap/frontend/calculations/statistics";
 import {
+  exposedHeat,
   heatExposure,
   heatLinesPaint,
+  heatLineTone,
   heatmapPaint,
+  heatmapRadiusPx,
   HEATMAP_LEAST_CONTRIBUTION,
   HEATMAP_LEAST_POINT_CONTRIBUTION,
+  HEATMAP_RADIUS_PX,
 } from "../../../../kml_heatmap/frontend/ui/heatmapPaint";
+import {
+  HEAT_KNEE,
+  heatTone,
+} from "../../../../kml_heatmap/frontend/calculations/heatTone";
 import {
   HEAT_LINES,
   HEATMAP_CLUSTER,
@@ -765,7 +773,12 @@ describe("DataManager", () => {
       publish(baseData());
 
       expect(heatLayer().paint).toEqual(heatmapPaint());
-      expect(heatLayer().paint["heatmap-radius"]).toBe(22);
+      expect(heatLayer().paint["heatmap-radius"]).toEqual([
+        "interpolate",
+        ["linear"],
+        ["zoom"],
+        ...HEATMAP_RADIUS_PX.flat(),
+      ]);
       for (const [id, paint] of Object.entries(heatLinesPaint())) {
         expect(mockApp.map!.layer(id).paint).toEqual(paint);
       }
@@ -1196,7 +1209,13 @@ describe("DataManager", () => {
       );
       const exposure = heatExposure(points, weights);
       expect(exposure).not.toBe(1);
-      expect(heatOfPoints()).toEqual(weights.map((w) => w * exposure));
+      // Scaled, and rolled off where the heat is past the knee
+      const drawn = exposedHeat(points, weights);
+      expect(drawn.exposure).toBe(exposure);
+      expect(heatOfPoints()).toEqual(drawn.weights);
+      drawn.weights.forEach((weight, i) =>
+        expect(weight).toBeLessThanOrEqual(weights[i]! * exposure),
+      );
       // The heat legend reads it (ui/heatScale.ts)
       expect(mockApp.heatmapExposure).toBe(exposure);
       // The paint stays as it is: the heat is what is scaled
@@ -1209,6 +1228,16 @@ describe("DataManager", () => {
       const unscaled = heatLineFeatures(data.path_segments, () => true);
       expect(lines.features.map((line) => line.properties.heat)).not.toEqual(
         unscaled.features.map((line) => line.properties.heat),
+      );
+      // Rolled off as the heatmap's heat
+      const weigh = heatWeight(false);
+      expect(lines).toEqual(
+        heatLineFeatures(
+          data.path_segments,
+          () => true,
+          (segment, next) => weigh(segment, next) * exposure,
+          heatLineTone,
+        ),
       );
     });
 
@@ -1415,7 +1444,7 @@ describe("DataManager", () => {
   describe("heatmapPaint", () => {
     const paint = heatmapPaint();
 
-    it("halves the intensity per zoom level out, up to where fixes turn into dots", () => {
+    it("halves the intensity per zoom level out, up to where fixes turn into dots, and gives a narrower reach as much more", () => {
       const intensity = paint["heatmap-intensity"] as unknown[];
       expect(intensity.slice(0, 3)).toEqual([
         "interpolate",
@@ -1423,27 +1452,46 @@ describe("DataManager", () => {
         ["zoom"],
       ]);
       const stops = intensity.slice(3) as number[];
-      expect(stops).toHaveLength(6);
-      const [z0, i0, z1, i1, z2, i2] = stops as [
-        number,
-        number,
-        number,
-        number,
-        number,
-        number,
-      ];
-      // A power of two per level makes the base 2 curve exactly 2^zoom
-      expect(i1 / i0).toBe(2 ** (z1 - z0));
-      expect(z2).toBeGreaterThan(z1);
-      expect(i2).toBe(i1);
+      const zooms = stops.filter((_, i) => i % 2 === 0);
+      const values = stops.filter((_, i) => i % 2 === 1);
+      // A stop per half level, and the last one's value beyond
+      expect(zooms.slice(0, -1)).toEqual(
+        Array.from({ length: zooms.length - 1 }, (_, i) => i / 2),
+      );
+      expect(values.at(-1)).toBe(values.at(-2));
+      for (let i = 1; i < zooms.length - 1; i++) {
+        // The ridge of a track, intensity times reach, doubles per level in
+        expect(
+          (values[i]! * heatmapRadiusPx(zooms[i]!)) /
+            (values[i - 1]! * heatmapRadiusPx(zooms[i - 1]!)),
+        ).toBeCloseTo(Math.SQRT2, 12);
+      }
+      // Where the reach is the same, a power of two per level makes the
+      // base 2 curve exactly 2^zoom
+      expect(values[6]! / values[4]!).toBe(2);
+      // Where it narrows, within a few per cent
+      for (let zoom = 9; zoom <= 10; zoom += 0.05) {
+        expect(
+          (intensityAt(zoom) * heatmapRadiusPx(zoom) * 2 ** (12 - zoom)) /
+            (intensityAt(8) * heatmapRadiusPx(8) * 2 ** 4),
+        ).toBeCloseTo(1, 1);
+      }
     });
 
     /** What the intensity comes to at `zoom`, by the rule of the expression */
     const intensityAt = (zoom: number): number => {
-      const [z0, i0, z1, i1] = (paint["heatmap-intensity"] as unknown[]).slice(
+      const stops = (paint["heatmap-intensity"] as unknown[]).slice(
         3,
-      ) as [number, number, number, number];
-      return zoom >= z1 ? i1 : i0 * 2 ** (zoom - z0);
+      ) as number[];
+      const zooms = stops.filter((_, i) => i % 2 === 0);
+      const values = stops.filter((_, i) => i % 2 === 1);
+      if (zoom <= zooms[0]!) return values[0]!;
+      const upper = zooms.findIndex((z) => z > zoom);
+      if (upper < 0) return values.at(-1)!;
+      const [from, to] = [zooms[upper - 1]!, zooms[upper]!];
+      // MapLibre's exponential interpolation
+      const t = (2 ** (zoom - from) - 1) / (2 ** (to - from) - 1);
+      return values[upper - 1]! + (values[upper]! - values[upper - 1]!) * t;
     };
 
     /**
@@ -1489,21 +1537,25 @@ describe("DataManager", () => {
       expect(HEATMAP_LEAST_CONTRIBUTION).toBe(
         intensityAt(HEATMAP_CLUSTER.maxZoom + 1),
       );
-      for (let zoom = 0; zoom <= MAP_MAX_ZOOM; zoom += 0.5) {
+      // Between two levels of another reach the two curves are a few per
+      // cent apart, and the kernel of such a fix is still whole
+      for (let zoom = 0; zoom <= MAP_MAX_ZOOM; zoom += 0.25) {
         const contribution = weightAt(zoom, {}) * intensityAt(zoom);
         expect(contribution).toBeGreaterThanOrEqual(
-          HEATMAP_LEAST_CONTRIBUTION * (1 - 1e-9),
+          HEATMAP_LEAST_CONTRIBUTION * 0.97,
         );
       }
       expect(MAP_MIN_ZOOM).toBeGreaterThanOrEqual(0);
     });
 
-    it("holds a lone fix at exactly the floor while clusters are drawn", () => {
+    it("holds a lone fix at the floor while clusters are drawn", () => {
       for (let zoom = 0; zoom <= HEATMAP_CLUSTER.maxZoom + 1; zoom += 0.25) {
-        expect(weightAt(zoom, {}) * intensityAt(zoom)).toBeCloseTo(
-          HEATMAP_LEAST_CONTRIBUTION,
-          12,
-        );
+        const contribution = weightAt(zoom, {}) * intensityAt(zoom);
+        // Exactly at each level, and between two where the reach is the same
+        if (zoom % 1 === 0 || zoom < HEATMAP_RADIUS_PX[0][0]) {
+          expect(contribution).toBeCloseTo(HEATMAP_LEAST_CONTRIBUTION, 12);
+        }
+        expect(contribution / HEATMAP_LEAST_CONTRIBUTION).toBeCloseTo(1, 1);
       }
     });
 
@@ -1537,10 +1589,10 @@ describe("DataManager", () => {
         zoom += 0.5
       ) {
         // A fix a tenth of a second on, under the least exposure
-        expect(weightAt(zoom, { w: 0.00625 }) * intensityAt(zoom)).toBeCloseTo(
-          HEATMAP_LEAST_POINT_CONTRIBUTION,
-          9,
-        );
+        expect(
+          (weightAt(zoom, { w: 0.00625 }) * intensityAt(zoom)) /
+            HEATMAP_LEAST_POINT_CONTRIBUTION,
+        ).toBeCloseTo(1, 1);
       }
     });
 
@@ -1589,12 +1641,41 @@ describe("DataManager", () => {
       expect(alphas[alphas.length - 1]).toBe(1);
     });
 
-    it("never draws fainter than leaflet.heat's minOpacity", () => {
+    it("draws its faintest heat light enough to keep a rare leg off the base map", () => {
       const visible = colorStops()
         .map((stop) => stop[4]!)
         .filter((alpha) => alpha > 0);
-      expect(Math.min(...visible)).toBe(0.25);
-      expect(visible[0]).toBe(0.25);
+      // leaflet.heat's minOpacity was 0.25, which left a leg flown once
+      // close to the dark base map
+      expect(Math.min(...visible)).toBe(0.4);
+      expect(visible[0]).toBe(0.4);
+    });
+
+    it("gives the low end of the ramp more steps of lightness than the top", () => {
+      // The lightness of each stop over the dark base map (#0e0e0e)
+      const lightness = colorStops()
+        .slice(1)
+        .map(
+          ([, r, g, b, a]) =>
+            a! * (0.2126 * r! + 0.7152 * g! + 0.0722 * b!) + (1 - a!) * 14,
+        );
+      expect(lightness).toEqual([...lightness].sort((a, b) => a - b));
+      const [quarter, one, two, four] = lightness as [
+        number,
+        number,
+        number,
+        number,
+      ];
+      // A quarter of a flight, one, two and four each about half as light
+      // again as the one before, four well over twice as light as one
+      for (const [lower, higher] of [
+        [quarter, one],
+        [one, two],
+        [two, four],
+      ] as const) {
+        expect(higher / lower).toBeGreaterThan(1.4);
+      }
+      expect(four / one).toBeGreaterThan(2.2);
     });
 
     it("starts at full opacity and fades out for the heat lines", () => {
@@ -1722,6 +1803,30 @@ describe("DataManager", () => {
       expect(heatExposure(lone.points, lone.weights)).toBe(3);
       const lots = track(10, 1e6);
       expect(heatExposure(lots.points, lots.weights)).toBe(0.25);
+    });
+
+    it("rolls off the heat of the busiest cells and leaves the rest as it is", () => {
+      const { points, weights } = busy(400);
+      const drawn = exposedHeat(points, weights);
+
+      expect(drawn.exposure).toBe(heatExposure(points, weights));
+      // The lone track, under the knee, only scaled
+      for (let i = 0; i < 1000; i++) {
+        expect(drawn.weights[i]).toBe(weights[i]! * drawn.exposure);
+      }
+      // The track flown 400 times rolled off, all of its points alike in
+      // a cell, so a place keeps its share of the cell's heat
+      const over = drawn.weights.slice(1000);
+      const factors = over.map(
+        (weight, i) => weight / (weights[1000 + i]! * drawn.exposure),
+      );
+      expect(Math.max(...factors)).toBeLessThan(1);
+      // By the roll-off of a cell's heat, as many flights' worth as drawn:
+      // the ratio of two cells' heat past the knee is the ratio of the
+      // logarithms, not of the heat
+      const tone = (flights: number): number => heatTone(flights) / flights;
+      expect(tone(HEAT_KNEE)).toBe(1);
+      expect(tone(HEAT_KNEE * Math.E)).toBeCloseTo(2 / Math.E, 12);
     });
   });
 

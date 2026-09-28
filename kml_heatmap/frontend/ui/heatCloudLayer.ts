@@ -74,7 +74,8 @@ export const HEAT_CLOUD_LAYER = "heat-cloud";
  * pixels (the standard deviation of the Gaussian), and how much of its heat
  * it glows with (see CLOUD_REFERENCE_SPEED_MS), between the stops linearly.
  * Out to 9.5 (the app's 10.5) the glow reaches 21 px, as the heatmap's
- * points reach 22, and a region's routes run together into a cloud. Closer
+ * points reach 22 over a country, and a region's routes run together into
+ * a cloud, which its height and its shadow set apart. Closer
  * in a glow that wide over every track of a busy field covered its roads
  * and labels, where the flat heatmap has handed over to thin heat lines
  * (HEAT_LINES): it narrows to a crisp glow along each track, and dims so
@@ -108,12 +109,26 @@ export function cloudLook(zoom: number): { sigmaPx: number; gain: number } {
 /**
  * The narrowest the blur gets in a tilted view, in device pixels, and the
  * widest, as a part of the one at the middle: close to the camera a glow
- * would fill the screen. A far flight narrower than a pixel was drawn as a
- * crisp line that flickered: it is drawn this wide, and as much fainter,
- * so it fades into the distance.
+ * would fill the screen, and at three times the one of the middle the
+ * nearest tracks of a steeply tilted map still grew into wide saturated
+ * smears across the bottom of it. A far flight narrower than a pixel was
+ * drawn as a crisp line that flickered: it is drawn this wide, and as much
+ * fainter, so it fades into the distance.
  */
 const CLOUD_SIGMA_FLOOR_PX = 0.8;
-const CLOUD_SIGMA_MOST = 3;
+const CLOUD_SIGMA_MOST = 1.5;
+
+/**
+ * How the glow fades with its distance from the camera, as a power of the
+ * distance to the middle of the map over its own: behind the middle a
+ * haze, since the tracks of a tilted map pile up towards the horizon into
+ * one bright band that flattened its depth, and in front of it less, so
+ * the nearest tracks do not outshine the middle the view is of. Twice as
+ * far as the middle a glow has 0.35 of its strength, four times as far
+ * 0.13, and half as far 0.66.
+ */
+const CLOUD_HAZE = 1.5;
+const CLOUD_NEAR_FADE = 0.6;
 
 /**
  * How many blurs a quad reaches around its stretch, and pulls its glow
@@ -197,7 +212,7 @@ const CLOUD_EXPOSURE_RANGE = [0.25, 1] as const;
  * as much as the glow for a haze no one could see.
  */
 const CLOUD_SHADOW_COLOUR = [0.22, 0.26, 0.35] as const;
-const CLOUD_SHADOW_CEILING = 0.18;
+const CLOUD_SHADOW_CEILING = 0.24;
 const CLOUD_SHADOW_LIFT_FT = [30, 100] as const;
 const CLOUD_SHADOW_REACH = 2;
 
@@ -602,7 +617,12 @@ void main() {
   );
   v_ends = vec4(pa, pb);
   v_joins = vec4(joinA, joinB);
-  v_blur = vec4(sigmas, scales * min(blurs / sigmas, 1.0));
+  v_blur = vec4(
+    sigmas,
+    scales * min(blurs / sigmas, 1.0)
+      * pow(min(scales, 1.0), vec2(${CLOUD_HAZE.toFixed(2)}))
+      * pow(max(scales, 1.0), vec2(-${CLOUD_NEAR_FADE.toFixed(2)}))
+  );
   if (shadow) {
     float f = length_px / (1.4142136 * (sigmas.x + sigmas.y));
     shade *= sqrt(1.0 - exp(-1.2732395 * f * f));

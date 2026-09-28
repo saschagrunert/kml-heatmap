@@ -18,7 +18,14 @@
  * The heat alone takes nothing away: the flights along a track draw their
  * marks at the same places, so a busy one draws one row of them, not a
  * haze.
+ *
+ * The same cells roll the heat of the stretches off (see heatTone), as
+ * the flat heatmap rolls off its points by the heat of theirs: a stretch
+ * over the busiest cells of a home field is drawn with the few flights'
+ * worth their heat rolls off to, so its circuits keep their steps of
+ * colour rather than glowing as one white blob.
  */
+import { heatTone } from "./heatTone";
 
 /**
  * Of the flights along a stretch's axis in its cells, how far those going
@@ -157,6 +164,12 @@ function cellTable(): {
  * and not only where it starts; a stretch of no heat adds nothing. The
  * point that ends a run takes the marks of the stretch that ends at it, so
  * the layer can blend them along a stretch into the next without a step.
+ *
+ * With a `drawn` of more than 0, the flights' worth a second of heat in a
+ * cell is drawn as on the equator, the heat of each stretch is rolled off
+ * by the heat of the cells it passes (see heatTone), its mean over them in
+ * flights' worth as drawn; the cells shrink on the ground by the cosine of
+ * the latitude, and hold as much more heat per metre.
  */
 export function markStretches(
   values: number[],
@@ -164,6 +177,7 @@ export function markStretches(
   heat: number,
   marks: number,
   cell: number,
+  drawn = 0,
 ): void {
   const count = values.length / floats;
   const cells = cellTable();
@@ -225,6 +239,13 @@ export function markStretches(
         1,
       );
       mark = t * t * (3 - 2 * t);
+      // The seconds of the cells passed, over the latitude's cosine
+      const worth =
+        drawn *
+        (passed[2]! + passed[4]!) *
+        Math.cosh(Math.PI * (1 - 2 * values[k + 1]!));
+      if (worth > 0)
+        values[k + heat] = values[k + heat]! * (heatTone(worth) / worth);
     } else if (p > 0) {
       mark = values[k - floats + marks]!;
     }

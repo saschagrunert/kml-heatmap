@@ -211,12 +211,15 @@ function smoothAlongFlights(
  * is two steps per stop of the colour ramp, which the eye does not tell
  * apart on a line. The lines run along the curve through the fixes (see
  * calculations/curves.ts), the way the colour lines do; the time is added
- * up at the fixes, where it was logged.
+ * up at the fixes, where it was logged. `tone` rolls the time around a
+ * segment off before it is smoothed (see heatLineTone in
+ * ui/heatmapPaint.ts).
  */
 export function heatLineFeatures(
   segments: readonly PathSegment[],
   keep: (pathId: number) => boolean,
   weigh: SegmentWeight = heatWeight(false),
+  tone: (seconds: number) => number = (seconds) => seconds,
 ): GeoJSON.FeatureCollection<GeoJSON.LineString, { heat: number }> {
   const kept: PathSegment[] = [];
   /** Where each kept segment is in `segments`, and so on its curve */
@@ -260,7 +263,7 @@ export function heatLineFeatures(
       : secondsAround(cells, start);
     lastEndSeconds = secondsAround(cells, end);
     heats[index] = Math.log2(
-      Math.max(Math.min(startSeconds, lastEndSeconds), MIN_SECONDS),
+      Math.max(tone(Math.min(startSeconds, lastEndSeconds)), MIN_SECONDS),
     );
   });
 

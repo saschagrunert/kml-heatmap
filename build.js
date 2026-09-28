@@ -300,7 +300,11 @@ function analyzeBundleComposition(metafile, fileName) {
 // that: 155.38 KB raw and 53.54 KB gzipped. The Airborne and New areas
 // switches taken out again, and Routes turned into By distance in a Heat
 // group of its own: 154.11 KB raw and 53.18 KB gzipped.
-const BUDGET_APP = { raw: 156 * 1024, gzip: 54 * 1024 };
+// Raised from 156 KB and 54 KB for the roll-off of the heat, the heatmap's
+// narrower reach and the base map's labels dimmed under the heat: 155.58
+// KB raw and 53.66 KB gzipped before, 156.51 KB raw and 53.94 KB gzipped
+// after, in a local build.
+const BUDGET_APP = { raw: 158 * 1024, gzip: 54.5 * 1024 };
 // The feature bundle is fetched only when replay is opened, the relief, the
 // heat cloud and the ribbons of a selection of the 3D view are first drawn,
 // the Satellite switch is first on, a single flight is first

@@ -192,10 +192,11 @@ export const MAP_LAYERS = {
 export const HEATMAP_CLUSTER = { radius: 6, maxZoom: 8 } as const;
 
 /**
- * Where the heatmap hands over to the heat lines. A point reaches 22 px and
- * the fixes of a track are about 235 m apart, which is 20 px at zoom 12 and
- * 80 px at zoom 14: from 12 on a track falls apart into beads, and further
- * in into scattered dots. The heat lines draw the flights as lines instead,
+ * Where the heatmap hands over to the heat lines. A point reaches 13 px
+ * from zoom 10 in (see HEATMAP_RADIUS_PX) and the fixes of a track are
+ * about 235 m apart, which is 10 px at zoom 11 and 40 px at zoom 13: from
+ * 11 on a track falls apart into beads, and further in into scattered
+ * dots. The heat lines draw the flights as lines instead,
  * coloured by the time spent around them (see calculations/heatLines.ts),
  * so the busy places still read as the hot ones while each circuit and taxi
  * route stays a line of its own.
@@ -206,9 +207,9 @@ export const HEATMAP_CLUSTER = { radius: 6, maxZoom: 8 } as const;
  * that haze lay beside lines too faint yet to carry the colour. Map units.
  */
 export const HEAT_LINES = {
-  fromZoom: 11,
-  midZoom: 11.75,
-  fullZoom: 12.5,
+  fromZoom: 10,
+  midZoom: 10.75,
+  fullZoom: 11.5,
 } as const;
 
 /**

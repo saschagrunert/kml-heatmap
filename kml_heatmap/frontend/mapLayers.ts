@@ -5,6 +5,7 @@
  * module creates them and provides the handles that show and hide them.
  */
 import type {
+  ExpressionSpecification,
   FillExtrusionLayerSpecification,
   Map as MapLibreMap,
   StyleSpecification,
@@ -420,6 +421,18 @@ function addDataLayersTo(map: MapLibreMap): void {
 }
 
 /**
+ * The global state of the map (MapLibre's `global-state`) that says the
+ * heat is drawn at full strength, and how far the base map's labels step
+ * back while it is: its region and place names lie over the heat, and at
+ * full strength they broke it up into pieces, the names of the regions
+ * most of all. Only the text and its halo fade; with the heat off, or
+ * stepping back itself for what is drawn over it, the labels are as the
+ * base style has them (see followLayerVisibility).
+ */
+export const HEAT_SHOWN_STATE = "heatShown";
+const HEAT_LABEL_OPACITY = 0.5;
+
+/**
  * A base style with the app's sources and layers of the style before it:
  * what `setStyle` takes as `transformStyle`, which would otherwise drop
  * them. They are carried over as the map reports them, with their data,
@@ -429,7 +442,8 @@ function addDataLayersTo(map: MapLibreMap): void {
  * lives in the style, and a globe chosen before the base style arrived
  * would otherwise turn back into Mercator; and so does the relief of the
  * 3D view (ui/terrain.ts), which would otherwise go while the flights stay
- * cut for it.
+ * cut for it. The labels of the new style (its symbol layers without an
+ * opacity of their own) fade while the heat is drawn (HEAT_SHOWN_STATE).
  *
  * `diffed` leaves the data of the GeoJSON sources out, for a style the map
  * applies as the difference to the one before (see setBaseStyle).
@@ -454,7 +468,22 @@ export function withDataLayers(
   const onTop = own.filter((layer) => layer.id === MAP_LAYERS.airportLabels);
   const below = own.filter((layer) => layer.id !== MAP_LAYERS.airportLabels);
   const labels = next.layers.findIndex((layer) => layer.type === "symbol");
-  const layers = [...next.layers];
+  const layers = next.layers.map((layer) =>
+    layer.type === "symbol" && layer.paint?.["text-opacity"] === undefined
+      ? {
+          ...layer,
+          paint: {
+            ...layer.paint,
+            "text-opacity": [
+              "case",
+              ["global-state", HEAT_SHOWN_STATE],
+              HEAT_LABEL_OPACITY,
+              1,
+            ] as ExpressionSpecification,
+          },
+        }
+      : layer,
+  );
   layers.splice(labels < 0 ? layers.length : labels, 0, ...below);
   layers.push(...onTop);
   const projection = previous.projection ?? next.projection;
