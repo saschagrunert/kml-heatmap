@@ -17,22 +17,21 @@ import { datasetIndex } from "../calculations/datasetIndex";
 import { segmentsForPathIds } from "../calculations/statistics";
 import { datasetCells, newAreaKm2 } from "../calculations/newAreas";
 import { calculateAltitudeRange } from "../features/layers";
-import {
-  heatLineFeatures,
-  heatWeight,
-  type SegmentWeight,
-} from "../calculations/heatLines";
+import { heatWeight, type SegmentWeight } from "../calculations/heatLines";
+import { flatCurves } from "../calculations/curves";
+import type { DrawnHeat } from "../services/heatSource";
+import type { YearDecoder } from "../services/yearDecoder";
 import { HEAT_LINES, MAP_LAYERS, MAP_SOURCES } from "../utils/constants";
 import { domCache } from "../utils/domCache";
 import { formatFileSize } from "../utils/formatters";
 import { frameCoalescer } from "../utils/frameCoalescer";
-import { cssVar, toLngLat, whenContextRestored } from "../utils/mapHelpers";
+import { logError } from "../utils/logger";
+import { cssVar, whenContextRestored } from "../utils/mapHelpers";
 import { dismissToast, showToast, type ToastAction } from "../utils/toast";
 import { siteData } from "../state/siteData";
 import { dimsHeatmap } from "./layerVisibility";
 import {
   HEATMAP_OPACITY,
-  exposedHeat,
   fadeOutToLines,
   heatLineOpacities,
   heatLineTone,
@@ -46,14 +45,24 @@ import {
  */
 export interface Heat {
   points: readonly Coordinate[];
-  /** The heat of each point, scaled by `exposure` and rolled off */
+  /** The heat of each point, as the flights left it (see heatmapPoints) */
   weights: readonly number[];
-  /** What the heat is scaled by, see heatExposure */
-  exposure: number;
   segments: PathSegment[];
   keep: (pathId: number) => boolean;
   weigh: SegmentWeight;
+  /**
+   * How the heatmap draws the heat, its exposure and the weights scaled by
+   * it and rolled off, and the content of its source: worked out by the
+   * year worker (see DataManager.drawHeat), null until it has answered
+   */
+  drawn: DrawnHeat | null;
 }
+
+/** What a heat line source is given while there are no lines to show */
+const NO_LINES: GeoJSON.FeatureCollection = {
+  type: "FeatureCollection",
+  features: [],
+};
 
 /** Stand-in for `--heatmap-dimmed-opacity` when the stylesheet has none */
 const HEATMAP_DIMMED_OPACITY_FALLBACK = 0.35;
@@ -141,14 +150,27 @@ export class DataManager {
     heat: Heat;
   } | null = null;
   /**
-   * The heat each heat source holds, to not send it a second time. A
-   * feature per fix is costly to hand to the worker, about 60 ms of main
-   * thread for 135000 of them on a desktop and 800 ms on a phone.
+   * The heat each heat source holds, to not send it a second time: the
+   * source would read, parse and cut the text of 135000 points anew, in
+   * MapLibre's worker, for the same heat
    */
   private heatWritten: Heat | null = null;
   private isolatedWritten: Heat | null = null;
   /** The heat the heat lines source was last worked out for, if any */
   private heatLinesFor: Heat | null = null;
+  /** Counts the requests for heat lines: only the last one is written */
+  private linesRequest = 0;
+  /** The heats the year worker is working out, see drawHeat */
+  private readonly drawing = new WeakSet<Heat>();
+  /** The Blob URL each source was given last, see writeSource */
+  private readonly sourceUrls = new Map<string, string>();
+  /**
+   * Requests for the heat sources the year worker has not answered yet: a
+   * map that is idle meanwhile is still to be given its heat, which
+   * Wrapped's map (revealMapWhenPainted in ui/wrappedManager.ts) and the
+   * e2e tests (waitForMapIdle in tests/e2e/map.ts) wait for
+   */
+  heatRequests = 0;
   /** Come to rest near the hand-over, the heat lines are worked out */
   private readonly handleZoomEnd = (): void => this.writeHeatLines();
   /** The indicator is up; asked on every chunk, so not asked of the DOM */
@@ -246,6 +268,8 @@ export class DataManager {
     this.app.map?.off("zoomend", this.handleZoomEnd);
     this.dataLoader.destroy();
     this.hideLoading();
+    for (const url of this.sourceUrls.values()) URL.revokeObjectURL(url);
+    this.sourceUrls.clear();
   }
 
   private drawLoading(state: LoadingState): void {
@@ -314,8 +338,11 @@ export class DataManager {
       ? dimmedHeatmapOpacity()
       : HEATMAP_OPACITY;
     // One of the two heatmaps is drawn, the one of an isolated selection
-    // while there is one; at no opacity the map leaves the other out
-    const isolated = !!this.isolated;
+    // while there is one; at no opacity the map leaves the other out. The
+    // isolated one once its source was given the selection's heat (see
+    // writeHeat): until the year worker has drawn it, its source still
+    // holds the selection isolated before, and the heat of before is shown
+    const isolated = !!this.isolated && this.isolatedWritten === this.isolated;
     for (const [id, drawn] of [
       [MAP_LAYERS.heat, !isolated],
       [MAP_LAYERS.heatIsolated, isolated],
@@ -384,34 +411,131 @@ export class DataManager {
       this.heat = heat;
     }
     this.isolated = isolated;
-    // The heat legend says what the colours of the heat drawn stand for
-    // (see ui/heatScale.ts)
-    this.app.heatmapExposure = (isolated ?? this.heat)?.exposure ?? 1;
+    this.drawHeat(this.heat ?? heat);
+    if (isolated) this.drawHeat(isolated);
+    this.followExposure();
     this.applyHeatmapEmphasis();
     this.writeHeat();
   }
 
-  /** Write what the heat sources are to show and do not hold yet */
+  /**
+   * The heat legend says what the colours of the heat drawn stand for (see
+   * ui/heatScale.ts): the exposure of the heat shown, once the year worker
+   * has worked it out. Until then the heatmap still draws the heat of
+   * before, and the legend keeps its exposure.
+   */
+  private followExposure(): void {
+    const drawn = (this.isolated ?? this.heat)?.drawn;
+    if (drawn) this.app.heatmapExposure = drawn.exposure;
+  }
+
+  /**
+   * Have the year worker work out how the heatmap draws `heat`, and write
+   * the content of its source (see services/heatSource.ts), once per heat.
+   * The answer is shown if the heat still is one to show; one let go of
+   * meanwhile keeps it, for an isolated selection that is isolated again.
+   */
+  private drawHeat(heat: Heat): void {
+    if (heat.drawn || this.drawing.has(heat)) return;
+    this.drawing.add(heat);
+    this.askWorker(
+      (decoder) =>
+        decoder
+          .drawHeat(heat.points, heat.weights)
+          .finally(() => this.drawing.delete(heat)),
+      (drawn) => {
+        heat.drawn = drawn;
+        if (heat === this.heat || heat === this.isolated) {
+          this.followExposure();
+          this.writeHeat();
+        }
+      },
+    );
+  }
+
+  /**
+   * Ask the year decoder, and hand its answer to `take` while the app is
+   * still there: the worker ends with it, and takes its requests along
+   */
+  private askWorker<T>(
+    ask: (decoder: YearDecoder) => Promise<T>,
+    take: (answer: T) => void,
+  ): void {
+    this.heatRequests++;
+    void this.dataLoader
+      .getDecoder()
+      .then(ask)
+      .then(
+        (answer) => this.destroyed || take(answer),
+        (error: unknown) =>
+          this.destroyed || logError("Could not draw the heat:", error),
+      )
+      .finally(() => {
+        // An answer that is not written (one for a heat let go of) gives
+        // the map nothing to draw, and so no `idle` to whoever waits for
+        // the heat (see revealMapWhenPainted in ui/wrappedManager.ts)
+        if (--this.heatRequests === 0 && !this.destroyed) {
+          this.app.map?.triggerRepaint();
+        }
+      });
+  }
+
+  /**
+   * Write what the heat sources are to show and do not hold yet: each heat
+   * once the year worker has drawn it (see drawHeat)
+   */
   private writeHeat(): void {
     const map = this.app.map;
     const heat = this.heat;
     const source = map?.getSource<GeoJSONSource>(MAP_SOURCES.heat);
     if (!heat || !source || this.destroyed) return;
     this.paintHeatmap();
-    // The promise is for the worker having taken the data. It does not
-    // reject: a failure arrives as an `error` event of the map
-    if (this.heatWritten !== heat) {
+    if (heat.drawn && this.heatWritten !== heat) {
       this.heatWritten = heat;
-      void source.setData(heatmapFeatures(heat));
+      this.writeSource(source, heat.drawn.source);
     }
     const isolated = this.isolated;
-    if (isolated && this.isolatedWritten !== isolated) {
+    const isolatedSource = map?.getSource<GeoJSONSource>(
+      MAP_SOURCES.heatIsolated,
+    );
+    if (
+      isolated?.drawn &&
+      isolatedSource &&
+      this.isolatedWritten !== isolated
+    ) {
       this.isolatedWritten = isolated;
-      void map
-        ?.getSource<GeoJSONSource>(MAP_SOURCES.heatIsolated)
-        ?.setData(heatmapFeatures(isolated));
+      this.writeSource(isolatedSource, isolated.drawn.source);
+      // Drawn from that source from now on
+      this.applyHeatmapEmphasis();
     }
     this.writeHeatLines();
+  }
+
+  /**
+   * Give `source` the GeoJSON text of `content` by a Blob URL, which
+   * MapLibre's worker reads and parses without the main thread (see
+   * services/heatSource.ts), or GeoJSON as it is. The URL the source held
+   * before is let go of once it has taken this one, and not before: a
+   * source that was still reading it would fail. The one it holds stays,
+   * for as long as it holds it.
+   */
+  private writeSource(
+    source: GeoJSONSource,
+    content: Blob | GeoJSON.FeatureCollection,
+  ): void {
+    const { id } = source;
+    const before = this.sourceUrls.get(id);
+    const url =
+      content instanceof Blob ? URL.createObjectURL(content) : undefined;
+    if (url) this.sourceUrls.set(id, url);
+    else this.sourceUrls.delete(id);
+    // The promise is for the worker having taken the data. It does not
+    // reject: a failure arrives as an `error` event of the map
+    void source
+      .setData(url ?? (content as GeoJSON.FeatureCollection))
+      .then(() => {
+        if (before) URL.revokeObjectURL(before);
+      });
   }
 
   /**
@@ -435,15 +559,32 @@ export class DataManager {
       this.app.heatmapLayer.isVisible() &&
       map.getZoom() >= HEAT_LINES.fromZoom - HEAT_LINES_LEAD;
     if (!shown && !held) return;
+    // As bright as the heatmap draws the same heat (see exposedHeat), so
+    // not before the year worker has worked that out (see drawHeat), which
+    // writes them then; the heatmap draws the heat of before until then
+    const drawn = heat.drawn;
+    if (shown && !drawn) return;
     this.heatLinesFor = shown ? heat : null;
-    // As bright as the heatmap draws the same heat (see exposedHeat)
-    void source.setData(
-      heatLineFeatures(
-        shown ? heat.segments : [],
-        heat.keep,
-        (segment, next) => heat.weigh(segment, next) * heat.exposure,
-        heatLineTone,
-      ),
+    const request = ++this.linesRequest;
+    if (!shown || !drawn) {
+      this.writeSource(source, NO_LINES);
+      return;
+    }
+    // Worked out and written by the code of the year worker as well (see
+    // heatLineFeatures), along the curves the colour lines keep; only the
+    // lines asked for last are written to the source
+    const { segments, keep, weigh } = heat;
+    this.askWorker(
+      (decoder) =>
+        decoder.linesSource(
+          flatCurves(segments),
+          segments,
+          keep,
+          (segment, next) => weigh(segment, next) * drawn.exposure,
+          heatLineTone,
+        ),
+      (content) =>
+        request === this.linesRequest && this.writeSource(source, content),
     );
   }
 
@@ -697,9 +838,9 @@ export class DataManager {
 
 /**
  * The heat of the flights `keep` accepts: the points of `pointSegments`
- * (all of `segments` or the part of them those flights are in), their heat
- * scaled by its exposure and rolled off (see exposedHeat), and the lines
- * of `segments`
+ * (all of `segments` or the part of them those flights are in) with their
+ * heat, and the lines of `segments`. How the heatmap draws it, scaled by
+ * its exposure and rolled off, the year worker works out (see drawHeat).
  */
 function heatOf(
   pointSegments: PathSegment[],
@@ -708,34 +849,7 @@ function heatOf(
   weigh: SegmentWeight,
 ): Heat {
   const { points, weights } = heatmapPoints(pointSegments, keep, weigh);
-  const drawn = exposedHeat(points, weights);
-  return {
-    points,
-    weights: drawn.weights,
-    exposure: drawn.exposure,
-    segments,
-    keep,
-    weigh,
-  };
-}
-
-/**
- * The content of a heat source: one Point per fix, with its heat as `w`. A
- * MultiPoint of all of them would be cheaper to hand to the worker, but the
- * source can only merge features into clusters, not the points of one
- * feature (see HEATMAP_CLUSTER).
- */
-export function heatmapFeatures(
-  heat: Pick<Heat, "points" | "weights">,
-): GeoJSON.FeatureCollection<GeoJSON.Point, { w: number }> {
-  return {
-    type: "FeatureCollection",
-    features: heat.points.map((point, index) => ({
-      type: "Feature",
-      properties: { w: heat.weights[index]! },
-      geometry: { type: "Point", coordinates: toLngLat(point) },
-    })),
-  };
+  return { points, weights, segments, keep, weigh, drawn: null };
 }
 
 /**

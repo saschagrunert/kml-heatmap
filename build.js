@@ -79,6 +79,31 @@ const yearWorkerPlugin = {
   },
 };
 
+/**
+ * Take utils/constants.ts for a module without side effects in the year
+ * worker's bundle, which uses none of it: the worker reaches it through
+ * helpers of the heat lines (utils/mapHelpers.ts, utils/geometry.ts), and
+ * esbuild kept 0.85 KB of constants that it cannot tell are free of side
+ * effects (MAP_LAYERS and HEATMAP_LAYER_IDS, sums of other constants).
+ * With no import of it used, the module is left out.
+ * @type {import("esbuild").Plugin}
+ */
+const pureConstantsPlugin = {
+  name: "pure-constants",
+  setup(build) {
+    build.onResolve({ filter: /\/constants$/ }, async (args) => {
+      if (args.pluginData === "pure-constants") return undefined;
+      const { path, errors } = await build.resolve(args.path, {
+        kind: args.kind,
+        importer: args.importer,
+        resolveDir: args.resolveDir,
+        pluginData: "pure-constants",
+      });
+      return errors.length > 0 ? { errors } : { path, sideEffects: false };
+    });
+  },
+};
+
 const STATIC_DIR = join(__dirname, "kml_heatmap/static");
 const FRONTEND_DIR = join(__dirname, "kml_heatmap/frontend");
 
@@ -143,7 +168,7 @@ const workerBuildOptions = {
   ...buildOptions,
   entryPoints: [join(FRONTEND_DIR, "services/yearWorker.ts")],
   splitting: false,
-  plugins: [],
+  plugins: [pureConstantsPlugin],
 };
 
 /**
@@ -404,8 +429,12 @@ const BUDGET_WRAPPED = { raw: 40 * 1024, gzip: 14 * 1024 };
 
 // The year worker's bundle is fetched by every visit, but next to the first
 // year file rather than ahead of the app, so it holds up nothing on the page.
-// 4.95 KB raw and 2.34 KB gzipped.
-const BUDGET_WORKER = { raw: 6 * 1024, gzip: 3 * 1024 };
+// 4.95 KB raw and 2.34 KB gzipped. Raised from 6 KB and 3 KB for the heat
+// sources, which the worker draws and writes as GeoJSON off the main
+// thread, with the heat lines the page works out with the bundle's code
+// (services/heatSource.ts): 4.78 KB raw and 2.28 KB gzipped before, 9.11 KB
+// raw and 4.14 KB gzipped after, in a local build.
+const BUDGET_WORKER = { raw: 10 * 1024, gzip: 5 * 1024 };
 
 // The vendored files are copied as they are but for a few bytes of fixes
 // (VENDOR_PATCHES in scripts/vendor.js), so a budget cannot make them

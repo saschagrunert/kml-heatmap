@@ -205,28 +205,33 @@ the camera moves Wrapped's intro and the hotspot tour share
 (`ui/cameraScript.ts`) do that, as the intro waits for the feature bundle
 anyway.
 `yearWorker.bundle.js` is a build of its own and shares nothing with the
-others: it is everything that works on the year files. The page imports it
-next to the first year file (`services/dataLoader.ts`), and the file then
-starts itself a second time as a module worker, which parses and decodes the
-year files off the main thread and hands the columns back as typed arrays;
-the page builds its dataset from them a few milliseconds at a time
-(`services/yearDecoder.ts`, `services/yearDataset.ts`). Where the worker
-cannot be used, the same code decodes on the main thread.
+others: it is everything that works on the year files, and on the heat
+sources made of them. The page imports it next to the first year file
+(`services/dataLoader.ts`), and the file then starts itself a second time as
+a module worker, which parses and decodes the year files off the main thread
+and hands the columns back as typed arrays; the page builds its dataset from
+them a few milliseconds at a time (`services/yearDecoder.ts`,
+`services/yearDataset.ts`). The worker also draws the heatmap's heat and
+writes the GeoJSON of the heat sources, which MapLibre's worker reads from
+Blob URLs (see "The heat sources and the year worker" below). Where the
+worker cannot be used, the same code runs on the main thread.
 The same command takes MapLibre GL JS and html-to-image out of
 `node_modules` into `kml_heatmap/static/vendor/`, which is what the published
 page loads them from (html-to-image with `import()`, on the first export, as
 one module that `scripts/vendor.js` bundles from the package's own), and the
 country flags of `flag-icons` into
 `kml_heatmap/static/flags/` (`scripts/vendor.js`). All of it is gitignored,
-and `make clean` removes it. MapLibre is copied with three fixes made to
+and `make clean` removes it. MapLibre is copied with five fixes made to
 its minified code (`VENDOR_PATCHES`): two for bugs of 6.10, where tiles
 under a camera that looks at a point above the relief (the chase view)
 were culled and a GeoJSON tile that loads empty kept the raw data of
-before, and one for WebKit on Linux (WebKitGTK and WPE, the WebKit of the
+before, one for WebKit on Linux (WebKitGTK and WPE, the WebKit of the
 e2e tests), whose page process crashed or hung as MapLibre's worker took
 apart an elevation tile it was sent as an ImageBitmap: there the tile is
 read into plain pixels on the main thread first, as MapLibre does where
-OffscreenCanvas is missing. Every other browser keeps the bitmap. Each fix has to
+OffscreenCanvas is missing (every other browser keeps the bitmap), and two
+that let MapLibre's worker read a GeoJSON source from a `blob:` URL without
+the main thread (see "The heat sources and the year worker"). Each fix has to
 find its code exactly once, or the build fails: after a bump of MapLibre,
 drop the fix it has made unnecessary, or match its code again.
 
@@ -1088,7 +1093,9 @@ as high as its kernel is wide, so the intensity grows as the reach
 narrows (`intensityAt`, a stop per half level of the zoom, which follows
 the narrowing to within 4 %). The exposure keeps its cells and intensity
 of the reach of 22 px (`EXPOSURE_INTENSITY`), so the narrower reach
-changes no exposure.
+changes no exposure; it is worked out by the year worker, in
+`calculations/heatExposure.ts` with that reference reach (see "The heat
+sources and the year worker" below).
 
 With the narrower reach a track falls apart into beads a level earlier,
 and so the heat lines take over a level earlier (`HEAT_LINES`: they fade
@@ -1142,6 +1149,68 @@ selection's lines over it, `dimsHeatmap`), and again on every
 `style.load`: a style built anew (a base style whose difference failed,
 or after a lost WebGL context) starts from a state of its own. With the
 heat off or stepping back, the labels are as the base style has them.
+
+**The heat sources and the year worker:**
+
+A change of the year, the aircraft, By distance or an isolated selection
+gives the heatmap new points, one per fix the filter keeps
+(`heatmapPoints` in `ui/dataManager.ts`): 135,000 for all years of
+`data/`. Handed to its GeoJSON source as a feature each, they held up the
+main thread of Chrome for 155 to 160 ms in one task on a desktop (Ryzen 7
+9800X3D), among it 20 ms for the points, their exposure and roll-off, and
+120 ms to hand them over: 70 ms for MapLibre's own copy of the objects and
+45 ms for the structured clone to its worker. With the CPU slowed down four
+times, as for a phone, it was 550 to 570 ms, and zoomed in to where the
+heat lines are worked out 310 to 330 ms and 1.1 to 1.2 s.
+
+Now the page works out the points and the heat of each alone and hands
+them to the year worker as one column (`heatColumns`, a copy of about a
+millisecond). The worker works out the exposure and the roll-off
+(`calculations/heatExposure.ts`) and writes the GeoJSON as text into a Blob
+(`drawHeat` in `services/heatSource.ts`), the text `JSON.stringify` writes
+for the same features, and the source is given a Blob URL of it
+(`DataManager.writeSource`), which MapLibre's worker fetches and parses
+itself. That takes two fixes of `scripts/vendor.js`: MapLibre fetches a URL
+of a scheme other than http(s) and file through the main thread for its
+worker, and sends the GeoJSON of a URL back to the main thread whole, and
+for a `blob:` URL it now does neither. A source keeps its URL until it has
+taken the next one, which is revoked then, and the page's CSP allows
+`blob:` in `connect-src` for a browser that holds MapLibre's worker to it
+(Chrome does not) and for the e2e tests, which read the sources' URLs.
+The heat lines take the same way: the page works them out with the code of
+the worker's bundle (`heatLinesAlong`, along the curves the colour lines
+keep), which leaves them out of the first visit, and the worker writes
+their text. A heat is drawn once (`Heat.drawn`), so a selection and
+isolation reuse it, and a source is not sent what it holds
+(`heatWritten`). The legend takes the new exposure as the worker answers,
+with the heat it stands for; until then both stay as they were, and so
+does the heatmap an isolated selection is drawn from (`isolatedWritten`),
+and a heat let go of before its answer is not written. The map is idle
+while the worker works, so Wrapped's map and the e2e tests wait for its
+answers as well (`heatRequests`, see `revealMapWhenPainted` in
+`ui/wrappedManager.ts` and `waitForMapIdle` in `tests/e2e/map.ts`). Where the
+worker cannot be used, the decoder does its part on the main thread from
+the same bundle, which still spares it the objects.
+
+The first visit went from 157.30 KB to 156.44 KB raw and from 54.26 KB to
+53.78 KB gzipped, the worker's bundle from 4.78 KB to 9.11 KB raw and from
+2.28 KB to 4.14 KB gzipped. `heatTone` and `appendCurve` with the helpers
+of `toLngLat` are in both. The worker's build takes `utils/constants.ts`
+for a module without side effects (`pureConstantsPlugin` in `build.js`):
+it uses none of it, and esbuild kept 0.85 KB of it that it cannot tell
+are free of them.
+
+On the built site (Chrome 154, a switch between years already loaded, the
+median of three, the main thread traced until the map is idle), the longest
+task of a switch to all years went from 161 to 21 ms, of By distance from
+154 to 9 ms and of an aircraft from 63 to 12 ms; with the CPU slowed down
+four times from 572 to 63, 551 to 33 and 195 to 35 ms. Zoomed in to map
+zoom 9.5, where the page still works out the heat lines (70 to 90 ms), from
+326 to 105 and 312 to 84 ms, slowed down from 1,174 to 313 and 1,082 to 310
+ms. All of the main thread's work for a switch to all years went from 216
+to 82 ms, 679 to 221 ms slowed down. The heat sources, the isolated
+selection's, the heat lines and the exposure came out byte for byte the
+same in ten switches of year, aircraft, weighing and isolation.
 
 **The heat legend and the heat scale:**
 

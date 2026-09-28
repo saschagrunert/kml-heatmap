@@ -24,7 +24,8 @@
 import type { MapApp } from "../mapApp";
 import { domCache } from "../utils/domCache";
 import { heatUntone } from "../calculations/heatTone";
-import { HEAT_FLIGHT_DENSITY, HEATMAP_GRADIENT } from "./heatmapPaint";
+import { HEAT_FLIGHT_DENSITY } from "../calculations/heatExposure";
+import { HEATMAP_GRADIENT } from "./heatmapPaint";
 import { heatScale } from "./heatScale";
 
 /**

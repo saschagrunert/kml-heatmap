@@ -1,10 +1,16 @@
 import { describe, it, expect } from "vitest";
 import {
   heatLineFeatures,
+  heatLinesAlong,
   heatWeight,
   ROUTE_SPEED_MS,
   segmentSeconds,
 } from "../../../../kml_heatmap/frontend/calculations/heatLines";
+import {
+  flatCurves,
+  FLAT_TURN_STEP_DEG,
+} from "../../../../kml_heatmap/frontend/calculations/curves";
+import { smoothFlights } from "../../../../kml_heatmap/frontend/calculations/smoothing";
 import type { PathSegment } from "../../../../kml_heatmap/frontend/types";
 import { createSegment } from "../../testHelpers";
 
@@ -321,6 +327,24 @@ describe("heatLineFeatures along the curve", () => {
     }));
 
     expect(heats(turning(2, 9, times, 15))).toEqual(heats(straight));
+  });
+});
+
+describe("heatLinesAlong", () => {
+  it("draws the lines of heatLineFeatures along the curves it is handed", () => {
+    const segments = [...flight(1), ...flight(2, { lng: 8.001, count: 4 })];
+    const weigh = heatWeight(true);
+    const tone = (seconds: number): number => seconds / 2;
+    // The year decoder is handed the curves the page keeps, and works out
+    // none of its own
+    const curves = smoothFlights(segments, () => 0, {
+      turnStepDeg: FLAT_TURN_STEP_DEG,
+    });
+
+    expect(
+      heatLinesAlong(curves, segments, (id) => id === 1, weigh, tone),
+    ).toEqual(heatLineFeatures(segments, (id) => id === 1, weigh, tone));
+    expect(curves).not.toBe(flatCurves(segments));
   });
 });
 

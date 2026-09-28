@@ -14,17 +14,26 @@
  * hand here: a worker that does not start (an old browser, a blocked
  * script), that reports an error or that does not answer is given up on for
  * the rest of the visit, and the years are decoded on the main thread.
+ *
+ * The same worker writes the content of the heat sources
+ * (services/heatSource.ts), with the same fallback: a heat the worker
+ * cannot be asked for is written on the main thread, which still spares it
+ * the objects MapLibre would otherwise have been given.
  */
 
 import { logError } from "../utils/logger";
 import { decodeYearBytes } from "./yearDecode";
 import { buildDatasetInSlices, combineYearData } from "./yearDataset";
+import { drawHeat, flatLines, linesSource, type DrawnHeat } from "./heatSource";
+import { heatColumns } from "../calculations/heatExposure";
+import { heatLinesAlong } from "../calculations/heatLines";
 import type { KMLDataset } from "../types";
+import type { Coordinate } from "../utils/geometry";
 import type { YearRequest, YearResponse } from "./yearWorker";
 
 /**
- * How long the worker may take over one year. Decoding takes it some
- * milliseconds, so this only ever ends a wait for a worker that hangs.
+ * How long the worker may take over one year or one heat. Either takes it
+ * some milliseconds, so this only ever ends a wait for a worker that hangs.
  */
 const DECODE_TIMEOUT_MS = 30_000;
 
@@ -47,6 +56,23 @@ export interface YearDecoder {
    * @returns Rejects for a file that cannot be decoded
    */
   decode(bytes: ArrayBuffer): Promise<KMLDataset>;
+  /**
+   * How the heatmap draws a heat, and the content of its source (see
+   * services/heatSource.ts)
+   * @param points - The points of the heat
+   * @param weights - The heat of each, see heatmapPoints in
+   *   ui/dataManager.ts
+   */
+  drawHeat(
+    points: readonly Coordinate[],
+    weights: readonly number[],
+  ): Promise<DrawnHeat>;
+  /**
+   * The content of the heat line source: the lines of heatLinesAlong in
+   * calculations/heatLines.ts, worked out here, on the page, from its
+   * arguments, and written by the worker
+   */
+  linesSource(...lines: Parameters<typeof heatLinesAlong>): Promise<Blob>;
   /** combineYearData of services/yearDataset.ts */
   combine: typeof combineYearData;
   /** End the worker, and the wait of whoever still waits for it */
@@ -59,6 +85,11 @@ export interface YearDecoder {
  */
 const startWorker = (): YearWorkerLike =>
   new Worker(import.meta.url, { type: "module" });
+
+/** Omit of each member of a union, which Omit of the union is not */
+type DistributiveOmit<T, K extends PropertyKey> = T extends unknown
+  ? Omit<T, K>
+  : never;
 
 /**
  * Ends the wait for one answer of the worker: with the answer, with null
@@ -97,10 +128,10 @@ export function createYearDecoder(
     settleAll(null);
   };
 
-  /** The worker's answer; null when the main thread has to decode */
+  /** The worker's answer; null when the main thread has to do the work */
   const askWorker = (
     target: YearWorkerLike,
-    bytes: ArrayBuffer,
+    body: DistributiveOmit<YearRequest, "id">,
   ): Promise<YearResponse | null> =>
     new Promise((resolve, reject) => {
       const id = nextId++;
@@ -114,7 +145,7 @@ export function createYearDecoder(
       pending.set(id, settle);
       // Copied, not transferred: the copy is a fraction of a millisecond,
       // and the bytes are still here if the worker fails over them
-      const request: YearRequest = { id, bytes };
+      const request: YearRequest = { id, ...body };
       try {
         target.postMessage(request);
       } catch (error) {
@@ -135,10 +166,31 @@ export function createYearDecoder(
     giveUpOnWorker(error);
   }
 
+  /**
+   * The worker's answer to `body`, taken by `take`, or else `work` done on
+   * the main thread: where there is no worker, or it failed over the
+   * request. If the fault is in the data, the work fails the same way,
+   * with the error and not its text.
+   */
+  const answerOf = async <T>(
+    body: DistributiveOmit<YearRequest, "id">,
+    take: (response: YearResponse) => T | undefined,
+    work: () => T,
+  ): Promise<T> => {
+    if (destroyed) throw new Error("year decoder destroyed");
+    const response = worker ? await askWorker(worker, body) : null;
+    const taken = response ? take(response) : undefined;
+    if (taken !== undefined) return taken;
+    if (response && "error" in response) {
+      logError("Year worker failed over a heat:", response.error);
+    }
+    return work();
+  };
+
   return {
     async decode(bytes) {
       if (destroyed) throw new Error("year decoder destroyed");
-      const answer = worker ? await askWorker(worker, bytes) : null;
+      const answer = worker ? await askWorker(worker, { bytes }) : null;
       let decoded = answer && "decoded" in answer ? answer.decoded : null;
       if (!decoded) {
         // A file the worker failed over is decoded again: if the file is
@@ -150,6 +202,23 @@ export function createYearDecoder(
       }
       for (const warning of decoded.warnings) console.warn(warning);
       return buildDatasetInSlices(decoded);
+    },
+    drawHeat(points, weights) {
+      // Packed here, on the page, into what is copied to the worker
+      const heat = heatColumns(points, weights);
+      return answerOf(
+        { heat },
+        (response) => ("drawn" in response ? response.drawn : undefined),
+        () => drawHeat(heat),
+      );
+    },
+    linesSource(...heatLines) {
+      const lines = flatLines(heatLinesAlong(...heatLines));
+      return answerOf(
+        { lines },
+        (response) => ("source" in response ? response.source : undefined),
+        () => linesSource(lines),
+      );
     },
     combine: combineYearData,
     destroy() {

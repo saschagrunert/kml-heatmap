@@ -547,8 +547,11 @@ export class DataLoader {
    * The year decoder, which starts the year worker. One for all years, and
    * one import for all callers. A failed import is not kept, here or (see
    * importYearTools) by the browser, so the next year asks the server again.
+   * The data manager has the worker write the heat sources through it as
+   * well (see services/heatSource.ts): there is a heat only once a year
+   * has been loaded, and with it the decoder.
    */
-  private getDecoder(): Promise<YearDecoder> {
+  getDecoder(): Promise<YearDecoder> {
     if (this.decoder) return Promise.resolve(this.decoder);
     this.decoderRequest ??= this.importWithTimeout()
       .then(

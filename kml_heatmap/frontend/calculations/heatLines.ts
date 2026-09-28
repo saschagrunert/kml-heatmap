@@ -14,6 +14,7 @@ import type { PathSegment } from "../types";
 import { DEGREES_TO_RADIANS, METRES_PER_DEGREE } from "../utils/geometry";
 import { toLngLat, type LngLatTuple } from "../utils/mapHelpers";
 import { appendCurve, flatCurves } from "./curves";
+import type { SmoothedFlights } from "./smoothing";
 import { segmentDistance } from "./statistics";
 
 /**
@@ -221,6 +222,23 @@ export function heatLineFeatures(
   weigh: SegmentWeight = heatWeight(false),
   tone: (seconds: number) => number = (seconds) => seconds,
 ): GeoJSON.FeatureCollection<GeoJSON.LineString, { heat: number }> {
+  return heatLinesAlong(flatCurves(segments), segments, keep, weigh, tone);
+}
+
+/**
+ * heatLineFeatures along `curves`, the curves of `segments` (see
+ * flatCurves). The page works the lines out with the code of the year
+ * worker's bundle (see linesSource in services/yearDecoder.ts), which
+ * leaves them out of what a first visit downloads, and hands it the curves
+ * the colour lines keep for the same segments.
+ */
+export function heatLinesAlong(
+  curves: SmoothedFlights,
+  segments: readonly PathSegment[],
+  keep: (pathId: number) => boolean,
+  weigh: SegmentWeight,
+  tone: (seconds: number) => number,
+): GeoJSON.FeatureCollection<GeoJSON.LineString, { heat: number }> {
   const kept: PathSegment[] = [];
   /** Where each kept segment is in `segments`, and so on its curve */
   const keptIndex: number[] = [];
@@ -269,7 +287,6 @@ export function heatLineFeatures(
 
   const smoothed = smoothAlongFlights(heats, joins);
 
-  const curves = flatCurves(segments);
   const features: GeoJSON.Feature<GeoJSON.LineString, { heat: number }>[] = [];
   let line: LngLatTuple[] = [];
   let lineStep = 0;

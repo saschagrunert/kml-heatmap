@@ -9,8 +9,8 @@ import {
   type StylePropertySpecification,
 } from "@maplibre/maplibre-gl-style-spec";
 import { heatScale } from "../../../../kml_heatmap/frontend/ui/heatScale";
+import { HEAT_FLIGHT_DENSITY } from "../../../../kml_heatmap/frontend/calculations/heatExposure";
 import {
-  HEAT_FLIGHT_DENSITY,
   heatLinesPaint,
   heatmapPaint,
   heatmapRadiusPx,

@@ -13,10 +13,10 @@ import {
 import { DataManager } from "../../../../kml_heatmap/frontend/ui/dataManager";
 
 // The data manager is real, so the paths follow the selection the way they
-// do in the app; it loads nothing here
+// do in the app; it loads nothing here, and its heat is never drawn
 vi.mock("../../../../kml_heatmap/frontend/services/dataLoader", () => ({
   DataLoader: vi.fn(function () {
-    return { destroy: vi.fn() };
+    return { destroy: vi.fn(), getDecoder: () => new Promise(() => {}) };
   }),
 }));
 

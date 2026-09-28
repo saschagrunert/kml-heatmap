@@ -919,6 +919,20 @@ describe("WrappedManager dialog", () => {
       expect(awaiting()).toBe(false);
     });
 
+    it("waits for the heat the year worker is still drawing", () => {
+      // The map is at rest meanwhile, with the heat of before
+      mockApp.dataManager.heatRequests = 1;
+      openWrapped();
+      vi.advanceTimersByTime(100);
+      expect(awaiting()).toBe(true);
+      mockApp.map!.emit("idle");
+      expect(awaiting()).toBe(true);
+
+      mockApp.dataManager.heatRequests = 0;
+      mockApp.map!.emit("idle");
+      expect(awaiting()).toBe(false);
+    });
+
     it("gives up waiting for a map that never comes to rest", () => {
       openWithBusyMap();
 

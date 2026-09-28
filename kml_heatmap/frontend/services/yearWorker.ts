@@ -1,5 +1,6 @@
 /**
- * The year worker: parses and decodes year files off the main thread.
+ * The year worker: parses and decodes year files off the main thread, and
+ * writes the content of the heat sources (services/heatSource.ts).
  *
  * An entry point of its own (yearWorker.bundle.js, see build.js), run as a
  * module worker of the site's own origin, which the page's CSP allows with
@@ -14,24 +15,38 @@
 import { decodeYearBytes } from "./yearDecode";
 import { transferablesOf } from "./yearDataset";
 import { createYearDecoder } from "./yearDecoder";
+import {
+  drawHeat,
+  linesSource,
+  type DrawnHeat,
+  type FlatLines,
+} from "./heatSource";
 import type { DecodedYear } from "./yearDataset";
 
 // What the page uses of this file (services/dataLoader.ts)
 export { createYearDecoder };
 
-/** What the page sends: the body of a year file under a number of its choice */
-export interface YearRequest {
-  id: number;
-  bytes: ArrayBuffer;
-}
+/**
+ * What the page sends, under a number of its choice: the body of a year
+ * file, the heat of a heat source (see drawHeat) or the lines of the heat
+ * line source (see linesSource)
+ */
+export type YearRequest = { id: number } & (
+  { bytes: ArrayBuffer } | { heat: Float64Array } | { lines: FlatLines }
+);
 
 /** What the worker answers with, under the number of the request */
-export type YearResponse =
-  { id: number; decoded: DecodedYear } | { id: number; error: string };
+export type YearResponse = { id: number } & (
+  | { decoded: DecodedYear }
+  | { drawn: DrawnHeat }
+  | { source: Blob }
+  | { error: string }
+);
 
 /**
  * Answer one request. A file that cannot be decoded is an answer like any
  * other, so that one bad year does not take the worker down for the rest.
+ * A Blob is sent as it is: the page is given a handle, not a copy.
  * @param request - Message of the page
  * @returns The answer and the buffers to hand over with it
  */
@@ -41,6 +56,15 @@ export function handleRequest(request: YearRequest): {
 } {
   const { id } = request;
   try {
+    if ("heat" in request) {
+      return { response: { id, drawn: drawHeat(request.heat) }, transfer: [] };
+    }
+    if ("lines" in request) {
+      return {
+        response: { id, source: linesSource(request.lines) },
+        transfer: [],
+      };
+    }
     const decoded = decodeYearBytes(request.bytes);
     return { response: { id, decoded }, transfer: transferablesOf(decoded) };
   } catch (error) {

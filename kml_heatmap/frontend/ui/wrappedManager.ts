@@ -253,8 +253,12 @@ export class WrappedManager {
     // waited for its labels to fade in as well, a third of a second more
     // of the dialog with the title alone (see ui/wrappedIntro.ts)
     const event = revealed ? "render" : "idle";
+    // Nor before the heat of the flights is on it: the year worker draws
+    // it (see DataManager.drawHeat), and the map is at rest meanwhile, with
+    // the heat of what it showed before
+    const heatDrawn = (): boolean => !this.app.dataManager.heatRequests;
     const ready = (): void => {
-      if (!revealed || map?.areTilesLoaded()) reveal();
+      if (heatDrawn() && (!revealed || map?.areTilesLoaded())) reveal();
     };
     const reveal = (): void => {
       if (this.mapRevealTimer !== null) {
@@ -269,7 +273,7 @@ export class WrappedManager {
 
     // Nothing in flight and nothing moving: no `idle` is coming, because the
     // map only fires it at the end of a frame and has no reason to draw one
-    if (!map || (map.loaded() && !map.isMoving())) {
+    if (!map || (map.loaded() && !map.isMoving() && heatDrawn())) {
       reveal();
       return;
     }

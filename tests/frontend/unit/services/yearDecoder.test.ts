@@ -2,6 +2,14 @@ import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
 import { createYearDecoder } from "../../../../kml_heatmap/frontend/services/yearDecoder";
 import { expandYearData } from "../../../../kml_heatmap/frontend/services/yearDecode";
 import { logError } from "../../../../kml_heatmap/frontend/utils/logger";
+import { drawHeat } from "../../../../kml_heatmap/frontend/services/heatSource";
+import { heatColumns } from "../../../../kml_heatmap/frontend/calculations/heatExposure";
+import { flatCurves } from "../../../../kml_heatmap/frontend/calculations/curves";
+import {
+  heatLineFeatures,
+  heatWeight,
+} from "../../../../kml_heatmap/frontend/calculations/heatLines";
+import { createSegment } from "../../testHelpers";
 import {
   dataset,
   FakeYearWorker,
@@ -213,6 +221,107 @@ describe("createYearDecoder", () => {
       worker.say({ id: 0, error: "out of memory" });
 
       await expect(owed).resolves.toEqual(expanded);
+    });
+  });
+
+  describe("the heat sources", () => {
+    const points: [number, number][] = [
+      [50, 8],
+      [50.01, 8.01],
+      [50.02, 8.02],
+    ];
+    const weights = [1, 2, 0.5];
+    const segments = [0, 1, 2].map((i) =>
+      createSegment({
+        path_id: 1,
+        time: i * 4,
+        coords: [
+          [50 + i / 100, 8 + i / 100],
+          [50 + (i + 1) / 100, 8 + (i + 1) / 100],
+        ],
+      }),
+    );
+    /** The arguments of linesSource for all of `segments` */
+    const lines = (): Parameters<
+      ReturnType<typeof createYearDecoder>["linesSource"]
+    > => [
+      flatCurves(segments),
+      segments,
+      () => true,
+      heatWeight(false),
+      (seconds) => seconds,
+    ];
+
+    /** Whether `drawn` is `points` drawn as drawHeat draws them */
+    async function expectDrawn(
+      drawn: ReturnType<typeof drawHeat>,
+    ): Promise<void> {
+      const expected = drawHeat(heatColumns(points, weights));
+      expect(drawn.exposure).toBe(expected.exposure);
+      expect(await drawn.source.text()).toBe(await expected.source.text());
+    }
+
+    it("asks the worker to draw a heat, packed here and copied, not handed over", async () => {
+      const decoder = createYearDecoder({ createWorker });
+      const postMessage = vi.spyOn(worker, "postMessage");
+
+      await expectDrawn(await decoder.drawHeat(points, weights));
+
+      const [request] = postMessage.mock.calls[0]!;
+      expect(request).toEqual({ id: 0, heat: heatColumns(points, weights) });
+      expect(postMessage.mock.calls[0]).toHaveLength(1);
+      expect(logError).not.toHaveBeenCalled();
+    });
+
+    it("works the heat lines out here and has the worker write them", async () => {
+      const decoder = createYearDecoder({ createWorker });
+
+      const source = await decoder.linesSource(...lines());
+
+      expect(worker.requests[0]).toMatchObject({ id: 0 });
+      expect("lines" in worker.requests[0]!).toBe(true);
+      expect(await source.text()).toBe(
+        JSON.stringify(heatLineFeatures(segments, () => true)),
+      );
+    });
+
+    it("draws and writes here where there are no workers", async () => {
+      vi.stubGlobal("Worker", undefined);
+      const decoder = createYearDecoder();
+
+      await expectDrawn(await decoder.drawHeat(points, weights));
+      expect(await (await decoder.linesSource(...lines())).text()).toBe(
+        JSON.stringify(heatLineFeatures(segments, () => true)),
+      );
+    });
+
+    it("draws here what the worker failed over, and keeps the worker", async () => {
+      worker.answers = false;
+      const decoder = createYearDecoder({ createWorker });
+      const owed = decoder.drawHeat(points, weights);
+
+      worker.say({ id: 0, error: "out of memory" });
+
+      await expectDrawn(await owed);
+      expect(logError).toHaveBeenCalledWith(
+        "Year worker failed over a heat:",
+        "out of memory",
+      );
+      expect(worker.terminate).not.toHaveBeenCalled();
+    });
+
+    it("draws nothing after the app has ended", async () => {
+      const decoder = createYearDecoder({ createWorker });
+
+      decoder.destroy();
+
+      await expect(decoder.drawHeat(points, weights)).rejects.toThrow(
+        "year decoder destroyed",
+      );
+      await expect(decoder.linesSource(...lines())).rejects.toThrow(
+        "year decoder destroyed",
+      );
+      expect(worker.requests).toEqual([]);
     });
   });
 

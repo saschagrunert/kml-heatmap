@@ -14,15 +14,15 @@
  * some three hundred times the knee, while everything up to the knee, a
  * lone flight or a route flown a few times, is drawn as before. The flat
  * heatmap, its heat lines and the cloud of the 3D view roll their heat off
- * alike (see exposedHeat and heatLineTone in ui/heatmapPaint.ts and
- * markStretches in calculations/cloudCells.ts), and the heat legend reads
- * its colours back through heatUntone.
+ * alike (see exposedHeat in calculations/heatExposure.ts, heatLineTone in
+ * ui/heatmapPaint.ts and markStretches in calculations/cloudCells.ts), and
+ * the heat legend reads its colours back through heatUntone.
  */
 
 /**
  * The flights' worth, as drawn, from which the heat rolls off: the light
  * cyan the flat heatmap's exposure draws the busiest routes in (see
- * heatExposure in ui/heatmapPaint.ts)
+ * heatExposure in calculations/heatExposure.ts)
  */
 export const HEAT_KNEE = 10;
 

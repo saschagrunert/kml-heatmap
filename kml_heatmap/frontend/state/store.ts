@@ -58,8 +58,8 @@ export interface StoreState extends ToggleFlags {
   heatCloudScale: number;
   /**
    * What the flat heatmap and its lines scale their heat by (heatExposure
-   * in ui/heatmapPaint.ts), 1 before there is any (see
-   * DataManager.setHeatmapPoints, its only writer, and ui/heatScale.ts)
+   * in calculations/heatExposure.ts), 1 before there is any (see
+   * DataManager.followExposure, its only writer, and ui/heatScale.ts)
    */
   heatmapExposure: number;
   /**

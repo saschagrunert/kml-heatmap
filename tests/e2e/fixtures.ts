@@ -206,6 +206,14 @@ function isTile(url: URL): boolean {
 }
 
 function isSite(url: URL): boolean {
+  // A blob: URL the page made (the heat sources, see DataManager.writeSource)
+  // is of the page's own origin: WebKit routes the fetches of MapLibre's
+  // worker for them, Chromium does not
+  if (url.protocol === "blob:") {
+    return (
+      url.origin !== "null" && LOCAL_HOSTS.has(new URL(url.origin).hostname)
+    );
+  }
   return LOCAL_HOSTS.has(url.hostname);
 }
 

@@ -11,10 +11,8 @@ import {
   HEAT_LEGEND_TITLES,
   heatLegend,
 } from "../../../../kml_heatmap/frontend/ui/heatLegend";
-import {
-  HEAT_FLIGHT_DENSITY,
-  HEATMAP_GRADIENT,
-} from "../../../../kml_heatmap/frontend/ui/heatmapPaint";
+import { HEAT_FLIGHT_DENSITY } from "../../../../kml_heatmap/frontend/calculations/heatExposure";
+import { HEATMAP_GRADIENT } from "../../../../kml_heatmap/frontend/ui/heatmapPaint";
 import { asMapApp, createMockApp, type MockApp } from "../../testHelpers";
 
 /** A gradient as the page's style spells it */
