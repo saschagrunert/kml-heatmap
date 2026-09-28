@@ -589,9 +589,7 @@ class TestObfuscateFile:
         kml_file.write_text(SAMPLE_KML, encoding="utf-8")
         kml_file.chmod(0o640)
 
-        with patch(
-            "kml_heatmap.obfuscate.os.replace", wraps=os.replace
-        ) as mock_replace:
+        with patch("kml_heatmap.cache.os.replace", wraps=os.replace) as mock_replace:
             assert obfuscate_kml_file(kml_file) is True
 
         mock_replace.assert_called_once()
@@ -620,7 +618,7 @@ class TestObfuscateFile:
     def test_write_failure_leaves_original(self, tmp_path):
         kml_file = tmp_path / "test.kml"
         kml_file.write_text(SAMPLE_KML, encoding="utf-8")
-        with patch("kml_heatmap.obfuscate.os.replace", side_effect=OSError("disk")):
+        with patch("kml_heatmap.cache.os.replace", side_effect=OSError("disk")):
             assert obfuscate_kml_file(kml_file) is False
         assert kml_file.read_text(encoding="utf-8") == SAMPLE_KML
         assert sorted(p.name for p in tmp_path.iterdir()) == ["test.kml"]
@@ -1334,25 +1332,6 @@ class TestErrorBranches:
         with patch.object(Path, "iterdir", side_effect=OSError("denied")):
             assert obfuscate_module.find_kml_files(tmp_path) == []
 
-    def test_directory_fsync_tolerates_errors(self, tmp_path):
-        with patch("kml_heatmap.obfuscate.os.fsync") as fsync:
-            obfuscate_module._fsync_directory(tmp_path / "missing")
-        fsync.assert_not_called()
-        closed = []
-        real_close = os.close
-
-        def recording_close(fd):
-            closed.append(fd)
-            real_close(fd)
-
-        with (
-            patch("kml_heatmap.obfuscate.os.fsync", side_effect=OSError("nope")),
-            patch("kml_heatmap.obfuscate.os.close", side_effect=recording_close),
-        ):
-            obfuscate_module._fsync_directory(tmp_path)
-        # The directory is closed again although the flush failed
-        assert len(closed) == 1
-
     def test_write_flushes_to_disk_before_replacing(self, tmp_path):
         kml_file = tmp_path / "test.kml"
         kml_file.write_text(SAMPLE_KML, encoding="utf-8")
@@ -1363,7 +1342,7 @@ class TestErrorBranches:
             calls.append(fd)
             return real_fsync(fd)
 
-        with patch("kml_heatmap.obfuscate.os.fsync", side_effect=recording_fsync):
+        with patch("kml_heatmap.cache.os.fsync", side_effect=recording_fsync):
             assert obfuscate_module.obfuscate_kml_file(kml_file) is True
         # Once for the temp file, once for the directory entry
         assert len(calls) == 2

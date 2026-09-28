@@ -13,13 +13,12 @@ from unittest.mock import patch
 import pytest
 
 import kml_heatmap.data_exporter as exporter_module
+import kml_heatmap.path_content as path_content_module
+import kml_heatmap.site_output as site_output_module
 from kml_heatmap.data_exporter import (
-    PATH_ID_BITS,
-    STAGING_PREFIX,
     ChunkResult,
     ExportResult,
     GroundspeedRange,
-    SiteOutput,
     YearExportResult,
     _assemble_year_file,
     _chunk_count,
@@ -27,17 +26,21 @@ from kml_heatmap.data_exporter import (
     _group_paths_by_year,
     _part_paths,
     _plan_chunks,
-    assign_path_ids,
-    drop_duplicate_paths,
     export_all_data,
-    exported_contents,
-    is_exportable_path,
-    path_content_id,
     process_year_chunk,
 )
 from kml_heatmap.exceptions import KMLHeatmapError
 from kml_heatmap.helpers import parse_timestamp_epoch
+from kml_heatmap.path_content import (
+    PATH_ID_BITS,
+    assign_path_ids,
+    drop_duplicate_paths,
+    exported_contents,
+    is_exportable_path,
+    path_content_id,
+)
 from kml_heatmap.segment_codec import FORMAT_VERSION, decode_ground
+from kml_heatmap.site_output import STAGING_PREFIX, SiteOutput
 from kml_heatmap.types import AirportData, PathMetadata, TrackPoint
 from kml_heatmap.validation import protected_directories
 from tests.conftest import FlatTiles, decoded_segments
@@ -354,7 +357,7 @@ class TestPathIds:
 
     def test_a_collision_wraps_around_the_id_space(self, monkeypatch):
         monkeypatch.setattr(
-            exporter_module, "_content_id", lambda content: 2**PATH_ID_BITS - 1
+            path_content_module, "_content_id", lambda content: 2**PATH_ID_BITS - 1
         )
         paths = [_two_point_path(0), _two_point_path(1), _two_point_path(2)]
         assert _ids({2025: [0, 1, 2]}, paths) == {
@@ -430,13 +433,13 @@ class TestDropDuplicatePaths:
 
     def test_content_is_packed_once_per_path(self, tmp_path, monkeypatch):
         packed = []
-        real_content = exporter_module._path_content
+        real_content = path_content_module._path_content
 
         def content(path):
             packed.append(path)
             return real_content(path)
 
-        monkeypatch.setattr(exporter_module, "_path_content", content)
+        monkeypatch.setattr(path_content_module, "_path_content", content)
         paths = [_timed_path(), _timed_path(1.0), _timed_path()]
         export_all_data(
             paths, _metadata([{"year": 2025}] * 3), [], output_dir=str(tmp_path)
@@ -445,7 +448,7 @@ class TestDropDuplicatePaths:
 
     def test_content_is_compared_not_the_hash(self, monkeypatch):
         """Two flights that share a hash are still two flights."""
-        monkeypatch.setattr(exporter_module, "_content_id", lambda content: 7)
+        monkeypatch.setattr(path_content_module, "_content_id", lambda content: 7)
         paths = [_two_point_path(0), _two_point_path(1)]
         kept = _drop({2025: [0, 1]}, paths, [{}, {}])
         assert kept == {2025: [0, 1]}
@@ -956,7 +959,7 @@ class TestSiteOutput:
 
         with SiteOutput(out, out / "data", ("manifest.json",)) as site:
             _stage_site(site, years=(2025, 2026))
-            with patch("kml_heatmap.data_exporter.os.replace", record):
+            with patch("kml_heatmap.site_output.os.replace", record):
                 site.publish([2025, 2026])
 
         assert moved == [
@@ -1008,7 +1011,7 @@ class TestSiteOutput:
     def test_runs_unguarded_where_locks_are_not_supported(self, tmp_path):
         out = tmp_path / "out"
         with patch(
-            "kml_heatmap.data_exporter.fcntl.flock",
+            "kml_heatmap.site_output.fcntl.flock",
             side_effect=OSError(errno.ENOLCK, "No locks available"),
         ):
             _publish_site(out)
@@ -1236,7 +1239,7 @@ class TestSiteOutput:
             return real_mkdtemp(**kwargs)
 
         with (
-            patch("kml_heatmap.data_exporter.tempfile.mkdtemp", mkdtemp),
+            patch("kml_heatmap.site_output.tempfile.mkdtemp", mkdtemp),
             pytest.raises(OSError, match="No space"),
             SiteOutput(out, out / "data"),
         ):
@@ -1274,7 +1277,7 @@ class TestSiteOutput:
 
     def test_runs_unguarded_without_fcntl(self, tmp_path, monkeypatch):
         """Windows has no fcntl; the export works without the lock."""
-        monkeypatch.setattr(exporter_module, "fcntl", None)
+        monkeypatch.setattr(site_output_module, "fcntl", None)
         out = tmp_path / "out"
         _publish_site(out)
         assert _tree(out)["index.html"] == "old page"

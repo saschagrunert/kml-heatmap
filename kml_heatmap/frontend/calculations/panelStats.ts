@@ -137,8 +137,6 @@ export function calculateAltitudeStats(
  * @returns Speed statistics in knots
  */
 export function calculateSpeedStats(segments: PathSegment[]): SpeedStats {
-  // One pass rather than utils/arrayHelpers, which only replay uses: a
-  // module both lazy bundles import would be a chunk of its own
   let count = 0;
   let sum = 0;
   let max = 0;

@@ -8,12 +8,10 @@ import math
 import os
 import re
 import ssl
-import tempfile
 import threading
 import time
 import urllib.error
-from pathlib import Path
-from typing import NamedTuple
+from typing import TYPE_CHECKING, NamedTuple
 from urllib.request import urlopen
 
 # Try to import fcntl for Unix-like systems (for process-safe file locking)
@@ -25,11 +23,15 @@ except ImportError:
     # Windows doesn't have fcntl
     HAS_FCNTL = False
 
-from .cache import CACHE_DIR, REGULAR_FILE_MODE
+from .cache import CACHE_DIR, atomic_bytes_write
 from .constants import FEET_TO_METERS, ICAO_REGION_PREFIXES
 from .exceptions import AirportDatabaseError
+from .geometry import true_bearing
 from .helpers import DATE_PATTERN
 from .logger import logger
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 # Pre-compiled pattern for ICAO code extraction
 _ICAO_PATTERN = re.compile(r"\b([A-Z]{4})\b")
@@ -163,11 +165,25 @@ def _is_valid_csv_file(path: Path, columns: tuple[str, ...] = REQUIRED_COLUMNS) 
             header_line = f.readline()
             f.seek(-1, os.SEEK_END)
             last_byte = f.read(1)
-        if last_byte != b"\n":
-            return False  # truncated download
+    except OSError:
+        return False
+    return _is_valid_csv(header_line, last_byte, columns)
+
+
+def _is_valid_csv(
+    header_line: bytes, last_byte: bytes, columns: tuple[str, ...]
+) -> bool:
+    """Whether a CSV file of this first line and last byte is usable.
+
+    It has to end in a line break, or the download was cut short, and its
+    header has to name ``columns``.
+    """
+    if last_byte != b"\n":
+        return False  # truncated download
+    try:
         header = header_line.decode("utf-8", errors="replace").strip()
         header_columns = next(csv.reader([header]))
-    except OSError, csv.Error, StopIteration, UnicodeDecodeError:
+    except csv.Error, StopIteration:
         return False
 
     return all(column in header_columns for column in columns)
@@ -212,9 +228,8 @@ def _clear_download_failure(database: _CsvDatabase | None = None) -> None:
         database.failed_marker.unlink()
 
 
-def _fetch_database(cache_dir: Path, database: _CsvDatabase) -> bool:
+def _fetch_database(database: _CsvDatabase) -> bool:
     """Download a database into the cache; False on any failure."""
-    tmp_path: Path | None = None
     name = database.name
     try:
         logger.info("📥 Downloading the OurAirports %s...", name)
@@ -257,24 +272,14 @@ def _fetch_database(cache_dir: Path, database: _CsvDatabase) -> bool:
             )
             return False
 
-        with tempfile.NamedTemporaryFile(
-            dir=cache_dir,
-            prefix=database.cache_file.stem + ".",
-            suffix=".tmp",
-            delete=False,
-        ) as tmp:
-            tmp_path = Path(tmp.name)
-            tmp.write(data)
-
-        if not _is_valid_csv_file(tmp_path, database.columns):
+        header_line = data.partition(b"\n")[0]
+        if not _is_valid_csv(header_line, data[-1:], database.columns):
             logger.warning("✗ The downloaded %s is empty or invalid", name)
             return False
 
-        # NamedTemporaryFile creates the file with mode 0600; a shared cache
-        # directory (a build container, a CI runner) needs it readable
-        os.chmod(tmp_path, REGULAR_FILE_MODE)
-        os.replace(tmp_path, database.cache_file)
-        tmp_path = None
+        # Readable like a regular write, for a shared cache directory (a
+        # build container, a CI runner)
+        atomic_bytes_write(database.cache_file, data)
         logger.info("✓ Downloaded the %.1f MB %s", len(data) / 1024 / 1024, name)
         return True
 
@@ -287,10 +292,6 @@ def _fetch_database(cache_dir: Path, database: _CsvDatabase) -> bool:
     ) as e:
         logger.warning("✗ Failed to download the %s: %s", name, e)
         return False
-    finally:
-        if tmp_path is not None:
-            with contextlib.suppress(OSError):
-                tmp_path.unlink()
 
 
 def _download_airport_database(database: _CsvDatabase | None = None) -> bool:
@@ -321,7 +322,7 @@ def _download_airport_database(database: _CsvDatabase | None = None) -> bool:
         )
         return False
 
-    if _fetch_database(cache_dir, database):
+    if _fetch_database(database):
         _clear_download_failure(database)
         return True
 
@@ -479,11 +480,6 @@ def _float(text: str | None) -> float | None:
     return value if math.isfinite(value) else None
 
 
-def _true_bearing(lat0: float, lon0: float, lat1: float, lon1: float) -> float:
-    dx = (lon1 - lon0) * math.cos(math.radians((lat0 + lat1) / 2))
-    return math.degrees(math.atan2(dx, lat1 - lat0)) % 360
-
-
 def _runway_ends(row: dict[str, str]) -> list[RunwayEnd]:
     """The two ends of a runway row with their true headings.
 
@@ -511,7 +507,7 @@ def _runway_ends(row: dict[str, str]) -> list[RunwayEnd]:
     if low_heading is None and None not in coordinates:
         lat0, lon0, lat1, lon1 = (value or 0.0 for value in coordinates)
         if (lat0, lon0) != (lat1, lon1):
-            low_heading = _true_bearing(lat0, lon0, lat1, lon1)
+            low_heading = true_bearing(lat0, lon0, lat1, lon1)
     if low_heading is None and high_heading is not None:
         low_heading = high_heading + 180
     if low_heading is None:

@@ -522,6 +522,15 @@ class TestTerrariumTiles:
         assert fetch.call_args.kwargs["timeout"] > 0
         assert tiles.path(tile).read_bytes() == body
 
+    def test_pixels_that_cannot_be_kept_are_decoded_again(self, tmp_path, caplog):
+        """Keeping them is a saving for the next build, never a failure."""
+        with caplog.at_level(logging.DEBUG, logger="kml_heatmap"):
+            terrain_module._keep_pixel_planes(
+                tmp_path / "missing" / "10-546-341.png", b"png", b"planes"
+            )
+        assert "Cannot keep the pixels of 10-546-341.png" in caplog.text
+        assert list(tmp_path.iterdir()) == []
+
     def test_a_tile_the_host_does_not_have_is_missing(self, tmp_path, monkeypatch):
         def fetch(request, **kwargs):
             if request.full_url.endswith("/1/1.png"):

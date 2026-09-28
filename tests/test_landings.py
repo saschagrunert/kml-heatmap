@@ -295,6 +295,21 @@ class TestTheRules:
 
         assert found == FlightLandings(takeoffs=1)
 
+    def test_a_circuit_across_the_antimeridian(self):
+        """The field on the 180th meridian, half the circuit to the west of it
+        and half to the east, where the longitudes start again at -180."""
+        field = FIELD._replace(ident="ANTI", lon=180.0)
+        flight = Flight().takeoff().circuit().final().stop()
+        points = [
+            point._replace(lon=(point.lon + 172.0 + 180.0) % 360.0 - 180.0)
+            for point in flight.points
+        ]
+        assert min(point.lon for point in points) < 0 < max(p.lon for p in points)
+
+        assert _detect(points, FieldIndex([field])) == FlightLandings(
+            takeoffs=1, landings=1, touchdowns=[("ANTI", "27")], circuits=1
+        )
+
     def test_the_first_fixes_of_a_receiver_share_a_time(self):
         """Their scatter reads as speed; the recording still starts on the ground."""
         flight = Flight().takeoff().circuit().final().stop()
@@ -328,6 +343,16 @@ class TestFieldIndex:
         index = FieldIndex([Field("NORD", 70.0, 8.217, 0.0)])
 
         assert _nearest(index, 70.0, 8.099).ident == "NORD"
+
+    def test_fields_across_the_antimeridian(self):
+        index = FieldIndex([Field("EAST", 50.0, -179.9999, 0.0)])
+
+        near = index.nearest(50.0, 179.9999)
+        assert near is not None
+        assert near[0].ident == "EAST"
+        # 0.0002 degrees of longitude at 50 degrees north, not 359.9998
+        assert near[1] == pytest.approx(0.0143, abs=1e-4)
+        assert _nearest(index, 50.0, 180.0).ident == "EAST"
 
     def test_only_airports_with_runways_are_fields(self):
         airports = {

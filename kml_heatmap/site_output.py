@@ -1,0 +1,338 @@
+"""Publishing a site all at once.
+
+``SiteOutput`` has every file written into staging directories and moves them
+into place only once all of them were written, so a run that fails while
+writing leaves the previous site as it was. One run at a time writes to an
+output directory.
+"""
+
+from __future__ import annotations
+
+import contextlib
+import errno
+import hashlib
+import os
+import re
+import shutil
+import tempfile
+from pathlib import Path
+from typing import TYPE_CHECKING, Self
+
+from .exceptions import KMLHeatmapError
+from .logger import logger
+from .validation import is_protected_directory
+
+try:
+    import fcntl
+except ImportError:  # pragma: no cover - Windows has no fcntl
+    # Without file locks two runs on one output directory are not detected;
+    # the export itself works
+    fcntl = None  # type: ignore[assignment]
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
+
+__all__ = [
+    "STABLE_MTIMES_ENV",
+    "STAGING_PREFIX",
+    "YEAR_FILE",
+    "SiteOutput",
+    "content_mtime",
+]
+
+YEAR_DIR_PATTERN = re.compile(r"^\d{4}$")
+YEAR_FILE = "data.json"
+TOOL_OWNED_FILES = ("airports.json", "metadata.json")
+# Hidden directories a run writes its files into before publishing them
+STAGING_PREFIX = ".kml-heatmap-staging-"
+# Published last: they reference the other files, so a page loaded while the
+# files are moved never points at one that is not in place yet
+ENTRY_POINT_FILES = ("metadata.json", "index.html")
+# Set to "1", every published file gets a modification time derived from
+# its content (see content_mtime)
+STABLE_MTIMES_ENV = "KML_HEATMAP_STABLE_MTIMES"
+# The content-derived modification times lie this many seconds after
+# 2001-09-09 at most: in the past, where no tool warns about them
+_CONTENT_MTIME_EPOCH = 1_000_000_000
+_CONTENT_MTIME_RANGE = 1 << 28
+
+
+def _refuse_symlink(path: Path) -> ValueError:
+    return ValueError(
+        f"Refusing to write through the symlink {path}; "
+        "remove it or choose a different output directory"
+    )
+
+
+def _check_target(root: Path, relative: Path) -> None:
+    """Refuse a destination that a staged file cannot safely be moved to.
+
+    Symlinks are neither written through nor replaced, and nothing but a
+    regular file (or a directory on the way to one) is replaced. The
+    permission to create the file is checked as well, so that a read-only
+    directory stops the run before the first file was moved.
+    """
+    directory = root
+    for part in relative.parts[:-1]:
+        child = directory / part
+        if child.is_symlink():
+            raise _refuse_symlink(child)
+        if not child.exists():
+            break
+        if not child.is_dir():
+            raise ValueError(f"Refusing to write into {child}: not a directory")
+        directory = child
+    else:
+        target = root / relative
+        if target.is_symlink():
+            raise _refuse_symlink(target)
+        if target.exists() and not target.is_file():
+            raise ValueError(f"Refusing to replace {target}: not a regular file")
+    if not os.access(directory, os.W_OK | os.X_OK):
+        raise PermissionError(errno.EACCES, os.strerror(errno.EACCES), str(directory))
+
+
+def content_mtime(path: Path) -> int:
+    """A modification time for a file that only its content decides.
+
+    GitHub Pages derives the ETag of a file from its modification time and
+    size, and a site built afresh on every deploy gives every file the time
+    of the build: every deploy made every browser download every file again,
+    changed or not. A time taken from a hash of the content keeps the ETag
+    of a file that did not change. It is no real time, only a label, and
+    only for a server that compares it for equality (nginx, GitHub Pages)
+    and sends a Cache-Control of its own: ``python -m http.server`` answers
+    304 to an older time and sends none, so browsers would cache a file of
+    2005 for years. Hence only on request, see ``STABLE_MTIMES_ENV``.
+    """
+    digest = hashlib.blake2b(digest_size=8)
+    with open(path, "rb") as f:
+        while chunk := f.read(1 << 20):
+            digest.update(chunk)
+    offset = int.from_bytes(digest.digest(), "big") % _CONTENT_MTIME_RANGE
+    return _CONTENT_MTIME_EPOCH + offset
+
+
+def _staged_files(stage: Path) -> list[Path]:
+    """The files of a staging directory, relative to it, in publishing order.
+
+    Files in subdirectories (the year files) come first and the entry points
+    last, see ``ENTRY_POINT_FILES``.
+    """
+    files = [path.relative_to(stage) for path in stage.rglob("*") if path.is_file()]
+    return sorted(
+        files,
+        key=lambda relative: (
+            len(relative.parts) == 1,
+            relative.name in ENTRY_POINT_FILES,
+            relative.as_posix(),
+        ),
+    )
+
+
+def _remove_stale_file(path: Path) -> None:
+    """Remove a tool-owned file that the published run did not produce.
+
+    The new site is already in place at this point, so a file that cannot be
+    removed only gets a warning; a symlink is somebody else's and left alone.
+    """
+    if path.is_symlink():
+        logger.warning("Leaving symlink in output directory: %s", path)
+    elif path.is_file():
+        try:
+            path.unlink()
+        except OSError as e:
+            logger.warning("Could not remove stale output %s: %s", path, e)
+
+
+def _remove_stale_data(data_dir: Path, years: set[str]) -> None:
+    """Remove year files that are not part of the site any more.
+
+    Anything the tool does not own is left in place with a warning.
+    """
+    for child in sorted(data_dir.iterdir()):
+        if child.name in TOOL_OWNED_FILES or child.name.startswith(STAGING_PREFIX):
+            continue
+        if (
+            child.is_dir()
+            and not child.is_symlink()
+            and YEAR_DIR_PATTERN.match(child.name)
+        ):
+            if child.name not in years:
+                _remove_stale_file(child / YEAR_FILE)
+                try:
+                    child.rmdir()
+                except OSError:
+                    logger.warning("Leaving non-empty year directory: %s", child)
+            continue
+        logger.warning("Leaving unexpected item in output directory: %s", child)
+
+
+def _lock_directory(directory: Path) -> int:
+    """Take the lock of an output directory, or fail when a run holds it.
+
+    Two runs writing one site would delete each other's staging directories.
+    The lock is on the directory itself, so no lock file ends up published
+    with the site. It is released when the returned descriptor is closed.
+    """
+    fd = os.open(directory, os.O_RDONLY)
+    if fcntl is None:
+        return fd
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        os.close(fd)
+        raise KMLHeatmapError(
+            f"Another run is writing to {directory}; wait for it to finish"
+        ) from None
+    except OSError:
+        # A file system without locks: run unguarded, as before
+        pass
+    return fd
+
+
+def _remove_leftover_stages(directory: Path) -> None:
+    """Remove the staging directories of runs that were killed.
+
+    Only called with the directory's lock held, so no stage of a running
+    run is among them.
+    """
+    for child in directory.iterdir():
+        if (
+            child.name.startswith(STAGING_PREFIX)
+            and child.is_dir()
+            and not child.is_symlink()
+        ):
+            shutil.rmtree(child, ignore_errors=True)
+
+
+class SiteOutput:
+    """Write a site into staging directories and publish it all at once.
+
+    Every file is written into a hidden staging directory inside its
+    destination, which keeps the final renames on one filesystem, and moved
+    into place only once all files were written. A failed run leaves the
+    previous site untouched instead of deleting it or mixing two versions.
+    Files the tool does not own are never touched.
+
+    Use it as a context manager: write the data files into ``data_stage`` and
+    the page and its assets into ``site_stage``, then call ``publish``. The
+    staging directories are removed on exit, published or not.
+    """
+
+    site_stage: Path
+    data_stage: Path
+
+    def __init__(
+        self,
+        output_dir: str | Path,
+        data_dir: str | Path,
+        site_files: Iterable[str] = (),
+        site_patterns: Iterable[str] = (),
+        stable_mtimes: bool = False,
+    ) -> None:
+        """Prepare the output of a site.
+
+        ``site_files`` are the paths the tool owns in ``output_dir``, each
+        relative to it and with forward slashes; the ones a run does not
+        produce are removed when it is published. ``site_patterns`` are glob
+        patterns of owned files whose names are not known in advance, such
+        as the flag of each country visited: every match that a run does
+        not produce is removed as well, or a flight removed from the input
+        would still give away its country. ``stable_mtimes`` gives every
+        published file a modification time derived from its content (see
+        ``content_mtime``).
+        """
+        self.output_dir = Path(output_dir).resolve()
+        self.data_dir = Path(data_dir).resolve()
+        for given, resolved in (
+            (output_dir, self.output_dir),
+            (data_dir, self.data_dir),
+        ):
+            if is_protected_directory(resolved):
+                raise ValueError(f"Refusing to use dangerous output directory: {given}")
+        self.site_files = tuple(site_files)
+        self.site_patterns = tuple(site_patterns)
+        self.stable_mtimes = stable_mtimes
+        self._cleanup = contextlib.ExitStack()
+
+    def __enter__(self) -> Self:
+        try:
+            for destination in dict.fromkeys((self.output_dir, self.data_dir)):
+                destination.mkdir(parents=True, exist_ok=True)
+                self._cleanup.callback(os.close, _lock_directory(destination))
+                _remove_leftover_stages(destination)
+            self.site_stage = self._stage(self.output_dir)
+            self.data_stage = self._stage(self.data_dir)
+        except BaseException:
+            self._cleanup.close()
+            raise
+        return self
+
+    def __exit__(self, *exc_info: object) -> None:
+        self._cleanup.close()
+
+    def _stage(self, destination: Path) -> Path:
+        stage = Path(tempfile.mkdtemp(prefix=STAGING_PREFIX, dir=destination))
+        self._cleanup.callback(shutil.rmtree, stage, ignore_errors=True)
+        return stage
+
+    def publish(self, years: Iterable[int]) -> None:
+        """Move the staged files into place, then remove stale outputs.
+
+        Every destination is checked before the first file moves, so that a
+        refusal leaves the previous site as it was. The data files move
+        first and the page last. ``years`` are the years of the new site.
+        """
+        for stage, required in (
+            (self.site_stage, "index.html"),
+            (self.data_stage, "metadata.json"),
+        ):
+            # A stage that lost its page or metadata is a bug or a stage
+            # removed from under the run; publishing it would break the site
+            if not (stage / required).is_file():
+                raise KMLHeatmapError(f"Staged site is incomplete: {required} missing")
+        site_files = _staged_files(self.site_stage)
+        moves = [
+            (self.data_stage, self.data_dir, relative)
+            for relative in _staged_files(self.data_stage)
+        ] + [(self.site_stage, self.output_dir, relative) for relative in site_files]
+
+        for _, destination, relative in moves:
+            _check_target(destination, relative)
+        if self.stable_mtimes:
+            for stage, _, relative in moves:
+                mtime = content_mtime(stage / relative)
+                os.utime(stage / relative, (mtime, mtime))
+        for stage, destination, relative in moves:
+            target = destination / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            os.replace(stage / relative, target)
+
+        # Compared as relative paths, not base names: the vendored files sit
+        # in a subdirectory, and two of them could share a name
+        produced = {relative.as_posix() for relative in site_files}
+        for name in self.site_files:
+            if name not in produced:
+                _remove_stale_file(self.output_dir / name)
+        for pattern in self.site_patterns:
+            self._remove_stale_matches(pattern, produced)
+        _remove_stale_data(self.data_dir, {str(year) for year in years})
+
+    def _remove_stale_matches(self, pattern: str, produced: set[str]) -> None:
+        """Remove the files matching ``pattern`` that were not produced.
+
+        A directory on the way that is a symlink is somebody else's and not
+        searched; one that ends up empty is removed.
+        """
+        directory = self.output_dir
+        for part in Path(pattern).parent.parts:
+            directory = directory / part
+            if directory.is_symlink() or not directory.is_dir():
+                return
+        for match in sorted(directory.glob(Path(pattern).name)):
+            if match.relative_to(self.output_dir).as_posix() not in produced:
+                _remove_stale_file(match)
+        if directory != self.output_dir:
+            with contextlib.suppress(OSError):
+                directory.rmdir()

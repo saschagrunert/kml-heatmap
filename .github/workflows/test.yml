@@ -98,8 +98,10 @@ jobs:
       - name: Run eslint
         if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
         run: npm run lint
-      # Files, exports and dependencies nothing reaches any more. The two
-      # bundles have size budgets, so dead code is not free here.
+      # Files, exports and dependencies nothing reaches any more, then (in
+      # production mode, from the entries marked ! in knip.json) files that
+      # only tests import. The bundles have size budgets, so dead code is not
+      # free here.
       - name: Check for unused files, exports and dependencies
         if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
         run: npm run lint:unused

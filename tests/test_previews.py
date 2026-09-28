@@ -326,7 +326,7 @@ class TestRenderImages:
             def write(self, data):
                 raise OSError("disk full")
 
-        monkeypatch.setattr("kml_heatmap.previews.tempfile.NamedTemporaryFile", Full)
+        monkeypatch.setattr("kml_heatmap.cache.tempfile.NamedTemporaryFile", Full)
         with pytest.raises(OSError, match="disk full"):
             previews._write_file(tmp_path / "a.png", b"data")
         assert list(tmp_path.iterdir()) == []

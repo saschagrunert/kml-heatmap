@@ -477,13 +477,13 @@ export class DataManager {
     return data;
   }
 
-  /** Say that a load failed; an error stays until dismissed */
   /** Take the failure toasts of loads off the screen, and no other error */
   dismissFailures(): void {
     for (const message of this.failures) dismissToast(message);
     this.failures.clear();
   }
 
+  /** Say that a load failed; an error stays until dismissed */
   private fail(message: string, retry: ToastAction | undefined): void {
     this.failures.add(message);
     showToast(message, "error", retry);

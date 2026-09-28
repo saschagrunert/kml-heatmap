@@ -56,7 +56,7 @@ npm run typecheck:node   # Type-check build.js, scripts/*.js and the tool config
 npm run typecheck:tests  # Type-check the unit and e2e tests
 npm run lint             # Lint TypeScript code
 npm run lint:fix         # Auto-fix linting issues
-npm run lint:unused      # Files, exports and dependencies nothing reaches (knip)
+npm run lint:unused      # Files, exports and dependencies nothing reaches, and files only tests reach (knip)
 npm run format           # Format code with Prettier
 npm run format:check     # Check code formatting
 ```
@@ -397,15 +397,16 @@ twice (the same longitude, latitude and altitude) joins them. A document
 placemark named after the aircraft, stay two flights. `gx:Track`s are
 never joined.
 
-After `data_exporter.drop_duplicate_paths` has dropped the exact copies,
-`drop_overlapping_paths` in `kml_heatmap/duplicates.py` drops a recording
-of a flight another one of the same year records as well: two timed
-recordings are one flight when they overlap in time by more than half of
-the shorter one and are within 300 m of each other at 20 moments spread
-over the time they share (two of them may be further apart). The recording
-that names the aircraft stays, its registration first and then its type,
-and of two that name as much the one with more points; the warning names
-both files. Recordings without times are not compared.
+After `drop_duplicate_paths` in `kml_heatmap/path_content.py` has dropped
+the exact copies, `drop_overlapping_paths` in `kml_heatmap/duplicates.py`
+drops a recording of a flight another one of the same year records as
+well: two timed recordings are one flight when they overlap in time by
+more than half of the shorter one and are within 300 m of each other at 20
+moments spread over the time they share (two of them may be further
+apart). The recording that names the aircraft stays, its registration
+first and then its type, and of two that name as much the one with more
+points; the warning names both files. Recordings without times are not
+compared.
 
 **Year file format and the ground column:**
 

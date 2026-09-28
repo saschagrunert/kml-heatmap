@@ -1,6 +1,6 @@
 """The same flight recorded twice, found by where it was when.
 
-``data_exporter.drop_duplicate_paths`` drops a path that repeats another one
+``path_content.drop_duplicate_paths`` drops a path that repeats another one
 exactly: the same file under two names. The same flight recorded by two
 devices (a phone and a panel-mounted GPS), or exported twice by different
 tools, has points of its own in each recording, and was counted twice in
@@ -126,7 +126,7 @@ def drop_overlapping_paths(
     """Leave out every exported path that records a flight another one does.
 
     ``exported`` holds the indices of the exported paths (see
-    ``data_exporter.exported_contents``). Of two recordings of one flight
+    ``path_content.exported_contents``). Of two recordings of one flight
     the one that names the aircraft stays: its registration first, then its
     type (see ``_aircraft_known``). Of two that name as much, the one with
     more points stays, and of two with as many the first in input order, so
