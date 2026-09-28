@@ -4,7 +4,6 @@ import {
   createAirportMarkers,
   dropUnknownPathIds,
   loadInitialData,
-  NO_YEAR_LABEL,
   resolveYearSelection,
 } from "../../../../kml_heatmap/frontend/appInitializer";
 import type {
@@ -35,7 +34,10 @@ function setupDOM(): void {
     <button id="airspeed-btn"></button>
     <div id="altitude-legend"></div>
     <div id="airspeed-legend"></div>
-    <div id="map-empty" hidden><button id="map-empty-retry"></button></div>
+    <div id="map-empty" hidden>
+      <p>The flights could not be loaded.</p>
+      <button id="map-empty-retry"></button>
+    </div>
   `;
 }
 
@@ -67,6 +69,7 @@ describe("appInitializer", () => {
 
   afterEach(() => {
     document.body.innerHTML = "";
+    document.body.className = "";
   });
 
   describe("resolveYearSelection", () => {
@@ -78,7 +81,27 @@ describe("appInitializer", () => {
         "2023",
         "2024",
       ]);
+      // As attributes too, which the e2e tests read the years off
+      expect(
+        [...yearSelect().options].map((o) => o.getAttribute("value")),
+      ).toEqual(["all", "2023", "2024"]);
       expect(app.selectedYear).toBe("2024");
+      expect(yearSelect().value).toBe("2024");
+    });
+
+    it("replaces the year the page ships with, and a restored one, with the list", () => {
+      // The template names the latest year (site_assets.render_html), and
+      // MapApp.restoreState adds one of a link
+      yearSelect().add(new Option("2024", "2024", true, true));
+      yearSelect().add(new Option("1999"));
+
+      resolveYearSelection(asMapApp(app), [2023, 2024]);
+
+      expect([...yearSelect().options].map((o) => o.value)).toEqual([
+        "all",
+        "2023",
+        "2024",
+      ]);
       expect(yearSelect().value).toBe("2024");
     });
 
@@ -248,6 +271,53 @@ describe("appInitializer", () => {
       eddf().getElement().click();
 
       expect(app.airportManager.activateAirport).toHaveBeenCalledWith(
+        "Frankfurt EDDF",
+      );
+    });
+
+    it("gives a press on a code of another airport in its reach to that airport", () => {
+      create();
+      const element = eddf().getElement();
+      const reach = element.querySelector(".airport-marker-reach")!;
+      app.airportManager.airportLabelAt.mockReturnValue("Munich EDDM");
+
+      // A code placed below or beside its own dot, under this target
+      reach.dispatchEvent(
+        new MouseEvent("click", {
+          bubbles: true,
+          detail: 1,
+          clientX: 40,
+          clientY: 30,
+        }),
+      );
+
+      expect(app.airportManager.airportLabelAt).toHaveBeenCalledWith(
+        expect.objectContaining({ x: 40, y: 30 }),
+      );
+      expect(app.airportManager.activateAirport).toHaveBeenCalledWith(
+        "Munich EDDM",
+      );
+    });
+
+    it("keeps a press on the dot, or beside it on no code, for its airport", () => {
+      create();
+      const element = eddf().getElement();
+      app.airportManager.airportLabelAt.mockReturnValue("Munich EDDM");
+
+      // On the dot: the codes keep off it, and a finger's padding reached
+      element
+        .querySelector(".airport-marker")!
+        .dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 1 }));
+      expect(app.airportManager.activateAirport).toHaveBeenLastCalledWith(
+        "Frankfurt EDDF",
+      );
+
+      // Beside it, where no code is
+      app.airportManager.airportLabelAt.mockReturnValue(null);
+      element
+        .querySelector(".airport-marker-reach")!
+        .dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      expect(app.airportManager.activateAirport).toHaveBeenLastCalledWith(
         "Frankfurt EDDF",
       );
     });
@@ -537,6 +607,44 @@ describe("appInitializer", () => {
       expect(app.store.get("statsPanelVisible")).toBe(true);
     });
 
+    it("hides the colour legends until the first dataset is in", async () => {
+      let during: boolean | undefined;
+      app.dataManager.loadData.mockImplementation(() => {
+        during = document.body.classList.contains("no-data");
+        return Promise.resolve(data);
+      });
+
+      await loadInitialData(asMapApp(app));
+
+      // They showed their scale over the empty map while it loaded
+      expect(during).toBe(true);
+      expect(document.body.classList.contains("no-data")).toBe(false);
+    });
+
+    it("keeps the colour legends hidden when the first year fails", async () => {
+      app.dataManager.loadData.mockResolvedValue(null);
+
+      await loadInitialData(asMapApp(app));
+
+      expect(document.body.classList.contains("no-data")).toBe(true);
+      app.currentData = data;
+      expect(document.body.classList.contains("no-data")).toBe(false);
+    });
+
+    it("shows the year the page ships with as all years without a list of years", async () => {
+      // The template names the latest year from the first paint
+      yearSelect().add(new Option("2025", "2025", true, true));
+      app.dataManager.loadMetadata.mockResolvedValue(null);
+
+      await loadInitialData(asMapApp(app));
+
+      // The map loads all of them, and the dropdown said 2025
+      expect(app.dataManager.loadData).toHaveBeenCalledWith("all");
+      expect(yearSelect().value).toBe("all");
+      // A first visit asked for no year, so nothing is taken back
+      expect(toastMock.showToast).not.toHaveBeenCalled();
+    });
+
     it("handles null metadata and data", async () => {
       app.dataManager.loadMetadata.mockResolvedValue(null);
       app.dataManager.loadData.mockResolvedValue(null);
@@ -622,41 +730,58 @@ describe("appInitializer", () => {
         app.dataManager.loadData.mockResolvedValue(null);
       });
 
-      it("shows no year in the dropdown, so picking it again asks again", async () => {
+      it("keeps the year that failed in the dropdown, which the panel loads again", async () => {
         await loadInitialData(asMapApp(app));
 
         expect(app.selectedYear).toBe("2025");
-        // A placeholder that cannot be picked, where no selection at all
-        // left the control without text (regression)
-        const shown = yearSelect().selectedOptions[0]!;
-        expect(shown.value).toBe("");
-        expect(shown.textContent).toBe(NO_YEAR_LABEL);
-        expect(shown.disabled).toBe(true);
-        expect(yearSelect().value).toBe("");
+        // It showed an empty "Year" placeholder, so that picking the year
+        // again was a change; the panel's Retry does that
+        expect(yearSelect().value).toBe("2025");
+        expect(
+          [...yearSelect().options].some((option) => option.disabled),
+        ).toBe(false);
+      });
+
+      it("says what failed on the panel, in place of a toast", async () => {
+        app.dataManager.loadData.mockImplementation(() => {
+          // The data manager hands it failures while the map has no flights
+          app.dataManager.failureNote!("Failed to load flight data for 2025");
+          // Heard once the panel is there, and not while it is hidden: a
+          // load of all years that brings some hides it unseen
+          expect(toastMock.announceStatus).not.toHaveBeenCalled();
+          return Promise.resolve(null);
+        });
+
+        await loadInitialData(asMapApp(app));
+
+        expect(document.querySelector("#map-empty p")!.textContent).toBe(
+          "Failed to load flight data for 2025",
+        );
+        // Heard, as the toast was, and once
+        expect(toastMock.announceStatus).toHaveBeenCalledExactlyOnceWith(
+          "Failed to load flight data for 2025",
+        );
+        expect(toastMock.showToast).not.toHaveBeenCalled();
+
+        // A failure while it is on screen is heard at once
+        app.dataManager.failureNote!("Failed to load flight data for 2024");
+        expect(toastMock.announceStatus).toHaveBeenLastCalledWith(
+          "Failed to load flight data for 2024",
+        );
       });
 
       it("says nothing loaded, where a load that worked says which year", async () => {
         await loadInitialData(asMapApp(app));
 
-        expect(toastMock.announceStatus).not.toHaveBeenCalled();
+        expect(toastMock.announceStatus).not.toHaveBeenCalledWith(
+          expect.stringMatching(/^Showing/),
+        );
       });
 
       it("hides every airport, which no flights say to show", async () => {
         await loadInitialData(asMapApp(app));
 
         expect(app.airportManager.updateAirportOpacity).toHaveBeenCalled();
-      });
-
-      it("has an open Filter sheet read the dropdown again", async () => {
-        // The store did not change, and the sheet kept showing the year
-        const refresh = vi.fn();
-        app.mobileBar = {
-          sheet: { refresh },
-        } as unknown as MockApp["mobileBar"];
-
-        await loadInitialData(asMapApp(app));
-
-        expect(refresh).toHaveBeenCalled();
       });
 
       it("keeps a year someone picked during the load", async () => {

@@ -43,6 +43,7 @@ export function mountWrappedDom(): void {
         <div id="wrapped-title"></div>
         <div id="wrapped-year"></div>
         <div id="wrapped-stats"></div>
+        <button id="wrapped-more-btn">More below</button>
         <div id="wrapped-fun-facts"></div>
         <div id="wrapped-aircraft-fleet"></div>
         <div id="wrapped-top-airports"></div>

@@ -3,7 +3,7 @@
  * Extracted from MapApp to reduce file size and improve modularity
  */
 
-import { Marker } from "maplibre-gl";
+import { Marker, Point } from "maplibre-gl";
 import {
   createAirportElement,
   setAirportElementHome,
@@ -21,7 +21,10 @@ import type { Airport, AirportMarker, KMLDataset } from "./types";
 /**
  * Populate the year dropdown and make sure the selected year exists.
  * A restored/URL year that is not available falls back to the latest year
- * (with a toast) so the select never ends up blank.
+ * (with a toast) so the select never ends up blank. The page ships with
+ * the latest year as an option, and a restored one may have one of its own
+ * (see MapApp.restoreState), which the list replaces: the dropdown named
+ * the year it opens on from the start.
  * @param app - The MapApp instance to operate on
  * @param availableYears - Years listed in the metadata
  */
@@ -32,11 +35,11 @@ export function resolveYearSelection(
   const select = domCache.get("year-select", HTMLSelectElement);
 
   if (select) {
+    select.length = 1;
+    // With the value written out: an option's value falls back to its text,
+    // but only as a property, and what reads the attribute found none
     for (const year of availableYears) {
-      const option = document.createElement("option");
-      option.value = year.toString();
-      option.textContent = String(year);
-      select.appendChild(option);
+      select.add(new Option(String(year), String(year)));
     }
   }
 
@@ -65,35 +68,14 @@ export function resolveYearSelection(
   app.selectedYear = year;
 }
 
-/** What the year dropdown says while no year is loaded */
-export const NO_YEAR_LABEL = "Year";
-
-/**
- * Show no year in the dropdown: a placeholder that cannot be picked, so
- * that picking the year that failed is a change and asks for it again. With
- * no option selected the control showed no text at all.
- */
-export function showNoYear(select: HTMLSelectElement): void {
-  let placeholder = Array.from(select.options).find(
-    (option) => option.value === "",
-  );
-  if (!placeholder) {
-    placeholder = document.createElement("option");
-    placeholder.value = "";
-    placeholder.textContent = NO_YEAR_LABEL;
-    placeholder.disabled = true;
-    placeholder.hidden = true;
-    select.prepend(placeholder);
-  }
-  placeholder.selected = true;
-}
-
 /**
  * Load initial data including airports, metadata, and path data
  * @param app - The MapApp instance to operate on
  */
 export async function loadInitialData(app: MapApp): Promise<void> {
   colorSegmentPopups();
+  // From the start, so the legends wait for the first dataset
+  const failure = followLoadFailure(app);
 
   // Both are preloaded by the template; asked for together so that neither
   // waits for the other when they are not
@@ -105,10 +87,12 @@ export async function loadInitialData(app: MapApp): Promise<void> {
   // Populate year filter dropdown and validate the selected year
   if (metadata && metadata.available_years) {
     resolveYearSelection(app, metadata.available_years);
-  } else if (app.selectedYear !== "all") {
-    // Without the index there is no year to offer, so a restored year
-    // would show as "All years" in the dropdown while the map loads it
-    showToast("The list of years is unavailable, showing all years", "error");
+  } else {
+    // Without the index there is no year to offer, so the map loads all of
+    // them, which the dropdown says: it named the year the page ships with
+    if (app.selectedYear !== "all") {
+      showToast("The list of years is unavailable, showing all years", "error");
+    }
     const select = domCache.get("year-select", HTMLSelectElement);
     if (select) select.value = "all";
     app.selectedYear = "all";
@@ -160,10 +144,9 @@ export async function loadInitialData(app: MapApp): Promise<void> {
   // statistics panel and the airport markers follow it through their store
   // subscriptions; one flush, so nobody sees the dataset with a selection
   // it does not have or an aircraft filter it has no flights for.
-  const failure = followLoadFailure(app);
   const year = app.selectedYear;
-  // The toast of a failure offers no Retry: the panel on the map does, and
-  // two of them at once, styled apart, were two ways of doing one thing
+  // A failure is said by the panel on the map, with its Retry, and not by
+  // a toast as well (see followLoadFailure)
   const data = await app.dataManager.loadData(year);
   // A year switch that went ahead during the load has published its own
   // dataset, and this one would replace it under a store and a dropdown
@@ -177,17 +160,10 @@ export async function loadInitialData(app: MapApp): Promise<void> {
       app.filterManager.updateAircraftDropdown();
     });
     if (data) announceDataset(year);
-    // No year is loaded, so the dropdown shows none: picking the one that
-    // failed is then a change, and asks for it again. Unless someone has
-    // picked another one meanwhile, which is applied once the load is over.
-    // The Filter sheet mirrors the dropdown, and the store has not changed
-    // to tell it, so it is told to read the dropdown again (a sheet opened
-    // during the load kept showing the year).
-    const select = domCache.get("year-select", HTMLSelectElement);
-    if (!data && select?.value === year) {
-      showNoYear(select);
-      app.mobileBar?.sheet.refresh();
-    }
+    // No year is loaded, and the dropdown keeps showing the one that
+    // failed, which the panel on the map names and loads again. It showed
+    // an empty "Year" instead, so that picking the year again was a change
+    // and asked for it: the panel's Retry does that.
   }
   failure.settle();
 
@@ -233,7 +209,9 @@ export function announceDataset(year: string): void {
 /**
  * Say on the map itself that the first load left it without flights, and
  * offer to load them again. Otherwise the page was an empty map whose
- * dropdown named the year, with a toast that went after four seconds.
+ * dropdown named the year, with a toast that went after four seconds. What
+ * failed is said there, and only there, while the map has no flights (see
+ * DataManager.failureNote): a toast beside it said it a second time.
  * @param app - The MapApp instance to operate on
  * @returns `settle` says the first load is over, before which nothing is
  *   shown
@@ -241,9 +219,23 @@ export function announceDataset(year: string): void {
 function followLoadFailure(app: MapApp): { settle: () => void } {
   const panel = domCache.get("map-empty");
   const retryButton = domCache.get("map-empty-retry");
+  const text = panel?.querySelector("p");
+  // Heard as the toast's was, which the panel's text is not: when it is
+  // written on the panel on screen, or when the panel comes up with it. A
+  // load of all years that brings some years hides it unseen, and the
+  // data manager puts what failed into a toast, which is heard itself.
+  const say = (): void => {
+    if (text?.textContent) announceStatus(text.textContent);
+  };
+  app.dataManager.failureNote = (message) => {
+    if (text) text.textContent = message;
+    if (panel && !panel.hidden) say();
+  };
   let settled = false;
   let retrying = false;
   const sync = (): void => {
+    // The colour legends stand for nothing while there is none (styles.css)
+    document.body.classList.toggle("no-data", !app.currentData);
     if (!panel) return;
     const hide = !settled || retrying || app.currentData !== null;
     // Its own Retry is what hides it, and would take the focus with it
@@ -252,6 +244,7 @@ function followLoadFailure(app: MapApp): { settle: () => void } {
     }
     const appears = panel.hidden && !hide;
     panel.hidden = hide;
+    if (appears) say();
     // The one thing to do on the page then, so the keyboard is taken to
     // it, unless the focus was put somewhere else meanwhile: the map's
     // canvas is where the Retry left it
@@ -279,6 +272,7 @@ function followLoadFailure(app: MapApp): { settle: () => void } {
   };
   retryButton?.addEventListener("click", retry, { signal: app.signal });
   app.store.subscribe("currentData", sync);
+  sync();
   return {
     settle: () => {
       settled = true;
@@ -373,8 +367,29 @@ export function createAirportMarkers(app: MapApp, airports: Airport[]): void {
     // opened (see createActivationFilter).
     const isActivation = createActivationFilter();
     element.addEventListener("click", (event) => {
-      if (isActivation(event)) app.airportManager.activateAirport(name);
+      if (isActivation(event)) {
+        app.airportManager.activateAirport(pressedAirport(event) ?? name);
+      }
     });
+    // The target reaches past the dot, up over where its code goes, and a
+    // code of an airport nearby may have gone below or beside its own dot
+    // into it (see ui/airportLabels.ts): a press there on a code is one on
+    // that code, which the map tells. On the dot, and from the keyboard,
+    // it is this airport.
+    const pressedAirport = (event: MouseEvent): string | null => {
+      const target = event.target;
+      if (
+        !(target instanceof Element) ||
+        target === element ||
+        target.classList.contains("airport-marker")
+      ) {
+        return null;
+      }
+      const box = map.getCanvas().getBoundingClientRect();
+      return app.airportManager.airportLabelAt(
+        new Point(event.clientX - box.left, event.clientY - box.top),
+      );
+    };
     // The dot under the pointer lights its label up too (see airportLabels)
     element.addEventListener("mouseenter", () =>
       setAirportLabelHover(map, name, true),

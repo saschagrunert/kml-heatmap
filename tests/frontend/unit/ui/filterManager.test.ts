@@ -515,9 +515,10 @@ describe("FilterManager", () => {
       await vi.waitFor(() => expect(mockApp.selectedYear).toBe("2024"));
     });
 
-    it("shows no year when a switch fails with nothing loaded", async () => {
-      // The first load failed: re-picking the year the dropdown showed was
-      // no change and asked for nothing
+    it("keeps showing the year that failed when a switch fails with nothing loaded", async () => {
+      // The first load failed, and so did the next year picked: the note
+      // on the map names it and loads it again (see retryLoad). The
+      // dropdown showed an empty "Year" instead.
       mockApp.currentData = null;
       mockApp.selectedYear = "2025";
       addYearOption("2025");
@@ -527,23 +528,42 @@ describe("FilterManager", () => {
       ) as HTMLSelectElement;
       yearSelect.value = "2024";
       mockApp.dataManager.loadData.mockResolvedValue(null);
+      const sheet = { refresh: vi.fn() };
+      mockApp.mobileBar = { sheet } as unknown as MockApp["mobileBar"];
 
       await filterManager.filterByYear();
 
-      // A placeholder that cannot be picked; with no option selected the
-      // control showed no text at all
-      expect(yearSelect.value).toBe("");
-      expect(yearSelect.selectedOptions[0]!.disabled).toBe(true);
-      // Picking a year is then a change again
-      yearSelect.value = "2025";
-      expect(yearSelect.value).toBe("2025");
+      expect(yearSelect.value).toBe("2024");
+      expect([...yearSelect.options].some((option) => option.disabled)).toBe(
+        false,
+      );
+      expect(sheet.refresh).toHaveBeenCalled();
     });
 
-    it("retries the year of the store and keeps the selection it can", async () => {
+    it("retries the year the dropdown shows, the last that failed", async () => {
+      mockApp.currentData = null;
+      mockApp.selectedYear = "2025";
+      addYearOption("2025");
+      addYearOption("2024");
+      const yearSelect = document.getElementById(
+        "year-select",
+      ) as HTMLSelectElement;
+      yearSelect.value = "2024";
+      mockApp.dataManager.loadData.mockResolvedValue(year2024Data());
+
+      expect(await filterManager.retryLoad()).toBe(true);
+
+      expect(mockApp.dataManager.loadData.mock.calls[0]![0]).toBe("2024");
+      expect(mockApp.selectedYear).toBe("2024");
+    });
+
+    it("retries the year that failed and keeps the selection it can", async () => {
       // The page was opened with a selection the failed load never checked
       mockApp.currentData = null;
       mockApp.selectedYear = "2024";
       addYearOption("2024");
+      (document.getElementById("year-select") as HTMLSelectElement).value =
+        "2024";
       mockApp.selectedPathIds.add(3);
       mockApp.selectedPathIds.add(99);
       mockApp.dataManager.loadData.mockResolvedValue(year2024Data());

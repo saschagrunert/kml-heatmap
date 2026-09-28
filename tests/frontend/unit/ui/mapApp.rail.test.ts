@@ -1364,6 +1364,7 @@ describe("MapApp controls and map", () => {
         "selection-highlight-3d",
         "replay-trail-3d",
         "airport-labels",
+        "airport-dots",
       ]);
       // Empty until the managers fill them
       for (const id of [
@@ -1600,8 +1601,10 @@ describe("MapApp controls and map", () => {
           "selection-highlight-3d",
           "replay-trail-3d",
           "place-labels",
-          // Labels themselves, on top of the base style's
+          // Labels themselves, on top of the base style's, and the
+          // stand-ins of the dots they keep clear of
           "airport-labels",
+          "airport-dots",
         ]);
         // The same source, not one made again from a copy of its data: a
         // `setData` that is on its way still lands in it
@@ -1699,7 +1702,7 @@ describe("MapApp controls and map", () => {
 
           expect(fetchBaseStyle).toHaveBeenCalledTimes(3);
           expect(mockMap(app).setStyle).toHaveBeenCalledOnce();
-          expect(mockMap(app).getLayersOrder().at(-2)).toBe("place-labels");
+          expect(mockMap(app).getLayersOrder().at(-3)).toBe("place-labels");
 
           // Once it is there, it is there
           window.dispatchEvent(new Event("online"));

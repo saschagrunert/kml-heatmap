@@ -4,10 +4,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import {
-  NO_YEAR_LABEL,
-  showNoYear,
-} from "../../../../kml_heatmap/frontend/appInitializer";
 import type { Mock } from "vitest";
 import {
   MobileSheet,
@@ -612,22 +608,6 @@ describe("MobileSheet", () => {
       expect(
         row(sheet, "year").querySelector(".sheet-row-value")!.textContent,
       ).toBe("2025");
-    });
-
-    it("shows the placeholder of a dropdown with no year loaded, and keeps it unpickable", () => {
-      showNoYear(source);
-
-      sheet.refresh();
-
-      const select = row(sheet, "year").querySelector("select")!;
-      const placeholder = select.options[0]!;
-      expect(placeholder.value).toBe("");
-      expect(placeholder.disabled).toBe(true);
-      expect(placeholder.hidden).toBe(true);
-      expect(select.value).toBe("");
-      expect(
-        row(sheet, "year").querySelector(".sheet-row-value")!.textContent,
-      ).toBe(NO_YEAR_LABEL);
     });
 
     it("follows the source when it is disabled during replay", () => {

@@ -318,10 +318,13 @@ def render_html(
     """Render and minify the HTML template.
 
     ``latest_year`` is the year the page opens on, whose data file is
-    preloaded; None preloads nothing. CARTO's style and tile index are
-    preloaded after the site's own files. ``site_url`` is where the site is
-    published (see ``previews.normalize_site_url``), which the link preview
-    of the page is named by; None leaves the image out.
+    preloaded and which the year filter shows from the first paint (the
+    page adds the other years once it has read the metadata); None
+    preloads nothing and leaves the filter on all years. CARTO's style and
+    tile index are preloaded after the site's own files. ``site_url`` is
+    where the site is published (see ``previews.normalize_site_url``),
+    which the link preview of the page is named by; None leaves the image
+    out.
     """
     logger.info("\nGenerating progressive HTML...")
 
@@ -332,10 +335,17 @@ def render_html(
         if latest_year is not None
         else ""
     )
+    # It showed "All years" until the metadata was in, and then the year
+    year_option = (
+        f'<option value="{latest_year}" selected>{latest_year}</option>'
+        if latest_year is not None
+        else ""
+    )
     tmpl = string.Template(load_template())
     html_content = tmpl.substitute(
         data_dir_name=data_dir,
         year_preload=year_preload,
+        year_option=year_option,
         base_style_preload=_carto_preloads(_carto_api_key()),
         link_preview=page_preview_tags(site_url),
     )

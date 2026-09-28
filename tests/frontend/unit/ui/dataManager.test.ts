@@ -629,6 +629,57 @@ describe("DataManager", () => {
       );
     });
 
+    it("says a failure on the note of an empty map, and in a toast over flights", async () => {
+      const note = vi.fn();
+      dataManager.failureNote = note;
+      loaderMocks.loadData.mockImplementation(() => {
+        loaderMocks.options!.onLoadError!(["2025"]);
+        return Promise.resolve(null);
+      });
+      mockApp.currentData = null;
+
+      await dataManager.loadData("2025");
+
+      // Once, where its Retry is: the toast beside it said it twice
+      expect(note).toHaveBeenCalledExactlyOnceWith(
+        "Failed to load flight data for 2025",
+      );
+      expect(toastMock.showToast).not.toHaveBeenCalled();
+
+      // Over the flights of another year the toast says it, as before
+      mockApp.currentData = createDataset([{ id: 1, year: 2024 }]);
+      await dataManager.loadData("2025");
+
+      expect(note).toHaveBeenCalledTimes(1);
+      expect(toastMock.showToast).toHaveBeenCalledWith(
+        "Failed to load flight data for 2025",
+        "error",
+        undefined,
+      );
+    });
+
+    it("puts what failed on the note into a toast when some years load", async () => {
+      const note = vi.fn();
+      dataManager.failureNote = note;
+      mockApp.currentData = null;
+      loaderMocks.loadData.mockImplementation(() => {
+        loaderMocks.options!.onLoadError!(["2023"]);
+        const partial = createDataset([{ id: 1, year: 2024 }]);
+        partial.incomplete = true;
+        return Promise.resolve(partial);
+      });
+
+      await dataManager.loadData("all");
+
+      // The flights of the other years hide the note it went on
+      expect(note).toHaveBeenCalledOnce();
+      expect(toastMock.showToast).toHaveBeenCalledExactlyOnceWith(
+        "Failed to load flight data for 2023",
+        "error",
+        undefined,
+      );
+    });
+
     it("offers the caller's retry on the toast of a failed load", async () => {
       const retry = { label: "Retry", run: vi.fn() };
       loaderMocks.loadData.mockImplementation(() => {

@@ -2,6 +2,7 @@ import { describe, it, expect, afterEach } from "vitest";
 import type { Map as MapLibreMap } from "maplibre-gl";
 import {
   addAirportLabelImages,
+  airportDotLayer,
   airportLabelFeatures,
   airportLabelLayer,
   airportLabelSize,
@@ -66,9 +67,21 @@ describe("airport labels", () => {
       expect(layer.layout).toMatchObject({
         visibility: "none",
         "text-field": ["get", "icao"],
-        // Always above the dot
-        "text-anchor": "bottom",
       });
+    });
+
+    it("puts the code above its dot, and leaves it out where it would cover another", () => {
+      const layout = airportLabelLayer().layout!;
+
+      // The anchor is the side of the text at the airport
+      expect(layout["text-anchor"]).toBe("bottom");
+      const [x, y] = layout["text-offset"] as [number, number];
+      expect(x).toBe(0);
+      expect(y).toBeLessThan(0);
+      // No variable anchors: the map keeps the one a label had, so a code
+      // pushed beside its dot in a crowded view stayed there zoomed in
+      expect(layout).not.toHaveProperty("text-variable-anchor-offset");
+      expect(layout).not.toHaveProperty("text-allow-overlap");
     });
 
     it("asks the glyph server for the base style's font, with a local fallback", () => {
@@ -85,6 +98,55 @@ describe("airport labels", () => {
         "-",
         ["case", ["get", "home"], Number.MAX_SAFE_INTEGER, ["get", "count"]],
       ]);
+    });
+  });
+
+  describe("airportDotLayer", () => {
+    /** The size the step expression gives at a zoom */
+    function sizeAt(expression: unknown[], zoom: number): number {
+      let size = expression[2] as number;
+      for (let i = 3; i < expression.length; i += 2) {
+        if (zoom >= (expression[i] as number)) {
+          size = expression[i + 1] as number;
+        }
+      }
+      return size;
+    }
+
+    it("stands in for each dot of the label source, placed whatever it overlaps", () => {
+      const layer = airportDotLayer();
+
+      expect(layer.id).toBe(MAP_LAYERS.airportDots);
+      expect(layer.source).toBe(MAP_SOURCES.airportLabels);
+      expect(layer.minzoom).toBe(AIRPORT_HIDE_LABELS_BELOW_ZOOM);
+      expect(layer.layout).toMatchObject({
+        visibility: "none",
+        "icon-image": "airport-dot-room",
+        "icon-allow-overlap": true,
+        "icon-padding": 0,
+      });
+      // Placed, so the codes give way to it
+      expect(layer.layout).not.toHaveProperty("icon-ignore-placement");
+    });
+
+    it("is as large as the dot with its ring at every zoom", () => {
+      const size = airportDotLayer().layout!["icon-size"] as unknown[];
+
+      // --marker-size and twice --marker-border of styles.css
+      expect(sizeAt(size, 4)).toBe(8);
+      expect(sizeAt(size, 5)).toBe(9);
+      expect(sizeAt(size, 7)).toBe(10);
+      expect(sizeAt(size, 9)).toBe(14);
+      expect(sizeAt(size, 11)).toBe(15);
+      expect(sizeAt(size, 13)).toBe(16);
+    });
+
+    it("is placed before the labels, which it is above", () => {
+      const order = Object.values(MAP_LAYERS);
+
+      expect(order.indexOf(MAP_LAYERS.airportDots)).toBe(
+        order.indexOf(MAP_LAYERS.airportLabels) + 1,
+      );
     });
   });
 
@@ -193,8 +255,14 @@ describe("airport labels", () => {
 
       addAirportLabelImages(map as unknown as MapLibreMap);
 
-      expect([...map.images.keys()]).toEqual(["airport-label-chip"]);
-      const options = (map.addImage.mock.calls[0] as unknown[])[2] as {
+      expect([...map.images.keys()].sort()).toEqual([
+        "airport-dot-room",
+        "airport-label-chip",
+      ]);
+      const chip = map.addImage.mock.calls.find(
+        ([id]) => id === "airport-label-chip",
+      ) as unknown[];
+      const options = chip[2] as {
         sdf: boolean;
         pixelRatio: number;
         stretchX: number[][];
@@ -206,7 +274,19 @@ describe("airport labels", () => {
       expect(options.content).toHaveLength(4);
     });
 
-    it("gives the chip back when a new style dropped it, and no other image", () => {
+    it("gives the stand-in of a dot a transparent pixel", () => {
+      const map = createMapLibreMock();
+
+      addAirportLabelImages(map as unknown as MapLibreMap);
+
+      expect(map.images.get("airport-dot-room")).toEqual({
+        width: 1,
+        height: 1,
+        data: new Uint8Array(4),
+      });
+    });
+
+    it("gives the images back when a new style dropped them, and no other image", () => {
       const map = createMapLibreMock();
       addAirportLabelImages(map as unknown as MapLibreMap);
       map.images.clear();
@@ -215,7 +295,13 @@ describe("airport labels", () => {
       expect(map.images.size).toBe(0);
 
       map.emit("styleimagemissing", { id: "airport-label-chip" });
-      expect([...map.images.keys()]).toEqual(["airport-label-chip"]);
+      expect([...map.images.keys()].sort()).toEqual([
+        "airport-dot-room",
+        "airport-label-chip",
+      ]);
+      map.images.clear();
+      map.emit("styleimagemissing", { id: "airport-dot-room" });
+      expect(map.images.size).toBe(2);
     });
   });
 

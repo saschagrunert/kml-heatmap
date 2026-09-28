@@ -138,6 +138,7 @@ class TestRenderHtml:
         substituted = string.Template(load_template()).substitute(
             data_dir_name="my_data_dir",
             year_preload="",
+            year_option="",
             base_style_preload="",
             link_preview="",
         )
@@ -213,6 +214,31 @@ class TestRenderHtml:
         content = output_file.read_text()
         assert "/data.json" not in content
         assert "$year_preload" not in content
+
+    def test_year_filter_names_the_latest_year_from_the_start(self, tmp_path):
+        """It said "All years" until the metadata was in, then the year."""
+        from lxml import html as lxml_html
+
+        output_file = tmp_path / "index.html"
+        render_html(output_file, "data", 2026)
+        select = lxml_html.fromstring(output_file.read_text()).find(
+            ".//select[@id='year-select']"
+        )
+        assert select is not None
+        options = [(o.get("value"), o.text, "selected" in o.attrib) for o in select]
+        # The page adds the other years, and puts them in order
+        assert options == [("all", "All years", False), ("2026", "2026", True)]
+
+    def test_year_filter_offers_all_years_without_a_year(self, tmp_path):
+        from lxml import html as lxml_html
+
+        output_file = tmp_path / "index.html"
+        render_html(output_file, "data")
+        content = output_file.read_text()
+        select = lxml_html.fromstring(content).find(".//select[@id='year-select']")
+        assert select is not None
+        assert [o.get("value") for o in select] == ["all"]
+        assert "$year_option" not in content
 
     def test_loads_the_bundle_as_a_module(self, tmp_path):
         """The bundles are ES modules, and the shared chunk is on its way

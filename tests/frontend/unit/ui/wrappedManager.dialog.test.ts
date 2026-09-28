@@ -48,6 +48,49 @@ describe("WrappedManager dialog", () => {
     vi.advanceTimersByTime(50);
   }
 
+  describe("More below", () => {
+    /** The column with the button in its first card */
+    function column(): HTMLElement {
+      const cards = el("wrapped-cards-column");
+      const first = document.createElement("section");
+      const second = document.createElement("section");
+      first.append(el("wrapped-more-btn"));
+      cards.append(first, second);
+      cards.getBoundingClientRect = () => ({ top: 60 }) as DOMRect;
+      // Below the column's top: the first card is taller than the column
+      second.getBoundingClientRect = () => ({ top: 772 }) as DOMRect;
+      cards.scrollBy = vi.fn();
+      return cards;
+    }
+
+    it("brings the next card to the top of the column", () => {
+      openWrapped();
+      const cards = column();
+
+      el("wrapped-more-btn").click();
+
+      // As far as the next card is below the column's top, not a page
+      // down: the first card may be taller than the column
+      expect(cards.scrollBy).toHaveBeenCalledWith({
+        top: 712,
+        behavior: "smooth",
+      });
+    });
+
+    it("jumps there under reduced motion", () => {
+      vi.spyOn(motion, "prefersReducedMotion").mockReturnValue(true);
+      openWrapped();
+      const cards = column();
+
+      el("wrapped-more-btn").click();
+
+      expect(cards.scrollBy).toHaveBeenCalledWith({
+        top: 712,
+        behavior: "instant",
+      });
+    });
+  });
+
   describe("opening", () => {
     it("shows the modal and records it in the store", () => {
       wrappedManager.showWrapped();

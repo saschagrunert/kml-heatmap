@@ -392,14 +392,12 @@ export class MobileSheet {
       return;
     }
 
-    // A placeholder that cannot be picked (see showNoYear) stays one here
     const options = Array.from(source.options).map((option) => ({
       value: option.value,
       label:
         option.value === "all"
           ? ALL_OPTION_LABEL
           : (option.textContent ?? option.value).trim(),
-      placeholder: option.disabled && option.hidden === true,
     }));
 
     const unchanged =
@@ -408,8 +406,7 @@ export class MobileSheet {
         const existing = select.options[index];
         return (
           existing?.value === option.value &&
-          existing.textContent === option.label &&
-          existing.disabled === option.placeholder
+          existing.textContent === option.label
         );
       });
 
@@ -419,8 +416,6 @@ export class MobileSheet {
         const element = document.createElement("option");
         element.value = option.value;
         element.textContent = option.label;
-        element.disabled = option.placeholder;
-        element.hidden = option.placeholder;
         select.append(element);
       }
     }

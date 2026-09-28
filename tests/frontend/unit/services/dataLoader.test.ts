@@ -1206,7 +1206,50 @@ describe("DataLoader", () => {
         ["test-data/metadata.json"],
         ["test-data/airports.json"],
       ]);
-      expect(mockShowLoading).not.toHaveBeenCalled();
+      // A load of no year, with no size and no bar
+      for (const [state] of mockShowLoading.mock.calls) {
+        expect(state).toMatchObject({
+          all: false,
+          years: [],
+          fileBytes: undefined,
+          totalBytes: undefined,
+        });
+      }
+    });
+
+    it("shows the indicator while the index files come in, and no longer", async () => {
+      let answer!: (json: unknown) => void;
+      mockFetchJson.mockImplementationOnce(
+        () => new Promise((resolve) => (answer = resolve)),
+      );
+
+      const metadata = loader.loadMetadata();
+
+      // The page used to be an empty map until the first year was asked for
+      expect(mockShowLoading).toHaveBeenCalledTimes(1);
+      expect(mockHideLoading).not.toHaveBeenCalled();
+      answer({ available_years: [2025] });
+      await metadata;
+      expect(mockHideLoading).toHaveBeenCalledTimes(1);
+
+      // Once in, the index is not asked for again, nor shown as a load
+      await loader.loadMetadata();
+      expect(mockShowLoading).toHaveBeenCalledTimes(1);
+    });
+
+    it("keeps the indicator up from the index to the year it names", async () => {
+      defineYear(2025);
+      files["test-data/metadata.json"] = { available_years: [2025] };
+
+      const all = loader.loadData("all");
+      await vi.waitFor(() => expect(request(2025)).toBeDefined());
+      request(2025).settle();
+      await all;
+
+      // One load throughout, the index within the load of all years
+      expect(mockHideLoading).toHaveBeenCalledTimes(1);
+      expect(shown()[0]).toBe("all: (undefined) 0/undefined");
+      expect(shown().at(-1)).toBe("all:2025 (undefined) 0/undefined");
     });
 
     it("takes the exported fetchJson as it is", () => {
