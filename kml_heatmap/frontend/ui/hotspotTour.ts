@@ -20,8 +20,8 @@
  * the saved state are what they had. A press, a wheel or a key on the map
  * ends it where it is instead, in the 3D view: the user has taken the map
  * over there, which is what the tour is the way into. Until then the state
- * manager saves the view the tour started from (MapApp.tourView), as it
- * saves the one Wrapped holds.
+ * manager saves the view the tour started from (tourView in the store), as
+ * it saves the one Wrapped holds.
  *
  * Under reduced motion nothing flies or turns: the camera cuts to each
  * place, and the tour stays there until the user steps on, with nothing to

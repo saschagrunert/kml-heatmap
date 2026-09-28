@@ -406,6 +406,30 @@ describe("LayerGl", () => {
       expect(gl.createProgram).toHaveBeenCalledTimes(2);
     });
 
+    it("keeps no program that did not compile: back on the map, it is tried again and told again", () => {
+      // The globe's works, the flat map's does not
+      begin(frame(true));
+      gl.getShaderParameter.mockReturnValueOnce(false);
+      expect(begin()).toBeNull();
+      expect(failed).toHaveBeenCalledOnce();
+      objects.release(context());
+
+      // Back in the same context object, as after a loss the layer did not
+      // hear of while off the map: the globe's program is kept, the
+      // failure is not
+      expect(begin(frame(true))).not.toBeNull();
+      expect(gl.createProgram).toHaveBeenCalledTimes(2);
+      gl.getShaderParameter.mockReturnValueOnce(false);
+      expect(begin()).toBeNull();
+      expect(gl.createProgram).toHaveBeenCalledTimes(3);
+      expect(failed).toHaveBeenCalledTimes(2);
+
+      // And where it compiles now, it draws
+      objects.release(context());
+      expect(begin()).not.toBeNull();
+      expect(failed).toHaveBeenCalledTimes(2);
+    });
+
     it("makes the programs anew in another context", () => {
       begin();
       objects.release(context());

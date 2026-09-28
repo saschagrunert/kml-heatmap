@@ -5,6 +5,7 @@
 
 import { logError } from "../utils/logger";
 import type { KMLDataset } from "../types";
+import type { TourView } from "../ui/hotspotTour";
 import { initialToggles, TOGGLE_KEYS, type ToggleFlags } from "./toggles";
 
 export interface Range {
@@ -84,6 +85,12 @@ export interface StoreState extends ToggleFlags {
    * what the map shows follows from both (see ui/layerVisibility.ts).
    */
   replayActive: boolean;
+  /**
+   * The user's view while the hotspot tour holds the map, null otherwise
+   * (see ui/hotspotTour.ts, its only writer): the one the state manager
+   * saves, as Wrapped's. Neither saved nor carried by a link.
+   */
+  tourView: TourView | null;
   currentData: KMLDataset | null;
   /** Whether the exported flights carry groundspeeds (metadata.json) */
   hasTimingData: boolean;
@@ -124,6 +131,7 @@ export const STORE_ACCESSOR_KEYS = [
   "heightBand",
   "selectionRibbons",
   "replayActive",
+  "tourView",
   "currentData",
   "hasTimingData",
 ] as const;
@@ -172,6 +180,7 @@ export function createDefaultState(): StoreState {
     heightBand: "",
     selectionRibbons: false,
     replayActive: false,
+    tourView: null,
     currentData: null,
     hasTimingData: false,
   };

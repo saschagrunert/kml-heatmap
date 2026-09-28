@@ -952,9 +952,15 @@ drops them (`webglcontextlost`), and the style MapLibre gets back has no
 custom layers, so `ui/heatCloud.ts` adds the layer again on `style.load`,
 and on `styledata` after a new base style. Shaders that do not compile turn
 it off with one logged error, and the flat heatmap stays, until the context
-is restored, where they are tried again (the replay of all flights alike);
-what fails while the context is lost (`isContextLost`: every GL object is
-null and no shader compiles) is no failure (`LayerGl`). It only
+is restored, where they are tried again (the replay of all flights alike,
+which closes its panel with an error toast in the run that failed). A
+program that did not compile is not kept for the layer's return
+(`release`): a context lost and restored while the layer was off the map,
+which it does not hear of, is the same object, and the kept failure was
+handed out there again without a word, the cloud drawing nothing while the
+heatmap stood aside for it. What fails while the context is lost
+(`isContextLost`: every GL object is null and no shader compiles) is no
+failure (`LayerGl`). It only
 draws: a custom layer has no features for `queryRenderedFeatures`, and the
 ribbons stay what is hovered and clicked (the readout below works out what
 the cloud under the pointer is made of from the segments instead). An
@@ -1084,7 +1090,8 @@ distance flown there), the flights that were there and the 400 ft band of
 height above the ground most of it was in. `ui/cloudReadout.ts` (feature bundle, started by `followHeatCloud`)
 listens to the map's pointer events only while the 3D view draws the cloud
 (`threeDVisible` and `heatCloud`, the Heatmap switch on, no replay, not in
-Wrapped or its intro's `forcedHeatCloud`) and looks once per frame at most
+Wrapped or its intro's `forcedHeatCloud`, nor while the hotspot tour holds
+the map, `tourView` in the store) and looks once per frame at most
 (`frameCoalescer`); with the 3D view off it holds nothing but its store
 subscription, and lets go of what it kept. `calculations/cloudReadout.ts`
 is the maths:
@@ -1133,20 +1140,39 @@ is the maths:
   four with the most of it, "mostly" from half of it on. The exposure never
   enters it: the box speaks of time or distance, not of heat. A change of
   the switches tells a resting pointer anew.
-- The segments near a place come from a grid made per dataset the first
-  time a radius is asked for (`segmentGrid`, a `WeakMap` on
-  `path_segments`, let go with the 3D view), its cells twice the radius. A
-  segment goes into the cells of points along it at most half a cell
-  apart, so a query looks in the cells within its reach and one more, and
-  visits each segment once (a stamp per segment). The grids of the three
-  radii asked for last are kept: the finer the grid, the more cells a
-  segment is in, and for 130,000 segments the one of 100 m took 13 MB and
-  the one of 1 km 2.3 MB. The seconds and the heights are kept alike, the
+- The segments near a place come from a grid made per dataset for each
+  radius (`segmentGrid`, a `WeakMap` on `path_segments`, let go with the
+  3D view), its cells twice the radius. A segment goes into the cells of
+  points along it at most half a cell apart, so a query looks in the
+  cells within its reach and one more, and visits each segment once (a
+  stamp per segment). The grids of the three radii asked for last are
+  kept: the finer the grid, the more cells a segment is in, and for
+  130,000 segments the one of 100 m took 13 MB and the one of 1 km
+  2.3 MB. The seconds and the heights are kept alike, the
   seconds per weighing (`heatWeight` gives one function per switches), the
   heights per relief level. On 100,000 synthetic segments around one
   field, the grid took 12 to 16 ms to make and a readout 0.5 ms at 500 m
   and 1.6 ms at 5 km (Node, desktop CPU); the 49 `unproject` calls of a
   line of sight took 0.3 ms over the relief in Chrome.
+
+The pointer's frames do little: a move of up to 3 px from where the
+readout was last worked out keeps it and moves the box along
+(`READOUT_SLACK_PX`), and nothing is worked out while the map moves
+(`isMoving`), which tells a resting pointer anew where it comes to rest.
+What a readout at a zoom is worked out from (the seconds, the heights and
+the grid of its radius, `readoutKept`) is made ahead of the pointer, once
+the page has a moment (`requestIdleCallback`, a timeout where Safari lacks
+it) after the map comes to rest and as the readout comes on; a hover that
+finds it missing hides the box and waits for it, and a click or a tap,
+which wants its answer, makes it. A zoom across a step of the radius used
+to make the grid in the next hover's frame or in the tap. With the two
+years of `data/` (135,000 segments) in the unit tests' jsdom on a desktop
+CPU, the frames of the first hover in the 3D view took 70 ms before and 14
+to 19 ms after (the rest, 53 to 59 ms, in an idle task), those after a
+rest at the next two zoom levels 19 to 29 ms before and 1.5 to 7 ms after
+(13 to 27 ms idle), and twenty moves of a pixel 25 ms and 20 readouts
+before, 2.3 ms and none after. A readout in the 3D view takes up to 49
+`unproject` and `project` pairs.
 
 With a colour layer on, the 3D view draws the flights as ribbons, and
 around a busy field the ribbons are within `PathHover`'s few pixels of nearly every point: at

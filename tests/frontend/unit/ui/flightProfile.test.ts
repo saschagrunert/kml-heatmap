@@ -381,10 +381,17 @@ describe("flight profile", () => {
       const dot = root.querySelector<HTMLElement>(".profile-dot")!;
       expect(dot.hidden).toBe(false);
       expect(dot.style.left).toBe("50%");
-      const mapDot = app
-        .map!.getCanvasContainer()
-        .querySelector(".profile-map-dot");
+      const container = app.map!.getCanvasContainer();
+      const mapDot = container.querySelector(".profile-map-dot");
       expect(mapDot).not.toBeNull();
+      // Moved as the pointer goes on, not taken off the map and put on anew
+      const changes = new MutationObserver(() => {});
+      changes.observe(container, { childList: true, subtree: true });
+      plot.dispatchEvent(pointer("pointermove", 0.6));
+      plot.dispatchEvent(pointer("pointermove", 0.7));
+      expect(changes.takeRecords()).toHaveLength(0);
+      changes.disconnect();
+      expect(container.querySelector(".profile-map-dot")).toBe(mapDot);
 
       plot.dispatchEvent(pointer("pointerleave", 0.5));
       expect(text(root, ".profile-readout")).toBe("");

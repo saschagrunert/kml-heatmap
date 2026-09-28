@@ -729,6 +729,35 @@ describe("the replay of all flights", () => {
       expect(controls.isOpen).toBe(false);
     });
 
+    it("says so as its shaders fail in the run they were first tried in, and closes", async () => {
+      controls.show();
+      expect(controls.isOpen).toBe(true);
+      const layer = (
+        controls.player as unknown as {
+          layer: { failed: (error: unknown) => void };
+        }
+      ).layer;
+      vi.spyOn(console, "error").mockImplementation(() => {});
+      // In the first frame of the layer on the map
+      layer.failed(new Error("the replay's shader did not compile"));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(controls.isOpen).toBe(false);
+      expect(app.replayActive).toBe(false);
+      expect(toast.showToast).toHaveBeenCalledOnce();
+      expect(toast.showToast).toHaveBeenCalledWith(
+        REPLAY_ALL_UNAVAILABLE_MESSAGE,
+        "error",
+      );
+    });
+
+    it("says nothing of the shaders as it closes where they worked", () => {
+      controls.show();
+      controls.close();
+
+      expect(toast.showToast).not.toHaveBeenCalled();
+    });
+
     it("plays again in the context the map gets back after a loss, which is what its shaders may have failed with", async () => {
       const layer = (
         controls.player as unknown as {

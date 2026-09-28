@@ -467,6 +467,27 @@ describe("the heat cloud's layer", () => {
     expect(gl.drawArraysInstanced).toHaveBeenCalledTimes(2 * PASSES);
   });
 
+  it("tries shaders that did not compile again once it is back on the map, and says so again where they still do not", () => {
+    gl = mockGl(false);
+    layer.onAdd(map);
+    layer.setPoints(points());
+    render();
+    expect(failed).toHaveBeenCalledOnce();
+    // Taken off the map for it (ui/heatCloud.ts), and put back after a
+    // loss and restore it did not hear of: the same context object
+    layer.onRemove(map, gl as unknown as WebGL2RenderingContext);
+    layer.onAdd(map);
+    render();
+    expect(failed).toHaveBeenCalledTimes(2);
+
+    layer.onRemove(map, gl as unknown as WebGL2RenderingContext);
+    gl.getShaderParameter.mockReturnValue(true);
+    layer.onAdd(map);
+    render();
+    expect(failed).toHaveBeenCalledTimes(2);
+    expect(gl.drawArraysInstanced).toHaveBeenCalledTimes(PASSES);
+  });
+
   it("does not touch a context that was lost", () => {
     layer.onAdd(map);
     layer.setPoints(points());
