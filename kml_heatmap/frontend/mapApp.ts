@@ -94,7 +94,6 @@ import {
 import type { ReplayManager } from "./ui/replayManager";
 import type { StatsManager } from "./ui/statsManager";
 import type { WrappedManager } from "./ui/wrappedManager";
-import type { TourView } from "./ui/hotspotTour";
 import type { FeatureModule } from "./features";
 import type {
   AircraftModels,
@@ -393,11 +392,6 @@ export class MapApp {
   statsManager?: StatsManager | undefined;
   replayManager?: ReplayManager | undefined;
   wrappedManager?: WrappedManager | undefined;
-  /**
-   * The user's view while the hotspot tour holds the map, set by the tour
-   * (ui/hotspotTour.ts): the one the state manager saves, as Wrapped's
-   */
-  tourView: TourView | null = null;
   uiToggles!: UIToggles;
   mobileBar!: MobileBar | null;
 

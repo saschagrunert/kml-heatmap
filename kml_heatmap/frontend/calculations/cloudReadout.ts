@@ -22,7 +22,8 @@
  * distance), of the part of the segment within the radius. The segments
  * near a place are found in a grid of cells twice the radius
  * (segmentGrid), made the first time a radius is asked for and kept with
- * the dataset, those of the last few radii.
+ * the dataset, those of the last few radii. The readout makes it ahead of
+ * the pointer, where the map comes to rest (see readoutKept).
  */
 import type { PathSegment } from "../types";
 import {
@@ -268,6 +269,30 @@ export function segmentGrid(
   }
   grids.set(radiusM, grid);
   return grid;
+}
+
+/**
+ * Whether what a readout of `radiusM` is worked out from is kept for the
+ * dataset: its seconds as `weigh` weighs them, its heights on the ground of
+ * `sampled` and `level` (see readoutData) and its grid for the radius (see
+ * segmentGrid). Each took some 5 to 35 ms to make for 135,000 segments on
+ * a desktop, several times that on a phone, which the pointer's frames
+ * leave to a moment of their own.
+ */
+export function readoutKept(
+  segments: readonly PathSegment[],
+  sampled: boolean,
+  level: number,
+  weigh: SegmentWeight,
+  radiusM: number,
+): boolean {
+  const entry = kept.get(segments);
+  return (
+    !!entry &&
+    entry.seconds.has(weigh) &&
+    entry.heights.has(sampled ? level : -1) &&
+    entry.grids.has(radiusM)
+  );
 }
 
 /** Let go of what was kept for every dataset, as the 3D view goes */

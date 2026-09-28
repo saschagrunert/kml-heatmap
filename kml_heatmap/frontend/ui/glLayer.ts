@@ -5,8 +5,8 @@
  * points, from a buffer of points uploaded once; a program per projection,
  * built on the prelude MapLibre hands a custom layer, so the same shaders
  * work on the globe; and GL objects made for one context, anew after it
- * was lost. The programs outlast the layer's time off the map, as long as
- * their context does.
+ * was lost. The programs that compiled outlast the layer's time off the
+ * map, as long as their context does.
  */
 import type { CustomRenderMethodInput } from "maplibre-gl";
 
@@ -58,7 +58,10 @@ interface Resources<U extends string> {
   corners: WebGLBuffer;
   points: WebGLBuffer;
   vao: WebGLVertexArrayObject;
-  /** By MapLibre's shader variant, one per projection; null did not work */
+  /**
+   * By MapLibre's shader variant, one per projection; null did not work,
+   * which holds while the layer stays on the map (see release)
+   */
   programs: Map<string, Program<U> | null>;
   /** What the points uploaded to `points` are of */
   uploaded: object | null;
@@ -124,7 +127,12 @@ export class LayerGl<U extends string> {
 
   /**
    * Let go of the buffers made in `gl`, unless that context is lost, and
-   * keep the programs for the layer's return
+   * keep the programs for the layer's return. Not what did not compile:
+   * that took the layer off the map (see `failed`), and it comes back only
+   * in a new context, which after a loss it did not hear of while off the
+   * map is the very same object. Kept, the failure was handed out there
+   * again without a word: the heat cloud drew nothing while the heatmap
+   * stood aside for it, and `failed` was never told.
    */
   release(gl: WebGL2RenderingContext): void {
     const resources = this.resources;
@@ -133,7 +141,11 @@ export class LayerGl<U extends string> {
     gl.deleteBuffer(resources.corners);
     gl.deleteBuffer(resources.points);
     gl.deleteVertexArray(resources.vao);
-    this.kept = { gl, programs: resources.programs };
+    const programs: Resources<U>["programs"] = new Map();
+    for (const [variant, program] of resources.programs) {
+      if (program) programs.set(variant, program);
+    }
+    this.kept = { gl, programs };
   }
 
   /** The GL objects for the context `gl`, made the first time */

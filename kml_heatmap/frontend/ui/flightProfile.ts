@@ -276,8 +276,11 @@ export function followFlightProfile(app: MapApp): HTMLElement {
       : 0;
     marker
       .setLngLat(toLngLat([lat, lon1 + (lon2 - lon1) * fraction]))
-      .setOffset([0, -lift])
-      .addTo(map);
+      .setOffset([0, -lift]);
+    // Put on the map once and moved after that: MapLibre takes a marker
+    // off the map and puts it on again for every addTo, which was at every
+    // move of a pointer or a finger over the chart
+    if (!marker.getElement().parentNode) marker.addTo(map);
   };
 
   /** Draw the chart and the figures of the profile */

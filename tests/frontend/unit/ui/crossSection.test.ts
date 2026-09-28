@@ -231,11 +231,22 @@ describe("cross-section", () => {
       expect(part(".section-place-btn").textContent).toBe(
         "Set B at the map centre",
       );
-      // The mouse drags the line along before B is placed
+      // The mouse drags the line along before B is placed, once a frame to
+      // where the pointer is last
+      const source = map.source(CROSS_SECTION_SOURCE);
+      const setData = source.setData;
+      setData.mockClear();
+      window.dispatchEvent(pointer("pointermove", screen(LON - 0.01)));
       window.dispatchEvent(pointer("pointermove", screen(LON)));
-      const preview = map.source(CROSS_SECTION_SOURCE)
-        .data as GeoJSON.FeatureCollection;
+      expect(setData).not.toHaveBeenCalled();
+      frames.run();
+      expect(setData).toHaveBeenCalledOnce();
+      const preview = source.data as GeoJSON.FeatureCollection;
       expect(preview.features).toHaveLength(2);
+      const line = preview.features[1]!.geometry as GeoJSON.LineString;
+      expect(line.coordinates.at(-1)![0]).toBeCloseTo(LON, 6);
+      frames.run();
+      expect(setData).toHaveBeenCalledOnce();
 
       expect(tap(canvas, LON + 0.035)).toBe(false);
 
@@ -272,7 +283,7 @@ describe("cross-section", () => {
     });
 
     it("draws a line by dragging", async () => {
-      const { app, canvas } = await setup();
+      const { app, map, canvas } = await setup();
       await open(app);
 
       canvas.dispatchEvent(pointer("pointerdown", screen(LON - 0.035)));
@@ -283,6 +294,12 @@ describe("cross-section", () => {
       window.dispatchEvent(pointer("pointerup", screen(LON + 0.035)));
 
       expect(summary()).toContain("of a 5.0 km line");
+      // The frame the last move asked for draws no line being drawn over it
+      frames.run();
+      const drawn = map.source(CROSS_SECTION_SOURCE)
+        .data as GeoJSON.FeatureCollection;
+      const line = drawn.features[1]!.geometry as GeoJSON.LineString;
+      expect(line.coordinates.at(-1)![0]).toBeCloseTo(LON + 0.035, 6);
     });
 
     it("gives the next click back to the map after a drag without one", async () => {
@@ -558,6 +575,16 @@ describe("cross-section", () => {
       );
       const dot = map.getCanvasContainer().querySelector(".profile-map-dot");
       expect(dot).not.toBeNull();
+      // Moved as the pointer goes on, not taken off the map and put on anew
+      const marker = (markers as MockMarker[]).find(
+        (made) => made.getElement() === dot,
+      )!;
+      const first = marker.getLngLat()!.lng;
+      plot.dispatchEvent(
+        pointer("pointermove", { clientX: 150, clientY: 64 - 0.82 * 64 }),
+      );
+      expect(marker.addTo).toHaveBeenCalledOnce();
+      expect(marker.getLngLat()!.lng).toBeGreaterThan(first);
 
       // Away from the flight there was no time
       plot.dispatchEvent(pointer("pointermove", { clientX: 10, clientY: 60 }));

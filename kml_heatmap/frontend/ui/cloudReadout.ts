@@ -26,16 +26,25 @@
  * read out, which would speak at every move. The box takes no pointer
  * events, so the map under it keeps its hover, clicks and drags.
  *
- * Nothing of it runs while the 3D view is off or the cloud is not drawn:
- * the map's pointer events are only listened to while it is, and what it
- * keeps (the seconds, heights and grids of a dataset) goes with the 3D
- * view. It comes with the feature bundle, with the cloud (see
- * ui/heatCloud.ts). The flat heatmap has no readout: its code would have
- * to come with the first visit, or this bundle with every one.
+ * The pointer's frames do little: a move of a few pixels keeps what was
+ * worked out (READOUT_SLACK_PX), nothing is worked out while the map moves,
+ * and what a readout at a zoom is worked out from (the seconds, heights and
+ * grid of calculations/cloudReadout.ts) is made once the page has a moment
+ * after the map comes to rest, ahead of the pointer. A hover that finds it
+ * missing waits for it; a click or a tap, which wants its answer, makes it.
+ *
+ * Nothing of it runs while the 3D view is off, the cloud is not drawn or
+ * the hotspot tour holds the map: the map's pointer events are only
+ * listened to while it is, and what it keeps (the seconds, heights and
+ * grids of a dataset) goes with the 3D view. It comes with the feature
+ * bundle, with the cloud (see ui/heatCloud.ts). The flat heatmap has no
+ * readout: its code would have to come with the first visit, or this
+ * bundle with every one.
  */
 import type { LngLat, MapMouseEvent, MapTouchEvent, Point } from "maplibre-gl";
 import type { MapApp } from "../mapApp";
 import type { StoreState } from "../state/store";
+import type { PathSegment } from "../types";
 import { datasetIndex } from "../calculations/datasetIndex";
 import { heightBandEdgesFt, parseHeightBand } from "../calculations/heightBand";
 import { heatWeight } from "../calculations/heatLines";
@@ -43,12 +52,14 @@ import { airplaneLiftPx, liftExaggeration } from "../calculations/lift";
 import {
   readoutAt,
   readoutData,
+  readoutKept,
   readoutRadiusM,
   readoutText,
   releaseReadoutData,
   segmentGrid,
   sightLine,
   type CloudReadout,
+  type ReadoutData,
 } from "../calculations/cloudReadout";
 import { frameCoalescer } from "../utils/frameCoalescer";
 import { DEGREES_TO_RADIANS, metresPerPixel } from "../utils/geometry";
@@ -86,6 +97,21 @@ const MAP_PANELS_SELECTOR = [
 const ESCAPE_SLACK_PX = 8;
 
 /**
+ * Pixels the pointer may move from where the readout was last worked out
+ * and keep it: the box follows, the words stay. Working one out takes up to
+ * 49 looks from the screen to the ground and back along the line of sight
+ * (see sightLine), each a read of the relief's depth in the 3D view, and a
+ * radius is some tens of pixels, which a few pixels hardly change.
+ */
+const READOUT_SLACK_PX = 3;
+
+/**
+ * Longest what a readout needs at a new zoom waits for the page to have a
+ * moment (whenIdle)
+ */
+const PREPARE_IDLE_MS = 500;
+
+/**
  * Milliseconds after a touch in which a click or a move of the mouse is
  * the browser's for the tap, not one of a mouse
  */
@@ -108,7 +134,22 @@ const READOUT_KEYS: readonly (keyof StoreState)[] = [
   "terrainActive",
   "reliefLevel",
   "routeWeighting",
+  "tourView",
 ];
+
+/**
+ * Run `work` in a task of its own once the page has a moment, as far as
+ * the browser tells (requestIdleCallback, which Safari lacks), and not in
+ * the task of the event that asked for it; as Wrapped's intro does (see
+ * ui/wrappedIntro.ts), whose bundle this one does not share
+ */
+function whenIdle(work: () => void): void {
+  if (typeof requestIdleCallback === "function") {
+    requestIdleCallback(work, { timeout: PREPARE_IDLE_MS });
+  } else {
+    setTimeout(work, 0);
+  }
+}
 
 /** The edges of a box on the map, in its pixels */
 interface Edges {
@@ -132,8 +173,9 @@ export function followCloudReadout(app: MapApp): void {
   const container = map.getContainer();
 
   /**
-   * Whether the cloud of the 3D view is drawn. Wrapped's intro draws it
-   * too (forcedHeatCloud), but there the map is only looked at.
+   * Whether the cloud of the 3D view is drawn, and the map is the user's.
+   * Wrapped's intro draws it too (forcedHeatCloud), but there the map is
+   * only looked at, and so it is while the hotspot tour flies over it.
    */
   const active = (): boolean =>
     app.threeDVisible &&
@@ -141,7 +183,8 @@ export function followCloudReadout(app: MapApp): void {
     app.heatmapVisible &&
     !app.forcedHeatCloud &&
     !app.replayActive &&
-    !app.wrappedVisible;
+    !app.wrappedVisible &&
+    !app.tourView;
 
   let box: HTMLElement | null = null;
   /** The pointer of the last move over the map, null off it */
@@ -164,6 +207,12 @@ export function followCloudReadout(app: MapApp): void {
 
   /** Where the box was last put, for placing it again */
   let shownAt: { point: Point; finger: boolean } | null = null;
+  /**
+   * Where the pointer's frames last worked a readout out, and what it was,
+   * for the moves of a few pixels after it (READOUT_SLACK_PX); null once
+   * the map, the pointer or what the readout is of has moved on
+   */
+  let worked: { point: Point; readout: CloudReadout | null } | null = null;
 
   const hide = (): void => {
     shownAt = null;
@@ -266,22 +315,89 @@ export function followCloudReadout(app: MapApp): void {
     place(point, finger);
   };
 
-  /** The readout of the cloud under the point `point` of the map */
-  const readoutUnder = (point: Point): CloudReadout | null => {
-    const data = app.currentData;
-    if (!data || !keep) return null;
+  /**
+   * The radius of a readout at the map's zoom, in metres and in pixels, and
+   * the zoom and the latitude of the middle of the map it is for
+   */
+  const radiusNow = () => {
     const zoom = map.getZoom();
     const lat = map.getCenter().lat;
     const pixelM = metresPerPixel(zoom) * Math.cos(lat * DEGREES_TO_RADIANS);
     const radiusM = readoutRadiusM(pixelM, cloudReachPx(zoom));
-    const radiusPx = radiusM / pixelM;
-    const segments = data.path_segments;
-    const prepared = readoutData(
+    return { radiusM, radiusPx: radiusM / pixelM, zoom, lat };
+  };
+
+  /**
+   * Whether what a readout of `radiusM` of the dataset `segments` is worked
+   * out from is kept (see readoutKept)
+   */
+  const ready = (segments: readonly PathSegment[], radiusM: number): boolean =>
+    readoutKept(
+      segments,
+      app.terrainActive,
+      app.reliefLevel,
+      heatWeight(app.routeWeighting),
+      radiusM,
+    );
+
+  /** The seconds and heights of the dataset `segments` (see readoutData) */
+  const dataOf = (segments: readonly PathSegment[]): ReadoutData =>
+    readoutData(
       segments,
       app.terrainActive,
       app.reliefLevel,
       heatWeight(app.routeWeighting),
     );
+
+  /** Whether prepare's task is on its way */
+  let preparing = false;
+
+  /**
+   * Make what a readout at the map's zoom is worked out from where it is
+   * not kept, once the page has a moment (whenIdle), and look again under
+   * the pointer then. A zoom across a step of the radius needs another
+   * grid, and a dataset or a relief level its seconds and heights the
+   * first time: each took some tens of milliseconds on a desktop and
+   * hundreds on a phone, in the frame of the next hover or in the tap. Not
+   * while the map moves: it is asked for again where the map comes to rest.
+   */
+  const prepare = (): void => {
+    const data = app.currentData;
+    if (preparing || !data || ready(data.path_segments, radiusNow().radiusM)) {
+      return;
+    }
+    preparing = true;
+    whenIdle(() => {
+      preparing = false;
+      const data = app.currentData;
+      if (!listening || !data || map.isMoving()) return;
+      const segments = data.path_segments;
+      const { radiusM } = radiusNow();
+      if (ready(segments, radiusM)) return;
+      dataOf(segments);
+      segmentGrid(segments, radiusM);
+      retell();
+    });
+  };
+
+  /**
+   * The readout of the cloud under the point `point` of the map. With
+   * `waits`, as the pointer's frames ask, undefined where what it is worked
+   * out from is still to be made: prepare makes it and looks again.
+   */
+  const readoutUnder = (
+    point: Point,
+    waits = false,
+  ): CloudReadout | null | undefined => {
+    const data = app.currentData;
+    if (!data || !keep) return null;
+    const { radiusM, radiusPx, zoom, lat } = radiusNow();
+    const segments = data.path_segments;
+    if (waits && !ready(segments, radiusM)) {
+      prepare();
+      return undefined;
+    }
+    const prepared = dataOf(segments);
     // Lifted as the cloud is (ui/heatCloud.ts), and taken down the screen
     // by as much as a ribbon under the pointer is (PathHover.nearest)
     const exaggeration =
@@ -324,8 +440,22 @@ export function followCloudReadout(app: MapApp): void {
 
   const hover = frameCoalescer<{ point: Point; finger: boolean }>(
     ({ point, finger }) => {
-      const readout = active() && !dismissedAt ? readoutUnder(point) : null;
-      if (readout) show(readout, point, finger);
+      // Nothing is worked out while the map moves under the pointer (a
+      // zoom by the wheel, a move of the app's): a zoom across the steps
+      // of the radius made a grid for each on the way. It is looked at
+      // again where the map comes to rest.
+      if (!active() || dismissedAt || map.isMoving()) return hide();
+      if (
+        !worked ||
+        Math.hypot(point.x - worked.point.x, point.y - worked.point.y) >
+          READOUT_SLACK_PX
+      ) {
+        const readout = readoutUnder(point, true);
+        // What it is worked out from is on its way (prepare)
+        if (readout === undefined) return hide();
+        worked = { point, readout };
+      }
+      if (worked.readout) show(worked.readout, point, finger);
       else hide();
     },
   );
@@ -335,6 +465,7 @@ export function followCloudReadout(app: MapApp): void {
    * where it still is on the map
    */
   const retell = (): void => {
+    worked = null;
     if (pointer) {
       hover.schedule({ point: pointer, finger: false });
     } else if (tapped) {
@@ -354,6 +485,7 @@ export function followCloudReadout(app: MapApp): void {
     pointer = null;
     dismissedAt = null;
     tapped = null;
+    worked = null;
     hover.cancel();
     hide();
   };
@@ -376,13 +508,18 @@ export function followCloudReadout(app: MapApp): void {
   };
 
   const onMoveStart = (): void => {
+    worked = null;
     hover.cancel();
     hide();
   };
 
   // A zoom by the wheel moves the map from under a pointer that rests,
-  // and the app from under a tap
-  const onMoveEnd = (): void => retell();
+  // and the app from under a tap; and a zoom may need another radius,
+  // whose grid is made before a tap or a hover asks for it
+  const onMoveEnd = (): void => {
+    retell();
+    prepare();
+  };
 
   const onPress = (): void => {
     changesAtPress = selectionChanges;
@@ -504,6 +641,8 @@ export function followCloudReadout(app: MapApp): void {
       if (on) retell();
     }
     listen(on);
+    // Ahead of a tap, which has no resting pointer to look again under
+    if (on) prepare();
   };
 
   void app.mapReady.then(() => {

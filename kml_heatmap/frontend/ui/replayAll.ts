@@ -735,6 +735,11 @@ export class ReplayAllControls {
     const player = this.player;
     if (!player.active) {
       this.close();
+      // Its shaders failed in the first frame of this run: said now, and
+      // not only at the next click, which finds the player unavailable
+      if (player.unavailable) {
+        showToast(REPLAY_ALL_UNAVAILABLE_MESSAGE, "error");
+      }
       return;
     }
     const play = panel.querySelector<HTMLElement>("#replay-all-play-btn");

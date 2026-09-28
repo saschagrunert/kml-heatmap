@@ -48,6 +48,7 @@ import { datasetIndex } from "../calculations/datasetIndex";
 import { ROUTE_SPEED_MS } from "../calculations/heatLines";
 import { MAP_LAYERS } from "../utils/constants";
 import { formatNumber } from "../utils/formatters";
+import { frameCoalescer } from "../utils/frameCoalescer";
 import {
   DEGREES_TO_RADIANS,
   metresPerPixel,
@@ -811,7 +812,11 @@ function createTool(app: MapApp): Tool {
         className: "profile-map-dot",
       }),
     });
-    dot.setLngLat(toLngLat(fromFrame(frame, along, 0))).addTo(target);
+    dot.setLngLat(toLngLat(fromFrame(frame, along, 0)));
+    // Put on the map once and moved after that: MapLibre takes a marker
+    // off the map and puts it on again for every addTo, which was at every
+    // move of the pointer over the chart
+    if (!dot.getElement().parentNode) dot.addTo(target);
   };
 
   // Drawing a line
@@ -830,10 +835,23 @@ function createTool(app: MapApp): Tool {
   const tooShort = (from: Coordinate, to: Coordinate): boolean =>
     lineFrame(from, to).lengthM < MIN_LINE_M;
 
+  /**
+   * Draw the corridor of the line being drawn to where the pointer of
+   * `event` is, once a frame: the map's source is set anew for each, which
+   * MapLibre hands to its worker, and a pointer moves many times a frame
+   */
+  const corridorFrame = frameCoalescer<PointerEvent>((event) => {
+    const target = map();
+    if (phase === "placing" && first && target) {
+      drawCorridor(first, pointAt(target, event));
+    }
+  });
+
   /** Stop drawing: the map pans by dragging and zooms on a double again */
   const stopPlacing = (): void => {
     press = null;
     first = null;
+    corridorFrame.cancel();
     const target = map();
     if (!target) return;
     target.getContainer().classList.remove("is-drawing-section");
@@ -935,9 +953,9 @@ function createTool(app: MapApp): Tool {
         syncChrome();
         placeHandles();
       }
-      if (press.dragging) drawCorridor(first, pointAt(target, event));
+      if (press.dragging) corridorFrame.schedule(event);
     } else if (first && !press && event.pointerType === "mouse") {
-      drawCorridor(first, pointAt(target, event));
+      corridorFrame.schedule(event);
     }
   };
 

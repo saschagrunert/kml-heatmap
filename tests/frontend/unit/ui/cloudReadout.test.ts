@@ -6,7 +6,11 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { LngLat, Point } from "maplibre-gl";
 import { followCloudReadout } from "../../../../kml_heatmap/frontend/ui/cloudReadout";
-import { releaseReadoutData } from "../../../../kml_heatmap/frontend/calculations/cloudReadout";
+import {
+  readoutKept,
+  releaseReadoutData,
+} from "../../../../kml_heatmap/frontend/calculations/cloudReadout";
+import { heatWeight } from "../../../../kml_heatmap/frontend/calculations/heatLines";
 import type { PathSegment } from "../../../../kml_heatmap/frontend/types";
 import {
   asMapApp,
@@ -439,6 +443,154 @@ describe("the readout of the heat cloud", () => {
     map().emit("mousedown", {});
     click(0, 0);
     await vi.waitFor(() => expect(status()).toMatch(/within 1 km: 2 flights/));
+  });
+
+  it("steps aside while the hotspot tour holds the map, and comes back with the map", () => {
+    enter3D();
+    expect(map().listenerCount("mousemove")).toBe(1);
+    app.tourView = {
+      center: { lat: 50, lng: 8 },
+      zoom: 10,
+      bearing: 0,
+      pitch: 0,
+      globeVisible: false,
+      threeDVisible: true,
+      heatmapVisible: true,
+      heightBand: "",
+    };
+    expect(map().listenerCount("mousemove")).toBe(0);
+    expect(map().listenerCount("click")).toBe(0);
+    app.tourView = null;
+    expect(map().listenerCount("mousemove")).toBe(1);
+  });
+
+  describe("in the pointer's frames", () => {
+    /** The tasks asked for once the page has a moment, in their order */
+    let idle: (() => void)[];
+    /** Run the tasks asked for so far */
+    const runIdle = (): void => {
+      for (const work of idle.splice(0)) work();
+    };
+    /** Whether what a readout of `radiusM` is worked out from is kept */
+    const kept = (radiusM: number): boolean =>
+      readoutKept(DATA.path_segments, true, 0, heatWeight(false), radiusM);
+
+    beforeEach(() => {
+      idle = [];
+      vi.stubGlobal("requestIdleCallback", (work: () => void) => {
+        idle.push(work);
+        return idle.length;
+      });
+    });
+
+    afterEach(() => {
+      vi.unstubAllGlobals();
+    });
+
+    it("keeps what it worked out for moves of a few pixels, and the box follows the pointer", async () => {
+      enter3D();
+      runIdle();
+      move(0, 0);
+      await nextFrame();
+      const said = shown();
+      expect(said).toMatch(/within 1 km/);
+      const looks = map().unproject.mock.calls.length;
+
+      move(2, 1);
+      await nextFrame();
+      move(3, 0);
+      await nextFrame();
+      expect(map().unproject).toHaveBeenCalledTimes(looks);
+      expect(shown()).toBe(said);
+      expect(box()!.style.transform).toBe("translate(17px, 14px)");
+
+      // Further from where it was worked out, it is worked out anew
+      move(4, 0);
+      await nextFrame();
+      expect(map().unproject.mock.calls.length).toBeGreaterThan(looks);
+      // And anew where the map comes to rest, however little the pointer
+      // moved
+      const before = map().unproject.mock.calls.length;
+      map().emit("movestart");
+      map().emit("moveend");
+      await nextFrame();
+      expect(map().unproject.mock.calls.length).toBeGreaterThan(before);
+      expect(shown()).toBe(said);
+    });
+
+    it("works nothing out while the map moves, and looks again where it rests", async () => {
+      enter3D();
+      runIdle();
+      map().isMoving.mockReturnValue(true);
+      map().emit("movestart");
+      const looks = map().unproject.mock.calls.length;
+      move(0, 0);
+      await nextFrame();
+      expect(shown()).toBeNull();
+      expect(map().unproject).toHaveBeenCalledTimes(looks);
+
+      map().isMoving.mockReturnValue(false);
+      map().emit("moveend");
+      await nextFrame();
+      expect(shown()).toMatch(/within 1 km/);
+    });
+
+    it("makes what a readout needs ahead of the pointer as the 3D view comes and as the map comes to rest at another radius", () => {
+      enter3D();
+      expect(kept(1000)).toBe(false);
+      runIdle();
+      expect(kept(1000)).toBe(true);
+
+      // Closer in, the radius is smaller: made once the map rests, before
+      // the pointer or a tap asks for it
+      map().emit("movestart");
+      map().jumpTo({ zoom: 13 });
+      map().emit("moveend");
+      expect(kept(100)).toBe(false);
+      expect(idle).toHaveLength(1);
+      runIdle();
+      expect(kept(100)).toBe(true);
+
+      // Nothing to make where it is kept already
+      map().emit("movestart");
+      map().emit("moveend");
+      expect(idle).toHaveLength(0);
+    });
+
+    it("has a hover that finds it missing wait for it, and tell once it is made", async () => {
+      enter3D();
+      move(0, 0);
+      await nextFrame();
+      // Not made in the pointer's frame
+      expect(shown()).toBeNull();
+      expect(kept(1000)).toBe(false);
+      runIdle();
+      expect(kept(1000)).toBe(true);
+      await nextFrame();
+      expect(shown()).toMatch(/within 1 km/);
+    });
+
+    it("makes nothing ahead for a map that moves on, nor once the readout is off", () => {
+      enter3D();
+      map().isMoving.mockReturnValue(true);
+      runIdle();
+      expect(kept(1000)).toBe(false);
+      map().isMoving.mockReturnValue(false);
+
+      map().emit("movestart");
+      map().emit("moveend");
+      app.threeDVisible = false;
+      runIdle();
+      expect(kept(1000)).toBe(false);
+    });
+
+    it("makes what a tap needs in the tap", () => {
+      enter3D();
+      touch();
+      click(0, 0);
+      expect(shown()).toMatch(/within 1 km/);
+      expect(kept(1000)).toBe(true);
+    });
   });
 
   it("lets go of the map when the app goes", async () => {
