@@ -149,9 +149,25 @@ export function runwayUse(paths: PathInfo[], code?: string): string {
     .join(", ");
 }
 
-/** Mark the listed flights that are part of the selection */
+/**
+ * Mark the listed flights that are part of the selection. Opening the popup
+ * selects every flight of the airport, which pressed every row: the list
+ * looked like a choice already made. While all of them are selected they
+ * stay pressed for a screen reader, and the stylesheet draws them as rows
+ * to pick from (`is-all-pressed`), unless there is only one.
+ */
 function markSelected(app: MapApp): void {
-  app.pathSelection.markSelected(
-    document.querySelectorAll<HTMLElement>(".kh-popup-flight"),
-  );
+  const buttons = document.querySelectorAll<HTMLElement>(".kh-popup-flight");
+  app.pathSelection.markSelected(buttons);
+  // The one flight of an airport pressed or not is the whole choice, and
+  // drawn unpressed both ways a press on it showed nothing
+  document
+    .querySelector(".kh-popup-flights")
+    ?.classList.toggle(
+      "is-all-pressed",
+      buttons.length > 1 &&
+        [...buttons].every(
+          (button) => button.getAttribute("aria-pressed") === "true",
+        ),
+    );
 }

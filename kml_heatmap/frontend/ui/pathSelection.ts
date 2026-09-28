@@ -4,11 +4,16 @@
 import type { Map as MapLibreMap, PaddingOptions } from "maplibre-gl";
 import type { MapApp } from "../mapApp";
 import { segmentsForPathIds } from "../calculations/statistics";
+import { loadFeatures } from "../services/featureLoader";
 import { applyToggleButtonState } from "../utils/buttonState";
 import { domCache } from "../utils/domCache";
 import { segmentBounds } from "../utils/geometry";
 import { pluralFlights } from "../utils/htmlGenerators";
-import { resizeMapAfterTransition, toBounds } from "../utils/mapHelpers";
+import {
+  resizeMapAfterTransition,
+  toBounds,
+  toLngLat,
+} from "../utils/mapHelpers";
 import { prefersReducedMotion } from "../utils/motion";
 import { announceStatus } from "../utils/toast";
 
@@ -18,12 +23,19 @@ const MAP_CHROME_SELECTOR = [
   "#right-buttons",
   "#selection-chip",
   "#flight-profile",
+  "#cross-section",
   "#mobile-bar",
   ".color-legend",
 ].join(", ");
 
-/** How far from an edge something may sit and still count as standing at it */
-const EDGE_REACH_PX = 48;
+/**
+ * How far from an edge something may sit and still count as standing at it.
+ * On a phone the profile of a flight and the legend stand above the bar and
+ * the map's credit, 81 px from the bottom and more with a home indicator:
+ * at 48 px the profile, as wide as the map, counted at the left edge, and a
+ * flight framed with it ended up beside it rather than above it.
+ */
+const EDGE_REACH_PX = 128;
 
 /** Room kept between the framed flights and the edge or a panel (px) */
 const FRAME_MARGIN_PX = 24;
@@ -34,13 +46,23 @@ const FRAME_MS = 800;
 type Edge = "top" | "right" | "bottom" | "left";
 
 /**
+ * Resolves after the next layout and the ResizeObservers that follow it,
+ * which run after a frame's callbacks: two frames on
+ */
+function afterLayout(): Promise<void> {
+  return new Promise((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+  });
+}
+
+/**
  * The padding a fit of the map needs to keep what it frames clear of the
  * panels over it: the control columns at the sides, the selection chip at
  * the top, the legend and the phone's bar at the bottom. Each panel counts
  * at the edge it stands at from which it reaches in least, and no edge
  * takes more than a third of the map.
  */
-export function mapChromePadding(map: MapLibreMap): PaddingOptions {
+export function mapChromePadding(map: MapLibreMap): Required<PaddingOptions> {
   const box = map.getContainer().getBoundingClientRect();
   const padding: Record<Edge, number> = {
     top: 0,
@@ -148,6 +170,40 @@ export class PathSelection {
       if (!add) this.clearSelection();
       if (add || !alone) this.togglePathSelection(pathId);
     });
+    if (!add && !alone) this.bringIntoView(pathId);
+  }
+
+  /**
+   * A flight picked on its own from a list can be anywhere: off the screen,
+   * or under the profile of the flight that opens with it at the bottom of
+   * the map. That profile is drawn by the feature bundle, which the
+   * selection fetches (MapApp.followFlightProfile), so the view waits for
+   * it and for the layout after it, where a legend that stands on the
+   * profile has moved up (its height is measured then), and then frames
+   * the flight clear of the panels unless all of it is in view already. A
+   * flight clicked on the map is where the user is looking, and that path
+   * does not come here; nor is the map taken back from a user who moved it
+   * meanwhile, or from the hotspot tour or Wrapped, which fly it.
+   */
+  private bringIntoView(pathId: number): void {
+    const map = this.app.map;
+    if (!map) return;
+    let moved = false;
+    const onMoveStart = (event: { originalEvent?: unknown }): void => {
+      if (event.originalEvent) moved = true;
+    };
+    map.on("movestart", onMoveStart);
+    void loadFeatures()
+      .then(afterLayout)
+      .then(() => {
+        map.off("movestart", onMoveStart);
+        const app = this.app;
+        // Unless the selection moved on while the bundle loaded
+        const selected = app.selectedPathIds;
+        const still = selected.size === 1 && selected.has(pathId);
+        const busy = app.replayActive || app.wrappedVisible || app.tourView;
+        if (still && !moved && !busy) this.frameSelection(true);
+      });
   }
 
   /** Mark the listed flights' buttons that are part of the selection */
@@ -207,17 +263,37 @@ export class PathSelection {
    * Bring the selected flights into view, clear of the panels: isolated,
    * they are all the map shows, and one could stay half off the screen or
    * under the chip that says it is selected. The map keeps its bearing.
+   * With `unlessInView` the map stays where it is when every point of them
+   * is on it and clear of the panels already.
    */
-  private frameSelection(): void {
+  private frameSelection(unlessInView = false): void {
     const map = this.app.map;
     const data = this.app.currentData;
     if (!map || !data) return;
-    const bounds = segmentBounds(
-      segmentsForPathIds(data.path_segments, this.app.selectedPathIds),
+    const segments = segmentsForPathIds(
+      data.path_segments,
+      this.app.selectedPathIds,
     );
+    const bounds = segmentBounds(segments);
     if (!bounds) return;
+    const padding = mapChromePadding(map);
+    if (unlessInView) {
+      const { width, height } = map.getContainer().getBoundingClientRect();
+      const clear = segments.every((segment) =>
+        segment.coords.every((coord) => {
+          const { x, y } = map.project(toLngLat(coord));
+          return (
+            x >= padding.left &&
+            x <= width - padding.right &&
+            y >= padding.top &&
+            y <= height - padding.bottom
+          );
+        }),
+      );
+      if (clear) return;
+    }
     map.fitBounds(toBounds(bounds), {
-      padding: mapChromePadding(map),
+      padding,
       bearing: map.getBearing(),
       duration: FRAME_MS,
       animate: !prefersReducedMotion(),

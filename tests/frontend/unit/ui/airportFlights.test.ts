@@ -185,6 +185,37 @@ describe("listFlights", () => {
     expect(pressed()).toEqual(["false", "false", "true"]);
   });
 
+  it("draws every row unpressed while all of them are, as opening leaves them", () => {
+    // Opening the popup selects the airport's flights, and every row read
+    // as a choice already made
+    mockApp.selectedPathIds = new Set([11, 12, 13]);
+    const { popup, container } = openPopup();
+    listFlights(asMapApp(mockApp), popup, "EDDP Leipzig");
+    const list = container.querySelector(".kh-popup-flights")!;
+
+    // Still pressed for a screen reader
+    expect(
+      buttons(container).map((b) => b.getAttribute("aria-pressed")),
+    ).toEqual(["true", "true", "true"]);
+    expect(list.classList).toContain("is-all-pressed");
+
+    mockApp.selectedPathIds = new Set([12]);
+
+    expect(list.classList).not.toContain("is-all-pressed");
+  });
+
+  it("draws the one flight of an airport as it is, pressed or not", () => {
+    // Drawn unpressed both ways, a press on it showed nothing
+    mockApp.selectedPathIds = new Set([13]);
+    const { popup, container } = openPopup();
+    listFlights(asMapApp(mockApp), popup, "Somewhere <b>odd</b>");
+
+    expect(buttons(container)).toHaveLength(1);
+    expect(
+      container.querySelector(".kh-popup-flights")!.classList,
+    ).not.toContain("is-all-pressed");
+  });
+
   it("shows the runways the flights of the filter touched down on", () => {
     mockApp.currentData = createDataset([
       { ...pathInfo[0]!, touchdowns: [["EDDP", "26R"]] },

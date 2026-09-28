@@ -29,6 +29,7 @@ import {
 } from "../calculations/replayAll";
 import { FEET_TO_METERS, MAP_LAYERS } from "../utils/constants";
 import { applyToggleButtonState } from "../utils/buttonState";
+import { holdControls } from "./heldControls";
 import { domCache } from "../utils/domCache";
 import { setControlIcon } from "../utils/icons";
 import { logError } from "../utils/logger";
@@ -507,10 +508,12 @@ export const REPLAY_ALL_ORBIT_REDUCED_MOTION_MESSAGE =
  * Controls held while every flight replays, as for the replay of one
  * (REPLAY_DISABLED_CONTROL_IDS in ui/replayManager.ts): the filters, the
  * selection and Wrapped would change or take the map under it. The colour
- * layers too, which colour the trail of one flight and nothing here.
+ * layers too, which colour the trail of one flight and nothing here, and By
+ * distance with the Heatmap switch: the heat is not the replay's to count.
  */
 const HELD_CONTROL_IDS = [
   "heatmap-btn",
+  "by-distance-btn",
   "altitude-btn",
   "airspeed-btn",
   "airports-btn",
@@ -567,6 +570,8 @@ export class ReplayAllControls {
   /** The clock as last written, so a frame writes it only when it changes */
   private shown = "";
   private stopWatchingUser: (() => void) | null = null;
+  /** Gives the held controls back as they were (see holdControls) */
+  private release: (() => void) | null = null;
 
   constructor(app: MapApp) {
     this.app = app;
@@ -639,7 +644,8 @@ export class ReplayAllControls {
     this.setOrbit(false);
     app.replayState.all = true;
     app.replayActive = true;
-    this.hold(true);
+    this.release?.();
+    this.release = holdControls(HELD_CONTROL_IDS);
     document.body.classList.add("replay-all-active");
     panel.hidden = false;
     this.shown = "";
@@ -697,7 +703,8 @@ export class ReplayAllControls {
       setControlIcon(button, "play");
       applyToggleButtonState(button, false);
     }
-    this.hold(false);
+    this.release?.();
+    this.release = null;
     this.app.replayState.all = false;
     // The layers come back as they were, and the phone's bar with them
     this.app.replayActive = false;
@@ -706,18 +713,6 @@ export class ReplayAllControls {
       : button;
     target?.focus();
     announceStatus("Replay of all flights closed");
-  }
-
-  private hold(held: boolean): void {
-    for (const id of HELD_CONTROL_IDS) {
-      const control = domCache.get(id);
-      if (
-        control instanceof HTMLButtonElement ||
-        control instanceof HTMLSelectElement
-      ) {
-        control.disabled = held;
-      }
-    }
   }
 
   private setOrbit(on: boolean): void {

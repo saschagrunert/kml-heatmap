@@ -117,9 +117,9 @@ describe("followHeatLegend", () => {
   });
 
   it("draws the bar under the labels the page has, those of the heatmap", () => {
-    expect(labels()).toEqual(["≈1 flight", "4", "16", "64"]);
+    expect(labels()).toEqual(["≈1 pass", "4", "16", "64"]);
     followHeatLegend(asMapApp(app));
-    expect(labels()).toEqual(["≈1 flight", "4", "16", "64"]);
+    expect(labels()).toEqual(["≈1 pass", "4", "16", "64"]);
     expect(bar()).toBe(styled(heatLegend(HEAT_FLIGHT_DENSITY).gradient));
   });
 
@@ -129,32 +129,32 @@ describe("followHeatLegend", () => {
       app.heatCloud = true;
       app.store.set("heatCloudScale", 0.5);
     });
-    expect(labels()).toEqual(["≈2 flights", "8", "32", "128"]);
+    expect(labels()).toEqual(["≈2 passes", "8", "32", "128"]);
     expect(bar()).toBe(styled(heatLegend(HEAT_FLIGHT_DENSITY / 2).gradient));
     app.store.set("heatCloudScale", 0.25);
-    expect(labels()).toEqual(["≈4 flights", "16", "64", "256"]);
+    expect(labels()).toEqual(["≈4 passes", "16", "64", "256"]);
 
     app.heatCloud = false;
-    expect(labels()).toEqual(["≈1 flight", "4", "16", "64"]);
+    expect(labels()).toEqual(["≈1 pass", "4", "16", "64"]);
   });
 
   it("follows the exposure of the flat heatmap, but not in the cloud's place", () => {
     followHeatLegend(asMapApp(app));
     // A logbook of many years, drawn at a quarter
     app.heatmapExposure = 0.25;
-    expect(labels()).toEqual(["≈4 flights", "16", "64", "256"]);
+    expect(labels()).toEqual(["≈4 passes", "16", "64", "256"]);
     expect(bar()).toBe(styled(heatLegend(HEAT_FLIGHT_DENSITY / 4).gradient));
     // A lone flight, drawn at twice its heat: one flight's colour is
     // brighter, and the labels start at one all the same
     app.heatmapExposure = 2;
-    expect(labels()).toEqual(["≈1 flight", "4", "16", "64"]);
+    expect(labels()).toEqual(["≈1 pass", "4", "16", "64"]);
     expect(bar()).toBe(styled(heatLegend(HEAT_FLIGHT_DENSITY * 2).gradient));
 
     app.store.batch(() => {
       app.heatCloud = true;
       app.store.set("heatCloudScale", 0.5);
     });
-    expect(labels()).toEqual(["≈2 flights", "8", "32", "128"]);
+    expect(labels()).toEqual(["≈2 passes", "8", "32", "128"]);
   });
 
   it("says what the heat counts: the distance flown with By distance on", () => {
@@ -166,7 +166,7 @@ describe("followHeatLegend", () => {
     app.routeWeighting = true;
     expect(title()).toBe("Distance flown");
     // The labels hold: a flight's worth is a pass, of any flight
-    expect(labels()).toEqual(["≈1 flight", "4", "16", "64"]);
+    expect(labels()).toEqual(["≈1 pass", "4", "16", "64"]);
     app.routeWeighting = false;
     expect(title()).toBe("Time spent");
   });

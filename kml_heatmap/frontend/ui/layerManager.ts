@@ -100,7 +100,6 @@ import {
   formatAltitudeLabel,
   rangeMiddle,
 } from "../features/layers";
-import { formatNumber } from "../utils/formatters";
 import {
   CULL_FROM_ZOOM,
   leavesBox,
@@ -148,9 +147,8 @@ interface LayerConfig {
   /** The label of the middle of the ramp, a number in the unit of the ends */
   legendMidId: string;
   legendMaxId: string;
+  /** Every label's, the middle's too: both units, one line each */
   formatLegend: (value: number) => string;
-  /** The middle's, narrower: the ends carry the second unit */
-  formatMiddle: (value: number) => string;
 }
 
 /** Colour steps a range is cut into; the merge key of a run */
@@ -181,7 +179,6 @@ const CONFIGS: Readonly<Record<LayerMode, LayerConfig>> = {
     legendMidId: "legend-mid",
     legendMaxId: "legend-max",
     formatLegend: formatAltitudeLabel,
-    formatMiddle: (value) => `${formatNumber(value)} ft`,
   },
   airspeed: {
     mode: "airspeed",
@@ -206,7 +203,6 @@ const CONFIGS: Readonly<Record<LayerMode, LayerConfig>> = {
     legendMidId: "airspeed-legend-mid",
     legendMaxId: "airspeed-legend-max",
     formatLegend: formatAirspeedLabel,
-    formatMiddle: (value) => `${formatNumber(value)} kt`,
   },
 };
 
@@ -1364,18 +1360,14 @@ export class LayerManager implements PathHitTester {
     range: Range,
     config: Pick<
       LayerConfig,
-      | "legendMinId"
-      | "legendMidId"
-      | "legendMaxId"
-      | "formatLegend"
-      | "formatMiddle"
+      "legendMinId" | "legendMidId" | "legendMaxId" | "formatLegend"
     >,
   ): void {
     const minEl = domCache.get(config.legendMinId);
     const midEl = domCache.get(config.legendMidId);
     const maxEl = domCache.get(config.legendMaxId);
     if (minEl) minEl.textContent = config.formatLegend(range.min);
-    if (midEl) midEl.textContent = config.formatMiddle(rangeMiddle(range));
+    if (midEl) midEl.textContent = config.formatLegend(rangeMiddle(range));
     if (maxEl) maxEl.textContent = config.formatLegend(range.max);
   }
 

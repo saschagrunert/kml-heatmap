@@ -66,7 +66,7 @@ test.describe("Cross-section", () => {
     await expect(plot).toHaveAttribute("role", "img");
     await expect(plot).toHaveAttribute(
       "aria-label",
-      /^Cross-section: [\d.,]+ (min|h) from \d+ flights? within [\d.]+ k?m of a [\d.,]+ km line/,
+      /^Cross-section: [\d,]+ (s|min|h)( \d+ min)? from \d+ flights? within [\d.]+ k?m of a [\d.,]+ km line/,
     );
     await expect(panel.locator(".profile-stats")).toContainText("Time");
     await expect(panel.locator(".profile-axis")).toContainText("B");

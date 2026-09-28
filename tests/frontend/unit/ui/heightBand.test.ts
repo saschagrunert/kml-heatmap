@@ -8,6 +8,7 @@ import {
   HEIGHT_BAND_STOPS_FT,
   OPEN_TOP,
 } from "../../../../kml_heatmap/frontend/calculations/heightBand";
+import { icon } from "../../../../kml_heatmap/frontend/utils/icons";
 import { asMapApp, createMockApp, type MockApp } from "../../testHelpers";
 
 /** The stop of `feet` */
@@ -100,6 +101,12 @@ describe("the control of the heat cloud's band of heights", () => {
       root.getAttribute("aria-labelledby")!,
     );
     expect(title?.textContent).toBe("Height AGL");
+    // Not the ruler of the cross-section: an arrow up from the ground
+    const climb = document.createElement("span");
+    climb.innerHTML = icon("climb", 16);
+    expect(title?.querySelector("svg")?.outerHTML).toBe(
+      climb.firstElementChild!.outerHTML,
+    );
     const [low, high] = thumbs();
     for (const thumb of [low, high]) {
       expect(thumb.type).toBe("range");

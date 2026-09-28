@@ -1380,6 +1380,8 @@ describe("ReplayManager activation", () => {
       activate();
 
       expect((el("heatmap-btn") as HTMLButtonElement).disabled).toBe(true);
+      // By distance goes with it: the replay hides the heat it counts
+      expect((el("by-distance-btn") as HTMLButtonElement).disabled).toBe(true);
       expect((el("airports-btn") as HTMLButtonElement).disabled).toBe(true);
       expect((el("aviation-btn") as HTMLButtonElement).disabled).toBe(true);
       expect((el("year-select") as HTMLSelectElement).disabled).toBe(true);
@@ -1404,6 +1406,18 @@ describe("ReplayManager activation", () => {
         false,
       );
       expect((el("reset-view-btn") as HTMLButtonElement).disabled).toBe(false);
+    });
+
+    it("gives each control back as it was before the replay", () => {
+      // Something else had it off, for a reason of its own
+      (el("year-select") as HTMLSelectElement).disabled = true;
+      activate();
+
+      replayManager.toggleReplay();
+
+      expect((el("year-select") as HTMLSelectElement).disabled).toBe(true);
+      expect((el("heatmap-btn") as HTMLButtonElement).disabled).toBe(false);
+      expect((el("by-distance-btn") as HTMLButtonElement).disabled).toBe(false);
     });
 
     it("disables Wrapped, which would take the map away from the replay", () => {

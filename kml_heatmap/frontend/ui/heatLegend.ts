@@ -7,7 +7,7 @@
  * followLayerVisibility), and says what the cloud shows while the cloud
  * draws the heat.
  *
- * Its labels are four steps of four apart, "≈1 flight · 4 · 16 · 64" for the
+ * Its labels are four steps of four apart, "≈1 pass · 4 · 16 · 64" for the
  * heatmap drawn unscaled, each under the middle of its quarter of the bar, and
  * the bar is drawn in a scale of those steps: the ramp is laid under the
  * labels rather than the labels over the ramp, so the labels stay round
@@ -15,6 +15,11 @@
  * flights' worth the colour of one flight at full strength stands for.
  * They are about as many flights as the logs are near the pace of fixes
  * the heat is made for (see ui/heatScale.ts).
+ *
+ * A flight's worth is the heat of one pass over a place, of any flight: the
+ * time it takes, or with By distance on its length. The labels count
+ * passes, which say both; "≈1 flight" under "Distance flown" read as a
+ * count of flights.
  */
 import type { MapApp } from "../mapApp";
 import { domCache } from "../utils/domCache";
@@ -78,7 +83,7 @@ export function followHeatLegend(app: MapApp): void {
     labels.forEach((text, i) => {
       text.textContent = i
         ? `${counts[i]}`
-        : `≈${counts[0]} ${counts[0]! > 1 ? "flights" : "flight"}`;
+        : `≈${counts[0]} ${counts[0]! > 1 ? "passes" : "pass"}`;
     });
     if (what) {
       what.textContent =

@@ -805,7 +805,10 @@ body {
   padding: var(--space-md);
   z-index: var(--z-legend);
   font-size: var(--text-sm);
-  min-width: 200px;
+  /* One width for the heat, altitude and speed legends, so the box does
+     not jump as one takes another's place: the widest, the speeds with
+     their km/h, fits it with room to spare */
+  min-width: 216px;
   box-shadow: var(--shadow-panel);
   box-sizing: border-box;
   opacity: 0;
@@ -844,10 +847,13 @@ body {
      two outer columns are as wide as the wider end */
   display: grid;
   grid-template-columns: 1fr auto 1fr;
-  /* The two ends carry both units ("166 kt (307 km/h)"), which left them
-     touching in the middle of a 200px box */
-  gap: var(--space-md);
-  white-space: nowrap;
+  gap: var(--space-sm);
+  /* Each label of the altitude and speed legends carries both units, the
+     second on a line of its own ("166 kt" over "(307 km/h)", see
+     formatAltitudeLabel): on one line the ends alone made those legends
+     70 px wider than the heat's, and the width jumped as one took the
+     other's place */
+  white-space: pre;
   font-size: var(--text-xs);
   color: var(--color-text-secondary);
 }
@@ -2010,13 +2016,21 @@ body.stats-open #left-buttons {
   }
 
   .color-legend {
-    min-width: 180px;
+    /* The larger type's widest legend, as above */
+    min-width: 228px;
     font-size: var(--text-sm);
     left: calc(var(--edge-gap) + var(--safe-left));
     bottom: calc(var(--edge-gap) + var(--safe-bottom));
   }
   .color-legend .labels {
     font-size: var(--text-sm);
+  }
+  /* A popup on the map (an airport's, a path's) is drawn inside it, under
+     the legend, which covers the bottom left corner of the narrow map:
+     an airport's list of flights ran under it. The popup is what is read
+     while it is open, and the legend comes back as it closes. */
+  body:has(#map .maplibregl-popup) .color-legend {
+    visibility: hidden;
   }
 
   /* The map's attribution is fine print (--text-fine above); the scale
@@ -2206,6 +2220,15 @@ body.stats-open #left-buttons {
 .kh-popup-flight[aria-pressed="true"] {
   background: rgba(var(--color-accent-blue-rgb), 0.15);
   color: var(--color-accent-blue);
+}
+/* Opening the popup selects all of the airport's flights, which pressed
+   every row, and the list looked like a choice already made. While every
+   row is pressed that says nothing, and they are drawn as rows to pick
+   from; they stay pressed for a screen reader (ui/airportFlights.ts). */
+.kh-popup-flights.is-all-pressed
+  .kh-popup-flight[aria-pressed="true"]:not(:hover) {
+  background: none;
+  color: var(--color-text-secondary);
 }
 .kh-popup-flight:focus-visible,
 .kh-popup-airport:focus-visible {

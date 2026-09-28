@@ -180,6 +180,7 @@ const PAGE_CHROME: FixtureNode[] = [
   { id: "airspeed-btn", tag: "button" },
   { id: "airspeed-legend", tag: "div" },
   { id: "heatmap-btn", tag: "button" },
+  { id: "by-distance-btn", tag: "button" },
   { id: "airports-btn", tag: "button" },
   { id: "aviation-btn", tag: "button" },
   { id: "wrapped-btn", tag: "button" },
