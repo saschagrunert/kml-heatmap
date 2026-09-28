@@ -1,6 +1,18 @@
 /**
  * Main Map Application
  * This is the main entry point that initializes all managers and handles the application lifecycle
+ *
+ * MapApp owns the map and its life: it creates the map and the handles of
+ * its layers, starts the managers, runs the first load, dispatches clicks
+ * on the map, fetches the lazy bundles as their controls are first used,
+ * puts the view back on Reset view and takes everything down again in
+ * `destroy()`. What it sets up once and then leaves to the store lives
+ * next to it: the base style and its fallback (baseStyle.ts), the saved
+ * state put back at start (ui/stateRestore.ts), the controls that follow
+ * the store (ui/appChrome.ts) and what the app says when a lazy bundle
+ * cannot be fetched (ui/lazyBundles.ts). The last three take the app as an
+ * argument and use its public state only; what stays here is what needs
+ * the app's private state.
  */
 
 import {
@@ -9,11 +21,10 @@ import {
   type LngLat,
   type LngLatBoundsLike,
   type MapMouseEvent,
-  type RequestTransformFunction,
   type StyleSpecification,
 } from "maplibre-gl";
 import { DataManager } from "./ui/dataManager";
-import { StateManager } from "./ui/stateManager";
+import type { StateManager } from "./ui/stateManager";
 import { LayerManager } from "./ui/layerManager";
 import { FilterManager } from "./ui/filterManager";
 import { PathSelection } from "./ui/pathSelection";
@@ -34,7 +45,6 @@ import { loadInitialData } from "./appInitializer";
 import { logError } from "./utils/logger";
 import { dismissToast, showToast } from "./utils/toast";
 import { domCache } from "./utils/domCache";
-import { syncLegend, syncToggleButton } from "./utils/buttonState";
 import { applyGradientTokens } from "./utils/colors";
 import { renderControlIcons } from "./utils/icons";
 import {
@@ -43,7 +53,6 @@ import {
   isOnMarker,
   isReplayCameraMove,
   keepMarkerTapsFromZoom,
-  slideMapBesideRail,
   stateZoomToMap,
   toBounds,
   toLngLat,
@@ -55,7 +64,6 @@ import {
   HEATMAP_LAYER_IDS,
   MAP_LAYERS,
   MAP_MAX_PITCH,
-  MAP_SKY,
   MAP_MAX_ZOOM,
   MAP_MIN_ZOOM,
 } from "./utils/constants";
@@ -78,23 +86,40 @@ import { siteData, type SiteData } from "./state/siteData";
 import { ReliefState } from "./ui/reliefState";
 import { watchScrollEnd, type ScrollEndWatcher } from "./utils/scrollFade";
 import { loadFeatures, loadWrapped } from "./services/featureLoader";
-import { updateReplayButtonState } from "./ui/replayButton";
+import {
+  BASE_STYLE_RETRY_MS,
+  cartoStyleUrl,
+  cartoTransformRequest,
+  FALLBACK_STYLE,
+} from "./baseStyle";
+import {
+  CROSS_SECTION_UNAVAILABLE_MESSAGE,
+  loadLazyBundle,
+  prepareWrappedOnIntent,
+  REPLAY_UNAVAILABLE_MESSAGE,
+  STATS_UNAVAILABLE_MESSAGE,
+  TOUR_UNAVAILABLE_MESSAGE,
+  WRAPPED_BUNDLE_MESSAGES,
+  WRAPPED_UNAVAILABLE_MESSAGE,
+  type FeatureToggle,
+} from "./ui/lazyBundles";
+import { applyPendingFilterChanges, restoreState } from "./ui/stateRestore";
+import {
+  followAttributionHeight,
+  followReplayAvailability,
+  setupButtonSync,
+  setupStatsRail,
+} from "./ui/appChrome";
 import { segmentsForPathIds } from "./calculations/statistics";
 import {
   datasetIndex,
   type PathIdsByAirport,
 } from "./calculations/datasetIndex";
 import type { StoreAccessors } from "./state/store";
-import {
-  TOGGLE_KEYS,
-  TOGGLES,
-  type Toggle,
-  type ToggleKey,
-} from "./state/toggles";
+import { TOGGLE_KEYS } from "./state/toggles";
 import type { ReplayManager } from "./ui/replayManager";
 import type { StatsManager } from "./ui/statsManager";
 import type { WrappedManager } from "./ui/wrappedManager";
-import type { FeatureModule } from "./features";
 import type {
   AircraftModels,
   AirportMarker,
@@ -121,78 +146,6 @@ export interface MapConfig {
 }
 
 /**
- * The CARTO vector style that replaces the raster `dark_all` tiles. The
- * style, its tiles, glyphs and sprite all come from hosts under
- * basemaps.cartocdn.com.
- */
-const CARTO_STYLE_URL =
-  "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json";
-const CARTO_HOST = /(^|\.)basemaps\.cartocdn\.com$/;
-
-/** The base style, with the API key when the site was built with one */
-function cartoStyleUrl(apiKey?: string): string {
-  return apiKey
-    ? `${CARTO_STYLE_URL}?key=${encodeURIComponent(apiKey)}`
-    : CARTO_STYLE_URL;
-}
-
-/**
- * Put the API key on every request to CARTO, not only on the style. CARTO
- * documents the key for the style URL, but the requests that count against
- * the quota are the tiles, and the style names those without it.
- */
-export function cartoTransformRequest(
-  apiKey?: string,
-): RequestTransformFunction | null {
-  if (!apiKey) return null;
-  return (url) => {
-    let parsed: URL;
-    try {
-      parsed = new URL(url);
-    } catch {
-      // Relative, so one of the site's own files
-      return undefined;
-    }
-    if (!CARTO_HOST.test(parsed.hostname) || parsed.searchParams.has("key")) {
-      return undefined;
-    }
-    // Appended by hand, so the rest of the URL stays byte for byte what
-    // MapLibre asked for
-    const separator = url.includes("?") ? "&" : "?";
-    return { url: `${url}${separator}key=${encodeURIComponent(apiKey)}` };
-  };
-}
-
-/**
- * What the map starts on, and stays on when the base style cannot be
- * fetched: the page background and nothing else. It needs no network, so
- * the flights are drawn without waiting for CARTO, whose style is swapped
- * in under them when it arrives (see `loadBaseStyle`). The colour is the
- * one of that style's background layer and of `#map` (--color-map-bg).
- */
-export const FALLBACK_STYLE: StyleSpecification = {
-  version: 8,
-  sky: MAP_SKY,
-  sources: {},
-  layers: [
-    {
-      id: "background",
-      type: "background",
-      paint: { "background-color": "#0e0e0e" },
-    },
-  ],
-};
-
-/**
- * The toggles `restoreState` sets from a saved state. The panels reopen
- * once there is data for them (see initialize), and isolating needs a
- * selection, which `restoreState` sees to on its own.
- */
-const RESTORED_TOGGLES: readonly ToggleKey[] = TOGGLES.filter(
-  (toggle: Toggle) => !("panel" in toggle) && toggle.key !== "isolateSelection",
-).map((toggle) => toggle.key);
-
-/**
  * The keys of the view besides the filters that Reset view puts back: the
  * toggles and the heat cloud's band of heights
  */
@@ -203,43 +156,6 @@ const START_VIEW_PADDING = 30;
 
 /** Delay before a Wrapped panel restored from state opens again */
 const WRAPPED_RESTORE_DELAY_MS = 500;
-
-/**
- * How long after a failed request the base style is asked for once more. A
- * connection that was reset or a CDN node that answered 5xx is usually fine
- * a moment later; whatever still fails then is not cured by asking again,
- * except by the network coming back, which `online` reports.
- */
-export const BASE_STYLE_RETRY_MS = 5_000;
-
-/**
- * Said when the feature bundle or the Wrapped bundle cannot be fetched.
- * Without it a click on Replay or Wrapped would do nothing at all and look
- * like a dead control; the export button says the same kind of thing when
- * html-to-image is missing.
- */
-export const REPLAY_UNAVAILABLE_MESSAGE =
-  "Replay is unavailable: its code could not be loaded";
-export const TOUR_UNAVAILABLE_MESSAGE =
-  "The hotspot tour is unavailable: its code could not be loaded";
-export const WRAPPED_UNAVAILABLE_MESSAGE =
-  "Wrapped is unavailable: its code could not be loaded";
-export const STATS_UNAVAILABLE_MESSAGE =
-  "The statistics are unavailable: their code could not be loaded";
-export const CROSS_SECTION_UNAVAILABLE_MESSAGE =
-  "The cross-section is unavailable: its code could not be loaded";
-
-/** What a control starts in the feature bundle once it has arrived */
-type FeatureToggle = keyof Pick<
-  FeatureModule,
-  "toggleReplayAll" | "toggleHotspotTour" | "toggleCrossSection"
->;
-
-/** The messages of the one file that carries Wrapped and the statistics */
-const WRAPPED_BUNDLE_MESSAGES = [
-  WRAPPED_UNAVAILABLE_MESSAGE,
-  STATS_UNAVAILABLE_MESSAGE,
-] as const;
 
 /**
  * How long the map may take to draw once the data is in. The map draws
@@ -501,11 +417,11 @@ export class MapApp {
   }
 
   async initialize(): Promise<void> {
-    this.restoreState();
+    restoreState(this);
     this.setupMap();
     this.initializeManagers();
-    this.setupButtonSync();
-    this.setupStatsRail();
+    setupButtonSync(this);
+    setupStatsRail(this);
 
     // The data goes into sources that only exist once the style has loaded.
     // The files are preloaded by the template, so waiting here does not hold
@@ -561,7 +477,7 @@ export class MapApp {
     }
 
     // Apply filter changes made through the selects while loading
-    await this.applyPendingFilterChanges();
+    await applyPendingFilterChanges(this);
   }
 
   /** Say so when the map has not drawn MAP_STALL_MS after the data came */
@@ -619,102 +535,6 @@ export class MapApp {
     for (const watcher of this.columnScrollWatchers) watcher.stop();
     this.columnScrollWatchers = [];
     this.store.unsubscribeAll();
-  }
-
-  /**
-   * Year/aircraft select changes during initialization are ignored by the
-   * bound handlers; apply them once the initial data is loaded.
-   */
-  private async applyPendingFilterChanges(): Promise<void> {
-    const yearSelect = domCache.get("year-select", HTMLSelectElement);
-    const aircraftSelect = domCache.get("aircraft-select", HTMLSelectElement);
-    // Capture both before filtering: switching the year rebuilds the aircraft
-    // dropdown and would otherwise overwrite a pending aircraft selection.
-    // A dropdown that shows no year is one whose first load failed (see
-    // loadInitialData), not one someone changed
-    const pendingYear =
-      yearSelect && yearSelect.value && yearSelect.value !== this.selectedYear
-        ? yearSelect.value
-        : null;
-    const pendingAircraft =
-      aircraftSelect && aircraftSelect.value !== this.selectedAircraft
-        ? aircraftSelect.value
-        : null;
-
-    if (pendingYear !== null) {
-      await this.filterManager.filterByYear();
-    }
-
-    if (pendingAircraft === null || !aircraftSelect) {
-      return;
-    }
-    // The aircraft may not exist in the newly selected year
-    const stillAvailable = Array.from(aircraftSelect.options).some(
-      (option) => option.value === pendingAircraft,
-    );
-    if (!stillAvailable || pendingAircraft === this.selectedAircraft) {
-      return;
-    }
-    aircraftSelect.value = pendingAircraft;
-    this.filterManager.filterByAircraft();
-  }
-
-  private restoreState(): void {
-    this.stateManager = new StateManager(this);
-    this.savedState = this.stateManager.loadState();
-
-    if (!this.savedState) return;
-
-    const state = this.savedState;
-    this.store.batch(() => {
-      const year = state.selectedYear;
-      if (year !== undefined) {
-        this.selectedYear = year;
-        this.restoredYearFromState = true;
-        // The dropdown names the year from the start, as it does the
-        // latest for a first visit (resolveYearSelection): an option of
-        // its own until the list of years replaces it
-        const select = domCache.get("year-select", HTMLSelectElement);
-        if (select) {
-          select.value = year;
-          if (select.value !== year) {
-            select.add(new Option(year, year, true, true));
-          }
-        }
-      }
-      if (state.selectedAircraft) {
-        this.selectedAircraft = state.selectedAircraft;
-      }
-
-      // Restore selected paths BEFORE updateLayers() so paths are drawn with correct selection
-      if (state.selectedPathIds && state.selectedPathIds.length > 0) {
-        state.selectedPathIds.forEach((pathId) => {
-          this.selectedPathIds.add(pathId);
-        });
-        this.store.notifyMutation("selectedPathIds");
-      }
-
-      // Restore the layers and how the map is drawn
-      for (const key of RESTORED_TOGGLES) {
-        const value = state[key];
-        if (value !== undefined) this.store.set(key, value);
-      }
-      if (state.heightBand) this.heightBand = state.heightBand;
-      // Altitude and speed colour the same paths, and the toggles never
-      // leave both on (setColorLayer); a link written by hand, or with every
-      // flag of `v` set, can. Altitude is the one kept, as it needs no
-      // timing data.
-      if (this.altitudeVisible && this.airspeedVisible) {
-        this.airspeedVisible = false;
-      }
-      // Isolating nothing is not a state the controls can leave: a link
-      // written before path ids were versioned drops its selection but still
-      // carries the isolate flag
-      if (state.isolateSelection !== undefined) {
-        this.isolateSelection =
-          state.isolateSelection && this.selectedPathIds.size > 0;
-      }
-    });
   }
 
   private setupMap(): void {
@@ -913,86 +733,6 @@ export class MapApp {
     logError(`Map error: ${message}`);
   };
 
-  /**
-   * The store drives the toggle buttons and the colour legends: initial
-   * state and every change are reflected in aria-pressed, the active class
-   * and the legend visibility, for the buttons that show their key alone
-   * (`pressed` in state/toggles.ts). The heatmap's toggle and the altitude
-   * scale also depend on whether a replay runs, so they follow the layers
-   * (see ui/layerVisibility.ts).
-   */
-  private setupButtonSync(): void {
-    for (const toggle of TOGGLES) {
-      if ("pressed" in toggle) {
-        syncToggleButton(this.store, toggle.key, toggle.button);
-      }
-    }
-    syncLegend(this.store, "airspeedVisible", "airspeed-legend");
-  }
-
-  /**
-   * Open and close the statistics rail. The rail turns the left column into
-   * a single row of icon-only buttons and takes the space beside the map,
-   * which slides aside for it (see slideMapBesideRail).
-   */
-  private setupStatsRail(): void {
-    const apply = (visible: boolean): void => {
-      const rail = domCache.get("stats-rail");
-      if (rail) {
-        // The collapse button hides itself, so focus has to leave the rail
-        // before it does; otherwise it falls back to <body>
-        if (!visible) restoreFocusFromRail(rail, this.map);
-        rail.hidden = !visible;
-      }
-
-      // Both triggers are a disclosure for the rail, not a pressed toggle;
-      // only the one that stays on screen carries the active treatment
-      for (const id of ["stats-btn", "stats-collapse-btn"]) {
-        domCache.get(id)?.setAttribute("aria-expanded", String(visible));
-      }
-      domCache.get("stats-btn")?.classList.toggle("active", visible);
-
-      slideMapBesideRail(
-        document.getElementById("map"),
-        visible,
-        animate && !prefersReducedMotion(),
-      );
-    };
-
-    // Opened with the page, the rail is simply there
-    let animate = false;
-    apply(this.statsPanelVisible);
-    animate = true;
-    this.store.subscribe("statsPanelVisible", apply);
-  }
-
-  /**
-   * Get Wrapped and its intro ready while its button is pointed at or
-   * focused, on either layout (see prepareWrappedIntro). Not under reduced
-   * motion, where no intro plays: Wrapped's code comes with the click, as
-   * it always has.
-   */
-  private prepareWrappedOnIntent(): void {
-    const prepare = (event: Event): void => {
-      const id = (event.target as Partial<Element>).id;
-      if (
-        (id === "wrapped-btn" || id === "mobile-tab-wrapped") &&
-        !prefersReducedMotion()
-      ) {
-        loadWrapped()
-          .then((wrapped) => wrapped?.prepareWrappedIntro(this))
-          .catch(logError);
-      }
-    };
-    // Neither event bubbles; both reach a listener that captures
-    for (const type of ["pointerenter", "focus"]) {
-      document.addEventListener(type, prepare, {
-        capture: true,
-        signal: this.signal,
-      });
-    }
-  }
-
   private initializeManagers(): void {
     this.dataManager = new DataManager(this);
     this.layerManager = new LayerManager(this);
@@ -1007,8 +747,8 @@ export class MapApp {
     followSatelliteSwitch(this);
     followSelectionHighlight(this);
     followStatsPanel(this);
-    this.prepareWrappedOnIntent();
-    this.followReplayAvailability();
+    prepareWrappedOnIntent(this);
+    followReplayAvailability(this);
     this.followFlightProfile();
     this.store.subscribeKeys(
       [
@@ -1180,7 +920,7 @@ export class MapApp {
     const pending = this.pendingFeatureToggles;
     if (pending.has(name)) return;
     pending.add(name);
-    this.loadLazyBundle(loadFeatures, unavailable)
+    loadLazyBundle(loadFeatures, unavailable)
       .then((features) => {
         pending.delete(name);
         if (!this.destroyed) features?.[name](this);
@@ -1197,24 +937,6 @@ export class MapApp {
    */
   toggleCrossSection(): void {
     this.toggleFeature("toggleCrossSection", CROSS_SECTION_UNAVAILABLE_MESSAGE);
-  }
-
-  /**
-   * Keep the replay control showing whether replay is available. It has to
-   * say so from the first paint, so the app owns it rather than the replay
-   * manager, which is only fetched once someone opens replay.
-   */
-  private followReplayAvailability(): void {
-    // A running replay owns the button (it is pressed); it is back in step
-    // with the selection as the replay closes
-    const refresh = (): void => {
-      if (!this.replayActive) updateReplayButtonState(this.canReplay());
-    };
-    this.store.subscribeKeys(
-      ["selectedPathIds", "hasTimingData", "currentData", "replayActive"],
-      refresh,
-    );
-    refresh();
   }
 
   /**
@@ -1275,35 +997,12 @@ export class MapApp {
   }
 
   /**
-   * A lazy bundle, or null when it could not be fetched. A failure is
-   * reported here rather than at each call site, so every way into Replay,
-   * Wrapped or the statistics says the same thing instead of doing nothing.
-   * `messages` are those of every part of the app the file carries, which
-   * stand or fall with it: one toast says it failed, the one of the part
-   * that asked last.
-   */
-  private async loadLazyBundle<T>(
-    load: () => Promise<T | null>,
-    unavailable: string,
-    messages: readonly string[] = [unavailable],
-  ): Promise<T | null> {
-    const bundle = await load();
-    // The failure of an earlier try stays until dismissed, and would say
-    // the code is unavailable over the panel it has just opened
-    for (const message of messages) {
-      if (bundle || message !== unavailable) dismissToast(message);
-    }
-    if (!bundle) showToast(unavailable, "error");
-    return bundle;
-  }
-
-  /**
    * The replay manager, fetching the feature bundle on first use. Resolves
    * with undefined when the bundle cannot be loaded.
    */
   async loadReplay(): Promise<ReplayManager | undefined> {
     if (!this.replayManager) {
-      const features = await this.loadLazyBundle(
+      const features = await loadLazyBundle(
         loadFeatures,
         REPLAY_UNAVAILABLE_MESSAGE,
       );
@@ -1321,7 +1020,7 @@ export class MapApp {
    */
   async loadWrapped(): Promise<WrappedManager | undefined> {
     if (!this.wrappedManager) {
-      const wrapped = await this.loadLazyBundle(
+      const wrapped = await loadLazyBundle(
         loadWrapped,
         WRAPPED_UNAVAILABLE_MESSAGE,
         WRAPPED_BUNDLE_MESSAGES,
@@ -1341,7 +1040,7 @@ export class MapApp {
    */
   async loadStats(): Promise<StatsManager | undefined> {
     if (!this.statsManager) {
-      const wrapped = await this.loadLazyBundle(
+      const wrapped = await loadLazyBundle(
         loadWrapped,
         STATS_UNAVAILABLE_MESSAGE,
         WRAPPED_BUNDLE_MESSAGES,
@@ -1437,58 +1136,6 @@ export class MapApp {
 }
 
 defineStoreAccessors(MapApp.prototype);
-
-/**
- * Hand focus to the first reachable statistics trigger when the rail that
- * holds it is about to be hidden. Without this the browser drops focus to
- * `<body>` and the next Tab restarts at the top of the document, ahead of
- * every focusable marker on the map.
- */
-function restoreFocusFromRail(
-  rail: HTMLElement,
-  map: MapLibreMap | null,
-): void {
-  if (!rail.contains(document.activeElement)) return;
-  // The mobile tab replaces the desktop button on small viewports
-  for (const id of ["stats-btn", "mobile-tab-stats"]) {
-    const trigger = domCache.get(id);
-    if (!trigger || rail.contains(trigger)) continue;
-    trigger.focus();
-    if (document.activeElement === trigger) return;
-  }
-  // The map is the last resort: next to the controls in order. It is the
-  // canvas that takes focus, the container around it does not.
-  map?.getCanvas().focus();
-}
-
-/**
- * Keep --attribution-h at the height of the map's credit. The credit wraps
- * once a layer adds one of its own (see styles.css), and the legends, the
- * toasts and the phone's replay panel stand on top of it. A phone shows two
- * of its lines, and a tap on it beside its links all of them.
- */
-function followAttributionHeight(map: MapLibreMap): void {
-  const credit = map
-    .getContainer()
-    .querySelector<HTMLElement>(".maplibregl-ctrl-attrib");
-  if (!credit) return;
-  credit.addEventListener("click", (event) => {
-    if (!(event.target as Element).closest("a")) {
-      credit.classList.toggle("is-expanded");
-    }
-  });
-  if (typeof ResizeObserver === "undefined") return;
-  new ResizeObserver(() => {
-    const height = credit.getBoundingClientRect().height;
-    // Hidden while a sheet covers its corner: the chrome keeps its place
-    if (height > 0) {
-      document.documentElement.style.setProperty(
-        "--attribution-h",
-        `${height}px`,
-      );
-    }
-  }).observe(credit);
-}
 
 /** Markup shown in place of the map when initialization fails */
 export const INIT_ERROR_HTML =

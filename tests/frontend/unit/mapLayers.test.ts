@@ -23,7 +23,7 @@ import {
   MAP_MIN_ZOOM,
   MAP_SOURCES,
 } from "../../../kml_heatmap/frontend/utils/constants";
-import { FALLBACK_STYLE } from "../../../kml_heatmap/frontend/mapApp";
+import { FALLBACK_STYLE } from "../../../kml_heatmap/frontend/baseStyle";
 import { createMapLibreMock, createMockApp } from "../testHelpers";
 import { resetMapLibreMock } from "../../mocks/maplibre-gl";
 

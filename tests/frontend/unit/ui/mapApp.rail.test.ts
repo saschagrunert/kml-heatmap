@@ -2,17 +2,19 @@
  * MapApp: store-driven controls, the statistics rail, map events and setup.
  */
 import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
+import { MapApp } from "../../../../kml_heatmap/frontend/mapApp";
 import {
   cartoTransformRequest,
   BASE_STYLE_RETRY_MS,
   FALLBACK_STYLE,
+} from "../../../../kml_heatmap/frontend/baseStyle";
+import {
   CROSS_SECTION_UNAVAILABLE_MESSAGE,
   REPLAY_UNAVAILABLE_MESSAGE,
   STATS_UNAVAILABLE_MESSAGE,
   TOUR_UNAVAILABLE_MESSAGE,
   WRAPPED_UNAVAILABLE_MESSAGE,
-  MapApp,
-} from "../../../../kml_heatmap/frontend/mapApp";
+} from "../../../../kml_heatmap/frontend/ui/lazyBundles";
 import { logError } from "../../../../kml_heatmap/frontend/utils/logger";
 import {
   AttributionControl,

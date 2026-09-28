@@ -41,7 +41,7 @@ export interface ToggleSpec {
    * also says whether a replay hides it, the altitude's whether a replay
    * colours its trail by altitude (ui/layerVisibility.ts), Isolate's
    * whether there is a selection (ui/pathSelection.ts), and the statistics
-   * button is a disclosure (MapApp.setupStatsRail).
+   * button is a disclosure (setupStatsRail in ui/appChrome.ts).
    */
   readonly pressed?: boolean;
   /**

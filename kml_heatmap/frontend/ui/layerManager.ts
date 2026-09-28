@@ -35,9 +35,16 @@
  * - Paths are pixels of a layer and have no events of their own: what is
  *   under the pointer, for a click and for the tooltip, is found in
  *   ui/pathHover.ts, among the layers and runs this module has drawn.
+ *
+ * This module keeps the state of the modes and decides what is written
+ * when: as the data, the filters, the selection or the visibility change,
+ * as the 3D view and its relief come and go, and as a zoom or a pan ends.
+ * What it does that with lives next to it: the modes, their state and the
+ * cut into runs (ui/pathRuns.ts), the look of a selection, the colour
+ * ranges and the legends (ui/pathLook.ts) and what the ribbons of the 3D
+ * view are cut for (ui/pathRibbons.ts).
  */
 import type {
-  ExpressionSpecification,
   GeoJSONSource,
   LngLat,
   Map as MapLibreMap,
@@ -51,18 +58,8 @@ import type {
   PathHit,
   PathHitResult,
   PathHitTester,
-  PathInfo,
   PathRunProperties,
-  PathSegment,
 } from "../types";
-import {
-  airspeedColorAt,
-  altitudeColorAt,
-  scalePosition,
-} from "../utils/colors";
-import { MAP_LAYERS, MAP_SOURCES } from "../utils/constants";
-import { domCache } from "../utils/domCache";
-import { generateSegmentPopupHtml } from "../utils/htmlGenerators";
 import { logError } from "../utils/logger";
 import {
   isReplayCameraMove,
@@ -71,11 +68,6 @@ import {
   whenContextRestored,
   type LngLatTuple,
 } from "../utils/mapHelpers";
-import { datasetIndex } from "../calculations/datasetIndex";
-import {
-  segmentRangesFor,
-  segmentsForPathIds,
-} from "../calculations/statistics";
 import { loadFeatures } from "../services/featureLoader";
 import {
   followsLevel,
@@ -83,9 +75,7 @@ import {
   reliefLevel,
   ribbonWidthZoom,
 } from "../calculations/lift";
-import type { SmoothedFlights } from "../calculations/smoothing";
 import {
-  groundedFlights,
   heldGroundedFlights,
   releaseGroundedFlights,
   releaseGroundProfiles,
@@ -93,248 +83,36 @@ import {
 import { ribbonOf, ribbonProperties } from "../calculations/ribbons";
 import { appendCurve, flatCurves } from "../calculations/curves";
 import {
-  calculateAirspeedRange,
-  calculateAltitudeRange,
-  calculateSegmentProperties,
-  formatAirspeedLabel,
-  formatAltitudeLabel,
-  rangeMiddle,
-} from "../features/layers";
-import {
   CULL_FROM_ZOOM,
   leavesBox,
   overlaps,
-  ribbonsTopM,
   VIEW_SPARE,
   viewBox,
-  type Box,
 } from "../utils/viewBox";
 import { PathHover, type DrawnRuns, type RunsOnLayer } from "./pathHover";
-
-export type LayerMode = "altitude" | "airspeed";
-
-/** The two sources of a mode, and the layers drawn from them */
-type RunSet = "main" | "selected";
-
-const RUN_SETS: readonly RunSet[] = ["main", "selected"];
-
-/**
- * What sets the two modes apart, the same for every app. The handle of a
- * mode's layers and its colour range are the app's (see handleOf and
- * rangeOf).
- */
-interface LayerConfig {
-  mode: LayerMode;
-  /** Source and layer share their id, see MAP_SOURCES and MAP_LAYERS */
-  sources: Record<RunSet, string>;
-  layers: Record<RunSet, string>;
-  /**
-   * The sources the 3D view writes the runs to as ribbons, and their
-   * layers, which share their id
-   */
-  ribbons: Record<RunSet, string>;
-  getValue: (seg: PathSegment) => number;
-  /** The ramp's colour at a position along it, from 0 to 1 */
-  colorAt: (position: number) => string;
-  /** Range of the given segments, `fallback` when they have no value */
-  computeRange: (
-    segments: PathSegment[],
-    fallback: Range,
-    paths: PathInfo[],
-  ) => Range;
-  filterSegment?: (seg: PathSegment) => boolean;
-  legendMinId: string;
-  /** The label of the middle of the ramp, a number in the unit of the ends */
-  legendMidId: string;
-  legendMaxId: string;
-  /** Every label's, the middle's too: both units, one line each */
-  formatLegend: (value: number) => string;
-}
-
-/** Colour steps a range is cut into; the merge key of a run */
-const COLOR_BINS = 32;
-
-const MODES: readonly LayerMode[] = ["altitude", "airspeed"];
-
-/** The two modes, made once rather than on every call that needs one */
-const CONFIGS: Readonly<Record<LayerMode, LayerConfig>> = {
-  altitude: {
-    mode: "altitude",
-    sources: {
-      main: MAP_SOURCES.pathsAltitude,
-      selected: MAP_SOURCES.pathsAltitudeSelected,
-    },
-    layers: {
-      main: MAP_LAYERS.pathsAltitude,
-      selected: MAP_LAYERS.pathsAltitudeSelected,
-    },
-    ribbons: {
-      main: MAP_SOURCES.pathsAltitudeRibbons,
-      selected: MAP_SOURCES.pathsAltitudeSelectedRibbons,
-    },
-    getValue: (seg) => seg.altitude_ft,
-    colorAt: altitudeColorAt,
-    computeRange: calculateAltitudeRange,
-    legendMinId: "legend-min",
-    legendMidId: "legend-mid",
-    legendMaxId: "legend-max",
-    formatLegend: formatAltitudeLabel,
-  },
-  airspeed: {
-    mode: "airspeed",
-    sources: {
-      main: MAP_SOURCES.pathsAirspeed,
-      selected: MAP_SOURCES.pathsAirspeedSelected,
-    },
-    layers: {
-      main: MAP_LAYERS.pathsAirspeed,
-      selected: MAP_LAYERS.pathsAirspeedSelected,
-    },
-    ribbons: {
-      main: MAP_SOURCES.pathsAirspeedRibbons,
-      selected: MAP_SOURCES.pathsAirspeedSelectedRibbons,
-    },
-    getValue: (seg) => seg.groundspeed_knots,
-    colorAt: airspeedColorAt,
-    computeRange: (segments, fallback) =>
-      calculateAirspeedRange(segments, fallback),
-    filterSegment: (seg) => seg.groundspeed_knots > 0,
-    legendMinId: "airspeed-legend-min",
-    legendMidId: "airspeed-legend-mid",
-    legendMaxId: "airspeed-legend-max",
-    formatLegend: formatAirspeedLabel,
-  },
-};
-
-/** One feature of a source: a run of segments of one path in one colour */
-interface Run {
-  /** Half-open index range of the run within the drawn segment array */
-  start: number;
-  end: number;
-  pathId: number;
-  /**
-   * Where the run is coloured on the ramp, from 0 to 1: the middle of its
-   * colour step
-   */
-  value: number;
-  color: string;
-}
-
-/** The runs of one source; the index of a run is the `r` of its feature */
-interface RunTable {
-  runs: Run[];
-  /**
-   * Bumped on every change of the runs, written or not; features of an
-   * older one are stale
-   */
-  g: number;
-  /**
-   * The source that holds the runs' features, null while none does, which
-   * is how they are created: the lines' source, or in the 3D view the
-   * ribbons' source
-   */
-  written: string | null;
-  /**
-   * How far the last `setData` has got: with the worker, with the tiles in
-   * view being cut from it, or null once the map shows it. Until then the
-   * tiles answer for the data before it.
-   */
-  landing: "worker" | "tiles" | null;
-  /**
-   * The zoom level the runs were last written for in the 3D view (see
-   * ribbonWidthZoom), null outside it
-   */
-  widthZoom: number | null;
-  /**
-   * The part of the map the ribbons were written for (see viewBox), null
-   * for all of them
-   */
-  box: Box | null;
-  /**
-   * A cut for another zoom or view was left out while isolate mode hid the
-   * runs (see isolatedOut); they are written again as they show
-   */
-  behind: boolean;
-}
-
-/** The selection a mode's layers were last styled for */
-interface ShownSelection {
-  selected: Set<number>;
-  isolate: boolean;
-}
-
-interface ModeState {
-  tables: Record<RunSet, RunTable>;
-  /** The array the runs index into, null while the mode is not drawn */
-  segments: PathSegment[] | null;
-  shown: ShownSelection;
-  /** The filter on the main layer, serialised, to set it only on a change */
-  filterKey: string;
-  /**
-   * The colour range of the selection, and what it was worked out for (see
-   * resolveColorRange)
-   */
-  selectionRange: {
-    data: KMLDataset;
-    full: Range;
-    selected: Set<number>;
-    range: Range;
-  } | null;
-  /**
-   * Its sources hold runs of before a change of the view that passed it by
-   * while it was hidden; it is drawn again as a whole
-   */
-  dirty: boolean;
-}
-
-function emptyModeState(): ModeState {
-  const table = (): RunTable => ({
-    runs: [],
-    g: 0,
-    written: null,
-    landing: null,
-    widthZoom: null,
-    box: null,
-    behind: false,
-  });
-  return {
-    tables: { main: table(), selected: table() },
-    segments: null,
-    shown: { selected: new Set(), isolate: false },
-    filterKey: "null",
-    selectionRange: null,
-    dirty: false,
-  };
-}
-
-/**
- * The middle of the one of COLOR_BINS equal steps of the ramp that `value`
- * falls in on `range` (see scalePosition), from 0 to 1: the merge key of a
- * run, and where on the ramp it is coloured
- */
-function stepPosition(value: number, range: Range): number {
-  const position = scalePosition(value, range.min, range.max, range.ranks);
-  const step = Math.floor(position * COLOR_BINS);
-  return (Math.min(Math.max(step, 0), COLOR_BINS - 1) + 0.5) / COLOR_BINS;
-}
-
-/**
- * Width and opacity of the runs of a selected or an unselected path. The
- * numbers are those of `calculateSegmentProperties`, asked for a path that
- * stands in for every path of its kind, since a layer has one look.
- */
-function runLook(
-  isSelected: boolean,
-  shown: ShownSelection,
-): { weight: number; opacity: number } {
-  const hasSelection = shown.selected.size > 0;
-  const { weight, opacity } = calculateSegmentProperties({
-    pathId: 0,
-    selectedPathIds: new Set(isSelected ? [0] : hasSelection ? [1] : []),
-    isolateSelection: shown.isolate,
-  });
-  return { weight, opacity };
-}
+import {
+  CONFIGS,
+  cutRuns,
+  emptyModeState,
+  isolatedOut,
+  MODES,
+  readyMap,
+  RUN_SETS,
+  runsOnLayer,
+  type LayerConfig,
+  type LayerMode,
+  type ModeState,
+  type Run,
+  type RunSet,
+} from "./pathRuns";
+import {
+  applyLook,
+  formatSegmentTooltip,
+  rangeOf,
+  resolveColorRange,
+  updateLegend,
+} from "./pathLook";
+import { runBox, smoothedFlights, topM } from "./pathRibbons";
 
 export class LayerManager implements PathHitTester {
   private app: MapApp;
@@ -385,7 +163,7 @@ export class LayerManager implements PathHitTester {
         const table = state.tables[set];
         if (table.widthZoom === null || table.widthZoom === level) continue;
         // Out of sight in isolate mode: written as it shows again
-        if (this.isolatedOut(state, set)) {
+        if (isolatedOut(state, set)) {
           table.behind = true;
           continue;
         }
@@ -418,11 +196,11 @@ export class LayerManager implements PathHitTester {
       for (const set of RUN_SETS) {
         const table = state.tables[set];
         const { box, runs } = table;
-        const view = box && viewBox(map, this.topM(), 0);
+        const view = box && viewBox(map, topM(this.app), 0);
         // Written again once the view reaches past one of its edges, or as
         // they show again when isolate mode hides them
         if (view && leavesBox(view, box)) {
-          if (this.isolatedOut(state, set)) table.behind = true;
+          if (isolatedOut(state, set)) table.behind = true;
           else this.setRuns(CONFIGS[mode], set, runs, true);
         }
       }
@@ -432,9 +210,9 @@ export class LayerManager implements PathHitTester {
   constructor(app: MapApp) {
     this.app = app;
     this.pathHover = new PathHover(app, {
-      readyMap: () => this.readyMap(),
+      readyMap: () => readyMap(this.app),
       drawnRuns: (map) => this.drawnRuns(map),
-      describe: (segment) => this.formatSegmentTooltip(segment),
+      describe: (segment) => formatSegmentTooltip(app, this.state, segment),
     });
     // Lifted or flat, the flights are cut and written anew. The smoothed
     // flights and the ground of every level only the 3D view needs are let
@@ -512,22 +290,6 @@ export class LayerManager implements PathHitTester {
       : this.app.airspeedLayer;
   }
 
-  /** The colour range of a mode over every flight */
-  private rangeOf(mode: LayerMode): Range {
-    return mode === "altitude"
-      ? this.app.altitudeRange
-      : this.app.airspeedRange;
-  }
-
-  /**
-   * The map once the path sources exist on it. They are created when the
-   * style has loaded, and a source that is not there cannot take data.
-   */
-  private readyMap(): MapLibreMap | null {
-    const map = this.app.map;
-    return map?.getSource(MAP_SOURCES.pathsAltitude) ? map : null;
-  }
-
   /**
    * Remember a mode that could not reach its sources, and bring it up to
    * date once the map is ready: drawn again from the data of that moment,
@@ -542,7 +304,7 @@ export class LayerManager implements PathHitTester {
       const pending = [...this.pendingModes];
       this.pendingModes.clear();
       // Without the sources even now there is nothing to wait for
-      if (!this.readyMap()) return;
+      if (!readyMap(this.app)) return;
       for (const pendingMode of pending) {
         if (this.state[pendingMode].segments) {
           this.redrawPaths(pendingMode);
@@ -582,7 +344,7 @@ export class LayerManager implements PathHitTester {
       const config = CONFIGS[mode];
       const state = this.state[mode];
       if (!this.handleOf(mode).isVisible() || !state.segments) continue;
-      const drawn = RUN_SETS.map((set) => this.runsOnLayer(state, set));
+      const drawn = RUN_SETS.map((set) => runsOnLayer(state, set));
       RUN_SETS.forEach((set, i) => layers.set(config.layers[set], drawn[i]!));
       if (ribbons) {
         RUN_SETS.forEach((set, i) =>
@@ -594,18 +356,6 @@ export class LayerManager implements PathHitTester {
       }
     }
     return { layers, stale: landing || (threeD && !ribbons) };
-  }
-
-  /** What the features of a mode's lines of one set stand for */
-  private runsOnLayer(state: ModeState, set: RunSet): RunsOnLayer {
-    const { selected, isolate } = state.shown;
-    return {
-      table: state.tables[set],
-      segments: state.segments ?? [],
-      selected: set === "selected",
-      ribbon: false,
-      only: set === "main" && isolate && selected.size > 0 ? selected : null,
-    };
   }
 
   /**
@@ -755,124 +505,6 @@ export class LayerManager implements PathHitTester {
   }
 
   /**
-   * Colour range used for the layer: the selected paths' range when a
-   * selection exists, the layer's full range otherwise. The selection's is
-   * kept until the selection, the dataset or the full range changes: the
-   * tooltip asks for both modes' on every segment it shows, and working
-   * them out took milliseconds with a hundred flights selected.
-   */
-  private resolveColorRange(config: LayerConfig): Range {
-    const selected = this.app.selectedPathIds;
-    const data = this.app.currentData;
-    const full = this.rangeOf(config.mode);
-    if (selected.size === 0 || !data) return full;
-    const state = this.state[config.mode];
-    const held = state.selectionRange;
-    if (
-      held?.data === data &&
-      held.full === full &&
-      held.selected.size === selected.size &&
-      [...selected].every((id) => held.selected.has(id))
-    ) {
-      return held.range;
-    }
-    // Only the selected paths' segments, sliced out through the path index:
-    // a selection click should not walk the whole dataset
-    const range = config.computeRange(
-      segmentsForPathIds(data.path_segments, selected),
-      full,
-      data.path_info,
-    );
-    state.selectionRange = { data, full, selected: new Set(selected), range };
-    return range;
-  }
-
-  /**
-   * Cut the segments into runs: of every path on the full range, or with
-   * `only` of the given paths on `range`. The year/aircraft filter and the
-   * mode's own filter apply to both.
-   */
-  private cutRuns(
-    config: LayerConfig,
-    data: KMLDataset,
-    range: Range,
-    only?: Set<number>,
-  ): Run[] {
-    const segments = data.path_segments;
-    // Resolve the filter once over the path info instead of re-deriving it per
-    // segment: `null` means every path passes, so no lookup is needed at all
-    const visiblePathIds = this.visiblePathIds(data);
-    const runs: Run[] = [];
-
-    // The stretches of the array to walk: all of it, or the slices of the
-    // wanted paths where the array is indexed by path
-    let stretches: [number, number][] = [[0, segments.length]];
-    const index = only ? segmentRangesFor(segments) : null;
-    if (only && index) {
-      stretches = [];
-      for (const id of only) {
-        const stretch = index.get(id);
-        if (stretch) stretches.push([stretch[0], stretch[1]]);
-      }
-      stretches.sort((a, b) => a[0] - b[0]);
-    }
-
-    // Current merge run. Its key is the middle of its colour step.
-    let runStart = -1;
-    let runPathId = -1;
-    let runKey = NaN;
-    let runEnd: readonly number[] | null = null;
-
-    const flush = (end: number): void => {
-      if (runStart < 0) return;
-      runs.push({
-        start: runStart,
-        end,
-        pathId: runPathId,
-        value: runKey,
-        color: config.colorAt(runKey),
-      });
-      runStart = -1;
-      runEnd = null;
-    };
-
-    for (const [from, to] of stretches) {
-      for (let i = from; i < to; i++) {
-        const segment = segments[i]!;
-        const pathId = segment.path_id;
-        const coords = segment.coords;
-
-        if (
-          (only && !only.has(pathId)) ||
-          (visiblePathIds !== null && !visiblePathIds.has(pathId)) ||
-          (config.filterSegment && !config.filterSegment(segment))
-        ) {
-          flush(i);
-          continue;
-        }
-
-        const key = stepPosition(config.getValue(segment), range);
-        const contiguous =
-          runEnd !== null &&
-          pathId === runPathId &&
-          key === runKey &&
-          runEnd[0] === coords[0][0] &&
-          runEnd[1] === coords[0][1];
-
-        if (!contiguous) {
-          flush(i);
-          runStart = i;
-          runPathId = pathId;
-          runKey = key;
-        }
-        runEnd = coords[1];
-      }
-      flush(to);
-    }
-    return runs;
-  }
-
-  /**
    * Replace the runs of one source, and its data where the map has it.
    * `recut` writes the same runs again, cut for another zoom: the features
    * the tiles still hold stand for the same runs, so they stay valid, and
@@ -897,7 +529,7 @@ export class LayerManager implements PathHitTester {
         ? table.g
         : ++table.g;
 
-    const map = this.readyMap();
+    const map = readyMap(this.app);
     if (!map) {
       this.deferUntilReady(config.mode);
       return;
@@ -921,13 +553,13 @@ export class LayerManager implements PathHitTester {
     const segments = state.segments ?? [];
     // Every flight smoothed at its height, in the 3D view (see lift.ts),
     // and the ribbons as wide as the zoom asks
-    const smoothed = lifted ? this.smoothedFlights(segments) : null;
+    const smoothed = lifted ? smoothedFlights(this.app, segments) : null;
     const widthZoom = ribbonWidthZoom(map.getZoom());
     table.widthZoom = threeD ? widthZoom : null;
     // Zoomed in, the ribbons around the view only
     const box =
       smoothed && widthZoom >= CULL_FROM_ZOOM
-        ? viewBox(map, this.topM(), VIEW_SPARE)
+        ? viewBox(map, topM(this.app), VIEW_SPARE)
         : null;
     table.box = box;
     const level = this.app.reliefLevel;
@@ -956,7 +588,7 @@ export class LayerManager implements PathHitTester {
       // In the 3D view the run is a ribbon at its height, at every zoom, cut
       // from its flight's smoothed curve so it meets the runs on either side
       // without a seam, for the pixels of the zoom
-      if (box && !overlaps(box, this.runBox(run, smoothed))) return;
+      if (box && !overlaps(box, runBox(run, smoothed))) return;
       for (const piece of ribbonOf(
         smoothed,
         run.start,
@@ -1014,7 +646,7 @@ export class LayerManager implements PathHitTester {
     this.setRuns(
       config,
       "main",
-      this.cutRuns(config, data, this.rangeOf(mode)),
+      cutRuns(this.app, config, data, rangeOf(this.app, mode)),
     );
     this.showSelection(config, data);
     this.pathHover.rehoverOnIdle();
@@ -1028,72 +660,14 @@ export class LayerManager implements PathHitTester {
    */
   private showSelection(config: LayerConfig, data: KMLDataset): void {
     const selected = this.app.selectedPathIds;
-    const range = this.resolveColorRange(config);
+    const range = resolveColorRange(this.app, this.state, config);
     this.setRuns(
       config,
       "selected",
-      selected.size > 0 ? this.cutRuns(config, data, range, selected) : [],
+      selected.size > 0 ? cutRuns(this.app, config, data, range, selected) : [],
     );
-    this.applyLook(config);
-    this.updateLegend(range, config);
-  }
-
-  /**
-   * Style the two layers of a mode for the current selection. The handle
-   * owns their visibility, so what the main layer must not show (the
-   * selected flights, drawn on top, or in isolate mode everything) is left
-   * out by a filter.
-   */
-  private applyLook(config: LayerConfig): void {
-    const state = this.state[config.mode];
-    const shown: ShownSelection = {
-      selected: new Set(this.app.selectedPathIds),
-      isolate: this.app.isolateSelection,
-    };
-    state.shown = shown;
-    const map = this.readyMap();
-    if (!map) return;
-
-    const selectedLook = runLook(true, shown);
-    const mainOpacity = runLook(false, shown).opacity;
-    map.setPaintProperty(config.layers.main, "line-opacity", mainOpacity);
-    map.setPaintProperty(
-      config.layers.selected,
-      "line-width",
-      selectedLook.weight,
-    );
-    map.setPaintProperty(
-      config.layers.selected,
-      "line-opacity",
-      selectedLook.opacity,
-    );
-    // The ribbons of the 3D view, dimmed for a selection like the lines,
-    // and out of sight while they settle on another ground
-    const ribbonsShown = this.app.relief.ribbonsShown;
-    map.setPaintProperty(
-      config.ribbons.main,
-      "fill-extrusion-opacity",
-      mainOpacity * ribbonsShown,
-    );
-    map.setPaintProperty(
-      config.ribbons.selected,
-      "fill-extrusion-opacity",
-      selectedLook.opacity * ribbonsShown,
-    );
-
-    let filter: ExpressionSpecification | null = null;
-    if (shown.selected.size > 0) {
-      filter = shown.isolate
-        ? ["literal", false]
-        : ["!", ["in", ["get", "pathId"], ["literal", [...shown.selected]]]];
-    }
-    // A filter cuts the tiles of the layer again, even one equal to the last
-    const filterKey = JSON.stringify(filter);
-    if (filterKey !== state.filterKey) {
-      state.filterKey = filterKey;
-      map.setFilter(config.layers.main, filter);
-      map.setFilter(config.ribbons.main, filter);
-    }
+    applyLook(this.app, this.state, config);
+    updateLegend(range, config);
   }
 
   /**
@@ -1108,19 +682,6 @@ export class LayerManager implements PathHitTester {
     if (this.handleOf(mode).isVisible()) return true;
     state.dirty = true;
     return false;
-  }
-
-  /**
-   * Whether the runs of a set are out of sight as isolate mode shows the
-   * selection alone: the main layers are filtered to nothing (see
-   * applyLook). A zoom or a pan that would cut them again for the view, and
-   * in the 3D view smooth every flight for it, leaves them as they are
-   * until they show again (see updateSelectionStyles).
-   */
-  private isolatedOut(state: ModeState, set: RunSet): boolean {
-    return (
-      set === "main" && state.shown.isolate && state.shown.selected.size > 0
-    );
   }
 
   /** Cut and write the visible modes again, as the 3D view comes or goes */
@@ -1145,42 +706,6 @@ export class LayerManager implements PathHitTester {
       if (!this.state[mode].segments) this.clearLayer(mode);
       else if (this.drawsNow(mode)) this.redrawPaths(mode);
     }
-  }
-
-  /**
-   * Every flight smoothed at its height above its ground, on the ground and
-   * at the level the relief is drawn for (see groundedFlights), kept for as
-   * long as the dataset, the ground and the level are the same
-   */
-  private smoothedFlights(segments: PathSegment[]): SmoothedFlights {
-    return groundedFlights(
-      segments,
-      this.app.terrainActive,
-      this.app.reliefLevel,
-    );
-  }
-
-  /**
-   * How high the highest flight may be drawn above its ground, in metres,
-   * in the 3D view: no higher than its altitude
-   */
-  private topM(): number {
-    return ribbonsTopM(this.app.altitudeRange.max, this.app.reliefLevel);
-  }
-
-  /** The part of the map the ribbon of a run lies in, along its curve */
-  private runBox(run: Run, smoothed: SmoothedFlights): Box {
-    const { points } = smoothed.chains[smoothed.chainOf[run.start]!]!;
-    let [west, south, east, north] = [540, 90, -540, -90];
-    const last = smoothed.to[run.end - 1]!;
-    for (let j = smoothed.from[run.start]!; j <= last; j++) {
-      const [lat, lng] = points[j]!;
-      west = Math.min(west, lng);
-      east = Math.max(east, lng);
-      south = Math.min(south, lat);
-      north = Math.max(north, lat);
-    }
-    return [west, south, east, north];
   }
 
   /**
@@ -1269,7 +794,7 @@ export class LayerManager implements PathHitTester {
    * (drawsNow).
    */
   private releaseRibbons(hiddenOnly: boolean): void {
-    const map = this.readyMap();
+    const map = readyMap(this.app);
     for (const mode of MODES) {
       if (hiddenOnly && this.drawsNow(mode)) continue;
       const ribbons = Object.values(CONFIGS[mode].ribbons);
@@ -1285,7 +810,7 @@ export class LayerManager implements PathHitTester {
 
   /** Style the layers of both modes again, for ribbonsShown */
   private restyle(): void {
-    for (const mode of MODES) this.applyLook(CONFIGS[mode]);
+    for (const mode of MODES) applyLook(this.app, this.state, CONFIGS[mode]);
   }
 
   /**
@@ -1319,63 +844,21 @@ export class LayerManager implements PathHitTester {
         selected.size === current.size &&
         [...current].every((id) => selected.has(id))
       ) {
-        this.applyLook(config);
+        applyLook(this.app, this.state, config);
       } else this.showSelection(config, data);
       const main = state.tables.main;
-      if (main.behind && !this.isolatedOut(state, "main")) {
+      if (main.behind && !isolatedOut(state, "main")) {
         this.setRuns(config, "main", main.runs, true);
       }
     }
     this.pathHover.rehoverOnIdle();
   }
 
-  /** Coloured on the same range as the runs, the selection's if any */
-  private formatSegmentTooltip(segment: PathSegment): string {
-    const altitude = this.resolveColorRange(CONFIGS.altitude);
-    const speed = this.resolveColorRange(CONFIGS.airspeed);
-    return generateSegmentPopupHtml({
-      segment,
-      altRange: altitude,
-      speedRange: speed,
-    });
-  }
-
-  /**
-   * Ids of the paths the year/aircraft filter keeps, or `null` when no filter
-   * is active and every segment is drawn regardless of its path info.
-   */
-  private visiblePathIds(data: KMLDataset): Set<number> | null {
-    const year = this.app.selectedYear;
-    const aircraft = this.app.selectedAircraft;
-    if (year === "all" && aircraft === "all") return null;
-    return datasetIndex(data).filter(year, aircraft).pathIds;
-  }
-
-  /**
-   * Label a legend with the ends of `range` and the value in the middle of
-   * its ramp: spread by rank, the colours of the middle are the median's,
-   * not those of the value halfway between the ends (see rangeMiddle)
-   */
-  private updateLegend(
-    range: Range,
-    config: Pick<
-      LayerConfig,
-      "legendMinId" | "legendMidId" | "legendMaxId" | "formatLegend"
-    >,
-  ): void {
-    const minEl = domCache.get(config.legendMinId);
-    const midEl = domCache.get(config.legendMidId);
-    const maxEl = domCache.get(config.legendMaxId);
-    if (minEl) minEl.textContent = config.formatLegend(range.min);
-    if (midEl) midEl.textContent = config.formatLegend(rangeMiddle(range));
-    if (maxEl) maxEl.textContent = config.formatLegend(range.max);
-  }
-
   updateAltitudeLegend(range: Range): void {
-    this.updateLegend(range, CONFIGS.altitude);
+    updateLegend(range, CONFIGS.altitude);
   }
 
   updateAirspeedLegend(range: Range): void {
-    this.updateLegend(range, CONFIGS.airspeed);
+    updateLegend(range, CONFIGS.airspeed);
   }
 }

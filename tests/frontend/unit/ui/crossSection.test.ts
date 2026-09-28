@@ -1,21 +1,27 @@
 /**
  * The cross-section tool (ui/crossSection.ts): drawing a line on the map by
- * pointer, drag and keyboard, its corridor, the chart and its readout, and
- * how it shares the bottom of the map with replay, Wrapped and the profile.
+ * pointer, drag and keyboard, its corridor (ui/crossSectionCorridor.ts),
+ * the chart and its readout (ui/crossSectionChart.ts, with its words from
+ * ui/crossSectionText.ts), and how it shares the bottom of the map with
+ * replay, Wrapped and the profile.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   CROSS_SECTION_HEIGHT_VAR,
+  crossSectionOpen,
+  followCrossSection,
+  toggleCrossSection,
+} from "../../../../kml_heatmap/frontend/ui/crossSection";
+import {
   CROSS_SECTION_LAYERS,
   CROSS_SECTION_SOURCE,
-  crossSectionOpen,
-  densityReference,
-  followCrossSection,
+} from "../../../../kml_heatmap/frontend/ui/crossSectionCorridor";
+import { densityReference } from "../../../../kml_heatmap/frontend/ui/crossSectionChart";
+import {
   formatAmount,
   heightUnit,
   sectionSummary,
-  toggleCrossSection,
-} from "../../../../kml_heatmap/frontend/ui/crossSection";
+} from "../../../../kml_heatmap/frontend/ui/crossSectionText";
 import type { CrossSection } from "../../../../kml_heatmap/frontend/calculations/crossSection";
 import { MobileSheet } from "../../../../kml_heatmap/frontend/ui/mobileSheet";
 import type { PathSegment } from "../../../../kml_heatmap/frontend/types";
