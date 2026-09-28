@@ -244,5 +244,6 @@ export const HIDEABLE_CONTROL_IDS = [
   "stats-rail",
   "altitude-legend",
   "airspeed-legend",
+  "heat-legend",
   "selection-chip",
 ] as const;

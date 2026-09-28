@@ -209,6 +209,53 @@ test.describe("Layers", () => {
     await expect.poll(() => sourcePoints(page, "heat")).toBe(all);
   });
 
+  test("the heat legend shows with the heatmap and says what its colours stand for", async ({
+    page,
+  }) => {
+    // Through whichever control the viewport offers: on a phone the legend
+    // stands above the bar, as the colour legends do
+    const legend = page.locator("#heat-legend");
+    await expect(legend).toBeVisible();
+    const title = legend.locator("#heat-legend-what");
+    await expect(title).toHaveText("Time spent");
+    // The heatmap as it is drawn under the exposure of the site's flights:
+    // about so many flights' worth of time, each label four times the one
+    // before
+    const labels = legend.locator(".labels > *");
+    await expect(labels).toHaveText([
+      /^≈\d+ flights?$/,
+      /^\d+$/,
+      /^\d+$/,
+      /^\d+$/,
+    ]);
+    const counts = (await labels.allTextContents()).map((text) =>
+      Number(text.replace(/\D/g, "")),
+    );
+    expect(counts.slice(1)).toEqual(counts.slice(0, 3).map((n) => n * 4));
+    // With Routes on, the heat counts the distance flown
+    await toggleLayer(page, "routes");
+    await expect(title).toHaveText("Distance flown");
+    await toggleLayer(page, "routes");
+    await expect(title).toHaveText("Time spent");
+    const bar = legend.locator(".gradient-bar");
+    await expect(bar).toHaveAttribute("role", "img");
+    await expect(bar).toHaveCSS("background-image", /linear-gradient/);
+    // What the cloud shows is said in the 3D view only
+    await expect(legend.locator("details")).toBeHidden();
+
+    await toggleLayer(page, "heatmap");
+    await expect(legend).toBeHidden();
+    await toggleLayer(page, "heatmap");
+    await expect(legend).toBeVisible();
+
+    // A colour layer brings its own legend in its place
+    await toggleLayer(page, "altitude");
+    await expect(page.locator("#altitude-legend")).toBeVisible();
+    await expect(legend).toBeHidden();
+    await toggleLayer(page, "altitude");
+    await expect(legend).toBeVisible();
+  });
+
   test("altitude toggle shows altitude layer and legend", async ({
     page,
     isMobile,

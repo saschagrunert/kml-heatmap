@@ -294,7 +294,8 @@ function analyzeBundleComposition(metafile, fileName) {
 // airspace of a year that Wrapped names, counted by the app
 // (DataManager.newAreaKm2) so that Wrapped never fetches the feature
 // bundle: 150.26 KB raw and 51.51 KB gzipped before, 153.41 KB raw and
-// 52.81 KB gzipped after, in a local build.
+// 52.81 KB gzipped after, in a local build. The heat legend with its
+// scale on top of that: 154.56 KB raw and 53.28 KB gzipped.
 const BUDGET_APP = { raw: 156 * 1024, gzip: 54 * 1024 };
 // The feature bundle is fetched only when replay is opened, the relief, the
 // heat cloud and the ribbons of a selection of the 3D view are first drawn,

@@ -87,7 +87,8 @@ export function altitudeColours(app: MapApp): boolean {
  * top of them, so closing it brings back exactly that choice. The 3D view
  * draws the heat as a cloud (ui/heatCloud.ts) in place of the flat heatmap,
  * which steps aside while the cloud is on the map. The lines of a selection
- * show where nothing else draws it. Nothing else sets the
+ * show where nothing else draws it, and the legend of the heat while no
+ * colour layer brings its own. Nothing else sets the
  * visibility of these layers, the heatmap's toggle or the altitude scale:
  * a toggle, a restored link and the start and end of a replay only write
  * store keys.
@@ -126,6 +127,18 @@ export function followLayerVisibility(app: MapApp): void {
     if (altitudeButton) applyToggleButtonState(altitudeButton, altitude);
     const legend = domCache.get("altitude-legend");
     if (legend) applyLegendVisibility(legend, altitude);
+    // The heat's legend (ui/heatLegend.ts) while the heat is the colour
+    // the map shows, and as faint as the heat when it steps back (the
+    // cloud steps back for the same, dimsHeatCloud, while no colour layer
+    // hides the legend)
+    const heatLegend = domCache.get("heat-legend");
+    if (heatLegend) {
+      applyLegendVisibility(
+        heatLegend,
+        heatmap && !app.altitudeVisible && !app.airspeedVisible,
+      );
+      heatLegend.classList.toggle("is-dimmed", dimsHeatmap(app));
+    }
   };
   app.store.subscribeKeys(LAYER_KEYS, apply);
   apply();

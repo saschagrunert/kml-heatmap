@@ -35,7 +35,8 @@
 
 ## Features
 
-- Interactive density heatmap showing visited locations
+- Interactive density heatmap showing visited locations, with a legend of
+  how many flights' worth of time each colour stands for
 - Altitude and groundspeed colored flight paths
 - Airport markers with ICAO codes and visit counts
 - Statistics panel (distance, altitude, flight time), with a sortable,

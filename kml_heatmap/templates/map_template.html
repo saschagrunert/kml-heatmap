@@ -277,8 +277,8 @@
             class="btn-surface control-btn active"
             data-action="toggleHeatmap"
             data-icon="heatmap"
-            title="Toggle heatmap overlay"
-            aria-label="Toggle heatmap overlay"
+            title="Heatmap: where the time was spent, brighter where more"
+            aria-label="Heatmap: where the time was spent, brighter where more"
             aria-pressed="true"
           >
             <span class="control-label">Heatmap</span>
@@ -419,8 +419,8 @@
             class="btn-surface control-btn"
             data-action="toggleThreeD"
             data-icon="threeD"
-            title="3D: lift the flights to their altitude, over the terrain"
-            aria-label="3D: lift the flights to their altitude, over the terrain"
+            title="3D: lift the flights to their altitude, over the terrain, and the heat into a glowing cloud"
+            aria-label="3D: lift the flights to their altitude, over the terrain, and the heat into a glowing cloud"
             aria-pressed="false"
           >
             <span class="control-label">3D</span>
@@ -586,6 +586,40 @@
         >
         <span>≥ <span id="airspeed-legend-max">200 kt</span></span>
       </div>
+    </div>
+    <!-- The colours of the heat, of the heatmap and of the 3D view's cloud,
+         with how many flights' worth of time spent each stands for. The
+         labels are those of the heatmap as it is drawn; ui/heatLegend.ts
+         follows the exposure (ui/heatScale.ts), draws the bar under them
+         and shows what the cloud means while it draws the heat. -->
+    <div
+      id="heat-legend"
+      class="color-legend"
+      hidden
+      role="region"
+      aria-label="Heat color scale legend"
+    >
+      <div class="legend-title" data-icon="heatmap">
+        <span id="heat-legend-what">Time spent</span>
+      </div>
+      <div
+        class="gradient-bar"
+        role="img"
+        aria-label="Heat gradient from dark blue, the least, to white, the most"
+      ></div>
+      <div class="labels">
+        <span>≈1 flight</span><span>4</span><span>16</span><span>64</span>
+      </div>
+      <details id="heat-cloud-about" hidden>
+        <summary>What the cloud shows</summary>
+        <ul>
+          <li><b>Glow:</b> the heat, at the height flown</li>
+          <li><b>Shadow:</b> the same on the ground, under lifted flights</li>
+          <li class="heat-cloud-pulses">
+            <b>Pulses:</b> the direction flown, while the map is in use
+          </li>
+        </ul>
+      </details>
     </div>
 
     <!-- What is selected, and the way out of it. A selection is only drawn

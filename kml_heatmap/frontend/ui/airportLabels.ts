@@ -46,7 +46,8 @@ const LABEL_SIZE_STEPS = [11, 9, 12, 13, 13] as const;
 
 /**
  * Nothing on a phone reads smaller than the stylesheet's small text there
- * (`--text-sm`). Pixels.
+ * (`--text-sm`), but its fine print (`--text-fine`), which the labels are
+ * not. Pixels.
  */
 const PHONE_MIN_LABEL_PX = 12;
 

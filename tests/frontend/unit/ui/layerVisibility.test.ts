@@ -46,6 +46,7 @@ describe("layer visibility", () => {
     unmount = mountElements({
       "heatmap-btn": "button",
       "altitude-legend": "div",
+      "heat-legend": "div",
     });
     app = createMockApp({
       currentData: createDataset(
@@ -230,6 +231,50 @@ describe("layer visibility", () => {
 
     app.replayActive = false;
     app.replayState.all = false;
+  });
+
+  it("shows the heat's legend while the heat is the colour the map shows", () => {
+    const legend = el("heat-legend");
+    legend.hidden = true;
+    followLayerVisibility(asMapApp(app));
+    expect(app.heatmapVisible).toBe(true);
+    expect(legend.hidden).toBe(false);
+
+    app.heatmapVisible = false;
+    expect(legend.hidden).toBe(true);
+    app.heatmapVisible = true;
+    expect(legend.hidden).toBe(false);
+
+    // A colour layer brings its own legend, and a replay hides the heat
+    for (const key of [
+      "altitudeVisible",
+      "airspeedVisible",
+      "replayActive",
+    ] as const) {
+      app[key] = true;
+      expect(legend.hidden, key).toBe(true);
+      app[key] = false;
+      expect(legend.hidden, key).toBe(false);
+    }
+
+    // The cloud of the 3D view draws the heat in the same colours
+    app.heatCloud = true;
+    expect(legend.hidden).toBe(false);
+  });
+
+  it("fades the heat's legend with the heat", () => {
+    const legend = el("heat-legend");
+    followLayerVisibility(asMapApp(app));
+    expect(legend.classList.contains("is-dimmed")).toBe(false);
+
+    app.aviationVisible = true;
+    expect(legend.classList.contains("is-dimmed")).toBe(true);
+    app.aviationVisible = false;
+    expect(legend.classList.contains("is-dimmed")).toBe(false);
+
+    // The selection's lines are drawn over it
+    app.selectedPathIds = new Set([1]);
+    expect(legend.classList.contains("is-dimmed")).toBe(true);
   });
 
   it("dims the heatmap as the colour flags change", () => {

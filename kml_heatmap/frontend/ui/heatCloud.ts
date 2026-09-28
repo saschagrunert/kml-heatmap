@@ -82,6 +82,8 @@ import {
 import { dimmedHeatmapOpacity } from "./dataManager";
 import { dimsHeatCloud } from "./layerVisibility";
 import {
+  cloudExposure,
+  cloudLook,
   HEAT_CLOUD_LAYER,
   HeatCloudLayer,
   type HeatCloudStyle,
@@ -369,11 +371,22 @@ export function followHeatCloud(app: MapApp): void {
     setTimeout(sync, 0);
   });
 
+  /**
+   * Tell the heat scale (ui/heatScale.ts) how brightly a flight's worth is
+   * drawn where the map came to rest: with the gain of the look there and
+   * the exposure the layer eases towards
+   */
+  const publishScale = (): void => {
+    const gain = cloudLook(map.getZoom()).gain;
+    app.heatCloudScale = drawn ? gain * cloudExposure(drawn.busiest * gain) : 0;
+  };
+
   /** Hand the layer `points`, unless it has them already */
   const draw = (points: CloudPoints | null): void => {
     if (points === drawn) return;
     drawn = points;
     layer.setPoints(points);
+    publishScale();
   };
 
   /**
@@ -600,6 +613,7 @@ export function followHeatCloud(app: MapApp): void {
       // Outside the 3D view the cloud follows the level itself, where the
       // map comes to rest: not on every jump of the replay's camera, nor
       // on the moves of Wrapped's intro (see REPLAY_CAMERA_MOVE)
+      if (!isReplayCameraMove(event)) publishScale();
       const at = reliefLevel(map.getZoom());
       if (!isReplayCameraMove(event)) restZoom = map.getZoom();
       if (!isReplayCameraMove(event) && at !== atRest) {

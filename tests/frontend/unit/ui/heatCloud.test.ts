@@ -19,6 +19,8 @@ import {
   prepareHeatCloud,
 } from "../../../../kml_heatmap/frontend/ui/heatCloud";
 import {
+  cloudExposure,
+  cloudLook,
   HEAT_CLOUD_LAYER,
   HeatCloudLayer,
   type HeatCloudStyle,
@@ -643,6 +645,34 @@ describe("the heat cloud", () => {
       await rest();
       expect(cuts.count).toBe(count);
     });
+  });
+
+  it("hands the heat scale how brightly it draws a flight's worth where the map rests", async () => {
+    /** The gain of the look at `zoom` times the exposure of the points */
+    const expected = (zoom: number): number => {
+      const gain = cloudLook(zoom).gain;
+      return gain * cloudExposure(drawn()!.busiest * gain);
+    };
+    map().setZoom(9);
+    await follow();
+    expect(app.store.get("heatCloudScale")).toBe(0);
+
+    app.threeDVisible = true;
+    expect(drawn()!.busiest).toBeGreaterThan(0);
+    expect(app.store.get("heatCloudScale")).toBeCloseTo(expected(9), 12);
+
+    // Where a zoom comes to rest, dimmer closer in, and not on the jumps of
+    // the replay's camera
+    map().setZoom(13);
+    map().emit("zoomend");
+    const closer = app.store.get("heatCloudScale");
+    expect(closer).toBeCloseTo(expected(13), 12);
+    map().setZoom(11);
+    map().emit("zoomend", REPLAY_CAMERA_MOVE);
+    expect(app.store.get("heatCloudScale")).toBe(closer);
+
+    app.threeDVisible = false;
+    expect(app.store.get("heatCloudScale")).toBe(0);
   });
 
   it("goes back where it belongs after a new base style", async () => {

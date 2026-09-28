@@ -857,6 +857,22 @@ body {
 .color-legend .labels > :last-child {
   text-align: end;
 }
+/* The heat legend (ui/heatLegend.ts) draws its bar so that each label
+   stands under the colour of its count, in the middle of its quarter */
+#heat-legend .gradient-bar {
+  height: var(--space-md);
+}
+/* As faint as the heat when it steps back for what is drawn over it */
+#heat-legend.is-dimmed .gradient-bar {
+  opacity: var(--heatmap-dimmed-opacity);
+}
+#heat-legend .labels {
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0;
+}
+#heat-legend .labels > * {
+  text-align: center;
+}
 
 /* ==========================================================================
    Statistics panel
@@ -1605,8 +1621,13 @@ body.stats-open #left-buttons {
   :root {
     --btn-min-height: 44px;
     --edge-gap: 8px;
-    /* The scale bottoms out at 12px here; nothing reads smaller on mobile */
+    /* The scale bottoms out at 12px here; nothing reads smaller on mobile
+       but the fine print below it, the map's credit and the statistics'
+       footer (wrapped.css), which are there to be found, not read: at
+       12px they took two lines of the map and the sheet a phone has
+       little of */
     --text-xs: 12px;
+    --text-fine: 10px;
   }
 
   #compass-float-btn:not([hidden]) {
@@ -1652,7 +1673,8 @@ body.stats-open #left-buttons {
     appearance: none;
     box-shadow: none;
     color: var(--color-text-muted);
-    /* The scale bottoms out at 12px; nothing in the UI reads smaller */
+    /* The scale bottoms out at 12px; nothing in the UI reads smaller, only
+       the fine print (--text-fine) */
     font-size: var(--text-sm);
     font-weight: 500;
     line-height: 1;
@@ -1997,12 +2019,19 @@ body.stats-open #left-buttons {
     font-size: var(--text-sm);
   }
 
-  /* The one size drawn outside the type scale: the map's attribution. The
-     scale itself is raised by --text-xs above; the airport codes on the map
-     follow it in ui/airportLabels.ts. */
+  /* The map's attribution is fine print (--text-fine above); the scale
+     itself is raised by --text-xs, and the airport codes on the map follow
+     it in ui/airportLabels.ts. Its lines are 1.5 of the fine print, which
+     the two lines clamped below keep, and its links reach as far above and
+     below their text as they did at 12px: a finger finds them as before.
+     followAttributionHeight measures whatever this comes to. */
   .maplibregl-map .maplibregl-ctrl-attrib,
   .maplibregl-map .maplibregl-ctrl-attrib.maplibregl-compact {
-    font-size: var(--text-sm);
+    font-size: var(--text-fine);
+    line-height: 1.5;
+  }
+  .maplibregl-map .maplibregl-ctrl-attrib a {
+    padding-block: 1.5px;
   }
   /* The relief, the imagery and the aviation layer together ran the credit
      to four lines over the map. Two show; a tap on the credit shows the rest

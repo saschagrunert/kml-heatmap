@@ -393,6 +393,9 @@ export class DataManager {
       this.heat = heat;
     }
     this.isolated = isolated;
+    // The heat legend says what the colours of the heat drawn stand for
+    // (see ui/heatScale.ts)
+    this.app.heatmapExposure = (isolated ?? this.heat)?.exposure ?? 1;
     this.applyHeatmapEmphasis();
     this.writeHeat();
   }

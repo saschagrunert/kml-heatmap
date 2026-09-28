@@ -1493,6 +1493,13 @@
 .kh-stats-build a:focus-visible {
   color: var(--color-text);
 }
+/* Fine print on a phone, below the 12px floor (see --text-fine) */
+@media (max-width: 767.98px) {
+  .kh-stats-footer,
+  .kh-stats-build {
+    font-size: var(--text-fine);
+  }
+}
 
 /* ==========================================================================
    Flight list (the Flights tab of the statistics rail, ui/flightList.ts)
