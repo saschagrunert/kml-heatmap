@@ -434,7 +434,7 @@ test.describe("State Persistence", () => {
     });
   });
 
-  test("Reset view goes back to a first visit, saved and linked", async ({
+  test("Reset view goes back to a first visit, saved and linked @heavy", async ({
     page,
   }) => {
     // About forty steps, the 3D view on the globe among them, where every
@@ -616,7 +616,7 @@ test.describe("State Persistence", () => {
       .toBe(false);
   });
 
-  test("the band of heights of the 3D view's heat cloud reaches its shaders, kept in the link until Reset view", async ({
+  test("the band of heights of the 3D view's heat cloud reaches its shaders, kept in the link until Reset view @heavy", async ({
     page,
   }) => {
     // The 3D view in software WebGL, as in the Reset view spec above, and

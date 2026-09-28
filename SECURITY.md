@@ -33,8 +33,8 @@ files, `npm audit`, and a gitleaks scan of the whole commit history, and the
 same job runs weekly so new advisories show up without a push. Every
 GitHub Action is pinned by commit SHA and every container image by digest,
 and every job that checks out the repository leaves no credentials in the
-checkout. Dependabot and the weekly `lock` workflow keep the dependencies
-current.
+checkout. Dependabot keeps the dependencies current, and `make lock`
+recompiles the Python lock files with the newest releases the ranges allow.
 
 ## Content Security Policy
 

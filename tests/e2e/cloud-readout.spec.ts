@@ -11,7 +11,7 @@
  * say for given flights is the unit tests' (tests/frontend/unit/
  * calculations/cloudReadout.test.ts).
  */
-import { test, expect, type Page } from "./fixtures";
+import { test, expect, HEAVY, type Page } from "./fixtures";
 import { gotoApp, layerButton } from "./helpers";
 import {
   airportPosition,
@@ -109,7 +109,7 @@ function readoutOverValues(page: Page): Promise<boolean> {
   });
 }
 
-test.describe("the readout of the heat cloud", () => {
+test.describe("the readout of the heat cloud", HEAVY, () => {
   test.beforeEach(async ({ page }) => {
     await gotoApp(page);
   });

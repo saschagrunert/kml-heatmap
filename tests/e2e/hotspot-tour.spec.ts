@@ -14,7 +14,7 @@
  * 13 to 17 s after the click, and every step after it waited 5 to 6 s for
  * a frame: the state of the page is read in one go where it can be.
  */
-import { test, expect, holdElevationTiles, type Page } from "./fixtures";
+import { test, expect, HEAVY, holdElevationTiles, type Page } from "./fixtures";
 import { gotoApp, readSavedState } from "./helpers";
 import { getZoom } from "./map";
 
@@ -57,7 +57,7 @@ function tourState(page: Page) {
   });
 }
 
-test.describe("Hotspot tour", () => {
+test.describe("Hotspot tour", HEAVY, () => {
   test.describe.configure({ timeout: TOUR_TEST_TIMEOUT_MS });
 
   test.beforeEach(async ({ page }) => {
@@ -144,7 +144,7 @@ test.describe("Hotspot tour", () => {
   });
 });
 
-test.describe("Hotspot tour on a phone", () => {
+test.describe("Hotspot tour on a phone", HEAVY, () => {
   test.describe.configure({ timeout: TOUR_TEST_TIMEOUT_MS });
   test.use({ viewport: { width: 390, height: 844 } });
 

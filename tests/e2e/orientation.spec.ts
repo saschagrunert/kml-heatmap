@@ -11,6 +11,7 @@
 import {
   test,
   expect,
+  HEAVY,
   slopeElevationM,
   TERRAIN_ELEVATION_M,
   type Locator,
@@ -289,7 +290,7 @@ test.describe("Map orientation", () => {
       .toMatchObject({ projection: "mercator" });
   });
 
-  test.describe("on the relief", () => {
+  test.describe("on the relief", HEAVY, () => {
     // One after the other in one worker, not side by side: a frame of the
     // relief takes seconds in software WebGL, and with two of them drawn
     // at once besides the other specs of the run, a step took as long as
@@ -716,7 +717,7 @@ test.describe("Map orientation", () => {
     await expect(mapMarkers(page).first()).toBeVisible();
   });
 
-  test("a globe that turns an airport away closes its popup and takes its focus", async ({
+  test("a globe that turns an airport away closes its popup and takes its focus @heavy", async ({
     page,
   }) => {
     // A dozen steps on the globe with the paths loaded, where a click took up

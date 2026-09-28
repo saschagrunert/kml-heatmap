@@ -40,15 +40,17 @@ export default defineConfig<object, SiteOptions>({
   // (reported as flaky) from one that fails every time; the trace of every
   // failed attempt is kept. That is worth the time of one more attempt in
   // the desktop project alone. The mobile, visual, webkit and
-  // webkit-desktop projects (below) do not retry, and neither do the relief
-  // tests of the 3D view, where one attempt takes minutes: their describe
-  // in orientation.spec.ts turns retries off in every project.
+  // webkit-desktop projects (below) do not retry, and neither do the heavy
+  // tests in CI (HEAVY in tests/e2e/fixtures.ts), where one attempt takes
+  // minutes: their job passes --retries=0, and the describe of the relief
+  // tests in orientation.spec.ts turns retries off in every project.
   retries: isCI ? 1 : 0,
   failOnFlakyTests: isCI,
   // One browser per core of the runner, each drawing WebGL in software. The
   // e2e job of .github/workflows/test.yml splits the desktop and mobile
-  // projects into shards and gives the relief tests of orientation.spec.ts,
-  // the slowest to draw, a runner of their own in either engine.
+  // projects into shards, and runs the heavy tests of the desktop and
+  // webkit-desktop projects, the slowest to draw, on a runner of their own
+  // with two browsers (--workers=2) in either engine.
   ...(isCI ? { workers: "100%" } : {}),
   // The console reporter Playwright would pick anyway, plus the HTML report
   // that CI uploads with the traces when a run fails

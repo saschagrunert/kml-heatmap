@@ -324,5 +324,21 @@ export const test = base.extend<
   ],
 });
 
+/**
+ * The details of a describe whose tests draw the 3D view (the relief, the
+ * heat cloud, the chase view) or turn the globe with the flights on it:
+ * `test.describe(title, HEAVY, body)`. A single test carries the tag at
+ * the end of its title instead (`test("... @heavy", body)`), which
+ * Playwright reads the same way: with the details in between, prettier
+ * would indent its whole body anew. A frame of those takes seconds in
+ * software WebGL, and with a browser per core of the CI runner they timed
+ * out and held up every other browser there. CI runs the tests of the
+ * desktop and webkit-desktop projects with this tag in a job of their own
+ * with two browsers, and leaves them out of the other jobs of those
+ * projects (see the e2e job of .github/workflows/test.yml). The phone
+ * projects run them among their other specs, where they have not timed out.
+ */
+export const HEAVY = { tag: "@heavy" };
+
 export { expect };
 export type { Locator, Page } from "@playwright/test";

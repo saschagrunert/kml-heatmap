@@ -166,9 +166,9 @@ test: ## Build the frontend bundles, then run the JavaScript and Python test sui
 # requirements-test.lock. pip-tools is installed into a throwaway environment
 # rather than added to the extras, so it cannot drift into what the lock
 # files pin. It comes from requirements-tools.lock with the hashes of its
-# dependencies as well, so the unattended lock workflow runs nothing it has
-# not pinned; that lock is compiled last from requirements-tools.in, with the
-# pip-tools it pins, and --allow-unsafe keeps pip and setuptools in it.
+# dependencies as well, so `make lock` runs nothing it has not pinned; that
+# lock is compiled last from requirements-tools.in, with the pip-tools it
+# pins, and --allow-unsafe keeps pip and setuptools in it.
 # The test lock is compiled against the runtime lock as a constraint, so a
 # dependency both of them pin gets the same version in each: CI installs
 # requirements-test.lock alone where it needs both.

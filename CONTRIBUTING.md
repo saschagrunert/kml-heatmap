@@ -114,20 +114,9 @@ parentheses back is undone on the next `make format`.
   out the version the locks pin, and tests the old versions either way until
   `make lock` is pushed on top.
   `make lock` compiles the test lock with the runtime lock as a constraint, so
-  the pins both files share cannot drift apart. The weekly `lock` workflow
-  regenerates them as well and opens a pull request, which needs one of two
-  one-time setups. With neither, its pull-request job fails with "GitHub
-  Actions is not permitted to create or approve pull requests", and its job
-  summary says what to set up.
-  - Preferred: a `LOCK_PR_TOKEN` repository secret (Settings > Secrets and
-    variables > Actions) holding a fine-grained personal access token, or a
-    GitHub App token, for this repository only, with read and write access
-    to "Contents" and "Pull requests". A pull request opened with it starts
-    CI like any other.
-  - Or: enable "Allow GitHub Actions to create and approve pull requests"
-    (Settings > Actions > General). Without the secret the workflow falls
-    back to its own token, and a pull request opened with that one does not
-    start CI: close and reopen it to run the checks.
+  the pins both files share cannot drift apart. Nothing regenerates them on
+  a schedule: run `make lock` yourself to pick up new releases, and push it
+  on top of a Dependabot `pip` pull request.
 - The published page carries MapLibre GL JS and html-to-image itself:
   `scripts/vendor.js` takes them out of `node_modules` at build time, so
   `package-lock.json` is the only place their versions are pinned and

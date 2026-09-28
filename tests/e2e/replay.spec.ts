@@ -1,4 +1,4 @@
-import { test, expect } from "./fixtures";
+import { test, expect, HEAVY } from "./fixtures";
 import {
   activateReplay,
   gotoApp,
@@ -217,7 +217,7 @@ test.describe("Replay", () => {
     );
   });
 
-  test.describe("with motion", () => {
+  test.describe("with motion", HEAVY, () => {
     // Before the page loads: WebKit does not update a media query list
     // the page already holds when the emulation changes
     test.use({ reducedMotion: "no-preference" });

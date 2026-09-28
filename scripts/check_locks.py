@@ -217,7 +217,7 @@ def main() -> int:
         problems += unsatisfied(
             build, read_pins("requirements-build.lock"), "requirements-build.lock"
         )
-    # What `make lock` itself runs; the lock workflow installs it unattended
+    # What `make lock` itself runs, installed with --require-hashes
     missing = [
         name
         for name in ("requirements-tools.in", "requirements-tools.lock")
