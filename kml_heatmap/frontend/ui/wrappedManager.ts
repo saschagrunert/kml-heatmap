@@ -230,12 +230,19 @@ export class WrappedManager {
     revealed?: () => void,
   ): void {
     const map = this.app.map;
+    // The intro's far globe (`revealed`) once its tiles are drawn: `idle`
+    // waited for its labels to fade in as well, a third of a second more
+    // of the dialog with the title alone (see ui/wrappedIntro.ts)
+    const event = revealed ? "render" : "idle";
+    const ready = (): void => {
+      if (!revealed || map?.areTilesLoaded()) reveal();
+    };
     const reveal = (): void => {
       if (this.mapRevealTimer !== null) {
         clearTimeout(this.mapRevealTimer);
         this.mapRevealTimer = null;
       }
-      map?.off("idle", reveal);
+      map?.off(event, ready);
       this.revealMap = null;
       container.classList.remove("is-awaiting-map");
       revealed?.();
@@ -253,8 +260,8 @@ export class WrappedManager {
     // to show. It is the one to wait for rather than `load`, which fires once
     // in the life of the map, or `moveend`, which does not wait for tiles.
     this.revealMap = reveal;
-    // `reveal` takes itself off, whichever of the three ways it is reached
-    map.on("idle", reveal);
+    // `reveal` takes `ready` off, whichever of the three ways it is reached
+    map.on(event, ready);
     this.mapRevealTimer = setTimeout(reveal, MAP_REVEAL_TIMEOUT_MS);
   }
 
@@ -333,6 +340,8 @@ export class WrappedManager {
     const fitTarget = overviewBounds(this.app);
     this.overview = fitTarget;
     const home = intro && !prefersReducedMotion() ? this.homeBase() : null;
+    // The map shows at once in an opening with the intro (wrapped.css)
+    domCache.get("wrapped-modal")?.classList.toggle("has-intro", !!home);
     if (home) {
       this.intro = startWrappedIntro(
         this.app,
@@ -484,19 +493,25 @@ export class WrappedManager {
     this.statsAbort = null;
   }
 
-  /** Title the dialog for the selected year, or for all of them */
+  /**
+   * Title the dialog for the selected year, or for all of them, and the
+   * intro that opens on the same words (see ui/wrappedIntro.ts)
+   */
   private renderTitle(): void {
-    const titleEl = domCache.get("wrapped-title");
-    const yearEl = domCache.get("wrapped-year");
     // The card is titled by its words alone: a sparkle emoji ignored the
     // heading's gradient, and a drawn star beside the type read as a stray
     const year = this.app.selectedYear;
-    if (year === "all") {
-      if (titleEl) titleEl.textContent = "Your Flight History";
-      if (yearEl) yearEl.textContent = "All Years";
-    } else {
-      if (titleEl) titleEl.textContent = "Your Year in Flight";
-      if (yearEl) yearEl.textContent = year;
+    const all = year === "all";
+    const title = all ? "Your Flight History" : "Your Year in Flight";
+    const period = all ? "All Years" : year;
+    for (const [id, text] of [
+      ["wrapped-title", title],
+      ["wrapped-intro-heading", title],
+      ["wrapped-year", period],
+      ["wrapped-intro-year", period],
+    ] as const) {
+      const el = domCache.get(id);
+      if (el) el.textContent = text;
     }
   }
 

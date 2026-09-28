@@ -42,6 +42,8 @@ export interface ReplayAllStyle {
   time: number;
   /** The seconds of flight a trail takes to fade */
   fade: number;
+  /** How many times their size the heads and trails are drawn */
+  scale: number;
 }
 
 /**
@@ -268,7 +270,8 @@ export class ReplayAllLayer implements CustomLayerInterface {
       options.nearZ,
       height / 2 / Math.tan(options.fov / 2),
     );
-    gl.uniform2f(u.u_size, TRAIL_HALF_WIDTH_PX * ratio, HEAD_RADIUS_PX * ratio);
+    const size = ratio * style.scale;
+    gl.uniform2f(u.u_size, TRAIL_HALF_WIDTH_PX * size, HEAD_RADIUS_PX * size);
 
     gl.bindVertexArray(ready.vao);
     gl.enable(gl.BLEND);

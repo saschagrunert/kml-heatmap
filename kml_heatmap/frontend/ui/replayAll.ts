@@ -99,6 +99,12 @@ export interface ReplayAllRun {
    * first comes to the end of a zoom. By default the map's zoom only.
    */
   zoom?: number;
+  /**
+   * How many times their size the heads and trails are drawn: 1 by
+   * default. Under Wrapped's intro, over a view of the whole year, they
+   * were specks.
+   */
+  scale?: number;
 }
 
 /**
@@ -112,6 +118,8 @@ export class ReplayAllPlayer {
   time = 0;
   /** Seconds of flight a second */
   speed: number = REPLAY_ALL_SPEED;
+  /** The size the flights are drawn at (ReplayAllRun.scale) */
+  private scale = 1;
   /** Whether the clock runs */
   playing = false;
   /** Whether the camera turns round the middle of the map while it plays */
@@ -202,6 +210,7 @@ export class ReplayAllPlayer {
     if (!map || !data || this.broken) return Promise.resolve(false);
     this.keep = keepOf(app, data, run.pathIds);
     this.speed = run.speed ?? REPLAY_ALL_SPEED;
+    this.scale = run.scale ?? 1;
     this.zoomAhead = run.zoom ?? null;
     this.aheadDrawn = this.nearAhead();
     this.time = 0;
@@ -369,6 +378,7 @@ export class ReplayAllPlayer {
       liftM: isLiftedAt(map.getZoom()) ? metres : 0,
       time: this.time,
       fade: this.fade(),
+      scale: this.scale,
     };
   };
 

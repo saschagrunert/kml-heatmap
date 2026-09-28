@@ -48,7 +48,12 @@ export function mountWrappedDom(): void {
         <div id="wrapped-top-airports"></div>
         <div id="wrapped-cards-column"></div>
         <div id="wrapped-airports-grid"></div>
-        <div id="wrapped-map-container"></div>
+        <div id="wrapped-map-container">
+          <div id="wrapped-intro-title">
+            <span id="wrapped-intro-heading"></span>
+            <span id="wrapped-intro-year"></span>
+          </div>
+        </div>
       </div>
     </div>
     <div id="github-footer"></div>

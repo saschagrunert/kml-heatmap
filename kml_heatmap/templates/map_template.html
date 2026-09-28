@@ -899,6 +899,13 @@
             role="region"
             aria-label="Flight map overview"
           >
+            <!-- The title the intro opens on, over the map while it plays
+                 (ui/wrappedIntro.ts): the words of the first card, which
+                 is what assistive technology reads -->
+            <div id="wrapped-intro-title" aria-hidden="true">
+              <span id="wrapped-intro-heading"></span>
+              <span id="wrapped-intro-year"></span>
+            </div>
             <!-- Map will be moved here when wrapped is shown -->
           </div>
         </div>

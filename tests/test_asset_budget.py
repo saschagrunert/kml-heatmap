@@ -41,7 +41,10 @@ from kml_heatmap.site_assets import CSS_FILES, STATIC_DIR, _copy_and_minify_css
 # wrapped.css was raised from 26 KB for the statistics panel, which comes with
 # the Wrapped bundle (28,811 B after), and from 30 KB for the flight list and
 # the tabs of the statistics rail, which show once it is in (28,603 B before,
-# 31,495 B after). features.css was raised from 7 KB for the panel of the
+# 31,495 B after), and from 33 KB for the rework of the intro of Wrapped
+# (the map over the whole dialog and its way back into its panel, the
+# title it opens on, and the page's chrome hidden under the dialog; 32,304 B
+# before, 34,244 B after). features.css was raised from 7 KB for the panel of the
 # replay of all flights (6,298 B before, 7,551 B after), and from 8 KB for
 # the flight profile, whose strip, chart, chip toggle and place in the replay
 # panel it carries (7,551 B before, 11,596 B after), and from 13.5 KB for the
@@ -55,7 +58,7 @@ from kml_heatmap.site_assets import CSS_FILES, STATIC_DIR, _copy_and_minify_css
 STYLESHEET_BUDGET_BYTES = {
     "styles.css": 40 * 1024,
     "features.css": int(21.5 * 1024),
-    "wrapped.css": 33 * 1024,
+    "wrapped.css": 36 * 1024,
 }
 
 
