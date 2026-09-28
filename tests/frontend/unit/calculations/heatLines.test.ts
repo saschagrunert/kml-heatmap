@@ -183,6 +183,20 @@ describe("heatLineFeatures", () => {
     );
   });
 
+  it("rolls the time around each segment off with `tone`, before it is smoothed", () => {
+    const flights = Array.from({ length: 8 }, (_, i) => flight(i + 1)).flat();
+    const plain = heatLineFeatures(flights, all);
+    const halved = heatLineFeatures(
+      flights,
+      all,
+      undefined,
+      (seconds) => seconds / 2,
+    );
+
+    const middle = 50 + 5 * 235 * DEG_PER_M;
+    expect(heatAt(halved, middle, 8)).toBe(heatAt(plain, middle, 8) / 2);
+  });
+
   it("keeps a flight that only crosses a busy place cool", () => {
     // Ten flights stand around one spot, a lone one passes it at speed
     const busy = Array.from({ length: 10 }, (_, i) =>

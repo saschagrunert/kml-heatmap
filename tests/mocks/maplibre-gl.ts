@@ -360,6 +360,8 @@ export class Map
       | "getCanvas"
       | "getCanvasContainer"
       | "triggerRepaint"
+      | "getGlobalState"
+      | "setGlobalStateProperty"
       | "addControl"
       | "removeControl"
       | "remove"
@@ -635,6 +637,15 @@ export class Map
    * time in between says otherwise with `mockReturnValue`.
    */
   isSourceLoaded = vi.fn((id: string) => this.source(id) !== undefined);
+
+  /** Like MapLibre: the global state the style's expressions read */
+  globalState: Record<string, unknown> = {};
+  getGlobalState = vi.fn(() => this.globalState);
+  setGlobalStateProperty = vi.fn((name: string, value: unknown) => {
+    if (!this.styleLoaded) throw new Error("Style is not done loading.");
+    this.globalState[name] = value;
+    return this;
+  });
 
   isStyleLoaded = vi.fn(() => this.styleLoaded);
   loaded = vi.fn(() => this.styleLoaded);

@@ -9,6 +9,7 @@ import {
 } from "../utils/buttonState";
 import { domCache } from "../utils/domCache";
 import { loadFeatures } from "../services/featureLoader";
+import { HEAT_SHOWN_STATE } from "../mapLayers";
 import { dismissToast, showToast } from "../utils/toast";
 
 /** Said when the imagery's code cannot be fetched and the switch goes off */
@@ -142,6 +143,28 @@ export function followLayerVisibility(app: MapApp): void {
   };
   app.store.subscribeKeys(LAYER_KEYS, apply);
   apply();
+  // The base map's labels step back while the heat is drawn at full
+  // strength (see HEAT_SHOWN_STATE), which needs the style. A style built
+  // anew (the base style where its difference failed, or after a lost
+  // WebGL context) starts from its own state, so it is set again on each
+  void app.mapReady.then(
+    (map) => {
+      const labels = (): void => {
+        try {
+          map.setGlobalStateProperty(
+            HEAT_SHOWN_STATE,
+            app.heatmapVisible && !app.replayActive && !dimsHeatmap(app),
+          );
+        } catch {
+          // A style still loading: it is set when it has loaded
+        }
+      };
+      app.store.subscribeKeys(LAYER_KEYS, labels);
+      map.on("style.load", labels);
+      labels();
+    },
+    () => {},
+  );
 }
 
 /**

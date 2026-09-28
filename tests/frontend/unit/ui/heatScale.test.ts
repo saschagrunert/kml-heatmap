@@ -11,10 +11,10 @@ import {
 import { heatScale } from "../../../../kml_heatmap/frontend/ui/heatScale";
 import {
   HEAT_FLIGHT_DENSITY,
-  HEATMAP_RADIUS_PX,
-  HEATMAP_REFERENCE_INTENSITY,
   heatLinesPaint,
   heatmapPaint,
+  heatmapRadiusPx,
+  intensityAt,
 } from "../../../../kml_heatmap/frontend/ui/heatmapPaint";
 import { heatmapPoints } from "../../../../kml_heatmap/frontend/ui/dataManager";
 import {
@@ -88,15 +88,21 @@ describe("heat scale", () => {
     expect(HEAT_FLIGHT_DENSITY).toBe(0.015);
   });
 
-  it("is about the density a lone cruise's ridge is drawn at, by time or by distance", () => {
+  it("is about the density a lone cruise's ridge is drawn at, by time or by distance, at every reach", () => {
     // MapLibre's kernel of a point is GAUSS_COEF * exp(-4.5 * (d / radius)^2)
-    // times weight times intensity, at the reference zoom 12 the intensity
-    // HEATMAP_REFERENCE_INTENSITY. The ridge ripples between the fixes, so
-    // its mean between two of them in the middle of the track.
+    // times weight times intensity, at the reference zoom 12 and further
+    // out, where the reach is wider and the intensity less. The ridge
+    // ripples between the fixes, so its mean between two of them in the
+    // middle of the track.
     const GAUSS_COEF = 0.3989422804014327;
-    const metresPerPx =
-      (40075016.686 * Math.cos(LAT * DEGREES_TO_RADIANS)) / (512 * 2 ** 12);
-    for (const route of [false, true]) {
+    for (const [zoom, route] of [
+      [12, false],
+      [12, true],
+      [10, false],
+      [8.5, false],
+    ] as const) {
+      const metresPerPx =
+        (40075016.686 * Math.cos(LAT * DEGREES_TO_RADIANS)) / (512 * 2 ** zoom);
       const { points, weights } = heatmapPoints(
         cruises(1),
         () => true,
@@ -110,14 +116,15 @@ describe("heat scale", () => {
           const px = ((at - lng) * LNG_DEGREE_M) / metresPerPx;
           ridge +=
             (weights[index]! *
-              HEATMAP_REFERENCE_INTENSITY *
+              intensityAt(zoom) *
               GAUSS_COEF *
-              Math.exp(-4.5 * (px / HEATMAP_RADIUS_PX) ** 2)) /
+              Math.exp(-4.5 * (px / heatmapRadiusPx(zoom)) ** 2)) /
             samples;
         });
       }
-      expect(ridge / HEAT_FLIGHT_DENSITY, `${route}`).toBeGreaterThan(0.9);
-      expect(ridge / HEAT_FLIGHT_DENSITY, `${route}`).toBeLessThan(1.2);
+      const at = `${zoom} ${route}`;
+      expect(ridge / HEAT_FLIGHT_DENSITY, at).toBeGreaterThan(0.9);
+      expect(ridge / HEAT_FLIGHT_DENSITY, at).toBeLessThan(1.2);
     }
   });
 

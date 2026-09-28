@@ -32,9 +32,10 @@ import { siteData } from "../state/siteData";
 import { dimsHeatmap } from "./layerVisibility";
 import {
   HEATMAP_OPACITY,
+  exposedHeat,
   fadeOutToLines,
-  heatExposure,
   heatLineOpacities,
+  heatLineTone,
   heatLinesPaint,
   heatmapPaint,
 } from "./heatmapPaint";
@@ -45,7 +46,7 @@ import {
  */
 export interface Heat {
   points: readonly Coordinate[];
-  /** The heat of each point, scaled by `exposure` */
+  /** The heat of each point, scaled by `exposure` and rolled off */
   weights: readonly number[];
   /** What the heat is scaled by, see heatExposure */
   exposure: number;
@@ -422,12 +423,13 @@ export class DataManager {
       map.getZoom() >= HEAT_LINES.fromZoom - HEAT_LINES_LEAD;
     if (!shown && !held) return;
     this.heatLinesFor = shown ? heat : null;
-    // As bright as the heatmap draws the same heat (see heatExposure)
+    // As bright as the heatmap draws the same heat (see exposedHeat)
     void source.setData(
       heatLineFeatures(
         shown ? heat.segments : [],
         heat.keep,
         (segment, next) => heat.weigh(segment, next) * heat.exposure,
+        heatLineTone,
       ),
     );
   }
@@ -667,7 +669,8 @@ export class DataManager {
 /**
  * The heat of the flights `keep` accepts: the points of `pointSegments`
  * (all of `segments` or the part of them those flights are in), their heat
- * scaled by its exposure, and the lines of `segments`
+ * scaled by its exposure and rolled off (see exposedHeat), and the lines
+ * of `segments`
  */
 function heatOf(
   pointSegments: PathSegment[],
@@ -676,11 +679,11 @@ function heatOf(
   weigh: SegmentWeight,
 ): Heat {
   const { points, weights } = heatmapPoints(pointSegments, keep, weigh);
-  const exposure = heatExposure(points, weights);
+  const drawn = exposedHeat(points, weights);
   return {
     points,
-    weights: weights.map((weight) => weight * exposure),
-    exposure,
+    weights: drawn.weights,
+    exposure: drawn.exposure,
     segments,
     keep,
     weigh,

@@ -25,8 +25,13 @@ import {
 import { levelGroundFt } from "../../../../kml_heatmap/frontend/calculations/groundProfile";
 import {
   heatWeight,
+  ROUTE_SPEED_MS,
   segmentSeconds,
 } from "../../../../kml_heatmap/frontend/calculations/heatLines";
+import {
+  HEAT_KNEE,
+  heatTone,
+} from "../../../../kml_heatmap/frontend/calculations/heatTone";
 import { liftFt } from "../../../../kml_heatmap/frontend/calculations/lift";
 import { segmentDistance } from "../../../../kml_heatmap/frontend/calculations/statistics";
 import { smoothFlights } from "../../../../kml_heatmap/frontend/calculations/smoothing";
@@ -1028,6 +1033,58 @@ describe("the busiest heat of the cloud", () => {
     const alone = cruise(1);
     expect(busiest(apart, 6) / busiest(alone, 6)).toBeCloseTo(2, 1);
     expect(busiest(apart, 11) / busiest(alone, 11)).toBeCloseTo(1, 1);
+  });
+
+  it("rolls the heat of the stretches off for the scale it is drawn at, and not the busiest", () => {
+    const flights = Array.from({ length: 40 }, (_, i) => cruise(i + 1)).flat();
+    const smoothed = smoothFlights(flights, (i) => flights[i]!.altitude_ft, {
+      groundOf: () => 0,
+    });
+    const heatOf = (cloud: CloudPoints): number =>
+      pointsOf(cloud).reduce((sum, point) => sum + point.heat, 0);
+    const plain = cloudPoints(flights, smoothed, everything, 11);
+    const scales: number[] = [];
+    const rolled = cloudPoints(
+      flights,
+      smoothed,
+      everything,
+      11,
+      11,
+      null,
+      undefined,
+      undefined,
+      (busiest) => {
+        scales.push(busiest);
+        return 1;
+      },
+    );
+    // Asked once, for the busiest heat it hands on as it is
+    expect(scales).toEqual([plain.busiest]);
+    expect(rolled.busiest).toBe(plain.busiest);
+    // Forty cruises over the same cells, drawn as they are, are forty
+    // flights' worth there, rolled off to what heatTone gives forty
+    expect(plain.busiest * ROUTE_SPEED_MS).toBeGreaterThan(HEAT_KNEE);
+    expect(heatOf(rolled) / heatOf(plain)).toBeCloseTo(heatTone(40) / 40, 2);
+    // A lone cruise, under the knee, keeps its heat
+    const one = cruise(1);
+    const lone = smoothFlights(one, (i) => one[i]!.altitude_ft, {
+      groundOf: () => 0,
+    });
+    expect(
+      heatOf(
+        cloudPoints(
+          one,
+          lone,
+          everything,
+          11,
+          11,
+          null,
+          undefined,
+          undefined,
+          () => 1,
+        ),
+      ),
+    ).toBeCloseTo(heatOf(cloudPoints(one, lone, everything, 11)), 6);
   });
 });
 

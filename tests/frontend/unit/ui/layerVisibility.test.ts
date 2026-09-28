@@ -11,6 +11,7 @@ import {
   setColorLayer,
 } from "../../../../kml_heatmap/frontend/ui/layerVisibility";
 import { LayerManager } from "../../../../kml_heatmap/frontend/ui/layerManager";
+import { HEAT_SHOWN_STATE } from "../../../../kml_heatmap/frontend/mapLayers";
 import {
   MAP_LAYERS,
   MAP_SOURCES,
@@ -275,6 +276,43 @@ describe("layer visibility", () => {
     // The selection's lines are drawn over it
     app.selectedPathIds = new Set([1]);
     expect(legend.classList.contains("is-dimmed")).toBe(true);
+  });
+
+  it("fades the base map's labels while the heat is drawn at full strength", async () => {
+    const faded = (): unknown => app.map!.getGlobalState()[HEAT_SHOWN_STATE];
+    followLayerVisibility(asMapApp(app));
+    // Once the style is there
+    await app.mapReady;
+    expect(faded()).toBe(true);
+
+    // Not while the heat steps back, is off, or a replay hides it
+    app.aviationVisible = true;
+    expect(faded()).toBe(false);
+    app.aviationVisible = false;
+    expect(faded()).toBe(true);
+    app.heatmapVisible = false;
+    expect(faded()).toBe(false);
+    app.heatmapVisible = true;
+    app.replayActive = true;
+    expect(faded()).toBe(false);
+    app.replayActive = false;
+    // The cloud of the 3D view is the heat as well
+    app.heatCloud = true;
+    expect(faded()).toBe(true);
+
+    // A style still loading takes no state, and nothing else fails
+    app.map!.setGlobalStateProperty.mockImplementationOnce(() => {
+      throw new Error("Style is not done loading.");
+    });
+    expect(() => (app.aviationVisible = true)).not.toThrow();
+    expect(visibility(MAP_LAYERS.aviation)).toBe("visible");
+    app.aviationVisible = false;
+
+    // A style built anew starts from a state of its own, and is given the
+    // one of now once it has loaded
+    app.map!.globalState = {};
+    app.map!.emit("style.load");
+    expect(faded()).toBe(true);
   });
 
   it("dims the heatmap as the colour flags change", () => {

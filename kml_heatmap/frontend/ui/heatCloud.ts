@@ -537,6 +537,8 @@ export function followHeatCloud(app: MapApp): void {
       : (pathId: number) => kept.has(pathId);
     const segments = data.path_segments;
     const flights = flightsFor(segments, level, forced);
+    // Rolled off for the scale of the middle of the level cut for
+    const gain = cloudLook(detail + 0.5).gain;
     return cloudPoints(
       segments,
       flights,
@@ -546,6 +548,7 @@ export function followHeatCloud(app: MapApp): void {
       box,
       exposure,
       heatWeight(app.routeWeighting),
+      (busiest) => gain * cloudExposure(busiest * gain),
     );
   };
 

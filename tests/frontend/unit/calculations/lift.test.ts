@@ -1153,7 +1153,7 @@ describe("lift", () => {
         ribbonId(7, 3),
       );
       const ids = [0, 1, 2, 3].flatMap((epoch) =>
-        [6, 7, 8, 9].map((level) => ribbonId(level, epoch)),
+        [7, 8, 9, 10].map((level) => ribbonId(level, epoch)),
       );
       expect(new Set(ids).size).toBe(ids.length);
       // The ribbons of a level next to one of another exaggeration
@@ -1162,7 +1162,7 @@ describe("lift", () => {
           { length: RELIEF_MAX_LEVEL + 1 },
           (_, level) => level,
         ).filter(switchesExaggeration),
-      ).toEqual([6, 7, 8, 9]);
+      ).toEqual([7, 8, 9, 10]);
       expect(ribbonHeightFt({ h: 1000, l: 7, "o-1": 40, o1: -80 }, 8.4)).toBe(
         920,
       );
@@ -1170,14 +1170,14 @@ describe("lift", () => {
 
     it("tells which cuts stay on the relief of another level until cut for it", () => {
       // The same exaggeration, or one they switch to by their id
-      expect(followsLevel(3, 5)).toBe(true);
-      expect(followsLevel(9, 11)).toBe(true);
+      expect(followsLevel(3, 7)).toBe(true);
+      expect(followsLevel(10, 11)).toBe(true);
       expect(followsLevel(8, 6)).toBe(true);
-      expect(followsLevel(6, 9)).toBe(true);
+      expect(followsLevel(7, 10)).toBe(true);
       // Without an id, into another exaggeration
-      expect(followsLevel(5, 7)).toBe(false);
+      expect(followsLevel(6, 8)).toBe(false);
       expect(followsLevel(11, 7)).toBe(false);
-      expect(followsLevel(10, 8)).toBe(false);
+      expect(followsLevel(11, 9)).toBe(false);
     });
   });
 
@@ -1197,7 +1197,9 @@ describe("lift", () => {
 
       expect(exaggerations).toEqual([...exaggerations].sort((a, b) => b - a));
       expect(Math.max(...exaggerations)).toBe(10);
-      expect(liftExaggeration(9)).toBe(2);
+      // Over a region still some times the height, at zoom 7 to 9
+      expect([7, 8, 9].map(liftExaggeration)).toEqual([10, 7, 4]);
+      expect(liftExaggeration(10)).toBe(2);
       expect(liftExaggeration(reliefLevel(20))).toBe(2);
     });
   });

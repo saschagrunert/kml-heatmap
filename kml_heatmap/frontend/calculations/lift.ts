@@ -101,10 +101,18 @@ export function groundKey(step: number): `o${number}` {
  * follows the relief the map draws only to within about 100 m there (see
  * groundProfileFt), which the exaggeration multiplies, and at 10x that is
  * under a pixel. The flights are lifted as much, so the lift ramps down
- * from there as it did, to twice their height closer in.
+ * from there to twice their height from level 10 in.
+ *
+ * The ramp down starts at level 8. Over a region (zoom 7 to 9, tilted 45
+ * to 60 degrees) a light aircraft's 1,000 to 3,000 ft at 7, 4 and 2 times
+ * was a few pixels next to the kilometres between its fields, and the
+ * cloud of the 3D view looked like the flat heatmap tilted; at 10, 7 and
+ * 4 times the circuits and the cruise stand apart. The ground at level 8
+ * follows the relief the map draws over the Alps to within about 30 m,
+ * which at 7x is a pixel or two there, and far less over flat land.
  */
 export const EXAGGERATION_BY_LEVEL: readonly number[] = [
-  10, 10, 10, 10, 10, 10, 10, 7, 4, 2,
+  10, 10, 10, 10, 10, 10, 10, 10, 7, 4, 2,
 ];
 
 /**

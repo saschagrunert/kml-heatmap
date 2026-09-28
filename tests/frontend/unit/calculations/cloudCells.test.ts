@@ -8,6 +8,7 @@ import {
   agreement,
   markStretches,
 } from "../../../../kml_heatmap/frontend/calculations/cloudCells";
+import { heatTone } from "../../../../kml_heatmap/frontend/calculations/heatTone";
 
 /** The floats of a point, and which are the heat and the marks */
 const FLOATS = 7;
@@ -208,5 +209,59 @@ describe("the marks of the stretches", () => {
 
     const marks = marksOf([{ fixes: out }, { fixes: [...out].reverse() }]);
     expect(marks.every((mark) => mark === 0)).toBe(true);
+  });
+});
+
+describe("markStretches rolling off the heat", () => {
+  /** A cell, in Mercator units */
+  const cell = 1e-4;
+  /**
+   * `times` flights of two stretches of 5 s each in the same cell, at the
+   * Mercator `y` (the equator at 0.5)
+   */
+  const over = (times: number, y = 0.5): number[] => {
+    const row = Math.floor(y / cell) * cell + cell / 6;
+    return valuesOf(
+      Array.from({ length: times }, () => ({
+        fixes: track(3, [0.5 + cell / 6, row], [1, 0], cell / 3),
+      })),
+    );
+  };
+  const heats = (values: number[]): number[] =>
+    values.filter((_, k) => k % FLOATS === HEAT && values[k]! > 0);
+
+  it("leaves the heat of a cell under the knee as it is", () => {
+    // A second in a cell on the equator is drawn as a tenth of a flight's
+    // worth: one flight's 10 s are one flight's worth
+    const values = over(1);
+    markStretches(values, FLOATS, HEAT, MARKS, cell, 0.1);
+    expect(heats(values)).toEqual([5, 5]);
+  });
+
+  it("rolls the heat of a busy cell off, every stretch in it alike", () => {
+    const values = over(100);
+    markStretches(values, FLOATS, HEAT, MARKS, cell, 0.1);
+    for (const heat of heats(values)) {
+      expect(heat).toBeCloseTo((5 * heatTone(100)) / 100, 6);
+    }
+    // As many flights' worth in all as the heat rolls off to
+    const total = heats(values).reduce((sum, heat) => sum + heat, 0);
+    expect(total * 0.1).toBeCloseTo(heatTone(100), 6);
+    // And not at all without a scale
+    const plain = over(100);
+    markStretches(plain, FLOATS, HEAT, MARKS, cell);
+    expect(new Set(heats(plain))).toEqual(new Set([5]));
+  });
+
+  it("counts a cell away from the equator as the more heat per metre it holds", () => {
+    // At 60 degrees a cell spans half the metres: 50 flights there are as
+    // busy as 100 on the equator
+    const y =
+      0.5 - Math.log(Math.tan(Math.PI / 4 + Math.PI / 6)) / (2 * Math.PI);
+    const values = over(50, y);
+    markStretches(values, FLOATS, HEAT, MARKS, cell, 0.1);
+    for (const heat of heats(values)) {
+      expect(heat).toBeCloseTo((5 * heatTone(100)) / 100, 2);
+    }
   });
 });
