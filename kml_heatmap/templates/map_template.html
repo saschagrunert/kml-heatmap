@@ -276,6 +276,7 @@
               aria-label="Filter flights by year"
             >
               <option value="all">All years</option>
+              $year_option
             </select>
           </div>
         </div>
@@ -862,6 +863,16 @@
               <h1 id="wrapped-title">Your Year in Flight</h1>
               <p class="year" id="wrapped-year">2025</p>
               <div class="stat-grid" id="wrapped-stats"></div>
+              <!-- Side by side with the map: the column scrolls, and this
+                   says so (wrapped.css, WrappedManager) -->
+              <button
+                id="wrapped-more-btn"
+                type="button"
+                data-icon="chevronDown"
+                data-icon-size="16"
+              >
+                More below
+              </button>
             </section>
 
             <!-- Card 2: Facts -->

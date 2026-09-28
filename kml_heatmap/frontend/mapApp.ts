@@ -667,9 +667,20 @@ export class MapApp {
 
     const state = this.savedState;
     this.store.batch(() => {
-      if (state.selectedYear !== undefined) {
-        this.selectedYear = state.selectedYear;
+      const year = state.selectedYear;
+      if (year !== undefined) {
+        this.selectedYear = year;
         this.restoredYearFromState = true;
+        // The dropdown names the year from the start, as it does the
+        // latest for a first visit (resolveYearSelection): an option of
+        // its own until the list of years replaces it
+        const select = domCache.get("year-select", HTMLSelectElement);
+        if (select) {
+          select.value = year;
+          if (select.value !== year) {
+            select.add(new Option(year, year, true, true));
+          }
+        }
       }
       if (state.selectedAircraft) {
         this.selectedAircraft = state.selectedAircraft;

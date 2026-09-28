@@ -358,6 +358,23 @@ describe("MapApp.initialize", () => {
       expect(app.restoredYearFromState).toBe(true);
     });
 
+    it("names a restored year in the dropdown before the list of years is in", async () => {
+      mockStateManagerInstance.loadState.mockReturnValue({
+        selectedYear: "2024",
+      });
+      let shown: string[] = [];
+      mockDataManagerInstance.loadMetadata.mockImplementation(() => {
+        shown = [yearSelect().value, yearSelect().selectedOptions[0]!.text];
+        return Promise.resolve(null);
+      });
+      mockDataManagerInstance.loadAirports.mockResolvedValue(defaultAirports);
+
+      await app.initialize();
+
+      // It said "All years" until the metadata was in, then the year
+      expect(shown).toEqual(["2024", "2024"]);
+    });
+
     it('keeps "all" when it was restored from state', async () => {
       mockStateManagerInstance.loadState.mockReturnValue({
         selectedYear: "all",

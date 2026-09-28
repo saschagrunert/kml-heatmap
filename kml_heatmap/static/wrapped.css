@@ -287,6 +287,57 @@ body:has(#wrapped-modal:not([hidden]))
 #wrapped-cards-column.is-at-end {
   mask-image: none;
 }
+/* The column ended with the map, but its first card did not: it ended a
+   gap and more above the map's edge, over a faded sliver of the second,
+   and the two sides of the dialog read as two heights. So the column
+   reaches one gap past the map, into the dialog's padding, where its fade
+   is, and the first card fills it down to the map's edge: at the top the
+   two end on one line, and the second card starts where the column fades
+   out. As tall as its content, where that is taller. */
+#wrapped-cards-column {
+  margin-bottom: calc(-1 * var(--space-lg));
+}
+#wrapped-card-stats {
+  min-height: calc(100% - var(--space-lg));
+  box-sizing: border-box;
+}
+/* What says that the column goes on: at the foot of the first card, in
+   its padding, so the card is as tall as it was, and a press takes the
+   column a card on. The figures above it are no longer the last part of
+   the card, and keep the bottom margin of none they had as that. */
+#wrapped-stats {
+  margin-bottom: 0;
+}
+#wrapped-more-btn {
+  position: absolute;
+  left: 50%;
+  bottom: var(--space-xs);
+  transform: translateX(-50%);
+  padding: 0 var(--space-sm);
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  background: none;
+  border: none;
+  color: var(--color-text-secondary);
+  font: inherit;
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+/* The chevron after the words, pointing where they say */
+#wrapped-more-btn .icon {
+  order: 1;
+}
+@media (hover: hover) {
+  #wrapped-more-btn:hover {
+    color: var(--color-text);
+  }
+}
+#wrapped-more-btn:focus-visible {
+  outline: 2px solid var(--color-accent-blue);
+  outline-offset: 2px;
+  border-radius: var(--radius-control);
+}
 #wrapped-cards-column::-webkit-scrollbar {
   width: 6px;
 }
@@ -1029,6 +1080,14 @@ body:has(#wrapped-modal:not([hidden]))
     width: 100%;
     overflow: visible;
     mask-image: none;
+    margin-bottom: 0;
+  }
+  /* The next card shows below it, and the dialog scrolls as a page does */
+  #wrapped-card-stats {
+    min-height: 0;
+  }
+  #wrapped-more-btn {
+    display: none;
   }
   .wrapped-square-card {
     width: 100%;

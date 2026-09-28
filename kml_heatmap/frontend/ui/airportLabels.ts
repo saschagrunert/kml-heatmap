@@ -10,6 +10,14 @@
  * the top layer, so they are placed first and the place names give way;
  * the map fades labels in and out, keeps them apart while it moves, and
  * hides the ones on the far side of the globe.
+ *
+ * The dots are DOM, which that pass knows nothing of: a code kept clear of
+ * the other codes still sat on the dot of the airport next to it, the home
+ * base's among them. So each dot has a stand-in on the map, an invisible
+ * symbol of its size above the labels (airportDotLayer), placed first and
+ * always, which the codes give way to like any other label. A code without
+ * room above its dot tries below it, then beside it, before it is left
+ * out.
  */
 import type {
   ExpressionSpecification,
@@ -59,6 +67,19 @@ const LABEL_LIFT_EM = 1.35;
 
 /** The chip the codes sit on */
 const CHIP_IMAGE = "airport-label-chip";
+
+/**
+ * The stand-in of a dot (airportDotLayer): a transparent pixel, scaled to
+ * the dot's size
+ */
+const DOT_IMAGE = "airport-dot-room";
+
+/**
+ * The size of a dot with its ring by zoom, `[size, zoom, size, ...]`, in
+ * pixels: `--marker-size` and twice `--marker-border` of the zoom's size
+ * class in styles.css (AIRPORT_SIZE_ZOOMS)
+ */
+const DOT_SIZE_STEPS = [8, 5, 9, 7, 10, 9, 14, 11, 15, 13, 16] as const;
 
 /**
  * The chip, in CSS pixels: a rounded rectangle with the corners of the
@@ -148,7 +169,12 @@ export function airportLabelLayer(): SymbolLayerSpecification {
       "text-font": AIRPORT_LABEL_FONT,
       "text-size": airportLabelSize(phone ? PHONE_MIN_LABEL_PX : 0),
       "text-letter-spacing": 0.05,
-      // Always above the dot: a label without room there is left out
+      // Above the dot, and left out where that covers another airport's
+      // dot (airportDotLayer) or code. Variable anchors placed a code below
+      // or beside its dot where the overview was crowded, and the map keeps
+      // the anchor a label had, so it stayed there, over its own flights,
+      // once zoomed in where there was room above: a code left out comes
+      // back where it is expected instead.
       "text-anchor": "bottom",
       "text-offset": [0, -LABEL_LIFT_EM],
       // Lower keys are placed first: the home base, then the busiest
@@ -159,6 +185,10 @@ export function airportLabelLayer(): SymbolLayerSpecification {
       "icon-image": CHIP_IMAGE,
       "icon-text-fit": "both",
       "icon-text-fit-padding": [1, 2, 1, 2],
+      // The image's margin for the rim is room enough around the chip: with
+      // the default two pixels more, a code above a dot of the middle sizes
+      // reached into the room of its own dot and went below it
+      "icon-padding": 0,
       // Point labels stay upright and face the reader on a tilted map, like
       // the markers: the default of the pitch alignment for them
     },
@@ -172,6 +202,32 @@ export function airportLabelLayer(): SymbolLayerSpecification {
         `rgba(${text}, ${contrast ? 0.5 : 0.16})`,
       ]),
       "icon-halo-width": 1,
+    },
+  };
+}
+
+/**
+ * The stand-ins of the dots, of the label source: a symbol the size of each
+ * dot that draws nothing. Placed whatever it overlaps, and before the codes
+ * (the layer is above theirs), it takes its room from them, which then
+ * never cover a dot. Shown and hidden with the labels.
+ */
+export function airportDotLayer(): SymbolLayerSpecification {
+  return {
+    id: MAP_LAYERS.airportDots,
+    type: "symbol",
+    source: MAP_SOURCES.airportLabels,
+    minzoom: AIRPORT_HIDE_LABELS_BELOW_ZOOM,
+    layout: {
+      visibility: "none",
+      "icon-image": DOT_IMAGE,
+      "icon-size": [
+        "step",
+        ["zoom"],
+        ...DOT_SIZE_STEPS,
+      ] as ExpressionSpecification,
+      "icon-allow-overlap": true,
+      "icon-padding": 0,
     },
   };
 }
@@ -210,8 +266,11 @@ export function chipImage(): {
   return { width: imageWidth, height: imageHeight, data };
 }
 
-/** Add the chip to the map, unless it has it */
-function addChip(map: MapLibreMap): void {
+/** Add the chip and the stand-in of a dot to the map, unless it has them */
+function addImages(map: MapLibreMap): void {
+  if (!map.hasImage(DOT_IMAGE)) {
+    map.addImage(DOT_IMAGE, { width: 1, height: 1, data: new Uint8Array(4) });
+  }
   if (map.hasImage(CHIP_IMAGE)) return;
   const { width, height, radius, margin, pixelRatio: r } = CHIP;
   map.addImage(CHIP_IMAGE, chipImage(), {
@@ -231,14 +290,14 @@ function addChip(map: MapLibreMap): void {
 }
 
 /**
- * Give the map the chip. It is not part of any style: a base style that
- * replaces the map's style may drop it, and the map asks for a missing
- * image by name, which is when it gets it again.
+ * Give the map the chip and the stand-in of a dot. Neither is part of any
+ * style: a base style that replaces the map's style may drop them, and the
+ * map asks for a missing image by name, which is when it gets them again.
  */
 export function addAirportLabelImages(map: MapLibreMap): void {
-  addChip(map);
+  addImages(map);
   map.on("styleimagemissing", (event: { id: string }) => {
-    if (event.id === CHIP_IMAGE) addChip(map);
+    if (event.id === CHIP_IMAGE || event.id === DOT_IMAGE) addImages(map);
   });
 }
 

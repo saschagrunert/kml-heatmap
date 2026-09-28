@@ -104,6 +104,7 @@ interface MockManagers {
     showHeatmap: Mock;
     dismissFailures: Mock;
     newAreaKm2: Mock;
+    failureNote: ((message: string) => void) | null;
   };
   layerManager: {
     clearLayer: Mock;
@@ -302,6 +303,7 @@ function createMockManagers(): MockManagers {
       showHeatmap: vi.fn(),
       dismissFailures: vi.fn(),
       newAreaKm2: vi.fn(() => null),
+      failureNote: null,
     },
     layerManager: {
       clearLayer: vi.fn(),

@@ -94,6 +94,19 @@ export class DataManager {
   private retryYear = "";
   /** The failures on screen, which stay until dismissed */
   private failures = new Set<string>();
+  /**
+   * Where a failure is said while the page has no flights at all, in place
+   * of a toast: the note on the empty map with its Retry (see
+   * followLoadFailure in appInitializer.ts). The two at once said the same
+   * thing twice, in two places, styled apart.
+   */
+  failureNote: ((message: string) => void) | null = null;
+  /**
+   * The failures said on that note since a load last ended. A load of all
+   * years brings the ones that did load, which hide the note with the
+   * failure of the others on it: they go into toasts then.
+   */
+  private noted: [string, ToastAction | undefined][] = [];
   /** What the layers were last drawn for, to tell a restyle from a rebuild */
   private drawn: {
     data: KMLDataset;
@@ -462,6 +475,10 @@ export class DataManager {
     this.retry = retry;
     this.retryYear = year;
     const data = await this.dataLoader.loadData(year, signal);
+    const noted = this.noted.splice(0);
+    if (data) {
+      for (const [message, action] of noted) this.toastFailure(message, action);
+    }
     if (data && !data.incomplete) {
       // The page has a whole dataset again: what failed before is over
       this.dismissFailures();
@@ -485,8 +502,20 @@ export class DataManager {
     this.failures.clear();
   }
 
-  /** Say that a load failed; an error stays until dismissed */
+  /**
+   * Say that a load failed; an error stays until dismissed. On an empty
+   * map the note there says it (failureNote).
+   */
   private fail(message: string, retry: ToastAction | undefined): void {
+    if (this.failureNote && !this.app.currentData) {
+      this.noted.push([message, retry]);
+      this.failureNote(message);
+      return;
+    }
+    this.toastFailure(message, retry);
+  }
+
+  private toastFailure(message: string, retry: ToastAction | undefined): void {
     this.failures.add(message);
     showToast(message, "error", retry);
   }

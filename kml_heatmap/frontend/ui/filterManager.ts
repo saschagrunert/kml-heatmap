@@ -7,7 +7,6 @@ import {
   announceDataset,
   dropUnknownPathIds,
   publishDataset,
-  showNoYear,
 } from "../appInitializer";
 import { domCache } from "../utils/domCache";
 import { showToast } from "../utils/toast";
@@ -56,22 +55,24 @@ export class FilterManager {
   }
 
   /**
-   * Show the year whose data is loaded, or no year at all when none is: a
-   * dropdown that kept showing the year that failed to load offered no way
-   * to ask for it again, as picking the year it shows fires no change
+   * Show the year whose data is loaded. With none loaded, the dropdown
+   * keeps the year that failed, which the note on the empty map names and
+   * offers to load again (see retryLoad): it showed an empty "Year"
+   * instead, so that picking the year it showed again was a change.
    */
   private showLoadedYear(select: HTMLSelectElement): void {
     if (this.app.currentData) select.value = this.app.selectedYear;
-    else showNoYear(select);
   }
 
   /**
-   * Load the year of the store once more, after its load failed. Unlike a
+   * Load the year of the dropdown once more, after its load failed while
+   * the map had no flights: the one the page opened on, or one picked
+   * since that failed as well, which the dropdown keeps showing. Unlike a
    * switch it keeps the selection, which is the one the page was opened
    * with and has not been checked against any dataset yet.
    */
   retryLoad(): Promise<boolean> {
-    return this.filterByYear(this.app.selectedYear, undefined, true);
+    return this.filterByYear(undefined, undefined, true);
   }
 
   updateAircraftDropdown(): void {

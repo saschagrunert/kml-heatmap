@@ -52,8 +52,11 @@ const FLIGHT_LAYERS = [
   "replay-trail-3d",
 ];
 
-/** The airport codes, a label layer on top of all (ui/airportLabels.ts) */
-const AIRPORT_LABELS = "airport-labels";
+/**
+ * The airport codes, a label layer on top of all, and the stand-ins of the
+ * dots they give way to above them (ui/airportLabels.ts)
+ */
+const AIRPORT_LABELS = ["airport-labels", "airport-dots"];
 
 /** Flights on the map in every way the app changes a layer at runtime */
 async function drawFlights(page: Page): Promise<void> {
@@ -85,7 +88,7 @@ test.describe("Base style", () => {
     expect(before.layers).toEqual([
       "background",
       ...FLIGHT_LAYERS,
-      AIRPORT_LABELS,
+      ...AIRPORT_LABELS,
     ]);
     expect(before.drawn.heat).toBeGreaterThan(0);
     expect(before.drawn.paths).toBeGreaterThan(0);
@@ -107,7 +110,7 @@ test.describe("Base style", () => {
       "base",
       ...FLIGHT_LAYERS,
       BASE_STYLE_LABELS,
-      AIRPORT_LABELS,
+      ...AIRPORT_LABELS,
     ]);
     expect(after.looks).toEqual(before.looks);
     expect(after.features).toEqual(before.features);
@@ -153,7 +156,7 @@ test.describe("Base style", () => {
       "base",
       ...FLIGHT_LAYERS,
       BASE_STYLE_LABELS,
-      AIRPORT_LABELS,
+      ...AIRPORT_LABELS,
     ]);
     expect(after.features["replay-route"]).toBe(
       before.features["replay-route"],
@@ -175,7 +178,7 @@ test.describe("Base style", () => {
     expect(flights.layers).toEqual([
       "background",
       ...FLIGHT_LAYERS,
-      AIRPORT_LABELS,
+      ...AIRPORT_LABELS,
     ]);
     expect(flights.drawn.heat).toBeGreaterThan(0);
     expect(flights.drawn.paths).toBeGreaterThan(0);

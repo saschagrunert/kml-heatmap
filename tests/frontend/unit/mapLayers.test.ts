@@ -366,25 +366,33 @@ describe("layer handles", () => {
   it("switch the airport labels, a layer of the map, with their markers", () => {
     const app = createMockApp();
     const map = app.map!;
-    const visibility = (): unknown =>
-      map.layer(MAP_LAYERS.airportLabels).layout["visibility"];
+    const visibility = (): unknown[] =>
+      [MAP_LAYERS.airportLabels, MAP_LAYERS.airportDots].map(
+        (id) => map.layer(id).layout["visibility"],
+      );
 
-    // On by default, like the markers
-    expect(visibility()).toBe("visible");
+    // On by default, like the markers, and the stand-ins of the dots with
+    // the labels that give way to them
+    expect(visibility()).toEqual(["visible", "visible"]);
 
     app.airportLayer.setVisible(false);
-    expect(visibility()).toBe("none");
+    expect(visibility()).toEqual(["none", "none"]);
 
     app.airportLayer.setVisible(true);
-    expect(visibility()).toBe("visible");
+    expect(visibility()).toEqual(["visible", "visible"]);
   });
 
   it("put the airport labels on top of every layer, labels of the style included", () => {
     const app = createMockApp();
     const order = app.map!.getLayersOrder();
 
-    expect(order.at(-1)).toBe(MAP_LAYERS.airportLabels);
+    // The stand-ins of the dots above them, which the map places first
+    expect(order.slice(-2)).toEqual([
+      MAP_LAYERS.airportLabels,
+      MAP_LAYERS.airportDots,
+    ]);
     expect(app.map!.layer(MAP_LAYERS.airportLabels).type).toBe("symbol");
+    expect(app.map!.layer(MAP_LAYERS.airportDots).type).toBe("symbol");
   });
 
   it("only remember the wish on an app without a map", () => {
@@ -482,6 +490,11 @@ describe("withDataLayers", () => {
           type: "symbol",
           source: MAP_SOURCES.heat,
         },
+        {
+          id: MAP_LAYERS.airportDots,
+          type: "symbol",
+          source: MAP_SOURCES.heat,
+        },
       ],
     };
 
@@ -493,6 +506,7 @@ describe("withDataLayers", () => {
       MAP_LAYERS.replayTrail,
       "place-labels",
       MAP_LAYERS.airportLabels,
+      MAP_LAYERS.airportDots,
     ]);
   });
 
@@ -525,6 +539,11 @@ describe("withDataLayers", () => {
           type: "symbol",
           source: MAP_SOURCES.heat,
         },
+        {
+          id: MAP_LAYERS.airportDots,
+          type: "symbol",
+          source: MAP_SOURCES.heat,
+        },
       ],
     };
 
@@ -545,10 +564,12 @@ describe("withDataLayers", () => {
       }),
     ).toEqual([]);
     // An opacity of the style's own stays, the style it came in is left as
-    // it was, and the airport labels are the app's
+    // it was, and the airport labels and the stand-ins of their dots are
+    // the app's
     expect(paint("own-opacity")).toEqual({ "text-opacity": 0.3 });
     expect(next.layers[1]!.paint).toEqual({ "text-color": "#fff" });
     expect(paint(MAP_LAYERS.airportLabels)).toBeUndefined();
+    expect(paint(MAP_LAYERS.airportDots)).toBeUndefined();
   });
 
   it("keeps the sky of a tilted map, which the base style does not have", () => {

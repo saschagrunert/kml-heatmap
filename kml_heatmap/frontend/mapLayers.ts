@@ -25,7 +25,11 @@ import {
   MAP_SOURCES,
 } from "./utils/constants";
 import type { LayerHandle } from "./types";
-import { addAirportLabelImages, airportLabelLayer } from "./ui/airportLabels";
+import {
+  addAirportLabelImages,
+  airportDotLayer,
+  airportLabelLayer,
+} from "./ui/airportLabels";
 
 /**
  * Aeronautical overlay of open flightmaps: airspaces, airfields, navaids and
@@ -116,11 +120,12 @@ export class MapLayerHandle implements LayerHandle {
  * Handle of the airport markers and their labels. The markers are DOM, not
  * a map layer, so hiding them is a class on the map container that the
  * stylesheet acts on; every marker follows at once and none has to be
- * removed and added again. The labels are a layer of the map.
+ * removed and added again. The labels are a layer of the map, and so are
+ * the stand-ins of the dots they keep clear of.
  */
 export class AirportLayerHandle extends MapLayerHandle {
   constructor(visible = true) {
-    super([MAP_LAYERS.airportLabels], visible);
+    super([MAP_LAYERS.airportLabels, MAP_LAYERS.airportDots], visible);
   }
 
   protected override apply(): void {
@@ -418,6 +423,7 @@ function addDataLayersTo(map: MapLibreMap): void {
   });
   addAirportLabelImages(map);
   map.addLayer(airportLabelLayer());
+  map.addLayer(airportDotLayer());
 }
 
 /**
@@ -438,12 +444,14 @@ const HEAT_LABEL_OPACITY = 0.5;
  * them. They are carried over as the map reports them, with their data,
  * filters, visibility and paint, in their order, and below the first label
  * layer of the new style, where `addDataLayers` would have put them; the
- * airport labels go on top of all. The projection comes along too: it
- * lives in the style, and a globe chosen before the base style arrived
- * would otherwise turn back into Mercator; and so does the relief of the
- * 3D view (ui/terrain.ts), which would otherwise go while the flights stay
- * cut for it. The labels of the new style (its symbol layers without an
- * opacity of their own) fade while the heat is drawn (HEAT_SHOWN_STATE).
+ * airport labels and the stand-ins of their dots go on top of all. The
+ * projection comes along too: it lives in the style, and a globe chosen
+ * before the base style arrived would otherwise turn back into Mercator;
+ * and so does the relief of the 3D view (ui/terrain.ts), which would
+ * otherwise go while the flights stay cut for it. The labels of the new
+ * style (its symbol layers without an opacity of their own) fade while the
+ * heat is drawn (HEAT_SHOWN_STATE); the app's own symbol layers are not
+ * among them, so the airport codes stay as they are.
  *
  * `diffed` leaves the data of the GeoJSON sources out, for a style the map
  * applies as the difference to the one before (see setBaseStyle).
@@ -465,8 +473,9 @@ export function withDataLayers(
   }
   const ids: readonly string[] = Object.values(MAP_LAYERS);
   const own = previous.layers.filter((layer) => ids.includes(layer.id));
-  const onTop = own.filter((layer) => layer.id === MAP_LAYERS.airportLabels);
-  const below = own.filter((layer) => layer.id !== MAP_LAYERS.airportLabels);
+  // The app's symbol layers are the airport labels and their dots
+  const onTop = own.filter((layer) => layer.type === "symbol");
+  const below = own.filter((layer) => layer.type !== "symbol");
   const labels = next.layers.findIndex((layer) => layer.type === "symbol");
   const layers = next.layers.map((layer) =>
     layer.type === "symbol" && layer.paint?.["text-opacity"] === undefined

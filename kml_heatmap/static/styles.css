@@ -427,7 +427,11 @@ body {
     transparent 100%
   );
 }
-.control-column.is-at-end {
+/* Every fade of a scrolled panel goes at its end, the statistics panel's
+   and the popup's list of flights below too: one rule */
+.control-column.is-at-end,
+#stats-panel.is-at-end,
+.kh-popup-flights.is-at-end {
   mask-image: none;
 }
 #left-buttons {
@@ -440,9 +444,12 @@ body {
 /* The mobile bar stands in for the two columns and sets `hidden` on them.
    `.control-column` would otherwise win on source order, and keying off the
    attribute rather than `body:has(.mobile-bar)` keeps them hidden while
-   replay has taken the bar out of the document. */
+   replay has taken the bar out of the document. The selection chip and
+   the note on an empty map are displayed as flex boxes the same way. */
 #left-buttons[hidden],
-#right-buttons[hidden] {
+#right-buttons[hidden],
+#selection-chip[hidden],
+#map-empty[hidden] {
   display: none;
 }
 
@@ -712,9 +719,6 @@ body {
   color: var(--color-text);
   white-space: nowrap;
 }
-#selection-chip[hidden] {
-  display: none;
-}
 #selection-chip-count {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -820,6 +824,12 @@ body {
 .color-legend:not([hidden]) {
   display: block;
   opacity: 1;
+}
+/* Nothing to stand for while the page has no flights (appInitializer.ts),
+   loading its first year or after that failed. Here, after the rule
+   above, whose weight it has. */
+.no-data .color-legend {
+  display: none;
 }
 @starting-style {
   .color-legend:not([hidden]) {
@@ -954,15 +964,13 @@ body {
   user-select: text;
   /* The panel holds well over its own height, and it used to stop dead
      wherever the rail ended, as often as not through the middle of a row.
-     ui/scrollFade.ts drops `is-at-end` on the class once there is no more. */
+     ui/scrollFade.ts drops `is-at-end` on the class once there is no more
+     (see `.control-column.is-at-end`). */
   mask-image: linear-gradient(
     to bottom,
     #000 calc(100% - var(--space-lg)),
     transparent 100%
   );
-}
-#stats-panel.is-at-end {
-  mask-image: none;
 }
 #stats-panel:focus-visible {
   outline: 2px solid var(--color-accent-blue);
@@ -1591,9 +1599,6 @@ body.stats-open #left-buttons {
   font-size: var(--text-base);
   text-align: center;
 }
-#map-empty[hidden] {
-  display: none;
-}
 #map-empty p {
   margin: 0;
 }
@@ -2198,15 +2203,13 @@ body.stats-open #left-buttons {
   overflow-y: auto;
   overscroll-behavior: contain;
   /* The fade of the statistics panel, for a list cut off mid-row; the
-     popup drops `is-at-end` once there is no more (utils/scrollFade.ts) */
+     popup drops `is-at-end` once there is no more (utils/scrollFade.ts,
+     `.control-column.is-at-end`) */
   mask-image: linear-gradient(
     to bottom,
     #000 calc(100% - var(--space-lg)),
     transparent 100%
   );
-}
-.kh-popup-flights.is-at-end {
-  mask-image: none;
 }
 .kh-popup-flight {
   font: inherit;

@@ -481,6 +481,23 @@ export class DataLoader {
   }
 
   /**
+   * Count an index file as a load while it is on its way. The indicator
+   * came up with the first year file, which is asked for once the index
+   * of years is in: on a slow line the page was an empty map for a second
+   * and more before it, with a legend and a filter that said nothing of
+   * a load.
+   */
+  private async indexing<T>(request: Promise<T>): Promise<T> {
+    this.loadingDepth++;
+    this.report();
+    try {
+      return await request;
+    } finally {
+      this.endLoading();
+    }
+  }
+
+  /**
    * Load data for a year or all years ('all')
    * @param year - Year string or 'all'
    * @returns Data object or null on error
@@ -709,7 +726,9 @@ export class DataLoader {
         this.airportsRequest ??= this.fetchJson(
           this.dataDir + "/airports.json",
         ).then((json) => checked(json, isAirports, "airports.json"));
-        siteData.airports = (await this.airportsRequest).airports;
+        siteData.airports = (
+          await this.indexing(this.airportsRequest)
+        ).airports;
       }
       return siteData.airports;
     } catch (error) {
@@ -730,7 +749,7 @@ export class DataLoader {
         this.metadataRequest ??= this.fetchJson(
           this.dataDir + "/metadata.json",
         ).then((json) => checked(json, isMetadata, "metadata.json"));
-        siteData.metadata = await this.metadataRequest;
+        siteData.metadata = await this.indexing(this.metadataRequest);
       }
       return siteData.metadata;
     } catch (error) {

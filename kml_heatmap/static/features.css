@@ -803,6 +803,28 @@ body.cross-section-open .toast-stack {
     bottom: calc(var(--attribution-h) + var(--space-sm) + var(--safe-bottom));
     transform: none;
   }
+  /* Laid out like the replay of one flight: the clock on a line of its
+     own, at the size of that one's readout and clear of the close in the
+     corner, and the controls on one row under it. In one row with the
+     clock, the orbit and the close went onto a second line of their own,
+     centred under the clock. */
+  #replay-all-clock {
+    order: -1;
+    flex-basis: 100%;
+    padding: 0 44px;
+    box-sizing: border-box;
+    font-size: var(--text-base);
+    text-align: center;
+  }
+  #replay-all-close-btn {
+    position: absolute;
+    top: var(--space-xs);
+    right: var(--space-xs);
+    background: transparent;
+    border: none;
+    box-shadow: none;
+    color: var(--color-text-secondary);
+  }
   body.replay-all-active #github-footer,
   body.replay-all-active #stats-rail {
     visibility: hidden;
