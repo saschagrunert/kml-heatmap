@@ -10,10 +10,11 @@
  * switch is off; and it steps back under the aviation chart or a
  * selection's lines as the heatmap does, but not under the ribbons of a
  * colour layer, which are drawn in front of it (dimsHeatCloud). While a
- * replay runs it stays, faintly and without its pulses, so the chase
- * camera flies through the flights of before. The flat heatmap steps aside
- * for it (heatCloud in the store, see ui/layerVisibility.ts) from the
- * moment the cloud's layer is on the map until the 3D view is turned off,
+ * replay runs it stays, faintly and without its pulses, its marks showing
+ * the way flown instead, so the chase camera flies through the flights of
+ * before. The flat heatmap steps aside for it (heatCloud in the store, see
+ * ui/layerVisibility.ts) from the moment the cloud's layer is on the map
+ * until the 3D view is turned off,
  * or, where the cloud's shaders do not work, until the map has a new WebGL
  * context, which leaves the heatmap as it was meanwhile.
  *

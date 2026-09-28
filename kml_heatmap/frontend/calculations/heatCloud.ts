@@ -18,8 +18,11 @@
  * cannot ask the map for its relief.
  *
  * Each point also carries the time into its flight it was flown at, which
- * the pulses of the layer run along, and the heat is added up in coarse
- * cells on the way, for the exposure the layer draws the cloud with.
+ * the pulses of the layer run along, and how strongly the stretch from it
+ * may draw the marks of the way it was flown, from the directions of the
+ * flights around it (calculations/cloudCells.ts); and the heat is added up
+ * in coarse cells on the way, for the exposure the layer draws the cloud
+ * with.
  */
 import type { PathSegment } from "../types";
 import {
@@ -33,6 +36,7 @@ import { overlaps, type Box } from "../utils/viewBox";
 import { heatWeight, type SegmentWeight } from "./heatLines";
 import { liftExaggeration } from "./lift";
 import { chainPieces, flightClockOf } from "./flightClock";
+import { markStretches } from "./cloudCells";
 import type { SmoothedFlights } from "./smoothing";
 
 /**
@@ -101,15 +105,24 @@ const MIN_HEAT_S = 0.01;
  * CloudPoints.busiest), this many pixels wide in the middle of the relief
  * level: about as wide as the glow of a stretch (see CLOUD_STOPS in
  * ui/heatCloudLayer.ts), so the heat of a cell is about what glows on its
- * brightest pixels
+ * brightest pixels. The directions of the stretches are added up in cells
+ * as wide at the level the cloud is cut for (see markStretches), so the
+ * flights of one track share them and those of a track a glow away do not.
  */
 const CLOUD_CELL_PX = 16;
 
 /** The part of the cells of heat that are less busy than CloudPoints.busiest */
 const CLOUD_BUSIEST_PERCENTILE = 0.99;
 
-/** The floats of a point of the cloud: x, y, ground, lift, heat and time */
-export const CLOUD_POINT_FLOATS = 6;
+/**
+ * The floats of a point of the cloud: x, y, ground, lift, heat, time and
+ * marks
+ */
+export const CLOUD_POINT_FLOATS = 7;
+
+/** Which of them are the heat and the marks */
+const HEAT_FLOAT = 4;
+const MARKS_FLOAT = 6;
 
 /**
  * The points of the cloud, one after the other along each flight, with a
@@ -127,7 +140,11 @@ export const CLOUD_POINT_FLOATS = 6;
  * - its time: the seconds into its flight at which it was flown, by the
  *   clock replay all plays the flights by (see flightClock), from 0 at the
  *   flight's first fix and on across a gap in its log, so the pulses run
- *   the way the flight went, in step with replay all.
+ *   the way the flight went, in step with replay all;
+ * - its marks: how strongly the stretch from it may draw the marks of the
+ *   way it was flown, from 0 to 1, for how far the flights around it go
+ *   the same way (see markStretches); the last point of a run of
+ *   stretches has those of the stretch before it.
  */
 export interface CloudPoints {
   points: Float32Array;
@@ -478,12 +495,13 @@ export function cloudPoints(
         east = Math.max(east, x);
         north = Math.min(north, y);
         south = Math.max(south, y);
-        values.push(x, y, groundAt(j), heights[j]!, heat, times[j]!);
+        values.push(x, y, groundAt(j), heights[j]!, heat, times[j]!, 0);
       };
       /** Write the stretch merged so far, which ends at `prev` */
       const flush = (): void => {
-        if (open) values[values.length - 2] = merged;
-        else write(first, firstX, firstY, merged);
+        if (open) {
+          values[values.length - CLOUD_POINT_FLOATS + HEAT_FLOAT] = merged;
+        } else write(first, firstX, firstY, merged);
         write(prev, prevX, prevY, 0);
         open = true;
       };
@@ -607,6 +625,14 @@ export function cloudPoints(
     }
     i = end;
   }
+  // The marks of the stretches written, in cells of the level cut for
+  markStretches(
+    values,
+    CLOUD_POINT_FLOATS,
+    HEAT_FLOAT,
+    MARKS_FLOAT,
+    CLOUD_CELL_PX / worldPx,
+  );
   const origin: [number, number] =
     values.length > 0 ? [(west + east) / 2, (north + south) / 2] : [0.5, 0.5];
   const points = new Float32Array(values.length + 2 * CLOUD_POINT_FLOATS);

@@ -475,6 +475,35 @@ test.describe("Map orientation", () => {
       expect(on.luminance - off.luminance).toBeGreaterThan(3);
     });
 
+    // The suite asks for reduced motion (playwright.config.ts), under which
+    // the cloud's pulses never run: the marks of the way flown show instead.
+    // How they hand over to the pulses is timed by the frames, which take
+    // seconds here: the unit tests of the layer check that.
+    test("under reduced motion the cloud shows the way flown with its marks, not its pulses", async ({
+      page,
+    }) => {
+      test.setTimeout(RELIEF_TEST_TIMEOUT_MS);
+      await page.setViewportSize(RELIEF_VIEWPORT);
+      await expectHeatmapPainted(page);
+      await page.locator("#three-d-btn").click();
+      await reliefExpect
+        .poll(async () => (await heatCloudOnMap(page)).drawn)
+        .toBeGreaterThan(0);
+      // Close enough in for the marks to show in full (see markStrength);
+      // using the map wakes no pulse while the system asks for less motion
+      const center = await page.evaluate(() => {
+        const { lat, lng } = window.mapApp!.map!.getCenter();
+        return [lat, lng] as const;
+      });
+      await jumpToView(page, center, 10);
+      await reliefExpect
+        .poll(async () => {
+          const { drawn, marks, pulses } = await heatCloudOnMap(page);
+          return drawn > 0 && marks === 1 && pulses === 0;
+        })
+        .toBe(true);
+    });
+
     test.describe("with motion", () => {
       // Before the page loads, as in replay.spec.ts: the chase view is off
       // with reduced motion, which the suite asks for

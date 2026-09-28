@@ -356,8 +356,12 @@ const BUDGET_APP = { raw: 156 * 1024, gzip: 54 * 1024 };
 // 35 KB for the readout of the heat cloud under the pointer
 // (ui/cloudReadout.ts, with its grid of the segments and the line of sight
 // in calculations/cloudReadout.ts): 103.21 KB raw and 37.82 KB gzipped
-// after, in a local build, about 37.97 KB in CI.
-const BUDGET_FEATURES = { raw: 103.5 * 1024, gzip: 38.25 * 1024 };
+// after, in a local build, about 37.97 KB in CI. Raised from 103.5 KB and
+// 38.25 KB for the marks of the way flown in the heat cloud (their blocks
+// of its shaders, and the directions of its cells,
+// calculations/cloudCells.ts): 108.32 KB raw and 39.68 KB gzipped after, in
+// a local build, about 39.84 KB in CI.
+const BUDGET_FEATURES = { raw: 108.5 * 1024, gzip: 40.25 * 1024 };
 
 // The Wrapped bundle is fetched only when the Wrapped dialog or the
 // statistics panel is first opened, and not with replay's code or replay

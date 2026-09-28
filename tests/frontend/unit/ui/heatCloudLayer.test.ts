@@ -1,7 +1,8 @@
 /**
  * The custom layer of the heat cloud, with the WebGL context mocked: what it
  * makes, when, what it draws, and what it lets go of; its shadow, its
- * pulses and its exposure.
+ * pulses, the marks of the way flown that take over from them, and its
+ * exposure.
  */
 import {
   describe,
@@ -20,6 +21,7 @@ import {
   cloudPulse,
   HEAT_CLOUD_LAYER,
   HeatCloudLayer,
+  markStrength,
   type HeatCloudStyle,
 } from "../../../../kml_heatmap/frontend/ui/heatCloudLayer";
 import { cloudMatrix } from "../../../../kml_heatmap/frontend/ui/glLayer";
@@ -545,17 +547,17 @@ describe("the heat cloud's layer", () => {
     expect(other.drawArraysInstanced).toHaveBeenCalledTimes(PASSES);
   });
 
-  it("reads the heat and the time of a stretch's ends from the six floats of each point", () => {
+  it("reads the heat, the time and the marks of a stretch's ends from the seven floats of each point", () => {
     layer.onAdd(map);
     layer.setPoints(points());
     render();
-    const stride = 6 * 4;
+    const stride = 7 * 4;
     const pointers = gl.vertexAttribPointer.mock.calls
       .slice(1)
       .map((call) => call as unknown as number[]);
-    // Before, start, end and after, and a float or two past each of the
-    // first three: the heat into the start, and the heat and the time at
-    // either end of the stretch
+    // Before, start, end and after, and a float or three past each of the
+    // first three: the heat into the start, and the heat, the time and the
+    // marks at either end of the stretch
     expect(
       pointers.map(([location, size, , , step, offset]) => [
         location,
@@ -567,9 +569,9 @@ describe("the heat cloud's layer", () => {
       [1, 4, stride, 0],
       [2, 1, stride, 16],
       [3, 4, stride, stride],
-      [4, 2, stride, stride + 16],
+      [4, 3, stride, stride + 16],
       [5, 4, stride, 2 * stride],
-      [6, 2, stride, 2 * stride + 16],
+      [6, 3, stride, 2 * stride + 16],
       [7, 4, stride, 3 * stride],
     ]);
   });
@@ -620,7 +622,9 @@ describe("the heat cloud's layer", () => {
     expect(vertex).toContain(
       "max(a_start.w, a_end.w) <= u_band.x || min(a_start.w, a_end.w) >= u_band.w",
     );
-    expect(vertex).toContain("v_height = vec2(a_start.w, a_end.w);");
+    expect(vertex).toContain(
+      "v_height = mix(vec2(a_start.w), vec2(a_end.w), kept);",
+    );
     const fade =
       "glow *= smoothstep(u_band.x, u_band.y, height) * (1.0 - smoothstep(u_band.z, u_band.w, height));";
     expect(fragment).toContain(fade);
@@ -929,6 +933,140 @@ describe("the heat cloud's layer", () => {
     });
   });
 
+  describe("the marks of the way flown", () => {
+    /** Draw frames `ms` apart for `total` milliseconds */
+    const frames = (total: number, ms = 16): void => {
+      for (let t = 0; t < total; t += ms) {
+        now += ms;
+        render();
+      }
+    };
+    /** How strongly the last frame drew the marks, and the pulses */
+    const marks = (): number => uniform("u_marks")[0]!;
+    const pulses = (): number => uniform("u_flowMix")[1]!;
+
+    beforeEach(() => {
+      layer.onAdd(map);
+      layer.setPoints(points());
+    });
+
+    it("show in full under reduced motion, in the glow and not in its shadow", () => {
+      motion.reduced = true;
+      frames(500);
+      const [shadow, glow] = perDraw("u_marks");
+      expect(shadow![0]).toBe(0);
+      expect(glow![0]).toBe(1);
+      expect(pulses()).toBe(0);
+      expect(layer.marks).toBe(1);
+      expect(layer.pulses).toBe(0);
+    });
+
+    it("are spaced in CSS pixels, and sized by them, whatever the screen's pixels", () => {
+      motion.reduced = true;
+      render();
+      const [, spacing, ratio] = uniform("u_marks");
+      expect(ratio).toBe(2);
+      expect(spacing! / ratio!).toBeGreaterThan(30);
+      expect(spacing! / ratio!).toBeLessThan(120);
+    });
+
+    it("hand over to the pulses as they fade in, and take over again as they fade out, one of the two at a time", () => {
+      const seen: [marks: number, pulses: number][] = [];
+      const watch = (total: number, ms: number): void => {
+        for (let t = 0; t < total; t += ms) {
+          now += ms;
+          render();
+          seen.push([layer.marks, layer.pulses]);
+        }
+      };
+      watch(2000, 16);
+      expect(layer.pulses).toBe(1);
+      expect(layer.marks).toBe(0);
+      expect(marks()).toBe(0);
+      // Resting after a while without the map being used
+      watch(30000, 100);
+      expect(layer.pulses).toBe(0);
+      expect(layer.marks).toBe(1);
+      expect(marks()).toBe(1);
+      for (const [shown, running] of seen) {
+        expect(shown + running).toBeCloseTo(1, 12);
+      }
+      // Some frames on the way drew some of both
+      expect(seen.some(([shown]) => shown > 0.2 && shown < 0.8)).toBe(true);
+    });
+
+    it("show while a replay runs, where the pulses do not", () => {
+      style = { ...STYLE, flow: false };
+      frames(500);
+      expect(marks()).toBe(1);
+      expect(pulses()).toBe(0);
+    });
+
+    it("show in a still image of the map in place of a pulse caught in the middle, for that frame only", () => {
+      frames(2000);
+      expect(layer.pulses).toBe(1);
+      capture.still = true;
+      now += 16;
+      render();
+      expect(marks()).toBe(1);
+      expect(pulses()).toBe(0);
+      capture.still = false;
+      now += 16;
+      render();
+      expect(marks()).toBe(0);
+      expect(pulses()).toBeGreaterThan(0.5);
+    });
+
+    it("fade out towards a view of a region, where the routes run together", () => {
+      motion.reduced = true;
+      (map.getZoom as Mock).mockReturnValue(5);
+      render();
+      expect(marks()).toBe(0);
+      (map.getZoom as Mock).mockReturnValue(9);
+      render();
+      expect(marks()).toBe(1);
+    });
+
+    it("are faded by the band of heights as the glow is, from their own block of the shaders", () => {
+      render();
+      const source = (of: string): string =>
+        gl.shaderSource.mock.calls
+          .map(([, text]) => String(text))
+          .find((text) => text.includes(of))!;
+      const vertex = source("projectTileFor3D");
+      expect(vertex).toContain(
+        "v_marks = mix(vec2(a_heat.z), vec2(a_out.z), kept);",
+      );
+      // What the mirror of the shaders below stands for: the one axis
+      // nearest the stretch, the lattice from the part of the stretch in
+      // front of the near plane, and the chevron
+      expect(vertex).toContain(
+        "return floor(atan(d.y, d.x) / 0.39269908 + 0.5);",
+      );
+      // A stretch whose neighbour takes another axis fades its marks out
+      // towards their join, where each would draw a mark of its own
+      expect(vertex).toContain(
+        "if (a_in > 0.0 && mod(markAxis(a_before.xy, a_start.xy) - axis, 8.0) != 0.0) v_marks.x = 0.0;",
+      );
+      expect(vertex).toContain(
+        "if (a_out.x > 0.0 && mod(markAxis(a_end.xy, a_after.xy) - axis, 8.0) != 0.0) v_marks.y = 0.0;",
+      );
+      expect(vertex).toContain(
+        "vec4(mix(a_start.xy, a_end.xy, kept.x), mix(a_start.xy, a_end.xy, kept.y))",
+      );
+      const fragment = source("fragColor");
+      expect(fragment).toContain("uniform vec3 u_marks;");
+      expect(fragment).toContain(
+        "abs(ahead - 0.4 * size + 0.8 * abs(across)) * 0.78086881",
+      );
+      const main = fragment.slice(fragment.indexOf("void main()"));
+      expect(main.indexOf("marked(glow")).toBeGreaterThan(0);
+      expect(main.indexOf("marked(glow")).toBeLessThan(
+        main.indexOf("u_band.y, height"),
+      );
+    });
+  });
+
   describe("the exposure", () => {
     const gainOf = (cloud: CloudPoints): number => {
       const fresh = new HeatCloudLayer(() => ({ ...STYLE, liftM: 0 }), failed);
@@ -1022,6 +1160,226 @@ describe("cloudPulse", () => {
     // x^2 (1 - smoothstep(0.85, 1, x)) * 3.776 fell at 27 a period
     expect(steepest).toBeLessThan(15);
     expect(cloudPulse(head)).toBeLessThan(2.7);
+  });
+});
+
+describe("markStrength", () => {
+  it("is the part of the pulses that does not show, so the cloud shows one of the two", () => {
+    expect(markStrength(0, 10)).toBe(1);
+    expect(markStrength(1, 10)).toBe(0);
+    expect(markStrength(0.25, 10)).toBeCloseTo(0.75, 12);
+    // Within 0 and 1 whatever it is asked
+    expect(markStrength(-1, 10)).toBe(1);
+    expect(markStrength(2, 10)).toBe(0);
+  });
+
+  it("fades in from a view of a region to one of its routes", () => {
+    expect(markStrength(0, 5)).toBe(0);
+    expect(markStrength(0, 6.5)).toBe(0);
+    const between = markStrength(0, 7.25);
+    expect(between).toBeGreaterThan(0);
+    expect(between).toBeLessThan(1);
+    expect(markStrength(0, 8)).toBe(1);
+    expect(markStrength(0, 17)).toBe(1);
+  });
+});
+
+/**
+ * The marks' lattice and chevrons as the shaders find them (markLattice in
+ * the vertex shader, chevron and marked in the fragment shader), in
+ * JavaScript: the shaders cannot run here, and the test above holds them
+ * to the lines this mirrors.
+ */
+describe("the marks of the way flown, as the shaders draw them", () => {
+  const smooth = (a: number, b: number, x: number): number => {
+    const t = Math.min(Math.max((x - a) / (b - a), 0), 1);
+    return t * t * (3 - 2 * t);
+  };
+  const SIZE = 12;
+  const STROKE = 1.5;
+  const SPACING = 64;
+  /** The stroke of a chevron `ahead` of its line and `across` the track */
+  const chevron = (ahead: number, across: number): number =>
+    (1 -
+      smooth(
+        STROKE - 0.5,
+        STROKE + 0.5,
+        Math.abs(ahead - 0.4 * SIZE + 0.8 * Math.abs(across)) * 0.78086881,
+      )) *
+    (1 - smooth(SIZE - 0.5, SIZE + 0.5, Math.abs(across)));
+  /**
+   * The lattice of a stretch from `[x0, y0]` to `[x1, y1]` on the ground
+   * that spans `lengthPx` on the screen: where its start is among the
+   * lines, from an even one, the pixels from a line to the next, and how
+   * far they have gone to every second one
+   */
+  const latticeOf = (
+    [x0, y0, x1, y1]: readonly number[],
+    lengthPx: number,
+  ): [number, number, number] => {
+    const units = Math.hypot(x1! - x0!, y1! - y0!);
+    const perUnit = lengthPx / units;
+    const [dx, dy] = [(x1! - x0!) / units, (y1! - y0!) / units];
+    const octave = Math.log2(SPACING / perUnit);
+    const apart = 2 ** Math.floor(octave);
+    const eighth = Math.PI / 8;
+    const axis = Math.floor(Math.atan2(dy, dx) / eighth + 0.5) * eighth;
+    const [nx, ny] = [Math.cos(axis), Math.sin(axis)];
+    const line = (x0! * nx + y0! * ny) / apart;
+    return [
+      line - 2 * Math.floor(0.5 * line),
+      (perUnit * apart) / (dx * nx + dy * ny),
+      octave - Math.floor(octave),
+    ];
+  };
+  /** The stroke on the middle of the track `px` along it from its start */
+  const markAt = (
+    [start, spacing, coarser]: readonly number[],
+    px: number,
+  ): number => {
+    const line = start! + px / spacing!;
+    const half = 0.5 * line;
+    return (
+      chevron((line - Math.floor(line + 0.5)) * spacing!, 0) * (1 - coarser!) +
+      chevron((half - Math.floor(half + 0.5)) * 2 * spacing!, 0) * coarser!
+    );
+  };
+  /** The middles of the strokes along `lengthPx` of a stretch, and theirs */
+  const strokes = (
+    lattice: readonly number[],
+    lengthPx: number,
+  ): [px: number, stroke: number][] => {
+    const found: [number, number][] = [];
+    let before = 0;
+    let top = -1;
+    for (let px = 0; px <= lengthPx; px += 0.25) {
+      const here = markAt(lattice, px);
+      if (here > before + 1e-9) top = px;
+      else if (top >= 0 && here < before - 1e-9) {
+        found.push([(top + px - 0.25) / 2, before]);
+        top = -1;
+      }
+      before = here;
+    }
+    // Not those cut by either end
+    return found.filter(([px]) => px > SIZE && px < lengthPx - SIZE);
+  };
+  /** A straight track `lengthPx` long on the screen at `perUnit` */
+  const track = (
+    degrees: number,
+    lengthPx: number,
+    perUnit: number,
+    from: readonly [number, number] = [37.3, 91.7],
+  ): number[] => {
+    const heading = (degrees * Math.PI) / 180;
+    const units = lengthPx / perUnit;
+    return [
+      from[0],
+      from[1],
+      from[0] + Math.cos(heading) * units,
+      from[1] + Math.sin(heading) * units,
+    ];
+  };
+
+  it("draws one row of chevrons along a track, a line of its lattice apart, at every heading", () => {
+    // Those halfway between two axes too, where a blend of the lattices of
+    // both drew two rows of marks at half their strength
+    for (let degrees = 0; degrees < 360; degrees += 3.75) {
+      for (const perUnit of [1, 1.3, 1.7]) {
+        const lattice = latticeOf(track(degrees, 600, perUnit), 600);
+        const [start, spacing, coarser] = lattice;
+        expect(spacing).toBeGreaterThanOrEqual(SPACING / 2 - 1e-9);
+        expect(spacing).toBeLessThanOrEqual(
+          SPACING / Math.cos(Math.PI / 16) + 1e-9,
+        );
+        const found = strokes(lattice, 600);
+        expect(found.length).toBeGreaterThanOrEqual(
+          Math.floor(600 / spacing) - 2,
+        );
+        for (const [px, stroke] of found) {
+          // On a line, its tip 0.4 of the size ahead of it
+          const line = start + (px - 0.4 * SIZE) / spacing;
+          expect(Math.abs(line - Math.round(line)) * spacing).toBeLessThan(1);
+          // Every second one in full, those between fading with the octave
+          const even = Math.round(line) % 2 === 0;
+          expect(stroke).toBeCloseTo(even ? 1 : 1 - coarser, 1);
+        }
+      }
+    }
+  });
+
+  it("points a chevron ahead, its arms trailing back from its tip", () => {
+    // The middle of the stroke, at `across` from the middle of the track
+    const peak = (across: number): number => {
+      const on: number[] = [];
+      for (let ahead = -SIZE; ahead <= SIZE; ahead += 0.05) {
+        if (chevron(ahead, across) > 0.999) on.push(ahead);
+      }
+      return (on[0]! + on[on.length - 1]!) / 2;
+    };
+    expect(peak(0)).toBeCloseTo(0.4 * SIZE, 0);
+    expect(peak(0.5 * SIZE)).toBeCloseTo(0, 0);
+    expect(peak(-0.8 * SIZE)).toBeCloseTo(-0.24 * SIZE, 0);
+    expect(chevron(0, 1.5 * SIZE)).toBe(0);
+  });
+
+  /** Where the pixel `px` along a stretch of `lattice` is among its lines */
+  const lineOf = ([start, spacing]: readonly number[], px: number): number =>
+    start! + px / spacing!;
+  /** Whether two places among the lines are the same, every second even */
+  const sameLine = (one: number, other: number): void => {
+    const apart = (one - other) / 2;
+    expect(Math.abs(apart - Math.round(apart))).toBeLessThan(1e-6);
+  };
+
+  it("marks the same places for every flight along a track, whichever way and wherever its stretches end", () => {
+    const whole = track(33, 800, 1.2);
+    const there = latticeOf(whole, 800);
+    // Another flight's stretch, from a third of the way in, is on the same
+    // lines at the same places
+    const later = latticeOf(
+      [
+        whole[0]! + (whole[2]! - whole[0]!) / 3,
+        whole[1]! + (whole[3]! - whole[1]!) / 3,
+        whole[2]!,
+        whole[3]!,
+      ],
+      (800 * 2) / 3,
+    );
+    expect(later[1]).toBeCloseTo(there[1], 9);
+    for (const px of [0, 100, 437]) {
+      sameLine(lineOf(later, px), lineOf(there, 800 / 3 + px));
+    }
+    // The way back crosses the same lines, counted from the other side
+    const back = latticeOf([whole[2]!, whole[3]!, whole[0]!, whole[1]!], 800);
+    expect(back[1]).toBeCloseTo(there[1], 9);
+    for (const px of [0, 100, 437]) {
+      sameLine(-lineOf(back, 800 - px), lineOf(there, px));
+    }
+  });
+
+  it("marks the part of a stretch in front of the near plane where the whole stretch has them", () => {
+    const whole = track(71, 900, 1.5);
+    // The first 40 % of it behind the camera: the part left starts there,
+    // on the ground as on the screen
+    const kept = 0.4;
+    const cut = [
+      whole[0]! + (whole[2]! - whole[0]!) * kept,
+      whole[1]! + (whole[3]! - whole[1]!) * kept,
+      whole[2]!,
+      whole[3]!,
+    ];
+    const there = latticeOf(whole, 900);
+    const left = latticeOf(cut, 900 * (1 - kept));
+    // Its ground left at the whole stretch's, the lines were elsewhere
+    const stale = latticeOf(whole, 900 * (1 - kept));
+    let off = 0;
+    for (const px of [0, 50, 200, 499]) {
+      sameLine(lineOf(left, px), lineOf(there, 900 * kept + px));
+      const miss = lineOf(stale, px) - lineOf(there, 900 * kept + px);
+      off = Math.max(off, Math.abs(miss - Math.round(miss)));
+    }
+    expect(off).toBeGreaterThan(0.1);
   });
 });
 

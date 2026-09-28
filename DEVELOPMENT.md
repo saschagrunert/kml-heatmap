@@ -697,21 +697,22 @@ those of the steps lay 35 to 55 deep on every pixel the cloud lights at `z`
 there are a third of the stretches and 2.5 times fewer pixels of glow out to
 `z` 10; closer in, where the steps follow the turns of the taxiing, about as
 many as before, and a fifth more than the chords had. The points are kept as
-x and y in Mercator
-units from an origin in the middle of them (so 32-bit floats hold them to a
-fraction of a pixel), the ground under the point and the height above it in
-feet, and the seconds spent on the stretch to the next point: those of each
-segment as the heatmap and its lines count them (`heatWeight` in
-`calculations/heatLines.ts`: the time spent, or the length at 100 kt for
-Routes, without what was logged under 30 kt for Airborne, whose steps are
-neither merged nor written; counting fixes, as the heatmap once did, left a
-cruise logged at an uneven pace in beads), spread over the stretches of the
-curve along it by their length (`chainPieces`, kept per curve, clock and
-weighing), and the time into its flight the point was flown at (the clock
-replay all plays by, from 0 at the flight's first fix, on across a gap in
-its log, whatever the weighing; `CLOUD_POINT_FLOATS`, 6). A stretch is kept where either end is around the view, or where it
-crosses it with neither (a fix logged a kilometre or more after the last
-does, close in). On the way the heat of each step of the relief level
+x and y in Mercator units from an origin in the middle of them (so 32-bit
+floats hold them to a fraction of a pixel), the ground under the point and
+the height above it in feet, and the seconds spent on the stretch to the
+next point: those of each segment as the heatmap and its lines count them
+(`heatWeight` in `calculations/heatLines.ts`: the time spent, or the length
+at 100 kt for Routes, without what was logged under 30 kt for Airborne,
+whose steps are neither merged nor written; counting fixes, as the heatmap
+once did, left a cruise logged at an uneven pace in beads), spread over the
+stretches of the curve along it by their length (`chainPieces`, kept per
+curve, clock and weighing), and the time into its flight the point was flown
+at (the clock replay all plays by, from 0 at the flight's first fix, on
+across a gap in its log, whatever the weighing), and how strongly the
+stretch from it may draw the marks of the way flown (see below;
+`CLOUD_POINT_FLOATS`, 7). A stretch is kept where either end is around the
+view, or where it crosses it with neither (a fix logged a kilometre or more
+after the last does, close in). On the way the heat of each step of the relief level
 (whatever zoom level the points are cut for) over its length is added up in
 cells of `CLOUD_CELL_PX` (16 px of the relief level), those of every flight
 the heatmap shows whether they are around the view or not, and `busiest` is
@@ -730,7 +731,7 @@ draws, so where the ribbons stand on the elevation tiles of the level drawn
 under them (see above), the cloud stands on the ground the build sampled,
 smoothed for the level: within about a pixel of them, and a flight whose
 ground is not known stands on the line between its fields. All years at `z`
-12 are about 45,000 points (1 MB; 104,000 before the steps were merged), at
+12 are about 45,000 points (1.3 MB; 104,000 before the steps were merged), at
 `z` 6 about 2,300, and around the view of the home field tilted by 60
 degrees 51,000 to 56,000 from `z` 14 to 17.
 
@@ -842,6 +843,76 @@ slow for it rather than jump. They are off
 under reduced motion, read in every frame, and during a replay, and hold
 still in the frame `withMapStill` takes for an export (`isMapStill`),
 whose resizes do not wake them either.
+
+The marks of the way flown take over whenever the pulses do not run: under
+reduced motion, on a map at rest, in an exported image and in the faint
+cloud of a replay. The glow pass draws them with `u_marks.x` from
+`markStrength`, one less the strength the pulses are drawn with in the same
+frame, so the two cross-fade as the pulses fade in and out and the cloud
+always shows one of them; the shadow pass draws none. In the frame
+`withMapStill` takes the layer draws the marks and no pulse, without
+touching its fade. The band of heights fades the marks as it fades the glow
+under them. They fade in from map zoom 6.5 to 8 (`CLOUD_MARK_ZOOMS`),
+further out the routes of a region run together. A mark is a chevron
+pointing ahead along a track where it crosses a line of a lattice on the
+ground, in Mercator units from the origin of the points. The vertex shader
+finds the lattice of a stretch once for all its pixels (`markLattice`,
+handed on as `v_lattice`): its lines cross the axis nearest the stretch's
+direction, of 16 at every 22.5 degrees. It is one axis and not a blend of
+the two either side, as it first was: their lines cross a track at places of
+their own, and the blend drew two rows of marks at half their strength along
+a track about halfway between two axes, nearly a third of all headings; a
+track that turns across that halfway fades its marks out towards the turn
+from both sides, where the lattices of both stretches drew a mark each, a
+pair of them close together (the snapshot of the cloud showed one). The
+lines are a power of two of Mercator units apart, the one nearest
+`CLOUD_MARK_SPACING_PX` (64 CSS px) along the stretch on the screen, and
+every second one, blended as that goes from one power to the next, so the
+marks keep their spacing on the screen at every zoom and depth and do not
+jump. Every flight along a track finds the same lines, so where a route is
+flown over and over the marks add up to one row: marks timed by each flight,
+as the pulses are, added up to a haze of them wherever flights overlapped.
+That is one row where the flights are within a stroke of each other: flights
+a little apart, side by side or at heights that a tilted map close to the
+camera sets apart on the screen, glow as one track and still draw a row of
+marks each. The stroke adds a part of the stretch's heat (`CLOUD_MARK_ADD`),
+a band as wide around it takes a part of the glow away (`CLOUD_MARK_CUT`),
+so a mark shows on a faint track as a brighter chevron and on a white one as
+a darker outline; a mark whose arms would be under 2 to 4 CSS px
+(`CLOUD_MARK_LEAST`, the far distance of a tilted map) fades out, and a
+pixel further across the track than the arms reach keeps its glow without
+working a mark out. Only a stretch whose time runs forward draws them. A
+stretch that reaches behind the camera's near plane is cut there, and the
+ends of the part left have its time, height, marks, heat and place on the
+ground, the ground its glow is pulled to among them, so its pulses, its band
+of heights, its pull and its marks stay where it was flown and meet those of
+the next. Where flights overlap in both directions, a runway or a circuit
+used both ways, a route flown out and back, marks both ways at the same
+places would be noise, so `markStretches` (`calculations/cloudCells.ts`)
+adds up the directions of the stretches written in cells of `CLOUD_CELL_PX`
+(16 px of the level the points are cut for) weighed by their heat as the
+Routes and Airborne switches weigh it (their sum S and the sum T of their
+outer products), each at two places a cell along it, so a stretch merged
+along a straight run counts in every cell it passes and not only where it
+starts; a stretch draws its marks by its agreement with the cells it passes,
+(d . S) / (d . T d), from none at 0.3 to in full at 0.8
+(`MARK_AGREEMENT_RANGE`): the heat along its axis its way less that the
+other way, over all of it, where flights across it count for neither. Steps
+of no heat are not written, so the taxiing that Airborne leaves out takes no
+marks away. The home field of the sample data flies its circuit both ways
+and shows almost none; the routes in and out show them. It runs on the
+points of each cut, those around the view, and takes about 15 ms for 100,000
+stretches on a desktop. How strongly a stretch may draw them is a float of
+its own, the seventh of each point, which the vertex shader reads at either
+end of the stretch; the last point of a run of stretches has the marks of
+the stretch before it. The shaders keep the marks in blocks of their own
+(`MARKS_VERTEX`, `MARKS_FRAGMENT`), with their own uniform (`u_marks`: the
+strength, the spacing in device pixels, the device pixels of a CSS pixel).
+The flat heat lines of the 2D map get no marks: they are drawn on the first
+visit, whose budget has no room for an arrow symbol and its placement, and a
+symbol placed along lines would show the direction of whichever flight's
+line won the collision, both ways on a runway.
+
 It is a 3D layer, right below the first ribbon layer: above every layer
 of the app that lies on the ground, the flat lines of the selection, the
 flights and the replay's route and trail among them, and below the ribbons
@@ -950,10 +1021,11 @@ while the heat is the colour the map shows (the Heatmap switch on, no
 colour layer, which brings its own legend, and no replay) and fades its bar
 with the heat when that steps back for the aviation chart or a selection.
 In the 3D view a `<details>` in it (`#heat-cloud-about`) says what the
-glow, the shadow (under lifted flights) and the pulses (while the map is in
-use, left out under reduced motion) mean; `followHeatLegend` shows it while
-`heatCloud` is set, and `features.css`, which arrives with the cloud,
-styles it.
+glow, the shadow (under lifted flights) and the direction flown mean: by
+the pulses while the map is in use or the chevrons at rest, and by the
+chevrons alone under reduced motion, where the pulses rest (the stylesheet
+swaps the two wordings); `followHeatLegend` shows it while `heatCloud` is
+set, and `features.css`, which arrives with the cloud, styles it.
 
 What a colour stands for is read through one function, `heatScale(app)` in
 `ui/heatScale.ts`: the density on the heat ramp (`HEATMAP_GRADIENT`, 0 to 1)

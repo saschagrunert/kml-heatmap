@@ -185,6 +185,27 @@ describe("followHeatLegend", () => {
     expect(about.hidden).toBe(true);
   });
 
+  it("says the direction flown shows by the pulses or the chevrons at rest, and by the chevrons alone under reduced motion", () => {
+    const wording = (selector: string): string =>
+      legend.querySelector(selector)!.textContent.replace(/\s+/g, " ").trim();
+    expect(wording("#heat-cloud-about .heat-cloud-moving")).toBe(
+      "Pulses, or chevrons at rest: the direction flown",
+    );
+    expect(wording("#heat-cloud-about .heat-cloud-still")).toBe(
+      "Chevrons: the direction flown",
+    );
+    // The stylesheet shows one of the two: the chevrons' own under reduced
+    // motion, where the pulses rest
+    const css = readFileSync(
+      join(process.cwd(), "kml_heatmap/static/features.css"),
+      "utf8",
+    ).replace(/\s+/g, " ");
+    expect(css).toContain("#heat-legend .heat-cloud-still { display: none; }");
+    expect(css).toContain(
+      "@media (prefers-reduced-motion: reduce) { #heat-legend .heat-cloud-moving { display: none; } #heat-legend .heat-cloud-still { display: inline; } }",
+    );
+  });
+
   it("does nothing on a page without it", () => {
     legend.remove();
     expect(() => followHeatLegend(asMapApp(app))).not.toThrow();
