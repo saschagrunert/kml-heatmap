@@ -876,7 +876,12 @@ that left the input are removed with it.
 
 ### Layers
 
-- **Density Heatmap** (toggle) - Shows frequently visited locations.
+- **Density Heatmap** (toggle) - Shows where the time was spent: every
+  logged position counts for the seconds until the next one, so a flight
+  logged every 2 seconds weighs as much as one logged every 5. Its
+  brightness follows what it draws: the busiest routes and circuits of a
+  year, of one aircraft or of an isolated flight come out alike, and a
+  logbook of many years does not wash out to white.
   Zoomed in from `z` 12 to 13.5 (the `z` of a
   [shared link](#shareable-urls)) it hands over to heat lines: the tracks
   themselves, coloured and widened by the time spent on each 40 m of them,
@@ -902,6 +907,22 @@ that left the input are removed with it.
   It only draws, so hovering and clicking still go to the flights. Should
   the browser not run its shaders, the flat heatmap stays until the browser
   gives the map a new WebGL context
+- **Routes** (toggle) - Count every flight the same per kilometre instead
+  of by the time spent: where you have been rather than where you spend
+  time, so a route flown once stands beside the circuits and the apron. The
+  heatmap, its lines and the 3D cloud alike
+- **Airborne** (toggle) - Leave out what was logged under 30 kt: taxiing,
+  run-ups and the apron, which otherwise drown out the traffic pattern. The
+  heatmap, its lines and the 3D cloud alike; a track without times keeps
+  all of it
+- **New areas** (toggle) - In a year, draw the places no flight of an
+  earlier year passed (cells of about a square kilometre) in amber, and the
+  rest in the usual blue; it loads the earlier years the first time. In
+  the view of all years, and in the first year, there is nothing to compare
+  with, and a toast says so. The heat lines closer in and the 3D cloud stay
+  blue. Wrapped counts the same places as the new airspace of the year
+  once the page holds the earlier years (after the switch, the view of all
+  years or each earlier year was shown), and does not load them itself
 - **Altitude** (toggle) - Paths coloured by elevation, on a scale that runs
   purple through magenta to orange
 - **Groundspeed** (toggle) - Paths coloured by groundspeed, on a scale that runs
@@ -999,6 +1020,8 @@ browser's address bar or use the copy-link button:
   every older link stay as they were
 - The Flights tab of the statistics panel (`?l=1`), left out while the
   panel shows its figures
+- How the heat is counted and drawn: routes (`?r=1`), airborne only
+  (`?o=1`) and the places new in the year (`?n=1`), each left out while off
 - Debug logging in the browser console (`?debug=true`)
 
 **Example URLs:**

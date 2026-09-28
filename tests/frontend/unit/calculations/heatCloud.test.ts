@@ -21,8 +21,12 @@ import {
   flightClock,
 } from "../../../../kml_heatmap/frontend/calculations/flightClock";
 import { levelGroundFt } from "../../../../kml_heatmap/frontend/calculations/groundProfile";
-import { segmentSeconds } from "../../../../kml_heatmap/frontend/calculations/heatLines";
+import {
+  heatWeight,
+  segmentSeconds,
+} from "../../../../kml_heatmap/frontend/calculations/heatLines";
 import { liftFt } from "../../../../kml_heatmap/frontend/calculations/lift";
+import { segmentDistance } from "../../../../kml_heatmap/frontend/calculations/statistics";
 import { smoothFlights } from "../../../../kml_heatmap/frontend/calculations/smoothing";
 import {
   DEGREES_TO_RADIANS,
@@ -349,15 +353,22 @@ describe("cloudPoints", () => {
     expect(points[1]!.x - points[0]!.x).toBeCloseTo(0.02 / 360, 9);
   });
 
-  it("gives a stretch without times or speeds a trace of heat, so it is still one", () => {
+  it("counts a stretch without times or speeds as flown at cruise speed, as the heatmap does", () => {
     const segments = flight(1, line(3)).map((segment) => ({
       ...segment,
       time: undefined,
       groundspeed_knots: 0,
     }));
     const points = pointsOf(cloudOf(segments, everything, [0, 0], 11));
-    expect(points[0]!.heat).toBeGreaterThan(0);
-    expect(points[0]!.heat).toBeLessThan(0.1);
+    const cruise = segments.reduce(
+      (sum, segment) => sum + heatWeight(false, false)(segment, undefined),
+      0,
+    );
+    expect(cruise).toBeGreaterThan(1);
+    expect(points.reduce((sum, point) => sum + point.heat, 0)).toBeCloseTo(
+      cruise,
+      3,
+    );
   });
 
   it("lies on the curve the ribbons are cut from, where a flight turns, not on the chords between its fixes", () => {
@@ -406,6 +417,35 @@ describe("cloudPoints", () => {
     const bend = points.slice(from[1], to[1]).map((p) => p.heat);
     expect(bend.reduce((sum, t) => sum + t, 0)).toBeCloseTo(20, 3);
     for (const heat of bend) expect(heat).toBeLessThan(20);
+  });
+
+  it("weighs a stretch as it is asked to: by length for routes", () => {
+    /** The same stretch flown a segment every `seconds`, at that speed */
+    const flown = (path: number, seconds: number): PathSegment[] =>
+      flight(path, line(3), undefined, seconds).map((segment) => ({
+        ...segment,
+        groundspeed_knots:
+          (segmentDistance(segment) * 1000) / seconds / (1852 / 3600),
+      }));
+    const heatOf = (segments: PathSegment[], route: boolean): number =>
+      pointsOf(
+        cloudPoints(
+          segments,
+          smoothFlights(segments, (i) => segments[i]!.altitude_ft, {
+            groundOf: () => 0,
+          }),
+          everything,
+          11,
+          11,
+          null,
+          undefined,
+          heatWeight(route, false),
+        ),
+      ).reduce((sum, point) => sum + point.heat, 0);
+    const [fast, slow] = [flown(1, 5), flown(2, 60)];
+
+    expect(heatOf(slow, false)).toBeCloseTo(heatOf(fast, false) * 12, 3);
+    expect(heatOf(slow, true)).toBeCloseTo(heatOf(fast, true), 3);
   });
 });
 
@@ -848,6 +888,79 @@ describe("the time of the cloud's points", () => {
     }));
     const points = pointsOf(cloudOf(segments, everything, [0, 0], 11));
     expect(points.map((p) => p.time)).toEqual([0, 0]);
+  });
+
+  it("stays on the replay's clock however the heat is weighed", () => {
+    // Slow enough for the routes to weigh it less, and a taxi at the end
+    // that the airborne weighing leaves out
+    const segments = flight(1, line(4), undefined, 60);
+    segments[2] = { ...segments[2]!, groundspeed_knots: 10 };
+    const flights = smoothFlights(segments, (i) => segments[i]!.altitude_ft, {
+      groundOf: () => 0,
+    });
+    const cloud = (weigh = heatWeight(false, false)): Point[] =>
+      pointsOf(
+        cloudPoints(
+          segments,
+          flights,
+          everything,
+          11,
+          11,
+          null,
+          undefined,
+          weigh,
+        ),
+      );
+    const timed = cloud();
+    const byRoute = cloud(heatWeight(true, false));
+    expect(byRoute.map((p) => p.heat)).not.toEqual(timed.map((p) => p.heat));
+    expect(byRoute.map((p) => p.time)).toEqual(timed.map((p) => p.time));
+    // The taxi is left out, and what stays is timed as before
+    const heat = (points: Point[]): number =>
+      points.reduce((sum, point) => sum + point.heat, 0);
+    for (const route of [false, true]) {
+      const airborne = cloud(heatWeight(route, true));
+      expect(heat(airborne)).toBeLessThan(heat(route ? byRoute : timed));
+      // It ends where the taxi starts, two minutes into the flight
+      expect(airborne[0]!.time).toBe(0);
+      expect(airborne.at(-1)!.time).toBeCloseTo(120, 3);
+    }
+  });
+
+  it("draws no stretch of what only the flights in the air leave out, and a new one after it", () => {
+    // A cruise, a taxi across, and a cruise again
+    const segments = flight(1, line(6), undefined, 5);
+    segments[2] = { ...segments[2]!, groundspeed_knots: 10 };
+    segments[3] = { ...segments[3]!, groundspeed_knots: 10 };
+    const flights = smoothFlights(segments, (i) => segments[i]!.altitude_ft, {
+      groundOf: () => 0,
+    });
+    const points = pointsOf(
+      cloudPoints(
+        segments,
+        flights,
+        everything,
+        11,
+        11,
+        null,
+        undefined,
+        heatWeight(false, true),
+      ),
+    );
+
+    // Two runs, each ending at a point of no heat, none over the taxi
+    const ends = points.filter((p) => p.heat === 0);
+    expect(ends).toHaveLength(2);
+    const taxiStart = segments[2].coords[0];
+    const taxiEnd = segments[3].coords[1];
+    const [xs, xe] = [mercatorOf(taxiStart)[0], mercatorOf(taxiEnd)[0]];
+    for (const point of points) {
+      if (point.heat === 0) continue;
+      const x = point.x;
+      expect(x >= Math.min(xs, xe) - 1e-12 && x < Math.max(xs, xe) - 1e-9).toBe(
+        false,
+      );
+    }
   });
 });
 

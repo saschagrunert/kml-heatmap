@@ -289,13 +289,19 @@ function analyzeBundleComposition(metafile, fileName) {
 // 150.2 KB raw and 51.5 KB gzipped.
 // Raised from 152 KB and 52.5 KB for the heat legend, the hotspot tour and
 // the cross-section, landing next to the heatmap weighed by time: about
-// 153.4 KB raw and 53 KB gzipped together in CI.
+// 153.4 KB raw and 53 KB gzipped together in CI. The heatmap weighed by
+// time with its switches for routes, airborne and new areas, and the new
+// airspace of a year that Wrapped names, counted by the app
+// (DataManager.newAreaKm2) so that Wrapped never fetches the feature
+// bundle: 150.26 KB raw and 51.51 KB gzipped before, 153.41 KB raw and
+// 52.81 KB gzipped after, in a local build.
 const BUDGET_APP = { raw: 156 * 1024, gzip: 54 * 1024 };
 // The feature bundle is fetched only when replay is opened, the relief, the
 // heat cloud and the ribbons of a selection of the 3D view are first drawn,
-// the Satellite switch is first on or a single flight is first selected, so
-// it is not part of what a first visit downloads; it still gets a budget so it
-// cannot grow without anyone noticing. 41.01 KB raw and 14.53 KB gzipped.
+// the Satellite or New areas switch is first on or a single flight is first
+// selected, so it is not part of what a first visit downloads; it still
+// gets a budget so it cannot grow without anyone noticing. 41.01 KB raw and
+// 14.53 KB gzipped.
 // Raised from 43 KB for the replay camera's own rest and the relief and
 // imagery placed on the ground: 43.19 KB raw and 15.18 KB gzipped then,
 // 42.68 KB raw and 15.12 KB gzipped in CI before the flight list of the
@@ -341,8 +347,12 @@ const BUDGET_APP = { raw: 156 * 1024, gzip: 54 * 1024 };
 // both, 89.3 KB raw and 31.9 KB gzipped after the first (90.34 KB and
 // 32.35 KB with the flights smoothed once), 93.47 KB raw and 33.82 KB
 // gzipped after both, in a local build, about 33.96 KB in CI going by the
-// 0.4 % above.
-const BUDGET_FEATURES = { raw: 94 * 1024, gzip: 34.25 * 1024 };
+// 0.4 % above. Raised from 94 KB and 34.25 KB for the heatmap weighed by
+// time, whose weighing the cloud takes (the pieces of a curve kept per
+// clock and weighing, the steps of no heat left out), and the places new
+// in a year of the New areas switch: 95.04 KB raw and 34.52 KB gzipped
+// after, in a local build, about 34.66 KB in CI.
+const BUDGET_FEATURES = { raw: 95.5 * 1024, gzip: 35 * 1024 };
 
 // The Wrapped bundle is fetched only when the Wrapped dialog or the
 // statistics panel is first opened, and not with replay's code or replay

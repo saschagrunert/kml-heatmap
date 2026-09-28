@@ -509,6 +509,14 @@ export class DataLoader {
   }
 
   /**
+   * The dataset of a year (or "all") this session holds already, without
+   * loading it
+   */
+  cachedData(year: string): KMLDataset | undefined {
+    return this.cache.get(year);
+  }
+
+  /**
    * End the year worker. Loads that are still under way end without a
    * dataset and without a report: the app they were for is gone.
    */

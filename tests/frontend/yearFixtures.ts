@@ -140,7 +140,6 @@ export function dataset(
     groundspeed_knots: 100,
   }));
   return {
-    coordinates: path_segments.map((s) => s.coords[0]),
     path_segments,
     path_info: path_segments.map((s) => ({ id: s.path_id })),
     original_points: originalPoints,

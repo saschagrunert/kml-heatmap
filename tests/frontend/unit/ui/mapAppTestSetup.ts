@@ -216,7 +216,6 @@ export const defaultMetadata: Metadata = {
 };
 
 export const defaultData: KMLDataset = {
-  coordinates: [[50, 8]],
   // Timed, so the one flight can be replayed
   path_segments: [
     {

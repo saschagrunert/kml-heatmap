@@ -219,14 +219,26 @@ function periodPhrase(year: string): string {
  * @param yearStats - The Wrapped summary of the selected year and aircraft
  * @param filteredStats - The statistics of the same selection
  * @param year - The selected year, or "all"
+ * @param newAreaKm2 - The area the year's flights passed over and none of
+ * an earlier year did (see DataManager.newAreaKm2), where known
  */
 export function generateFunFacts(
   yearStats: YearStats,
   filteredStats: FunFactStats | null = null,
   year: string = "all",
+  newAreaKm2: number | null = null,
 ): FunFact[] {
   const facts: FunFact[] = [];
   const period = periodPhrase(year);
+
+  if (newAreaKm2) {
+    facts.push({
+      icon: "milestone",
+      text: `<strong>${formatNumber(newAreaKm2)} km²</strong> of new airspace ${period}, never flown in the years before.`,
+      category: "explore",
+      priority: 9,
+    });
+  }
 
   // Distance facts
   const distanceNm = yearStats.total_distance_nm;

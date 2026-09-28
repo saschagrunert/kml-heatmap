@@ -104,6 +104,7 @@ export const MAP_SOURCES = {
   aviation: "aviation",
   heat: "heat",
   heatIsolated: "heat-isolated",
+  heatNew: "heat-new",
   heatLines: "heat-lines",
   selectionHighlight: "selection-highlight",
   replayRoute: "replay-route",
@@ -136,6 +137,8 @@ export const MAP_SOURCES = {
  */
 export const MAP_LAYERS = {
   aviation: "aviation",
+  // The places new in a year, under the heat (see ui/newAreas.ts)
+  heatNew: "heat-new",
   heat: "heat",
   heatIsolated: "heat-isolated",
   heatLinesGlow: "heat-lines-glow",
@@ -160,7 +163,8 @@ export const MAP_LAYERS = {
  * How the heat source merges the fixes when the map is zoomed out. The
  * worker does it (supercluster): up to `maxZoom` a tile holds clusters, each
  * at the centre of its fixes and carrying their number as `point_count`,
- * which the heat layer takes as the weight. Closer in it holds the fixes.
+ * and adding up their weights as `w`, which the heat layer takes as its
+ * weight. Closer in it holds the fixes.
  *
  * The intensity of a point halves with every level zoomed out (see
  * heatmapIntensity in the data manager), and MapLibre adds the points up in
@@ -214,13 +218,15 @@ export const HEAT_LINES = {
  * The layers the heatmap toggle shows and hides: the heatmap first (the
  * e2e driver reads it off the front), then the lines it hands over to, and
  * the heatmap of an isolated selection, which only the one of them that
- * is not isolated draws (see DataManager.applyHeatmapEmphasis)
+ * is not isolated draws (see DataManager.applyHeatmapEmphasis), and the
+ * one of the places new in a year, drawn only while they are shown apart
  */
 export const HEATMAP_LAYER_IDS = [
   MAP_LAYERS.heat,
   MAP_LAYERS.heatLinesGlow,
   MAP_LAYERS.heatLinesCore,
   MAP_LAYERS.heatIsolated,
+  MAP_LAYERS.heatNew,
 ] as const;
 
 /**

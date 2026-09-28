@@ -52,11 +52,9 @@ describe("buildDataset", () => {
     const data = buildDataset(decodeYear(longYear(1, 3)));
 
     expect(data.path_segments).toHaveLength(3);
-    expect(data.coordinates).toHaveLength(4);
     expect(data.path_segments[1]!.coords[0]).toBe(
       data.path_segments[0]!.coords[1],
     );
-    expect(data.coordinates[3]).toBe(data.path_segments[2]!.coords[1]);
   });
 
   it("leaves the time out of a segment whose row has none", () => {
@@ -128,7 +126,6 @@ describe("buildDatasetInSlices", () => {
     await expect(
       buildDatasetInSlices(decodeYear(rawYear(2025, {}))),
     ).resolves.toEqual({
-      coordinates: [],
       path_segments: [],
       path_info: [],
       original_points: 0,
@@ -143,7 +140,6 @@ describe("combineYearData", () => {
 
     const result = combineYearData([a, b]);
 
-    expect(result.coordinates).toHaveLength(3);
     expect(result.path_segments).toHaveLength(3);
     expect(result.path_info).toHaveLength(3);
     expect(result.original_points).toBe(300);
@@ -152,18 +148,16 @@ describe("combineYearData", () => {
     expect(result.path_segments[0]).toBe(a.path_segments[0]);
     expect(result.path_segments[2]).toBe(b.path_segments[0]);
     expect(result.path_info[2]).toBe(b.path_info[0]);
-    expect(result.coordinates[0]).toBe(a.coordinates[0]);
   });
 
   it("skips null or undefined datasets", () => {
     const result = combineYearData([dataset(1), null, undefined]);
-    expect(result.coordinates).toHaveLength(1);
+    expect(result.path_segments).toHaveLength(1);
     expect(result.original_points).toBe(1);
   });
 
   it("returns an empty dataset for no input", () => {
     expect(combineYearData([])).toEqual({
-      coordinates: [],
       path_segments: [],
       path_info: [],
       original_points: 0,

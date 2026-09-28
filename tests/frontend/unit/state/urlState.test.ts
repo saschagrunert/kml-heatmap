@@ -511,6 +511,9 @@ describe("URL state management", () => {
      */
     const LINK_OF_TOGGLE: Record<ToggleKey, string> = {
       heatmapVisible: "v=000100000",
+      routeWeighting: "r=1",
+      airborneOnly: "o=1",
+      newAreasVisible: "n=1",
       airportsVisible: "v=100000000",
       altitudeVisible: "v=110100000",
       airspeedVisible: "v=101100000",

@@ -150,6 +150,24 @@ describe("WrappedManager content", () => {
     expect(texts.some((t) => t.includes("2 countries"))).toBe(true);
   });
 
+  it("names the airspace new in a year where the data manager knows it", () => {
+    wrappedManager.showWrapped();
+    // Not known: no year before it, or one the page has not loaded
+    expect(el("wrapped-fun-facts").textContent).not.toContain("new airspace");
+    expect(mockApp.dataManager.newAreaKm2).toHaveBeenCalledWith(
+      "2024",
+      expect.any(Array),
+    );
+    wrappedManager.closeWrapped();
+
+    mockApp.dataManager.newAreaKm2.mockReturnValue(1240);
+    wrappedManager.showWrapped();
+
+    expect(el("wrapped-fun-facts").textContent).toContain(
+      "1,240 km² of new airspace in 2024",
+    );
+  });
+
   it("lists the fleet busiest first with the model from the metadata", () => {
     wrappedManager.showWrapped();
 

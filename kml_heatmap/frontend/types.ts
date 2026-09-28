@@ -247,7 +247,6 @@ export interface Metadata {
  * In-memory KML dataset (one year or all years combined)
  */
 export interface KMLDataset {
-  coordinates: Coordinate[];
   path_segments: PathSegment[];
   path_info: PathInfo[];
   original_points: number;

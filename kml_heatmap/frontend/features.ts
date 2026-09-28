@@ -8,8 +8,11 @@
  * flight and of all of them at once), the relief, the heat cloud and the
  * ribbons of a selection of the 3D view, which the layer manager fetches as
  * they are first wanted, the satellite imagery, which its switch fetches,
- * and the profile of a single selected flight, which the app fetches as one
- * is first selected. Wrapped has a bundle of its own (wrapped.ts).
+ * the profile of a single selected flight, which the app fetches as one
+ * is first selected, and the places new in a year, which their switch
+ * fetches (ui/newAreas.ts). Wrapped has a bundle of its own (wrapped.ts),
+ * and never fetches this one: not even for the airspace new in a year,
+ * which it counts with the app's code (DataManager.newAreaKm2).
  *
  * The app is imported for the bundler's sake. esbuild puts every module in
  * a chunk by the set of entry points that reach it, so with three of them a
@@ -28,6 +31,7 @@ import { followHeatCloud, prepareHeatCloud } from "./ui/heatCloud";
 import { followSelectionRibbons } from "./ui/selectionRibbons";
 import { ReplayAllPlayer, toggleReplayAll } from "./ui/replayAll";
 import { followFlightProfile } from "./ui/flightProfile";
+import { drawNewAreas } from "./ui/newAreas";
 
 export interface FeatureModule {
   ReplayManager: typeof ReplayManager;
@@ -39,6 +43,7 @@ export interface FeatureModule {
   ReplayAllPlayer: typeof ReplayAllPlayer;
   toggleReplayAll: typeof toggleReplayAll;
   followFlightProfile: typeof followFlightProfile;
+  drawNewAreas: typeof drawNewAreas;
 }
 
 export {
@@ -51,4 +56,5 @@ export {
   ReplayAllPlayer,
   toggleReplayAll,
   followFlightProfile,
+  drawNewAreas,
 };

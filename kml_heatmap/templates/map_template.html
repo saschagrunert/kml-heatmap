@@ -284,6 +284,47 @@
             <span class="control-label">Heatmap</span>
           </button>
         </div>
+        <!-- How the heat is counted (calculations/heatLines.ts heatWeight)
+             and where it is new; the 3D view's cloud follows the first two -->
+        <div class="control-row">
+          <button
+            id="routes-btn"
+            class="btn-surface control-btn"
+            data-action="toggleRoutes"
+            data-icon="distance"
+            title="Routes: count every flight the same per kilometre (where I have been), not by the time spent (where I spend time)"
+            aria-label="Routes: count every flight the same per kilometre, not by the time spent"
+            aria-pressed="false"
+          >
+            <span class="control-label">Routes</span>
+          </button>
+        </div>
+        <div class="control-row">
+          <button
+            id="airborne-btn"
+            class="btn-surface control-btn"
+            data-action="toggleAirborne"
+            data-icon="climb"
+            title="Airborne: leave taxiing, run-ups and the apron out of the heat"
+            aria-label="Airborne: leave taxiing, run-ups and the apron out of the heat"
+            aria-pressed="false"
+          >
+            <span class="control-label">Airborne</span>
+          </button>
+        </div>
+        <div class="control-row">
+          <button
+            id="new-areas-btn"
+            class="btn-surface control-btn"
+            data-action="toggleNewAreas"
+            data-icon="milestone"
+            title="New areas: in a year, draw the places no flight of an earlier year passed in amber"
+            aria-label="New areas: in a year, draw the places no flight of an earlier year passed in amber"
+            aria-pressed="false"
+          >
+            <span class="control-label">New areas</span>
+          </button>
+        </div>
         <div class="control-row">
           <button
             id="airports-btn"

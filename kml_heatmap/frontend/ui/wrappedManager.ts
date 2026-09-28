@@ -569,8 +569,15 @@ export class WrappedManager {
     const statsEl = domCache.get("wrapped-stats");
     if (statsEl) statsEl.innerHTML = statsHtml;
 
-    // Build fun facts section with dynamic, varied facts
-    const funFacts = generateFunFacts(yearStats, filteredStats, year);
+    // Build fun facts section with dynamic, varied facts. The airspace new
+    // in the year is counted from the earlier years the page holds already
+    // (see DataManager.newAreaKm2), and left out unless it holds them all
+    const funFacts = generateFunFacts(
+      yearStats,
+      filteredStats,
+      year,
+      this.app.dataManager.newAreaKm2(year, preFiltered.segments),
+    );
 
     const funFactsHtml = generateFunFactsHtml(funFacts);
 
