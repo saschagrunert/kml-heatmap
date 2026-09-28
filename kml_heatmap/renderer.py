@@ -393,9 +393,47 @@ def _parse_kml_files(
             f"{failed_count} of {len(valid_files)} file(s) failed to parse "
             "(see above); fix or remove them"
         )
+    without_flight = 0
+    for parsed in results:
+        reason = _no_flight_reason(parsed)
+        if reason is not None:
+            logger.error("%s: %s", parsed.kml_file, reason)
+            without_flight += 1
+    if without_flight > 0:
+        raise KMLHeatmapError(
+            f"{without_flight} of {len(valid_files)} file(s) hold no flight to "
+            "export (see above); fix or remove them"
+        )
 
     logger.info("\nTotal points: %d", total_points)
     return all_path_groups, all_path_metadata
+
+
+def _no_flight_reason(parsed: ParsedFile) -> str | None:
+    """Why a file with coordinates gives the export no path, None if it does.
+
+    Such a file fails the run like one without coordinates: its points
+    count, but the site would be published without its flight. A path
+    without a year or one that never moves is only left out while another
+    path of the file is exported. A path that the export drops as a
+    recording of a flight another file holds as well (see ``duplicates``)
+    counts: the flight is on the site.
+    """
+    if not parsed.path_groups:
+        return (
+            "no track of two or more points with altitudes above sea level "
+            "(a clampToGround or relativeToGround track has none)"
+        )
+    dated = [
+        path
+        for path, metadata in zip(parsed.path_groups, parsed.path_metadata, strict=True)
+        if metadata.get("year") is not None
+    ]
+    if not dated:
+        return "no track with a determinable year"
+    if not any(is_exportable_path(path) for path in dated):
+        return "every track with a year stays on one spot"
+    return None
 
 
 def _drop_paths_without_year(
@@ -606,7 +644,8 @@ def create_progressive_heatmap(
 
     # Stage 1: Validate and parse. A file that cannot be used fails the run:
     # a site published without one of the flights, and exit status 0, would
-    # hide it until someone notices the flight is missing.
+    # hide it until someone notices the flight is missing. So does a file
+    # that parses but holds no flight to export (see _no_flight_reason).
     valid_files = []
     for kml_file in kml_files:
         is_valid, error_msg = validate_kml_file(kml_file)

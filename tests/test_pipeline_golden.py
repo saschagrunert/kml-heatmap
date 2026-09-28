@@ -456,12 +456,14 @@ def test_real_dates_export_exactly_like_obfuscated_ones(tmp_path):
     assert exported == data_files(tmp_path / "b")
 
 
-# Free-text names and a file name with the date of the flight in them
+# Free-text names and file names with the date, the time of day or the
+# weekday of the flight in them
 DATED_FLIGHTS = {
     "1_DEHYL_2026-08-16.kml": "Sunday flight 16 Aug 2026",
     "2_DEAGJ_DA20.kml": "Flight EDDS-EDDP 2026-08-16",
     "3_DEAGJ_DA20.kml": "EDXX 16 Aug 2026",
     "4_DEAGJ_DA20.kml": "EDDS 16.08.2026 08:50 Z - EDDP",
+    "5_DEHYL_1513h.kml": "EDXY Saturday",
 }
 
 
@@ -491,7 +493,7 @@ def test_no_date_of_a_name_is_exported(tmp_path):
     And, as for the timestamps, the site is the same whether or not the
     inputs were obfuscated.
     """
-    from kml_heatmap.date_tokens import find_date_tokens
+    from kml_heatmap.date_tokens import find_date_tokens, find_weekday_tokens
 
     sources = {}
     for label in ("a", "b"):
@@ -519,16 +521,25 @@ def test_no_date_of_a_name_is_exported(tmp_path):
     assert not any("Sunday" in name for name in names)
     assert "Flight EDDS-EDDP" in names
     assert "EDXX" in names
+    assert "EDXY" in names
     for name in names:
         assert not find_date_tokens(name), name
-        assert not re.search(r"\b16\b|Aug|08:50", name), name
-    # The dated file name has no type left, the others keep theirs
+        assert not find_weekday_tokens(name), name
+        assert not re.search(r"\b16\b|Aug|08:50|1513h|Saturday", name), name
+    # The file names with a date or a time have no type left, the others
+    # keep theirs
     assert [info.get("aircraft_type") for info in path_info] == [
         None,
         "DA20",
         "DA20",
         "DA20",
+        None,
     ]
+    # Nor do the pages of the flights carry them
+    pages = list((tmp_path / "a" / "site").rglob("*.html"))
+    assert len(pages) > len(DATED_FLIGHTS)
+    for page in pages:
+        assert not re.search(r"1513h|Saturday|Sunday", page.read_text()), page
 
     def data_files(root):
         return {

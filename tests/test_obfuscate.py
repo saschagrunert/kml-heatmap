@@ -908,6 +908,86 @@ class TestCheckObfuscated:
             "File name contains a date: 14.06.2025"
         ]
 
+    @pytest.mark.parametrize(
+        ("name", "violation"),
+        [
+            ("1_DEHYL_1513h.kml", "a time of day: 1513h"),
+            ("1_DEHYL_15h13.kml", "a time of day: 15h13"),
+            ("1_DEHYL_0930z.kml", "a time of day: 0930z"),
+            ("EDDS 0930UTC.kml", "a time of day: 0930UTC"),
+            ("EDDS 15:13.kml", "a time of day: 15:13"),
+            ("Log_2026-01-01_1430.kml", "a time of day: 1430"),
+            ("2026-01-01_0000h_OE-AKI_LOAV-LOAV_1513h.kml", "a time of day: 1513h"),
+            ("1_DEHYL_1513H.kml", "a time of day: 1513H"),
+            ("EDDS 3pm.kml", "a time of day: 3pm"),
+            ("EDDS - EDDF Saturday.kml", "a weekday: Saturday"),
+            ("1_DEHYL_Sonntag.kml", "a weekday: Sonntag"),
+        ],
+    )
+    def test_file_name_with_a_time_or_weekday_is_a_violation(
+        self, tmp_path, name, violation
+    ):
+        """The export takes them out, but the file itself is public."""
+        kml_file = tmp_path / name
+        kml_file.write_text("<kml/>", encoding="utf-8")
+        assert check_kml_obfuscated(kml_file) == [f"File name contains {violation}"]
+
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "1_DEHYL_DA40.kml",
+            "12_DEAGJ_C172.kml",
+            "3_N1430Z_PA28.kml",
+            "4_N1513H_C172.kml",
+            "5_DO27.kml",
+            "2026-01-01_0003h_RA-1513H_UUBW-UUBW.kml",
+        ],
+    )
+    def test_file_name_without_a_time_passes(self, tmp_path, name):
+        kml_file = tmp_path / name
+        kml_file.write_text("<kml/>", encoding="utf-8")
+        assert check_kml_obfuscated(kml_file) == []
+
+    @settings(max_examples=100, deadline=None)
+    @given(slot=st.integers(min_value=0, max_value=24 * 60 - 1))
+    def test_only_the_charterware_slot_may_look_like_a_time(
+        self, tmp_path_factory, slot
+    ):
+        """The slot of a renamed Charterware file is a sequence number."""
+        time = f"{slot // 60:02d}{slot % 60:02d}h"
+        directory = tmp_path_factory.mktemp("slot")
+        charterware = directory / f"2026-01-01_{time}_OE-AKI_LOAV-LOAV.kml"
+        numbered = directory / f"1_DEHYL_{time}.kml"
+        for kml_file in (charterware, numbered):
+            kml_file.write_text("<kml/>", encoding="utf-8")
+        assert check_kml_obfuscated(charterware) == []
+        assert check_kml_obfuscated(numbered) == [
+            f"File name contains a time of day: {time}"
+        ]
+
+    def test_weekday_in_a_file_is_a_violation(self, tmp_path):
+        """The timestamps moved to January 1st, the weekday of the flight
+        did not."""
+        kml_file = tmp_path / "1_DEHYL_DA40.kml"
+        kml_file.write_text(
+            "<kml><Placemark><name>Saturday flight</name>"
+            "<when>2026-01-01T15:13:00Z</when></Placemark></kml>",
+            encoding="utf-8",
+        )
+        assert check_kml_obfuscated(kml_file) == [
+            "Weekday gives the day of the flight away, remove it: Saturday"
+        ]
+
+    def test_time_of_day_in_a_file_is_kept(self, tmp_path):
+        """Obfuscated files keep the time of day of their timestamps."""
+        kml_file = tmp_path / "1_DEHYL_DA40.kml"
+        kml_file.write_text(
+            "<kml><Placemark><name>EDDS 1513h</name>"
+            "<when>2026-01-01T15:13:00Z</when></Placemark></kml>",
+            encoding="utf-8",
+        )
+        assert check_kml_obfuscated(kml_file) == []
+
     def test_unreadable_file_is_a_violation(self, tmp_path):
         # A file that cannot be read must not be certified as obfuscated
         violations = check_kml_obfuscated(tmp_path / "missing.kml")

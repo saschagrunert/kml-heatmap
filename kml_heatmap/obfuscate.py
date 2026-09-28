@@ -33,6 +33,8 @@ from .date_tokens import (
     MONTHS_LONG,
     MONTHS_SHORT,
     find_date_tokens,
+    find_time_tokens,
+    find_weekday_tokens,
     month_number,
     near_jan_first,
 )
@@ -637,11 +639,16 @@ def _epoch_near_jan_first(value: str) -> bool:
     return near_jan_first(dt.month, dt.day)
 
 
-def _find_stray_dates(content: str) -> list[str]:
-    """Return date-like tokens that are not within the days after January 1st."""
+def _with_unescaped(content: str) -> str:
     if "&#" in content:
         # A parser reads "2024&#45;03&#45;14" as a date as well
-        content = content + "\n" + html.unescape(content)
+        return content + "\n" + html.unescape(content)
+    return content
+
+
+def _find_stray_dates(content: str) -> list[str]:
+    """Return date-like tokens that are not within the days after January 1st."""
+    content = _with_unescaped(content)
     found = find_date_tokens(content, skip_near_jan_first=True)
     found.extend(
         match.group(2)
@@ -687,6 +694,19 @@ def check_kml_obfuscated(filepath: Path) -> list[str]:
             f"File name contains a date: {text}"
             for text in _find_stray_dates(filepath.name)
         )
+        violations.extend(
+            f"File name contains a weekday: {text}"
+            for text in find_weekday_tokens(filepath.name)
+        )
+        # A name keeps no time of day either ("1_DEHYL_1513h"): the export
+        # takes it out, but the file is public. The time slot of a renamed
+        # Charterware name is its sequence number.
+        violations.extend(
+            f"File name contains a time of day: {text}"
+            for text in find_time_tokens(
+                charterware_name["rest"] if charterware_name else filepath.stem
+            )
+        )
 
     violations.extend(
         f"Name element contains date: {match.group(0)}"
@@ -718,9 +738,15 @@ def check_kml_obfuscated(filepath: Path) -> list[str]:
     # different exporter may have put anywhere.
     # Coordinates cannot hold a date the parser would accept, and skipping
     # them saves most of the time the patterns take on a track
+    without_coordinates = COORDINATES_PATTERN.sub("", content)
     violations.extend(
-        f"Date not on Jan 1: {text}"
-        for text in _find_stray_dates(COORDINATES_PATTERN.sub("", content))
+        f"Date not on Jan 1: {text}" for text in _find_stray_dates(without_coordinates)
+    )
+    # The obfuscator neither moves a weekday along with the timestamps nor
+    # takes one out: it has to go by hand
+    violations.extend(
+        f"Weekday gives the day of the flight away, remove it: {text}"
+        for text in find_weekday_tokens(_with_unescaped(without_coordinates))
     )
 
     # A track repeats its date in every timestamp; one line per date is enough

@@ -288,6 +288,22 @@ class TestBuildPathInfo:
             "DA40"
         )
 
+    @pytest.mark.parametrize("aircraft_type", ["1513h", "15h13", "0930z", "Saturday"])
+    def test_a_time_or_weekday_is_no_aircraft_type(self, aircraft_type):
+        """1_DEHYL_1513h.kml would publish the time of the flight."""
+        metadata = _metadata(
+            {"aircraft_registration": "D-EHYL", "aircraft_type": aircraft_type}
+        )
+        info = build_path_info(_make_path(), metadata, 0, 2025)
+        assert "aircraft_type" not in info
+        assert info["aircraft_registration"] == "D-EHYL"
+
+    @pytest.mark.parametrize("aircraft_type", ["C172", "PA28", "DA20", "SR22", "DO27"])
+    def test_a_type_stays(self, aircraft_type):
+        metadata = _metadata({"aircraft_type": aircraft_type})
+        info = build_path_info(_make_path(), metadata, 0, 2025)
+        assert info["aircraft_type"] == aircraft_type
+
 
 class TestAltitudeGain:
     HYSTERESIS_M = ALTITUDE_GAIN_HYSTERESIS_FT / METERS_TO_FEET

@@ -1,8 +1,16 @@
 """Tests for date_tokens module."""
 
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 
-from kml_heatmap.date_tokens import find_date_tokens, month_number, strip_dates
+from kml_heatmap.date_tokens import (
+    find_date_tokens,
+    find_time_tokens,
+    find_weekday_tokens,
+    month_number,
+    strip_dates,
+)
 
 
 class TestFindDateTokens:
@@ -145,6 +153,123 @@ class TestFindDateTokens:
         assert find_date_tokens("2024-1-4", skip_near_jan_first=True) == ["2024-1-4"]
         assert find_date_tokens("2024/2/1", skip_near_jan_first=True) == ["2024/2/1"]
 
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "Monday",
+            "Tuesday",
+            "Wednesday",
+            "Thursday",
+            "Friday",
+            "Saturday",
+            "SUNDAY",
+            "sunday",
+            "Sundays",
+            "Montag",
+            "Dienstag",
+            "Mittwoch",
+            "Donnerstag",
+            "Freitag",
+            "Samstag",
+            "Sonnabend",
+            "Sonntag",
+            "sonntags",
+            "Sonntagsflug",
+            "Samstagnachmittag",
+        ],
+    )
+    def test_a_weekday_in_full(self, text):
+        # Reported apart from the dates: the obfuscator rewrites none
+        assert find_weekday_tokens(f"x_{text} y") == [text]
+        assert find_date_tokens(f"x_{text} y") == []
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            # Abbreviations alone are words, codes and types of their own
+            "Sun n Fun",
+            "SAT",
+            "Do 27",
+            "EDMO",
+            "Mo",
+            "Wed",
+            # Words that begin like a weekday
+            "Montage",
+            "Sundance",
+            "Freitagen",
+            # Places named after a weekday
+            "KFHR Friday Harbor",
+            "Thursday Island",
+            "Sunday Creek",
+            # A time of day is none either (see find_time_tokens)
+            "1513h",
+            "14:30",
+        ],
+    )
+    def test_no_weekday(self, text):
+        assert find_weekday_tokens(text) == []
+        assert find_date_tokens(text) == []
+
+
+class TestFindTimeTokens:
+    @pytest.mark.parametrize(
+        ("text", "expected"),
+        [
+            ("1_DEHYL_1513h", ["1513h"]),
+            ("1_DEHYL_15h13", ["15h13"]),
+            ("EDDS 0930z", ["0930z"]),
+            ("EDDS_0930Z", ["0930Z"]),
+            ("EDDS 0930UTC", ["0930UTC"]),
+            ("EDDS 1430hrs", ["1430hrs"]),
+            ("EDDS 1430L", ["1430L"]),
+            ("EDDS 15:13", ["15:13"]),
+            ("EDDS 1513 Uhr", ["1513 Uhr"]),
+            ("1_DEHYL_1513H", ["1513H"]),
+            ("EDDS 1513 hrs", ["1513 hrs"]),
+            ("EDDS 15.13h", ["15.13h"]),
+            ("EDDS 1513 MEZ", ["1513 MEZ"]),
+            ("EDDS 15:13 CEST", ["15:13 CEST"]),
+            ("EDDS T15:13", ["T15:13"]),
+            ("EDDS 3pm", ["3pm"]),
+            ("EDDS 3 p.m.", ["3 p.m."]),
+            ("EDDS_11.30am", ["11.30am"]),
+            ("EDDS-1513Z", ["1513Z"]),
+            # After a date in any form, whether or not the date counts
+            ("Log_2026-01-01_1430", ["1430"]),
+            ("EDDS 20260816T1430", ["T1430"]),
+            ("EDDS 16.08.2026, 15.13", ["15.13"]),
+        ],
+    )
+    def test_times(self, text, expected):
+        assert find_time_tokens(text) == expected
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "1_DEHYL_DA40",
+            "1_DEAGJ_C172",
+            # Registrations: a letter, or a nationality prefix and its hyphen
+            "N1430Z",
+            "N1513H",
+            "N0930Z",
+            "1_N1513H_C172",
+            "RA-1513H",
+            "HB-1430L",
+            "Mi-8AM",
+            # Hours and minutes that are no time of day
+            "TT 2500h",
+            "EDDS 1h30 flight",
+            "EDDS 1.5h",
+            "Flug 3 am Rhein",
+            "Squawk 7000",
+            "FL100 1430",
+            "2026-08-16",
+            "LOAV-LOAV",
+        ],
+    )
+    def test_no_times(self, text):
+        assert find_time_tokens(text) == []
+
 
 class TestStripDates:
     @pytest.mark.parametrize(
@@ -153,7 +278,7 @@ class TestStripDates:
             ("EDDS Stuttgart", "EDDS Stuttgart"),
             # Unchanged when there is no date, separators and all
             ("Niort - Marais Poitevin.", "Niort - Marais Poitevin."),
-            ("Sunday flight 16 Aug 2026", "Sunday flight"),
+            ("Sunday flight 16 Aug 2026", "flight"),
             ("EDDS to EDDP - 16 Aug 2026", "EDDS to EDDP"),
             ("EDDS - 16.08.2026 - EDDP", "EDDS - EDDP"),
             ("EDDS (2026-08-16) Stuttgart", "EDDS Stuttgart"),
@@ -290,6 +415,57 @@ class TestStripDates:
             ("EDDS 1 8 2026", "EDDS 1 8 2026"),
             ("EDDS kW 100", "EDDS kW 100"),
             ("16_34_DA40", "16_34_DA40"),
+            # Compact times of day, as a file name holds them
+            ("1_DEHYL_1513h", "1_DEHYL"),
+            ("1_DEHYL_15h13", "1_DEHYL"),
+            ("EDDS 0930z", "EDDS"),
+            ("EDDS 0930utc - EDDP", "EDDS - EDDP"),
+            ("EDDS 1430hrs", "EDDS"),
+            ("EDDS 15:13h", "EDDS"),
+            ("EDDS 08:50 z", "EDDS"),
+            ("EDDS 1513 Uhr", "EDDS"),
+            ("Log_2026-08-16_1430hrs", "Log"),
+            ("EDDS 16.08.2026, 15.13", "EDDS"),
+            ("EDDS 3pm", "EDDS"),
+            ("1_N1513H_C172", "1_N1513H_C172"),
+            ("RA-1513H EDDS", "RA-1513H EDDS"),
+            ("Mi-8AM", "Mi-8AM"),
+            ("1513h", None),
+            # Weekdays in full, English and German, and the forms of them
+            ("EDDS - EDDF Saturday", "EDDS - EDDF"),
+            ("Friday flight", "flight"),
+            ("Sunday's flight EDDS", "flight EDDS"),
+            ("Sundays EDDS", "EDDS"),
+            ("EDDS_SAMSTAG", "EDDS"),
+            ("Rundflug am Sonntag", "Rundflug am"),
+            ("Sonntagsflug EDDS", "EDDS"),
+            ("Samstagnachmittag EDDS", "EDDS"),
+            ("Flight_Saturday_2026-08-16_1430", "Flight"),
+            # Abbreviated only next to a date or a time
+            ("Sat 16 Aug 2026 EDDS", "EDDS"),
+            ("EDDS Sa., 16.08.2026", "EDDS"),
+            ("EDDS 16.08.2026 (Sa)", "EDDS"),
+            ("EDDS 2026-08-16 Sat", "EDDS"),
+            ("EDDS Mo 16.08.", "EDDS"),
+            ("EDDS SUN 16AUG26 1430Z", "EDDS"),
+            ("Do 14:30 EDDS", "EDDS"),
+            # Not weekdays: places, words, types and registrations
+            ("KFHR Friday Harbor", "KFHR Friday Harbor"),
+            ("Thursday Island", "Thursday Island"),
+            ("Sunday Creek Airpark", "Sunday Creek Airpark"),
+            ("Montage EDDS", "Montage EDDS"),
+            ("Sun n Fun", "Sun n Fun"),
+            ("Mo EDDS", "Mo EDDS"),
+            ("Do 27 EDDS", "Do 27 EDDS"),
+            ("SAT EDDS", "SAT EDDS"),
+            ("EDMO 16.08.2026", "EDMO"),
+            ("OE-SAT 16.08.2026", "OE-SAT"),
+            ("D-EFRI 16.08.2026", "D-EFRI"),
+            ("C172", "C172"),
+            ("PA28", "PA28"),
+            ("DA20", "DA20"),
+            ("SR22", "SR22"),
+            ("EDMO", "EDMO"),
             ("2026-08-16", None),
             ("16 Aug 2026 08:50 Z", None),
             ("1234", None),
@@ -299,6 +475,58 @@ class TestStripDates:
     )
     def test_strip(self, text, expected):
         assert strip_dates(text) == expected
+
+    @given(
+        hour=st.integers(min_value=0, max_value=23),
+        minute=st.integers(min_value=0, max_value=59),
+        form=st.sampled_from(
+            [
+                "{h}{m}h",
+                "{h}{m}H",
+                "{h}{m} hrs",
+                "{h}h{m}",
+                "{h}.{m}h",
+                "{h}{m}z",
+                "{h}{m}Z",
+                "{h}{m}UTC",
+                "{h}:{m}",
+            ]
+        ),
+        separator=st.sampled_from(["_", " ", " - "]),
+        head=st.sampled_from(["1_DEHYL", "1_DEAGJ_DA20", "EDDS", "EDDS - EDDP"]),
+    )
+    def test_no_time_of_day_is_left(self, hour, minute, form, separator, head):
+        time = form.format(h=f"{hour:02d}", m=f"{minute:02d}")
+        assert strip_dates(f"{head}{separator}{time}") == head
+        assert find_time_tokens(f"{head}{separator}{time}") == [time]
+
+    @given(
+        weekday=st.sampled_from(
+            [
+                "Monday",
+                "Tuesday",
+                "Wednesday",
+                "Thursday",
+                "Friday",
+                "Saturday",
+                "Sunday",
+                "Montag",
+                "Dienstag",
+                "Mittwoch",
+                "Donnerstag",
+                "Freitag",
+                "Samstag",
+                "Sonnabend",
+                "Sonntag",
+            ]
+        ),
+        case=st.sampled_from([str, str.upper, str.lower]),
+        separator=st.sampled_from(["_", " ", " - "]),
+        head=st.sampled_from(["1_DEHYL", "EDDS", "EDDS - EDDP", "Rundflug EDMO"]),
+    )
+    def test_no_weekday_is_left(self, weekday, case, separator, head):
+        assert strip_dates(f"{head}{separator}{case(weekday)}") == head
+        assert strip_dates(f"{case(weekday)}{separator}{head}") == head
 
 
 def test_month_number():
