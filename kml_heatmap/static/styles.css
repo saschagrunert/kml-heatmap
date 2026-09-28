@@ -1745,8 +1745,11 @@ body.stats-open #left-buttons {
       visibility 0s linear var(--duration-base);
   }
   /* The grabber every bottom sheet on both platforms has. It says the sheet
-     is a sheet, and that the edge it hangs from is the way out. */
-  .mobile-sheet::before {
+     is a sheet, and that the edge it hangs from is the way out: a drag down
+     on the title row closes it (see MobileSheet.handleDrag). The pill is
+     the row's own, so a press on it is one on the row; the row is not
+     positioned, so the pill is placed on the sheet as before. */
+  .sheet-title::before {
     content: "";
     position: absolute;
     top: var(--space-sm);
@@ -1778,6 +1781,9 @@ body.stats-open #left-buttons {
     font-weight: 600;
     line-height: 1.2;
     color: var(--color-text);
+    /* The row is the grabber's hit area: a drag on it moves the sheet, and
+       the browser is not to pan or zoom with it instead */
+    touch-action: none;
   }
   .sheet-body {
     overflow-y: auto;

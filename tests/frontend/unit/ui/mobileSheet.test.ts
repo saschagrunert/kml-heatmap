@@ -2,6 +2,8 @@
  * MobileSheet: rendering, the three row kinds, dismissal and focus handling.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import {
   NO_YEAR_LABEL,
   showNoYear,
@@ -24,6 +26,31 @@ function row(sheet: MobileSheet, id: string): HTMLElement {
 
 function pressEscape(): void {
   document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+}
+
+/**
+ * A touch pointer event at `clientY`, `time` ms into the gesture. jsdom
+ * stamps events with the real clock, so the stamp is set on the event.
+ */
+function touch(
+  target: Element,
+  type: string,
+  clientY: number,
+  time: number,
+  options: PointerEventInit = {},
+): void {
+  const event = new PointerEvent(type, {
+    clientY,
+    pointerId: 1,
+    pointerType: "touch",
+    isPrimary: true,
+    button: 0,
+    bubbles: true,
+    cancelable: true,
+    ...options,
+  });
+  Object.defineProperty(event, "timeStamp", { value: time });
+  target.dispatchEvent(event);
 }
 
 describe("MobileSheet", () => {
@@ -211,6 +238,228 @@ describe("MobileSheet", () => {
       pressEscape();
 
       expect(onClose).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("dragging the top edge", () => {
+    /** The sheet's height; a drag past a third of it closes it */
+    const HEIGHT = 300;
+
+    let title: HTMLElement;
+    let onClose: Mock<() => void>;
+    let toggle: Mock<() => void>;
+    let capture: Mock<(pointerId: number) => void>;
+    let opener: HTMLButtonElement;
+
+    beforeEach(() => {
+      opener = document.createElement("button");
+      document.body.append(opener);
+      opener.focus();
+      onClose = vi.fn();
+      toggle = vi.fn();
+      sheet.openWith(
+        "Layers",
+        [
+          {
+            kind: "switch",
+            id: "heatmap",
+            icon: "heatmap",
+            label: "Heatmap",
+            isOn: () => false,
+            onToggle: toggle,
+          },
+        ],
+        onClose,
+      );
+      title = sheet.root.querySelector<HTMLElement>(".sheet-title")!;
+      // jsdom lays nothing out and has no pointer capture
+      Object.defineProperty(sheet.root, "offsetHeight", { value: HEIGHT });
+      capture = vi.fn();
+      title.setPointerCapture = capture;
+    });
+
+    /** A drag from y 100 by `by` px over `ms`, lifted `rest` ms later */
+    function drag(by: number, ms: number, rest = 0, end = "pointerup"): void {
+      touch(title, "pointerdown", 100, 0);
+      touch(title, "pointermove", 100 + by / 2, ms / 2);
+      touch(title, "pointermove", 100 + by, ms);
+      touch(title, end, 100 + by, ms + rest);
+    }
+
+    it("moves the sheet with the finger, with the transition off", () => {
+      touch(title, "pointerdown", 100, 0);
+      touch(title, "pointermove", 160, 300);
+
+      expect(capture).toHaveBeenCalledWith(1);
+      expect(sheet.root.style.transform).toBe("translateY(60px)");
+      expect(sheet.root.style.transition).toBe("none");
+    });
+
+    it("closes through close() once let go past a third of its height", () => {
+      drag(HEIGHT / 3 + 10, 600);
+
+      expect(sheet.isOpen()).toBe(false);
+      expect(onClose).toHaveBeenCalledTimes(1);
+      expect(sheet.root.hidden).toBe(true);
+      expect(sheet.root.hasAttribute("inert")).toBe(true);
+      expect(document.activeElement).toBe(opener);
+      // The stylesheet's transition takes it the rest of the way down
+      expect(sheet.root.style.transform).toBe("");
+      expect(sheet.root.style.transition).toBe("");
+    });
+
+    it("springs back when let go short of it", () => {
+      drag(HEIGHT / 3 - 10, 600);
+
+      expect(sheet.isOpen()).toBe(true);
+      expect(onClose).not.toHaveBeenCalled();
+      expect(sheet.root.style.transform).toBe("");
+      expect(sheet.root.style.transition).toBe("");
+    });
+
+    it("closes on a short fast flick", () => {
+      // 40 px in 40 ms, lifted at once
+      drag(40, 40, 8);
+
+      expect(sheet.isOpen()).toBe(false);
+      expect(onClose).toHaveBeenCalledTimes(1);
+    });
+
+    it("takes neither a fast move that rested nor a jitter for a flick", () => {
+      drag(40, 40, 200);
+      expect(sheet.isOpen()).toBe(true);
+
+      // A tap's few pixels, however fast
+      drag(6, 4, 0);
+      expect(sheet.isOpen()).toBe(true);
+    });
+
+    it("ignores a drag upwards", () => {
+      touch(title, "pointerdown", 100, 0);
+      touch(title, "pointermove", 20, 40);
+
+      expect(sheet.root.style.transform).toBe("translateY(0px)");
+
+      touch(title, "pointerup", 20, 40);
+      expect(sheet.isOpen()).toBe(true);
+      expect(sheet.root.style.transform).toBe("");
+    });
+
+    it("springs back when the browser takes the pointer over", () => {
+      drag(HEIGHT, 600, 0, "pointercancel");
+
+      expect(sheet.isOpen()).toBe(true);
+      expect(sheet.root.style.transform).toBe("");
+    });
+
+    it("hands the release to the stylesheet, which does not animate under reduced motion", () => {
+      // The sheet does not ask for reduced motion itself: the spring back
+      // and the slide out are the stylesheet's transition, which the
+      // reduced motion rule turns off
+      touch(title, "pointerdown", 100, 0);
+      touch(title, "pointermove", 150, 300);
+      touch(title, "pointerup", 150, 300);
+
+      // No transition of its own is left inline, so the reduced motion
+      // rule decides: the sheet is back at once
+      expect(sheet.root.style.transition).toBe("");
+      expect(sheet.root.style.transform).toBe("");
+
+      const style = document.createElement("style");
+      style.textContent = readFileSync(
+        resolve(__dirname, "../../../../kml_heatmap/static/styles.css"),
+        "utf8",
+      );
+      document.head.append(style);
+      const reduced = [...style.sheet!.cssRules]
+        .filter(
+          (rule): rule is CSSMediaRule =>
+            rule instanceof CSSMediaRule &&
+            rule.media.mediaText === "(prefers-reduced-motion: reduce)",
+        )
+        .flatMap((rule) => [...rule.cssRules])
+        .filter(
+          (rule): rule is CSSStyleRule =>
+            rule instanceof CSSStyleRule &&
+            rule.selectorText
+              .split(",")
+              .some((one) => one.trim() === ".mobile-sheet"),
+        );
+      style.remove();
+      expect(reduced.map((rule) => rule.style.transition)).toContain("none");
+    });
+
+    it("does nothing for a drag that starts on a row, whose tap still toggles", () => {
+      const heatmap = row(sheet, "heatmap");
+      touch(heatmap, "pointerdown", 200, 0);
+      touch(heatmap, "pointermove", 400, 300);
+      touch(heatmap, "pointerup", 400, 300);
+
+      expect(capture).not.toHaveBeenCalled();
+      expect(sheet.root.style.transform).toBe("");
+      expect(sheet.isOpen()).toBe(true);
+
+      heatmap.click();
+      expect(toggle).toHaveBeenCalledTimes(1);
+    });
+
+    it("leaves the close button its click", () => {
+      const close = sheet.root.querySelector<HTMLElement>(".sheet-close")!;
+      touch(close, "pointerdown", 100, 0, { pointerType: "mouse" });
+
+      // Captured by the row, the click would go to the row instead
+      expect(capture).not.toHaveBeenCalled();
+
+      close.click();
+      expect(sheet.isOpen()).toBe(false);
+    });
+
+    it("ignores a secondary button and a second finger", () => {
+      touch(title, "pointerdown", 100, 0, { button: 2, pointerType: "mouse" });
+      touch(title, "pointerdown", 100, 0, { isPrimary: false, pointerId: 2 });
+
+      expect(capture).not.toHaveBeenCalled();
+    });
+
+    it("drops a drag in progress when the sheet closes otherwise", () => {
+      touch(title, "pointerdown", 100, 0);
+      touch(title, "pointermove", 150, 300);
+
+      pressEscape();
+
+      expect(sheet.isOpen()).toBe(false);
+      expect(sheet.root.style.transform).toBe("");
+      expect(sheet.root.style.transition).toBe("");
+
+      // The finger that is still down moves nothing, and a sheet opened
+      // under it again starts where the stylesheet puts it
+      touch(title, "pointermove", 250, 400);
+      sheet.openWith("Filter", []);
+      touch(title, "pointermove", 300, 500);
+      touch(title, "pointerup", 300, 500);
+      expect(sheet.isOpen()).toBe(true);
+      expect(sheet.root.style.transform).toBe("");
+    });
+
+    it("drops a drag in progress when another tab swaps the sheet", () => {
+      touch(title, "pointerdown", 100, 0);
+      touch(title, "pointermove", 150, 300);
+
+      sheet.openWith("Filter", []);
+
+      expect(sheet.root.style.transform).toBe("");
+      expect(sheet.root.style.transition).toBe("");
+      touch(title, "pointerup", 250, 300);
+      expect(sheet.isOpen()).toBe(true);
+    });
+
+    it("does nothing for a tap on the title", () => {
+      touch(title, "pointerdown", 100, 0);
+      touch(title, "pointerup", 100, 80);
+
+      expect(sheet.isOpen()).toBe(true);
+      expect(onClose).not.toHaveBeenCalled();
+      expect(sheet.root.style.transform).toBe("");
     });
   });
 

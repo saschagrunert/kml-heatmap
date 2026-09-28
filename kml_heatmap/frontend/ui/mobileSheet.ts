@@ -102,6 +102,17 @@ export class MobileSheet {
   private returnFocusTo: HTMLElement | null = null;
   private closeCallback: (() => void) | null = null;
   private open = false;
+  /**
+   * The drag on the title row: its pointer, where it began, its last move
+   * and that move's speed (px per ms)
+   */
+  private drag: {
+    id: number;
+    startY: number;
+    y: number;
+    time: number;
+    speed: number;
+  } | null = null;
 
   constructor(id: string = "mobile-sheet") {
     this.id = id;
@@ -141,6 +152,21 @@ export class MobileSheet {
     closeBtn.addEventListener("click", () => this.close());
 
     titleRow.append(this.titleEl, closeBtn);
+
+    // The grabber drawn above the title promises what a bottom sheet does on
+    // either platform: drag it down and it goes. The title row is its hit
+    // area, the grabber's own strip and the title under it (the close
+    // button's 44 px and more), where a 4 px pill alone could not be hit;
+    // the rows are left alone, so a long sheet still scrolls and a switch
+    // still toggles. The stylesheet takes the browser's own panning off the
+    // row (`touch-action: none`), which would otherwise take the finger over
+    // with a `pointercancel`. It is not a control assistive tech is told
+    // about: the close button and Escape are the ways out there.
+    titleRow.onpointerdown =
+      titleRow.onpointermove =
+      titleRow.onpointerup =
+      titleRow.onpointercancel =
+        (event) => this.handleDrag(event);
 
     this.rowsHost = document.createElement("div");
     this.rowsHost.className = "sheet-body";
@@ -212,6 +238,7 @@ export class MobileSheet {
   close(): void {
     if (!this.open) return;
     this.open = false;
+    this.endDrag();
     document.removeEventListener("keydown", this.onKeyDown);
     this.scrim.classList.remove("is-open");
     this.root.classList.remove("is-open");
@@ -418,6 +445,66 @@ export class MobileSheet {
     // back (a year that failed to load), and picking the page's value again
     // is how the user corrects it
     this.refresh();
+  }
+
+  /**
+   * Move the sheet with a drag down on its title row, and close it through
+   * close() once let go far enough down or flicked; otherwise it goes back.
+   * Upwards it stays put: the sheet has nothing below its bottom edge to
+   * show, and pulling it up off the bar would only open a gap.
+   *
+   * The sheet is moved by an inline transform with the transition off, and
+   * both are dropped on release, so the stylesheet's own transition takes it
+   * the rest of the way down or back up from where the finger left it. That
+   * transition is `none` under reduced motion, where it closes or returns
+   * at once.
+   */
+  private handleDrag(event: PointerEvent): void {
+    const { type, clientY: y, timeStamp: time } = event;
+    const drag = this.drag;
+    if (type === "pointerdown") {
+      // A pointer captured by the row would take the close button's click
+      // with it: the click goes where the pointer went up. Captured, a mouse
+      // keeps dragging past the row's edges.
+      if (
+        event.isPrimary &&
+        !event.button &&
+        !(event.target as Element).closest("button")
+      ) {
+        (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
+        this.drag = { id: event.pointerId, startY: y, y, time, speed: 0 };
+      }
+    } else if (drag?.id === event.pointerId) {
+      const offset = Math.max(0, y - drag.startY);
+      if (type === "pointermove") {
+        // The speed of the last move alone: a flick is how the finger left
+        drag.speed = (y - drag.y) / Math.max(1, time - drag.time);
+        drag.y = y;
+        drag.time = time;
+        this.root.style.transition = "none";
+        this.root.style.transform = `translateY(${offset}px)`;
+        return;
+      }
+      this.endDrag();
+      // Closed past a third of its height, or by a flick: faster than 0.5
+      // px/ms, further than 16 px (a tap's jitter is not one) and lifted
+      // within 100 ms of that move (a finger that rested did not flick). A
+      // pointercancel is the browser taking the finger over, never a close.
+      if (
+        type === "pointerup" &&
+        (offset > this.root.offsetHeight / 3 ||
+          (drag.speed > 0.5 && offset > 16 && time - drag.time < 100))
+      ) {
+        this.close();
+      }
+    }
+  }
+
+  /** Hand the sheet's position back to the stylesheet */
+  private endDrag(): void {
+    this.drag = null;
+    this.root.style.transition = "";
+    this.root.style.transform = "";
   }
 
   private handleKeyDown(event: KeyboardEvent): void {
