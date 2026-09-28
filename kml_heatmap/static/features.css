@@ -878,9 +878,16 @@ body.profile-open .toast-stack {
   padding: 0;
   list-style: none;
 }
-/* The pulses rest under reduced motion (see ui/heatCloudLayer.ts) */
+/* The pulses rest under reduced motion, and the chevrons show the way
+   flown in their place (see ui/heatCloudLayer.ts) */
+#heat-legend .heat-cloud-still {
+  display: none;
+}
 @media (prefers-reduced-motion: reduce) {
-  #heat-legend .heat-cloud-pulses {
+  #heat-legend .heat-cloud-moving {
     display: none;
+  }
+  #heat-legend .heat-cloud-still {
+    display: inline;
   }
 }

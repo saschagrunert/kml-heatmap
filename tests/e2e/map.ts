@@ -817,21 +817,32 @@ export function heatmapOnMap(page: Page): Promise<boolean> {
 
 /**
  * The heat cloud of the 3D view (ui/heatCloud.ts): whether its layer is on
- * the map, whether the flat heatmap steps aside for it, and how many
- * stretches it drew in the last frame the map drew, which a layer of
- * shaders of its own tells rather than the map
+ * the map, whether the flat heatmap steps aside for it, how many stretches
+ * it drew in the last frame the map drew, and how strongly it drew its
+ * pulses and the marks of the way flown there (see markStrength), which a
+ * layer of shaders of its own tells rather than the map
  */
-export function heatCloudOnMap(
-  page: Page,
-): Promise<{ onMap: boolean; stepsIn: boolean; drawn: number }> {
+export function heatCloudOnMap(page: Page): Promise<{
+  onMap: boolean;
+  stepsIn: boolean;
+  drawn: number;
+  pulses: number;
+  marks: number;
+}> {
   return page.evaluate(() => {
     const app = window.mapApp!;
     const layer = app.map!.getLayer("heat-cloud") as
-      { implementation?: { drawn: number } } | undefined;
+      | {
+          implementation?: { drawn: number; pulses: number; marks: number };
+        }
+      | undefined;
+    const cloud = layer?.implementation;
     return {
       onMap: !!layer,
       stepsIn: app.store.get("heatCloud"),
-      drawn: layer?.implementation?.drawn ?? 0,
+      drawn: cloud?.drawn ?? 0,
+      pulses: cloud?.pulses ?? 0,
+      marks: cloud?.marks ?? 0,
     };
   });
 }

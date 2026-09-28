@@ -40,8 +40,12 @@
  * along every track the way it was flown, by the time of its points,
  * which shows the direction of a circuit and the usual ways in and out;
  * they rest while the map is not used and under reduced motion, and the
- * map draws no frame for them then, and an exported image has none. And
- * the exposure follows the heat: the busiest cells of the cloud glow no
+ * map draws no frame for them then, and an exported image has none. Faint
+ * marks along the tracks, pointing the way they were flown, take over from
+ * them whenever they do not run (see CLOUD_MARK_SPACING_PX), so the
+ * direction still shows under reduced motion, on a map at rest, in an
+ * exported image and in the faint cloud of a replay. And the exposure
+ * follows the heat: the busiest cells of the cloud glow no
  * brighter than white, however many flights the filters keep (see
  * cloudExposure). A band of heights above ground can leave out the heat
  * below and above it, in the glow and its shadow alike, fading out at its
@@ -244,6 +248,54 @@ const CLOUD_FADE_S = 0.8;
 const CLOUD_FLOW_WAKE = ["touchstart", "move"] as const;
 
 /**
+ * The marks of the way flown, for when the pulses do not run: a chevron
+ * pointing ahead along each track, where it crosses the lines of a
+ * lattice laid over the ground, about this many CSS pixels apart on the
+ * screen wherever the track is. Every flight along a track draws its marks
+ * at the same places, so where a route is flown over and over they add up
+ * to one row of marks rather than a haze of them, as marks timed by each
+ * flight did. That is one row where the flights are within a stroke of
+ * each other: flights a little apart, side by side or at heights that a
+ * tilted map close to the camera sets apart on the screen, glow as one
+ * track and still draw a row each, their strokes being far narrower than
+ * the glow. Each adds a part of the heat of its stretch in its stroke and
+ * takes a part away around it, so it shows on a faint track and on a white
+ * one alike.
+ */
+const CLOUD_MARK_SPACING_PX = 64;
+const CLOUD_MARK_ADD = 1.2;
+const CLOUD_MARK_CUT = 0.8;
+
+/**
+ * The size of a mark, how far its arms reach to either side of the track,
+ * in blurs of the glow, and the most in CSS pixels, so a mark does not
+ * outgrow a narrow track further out; the sizes in CSS pixels over which
+ * the marks of a narrower glow fade out (the far distance of a tilted map,
+ * where they would be a flicker of pixels); and the width of its stroke,
+ * in blurs and the least and the most in CSS pixels
+ */
+const CLOUD_MARK_SIZE = [2.2, 12] as const;
+const CLOUD_MARK_LEAST = [2, 4] as const;
+const CLOUD_MARK_STROKE = [0.3, 0.6, 1.5] as const;
+
+/**
+ * The map zooms over which the marks fade in: further out the tracks of a
+ * region run together, and marks there would only add noise
+ */
+const CLOUD_MARK_ZOOMS = [6.5, 8] as const;
+
+/**
+ * How strongly the marks are drawn at the map zoom `zoom` while the pulses
+ * show at `pulses` (from 0 to 1): in place of the pulses, as they fade in
+ * and out, so the cloud shows one of the two at a time
+ */
+export function markStrength(pulses: number, zoom: number): number {
+  const [from, to] = CLOUD_MARK_ZOOMS;
+  const inZoom = Math.min(Math.max((zoom - from) / (to - from), 0), 1);
+  return inZoom * (1 - Math.min(Math.max(pulses, 0), 1));
+}
+
+/**
  * How brightly the cloud is drawn for its busiest heat per metre
  * `busiest` (see CloudPoints.busiest), times the gain of CLOUD_STOPS it
  * is drawn with: a factor of its heat that draws those cells in
@@ -284,6 +336,112 @@ export interface HeatCloudStyle {
 }
 
 /**
+ * The marks of the way flown, a block of their own in the shaders. The
+ * vertex shader hands on how strongly the stretch may draw them at either
+ * end (the marks of its points, see CloudPoints), and the lattice it draws
+ * them on (`markLattice`), which is the same for every pixel of it:
+ *
+ * The lines of the lattice cross the axis nearest the stretch's direction
+ * on the ground, in Mercator units from the origin of the points, of the
+ * 16 at every 22.5 degrees: a stretch is marked where it crosses them.
+ * One axis and not a blend of the two either side, whose lines would
+ * cross a track at places of their own and draw two rows of marks along
+ * it. Where a track turns across the middle between two axes, the two
+ * stretches at the turn fade their marks out towards it (`v_marks`), where
+ * the lattices of both drew a mark each, a pair of them close together.
+ * The lines are a power of two of Mercator units apart, the one that puts
+ * them nearest `u_marks.y` device pixels apart along the
+ * stretch on the screen, and every second one of them, blended as that
+ * goes from one power to the next; flights along the same track find the
+ * same lines, and so do flights the other way, whose axis is the opposite
+ * one and whose marks point back. Only a stretch whose time runs forward
+ * draws them, the way it was flown, and none seen end on, which spans no
+ * pixel. Its lattice is where the start of the stretch is among the lines,
+ * counted from an even one, how many device pixels a line is from the
+ * next along the stretch (0 for no marks), and how far the lines have
+ * gone to every second one.
+ */
+const MARKS_VERTEX = `
+flat out vec2 v_marks;
+flat out vec3 v_lattice;
+uniform vec3 u_marks;
+
+float markAxis(vec2 from, vec2 to) {
+  vec2 d = to - from;
+  return floor(atan(d.y, d.x) / ${(Math.PI / 8).toFixed(8)} + 0.5);
+}
+
+vec3 markLattice(vec4 ground, float length_px, vec2 time) {
+  float units = distance(ground.xy, ground.zw);
+  if (u_marks.x <= 0.0 || time.y <= time.x || units <= 0.0 || length_px < 1e-3) {
+    return vec3(0.0);
+  }
+  float perUnit = length_px / units;
+  vec2 d = (ground.zw - ground.xy) / units;
+  float octave = log2(u_marks.y / perUnit);
+  float apart = exp2(floor(octave));
+  float axis = markAxis(ground.xy, ground.zw) * ${(Math.PI / 8).toFixed(8)};
+  vec2 normal = vec2(cos(axis), sin(axis));
+  float line = dot(ground.xy, normal) / apart;
+  return vec3(
+    line - 2.0 * floor(0.5 * line),
+    perUnit * apart / dot(d, normal),
+    octave - floor(octave)
+  );
+}
+`;
+
+/**
+ * The fragment shader finds where the pixel is among the lines of the
+ * lattice of its stretch (`v_lattice`), and draws a chevron at the nearest
+ * one, pointing ahead, its arms reaching CLOUD_MARK_SIZE to either side;
+ * a pixel further across than they reach keeps its glow as it is. Its
+ * stroke adds the heat of the stretch there (CLOUD_MARK_ADD), spread along
+ * it as the glow is, so the stretches of a flight hand a mark on at their
+ * joins, and a band as wide around it takes away the glow
+ * (CLOUD_MARK_CUT), each times the strength (`u_marks.x`) and the
+ * stretch's own marks (`v_marks`). `u_marks.z` is the device pixels of a
+ * CSS pixel.
+ */
+const MARKS_FRAGMENT = `
+flat in vec2 v_marks;
+flat in vec3 v_lattice;
+uniform vec3 u_marks;
+
+vec2 chevron(float ahead, float across, float size, float stroke) {
+  float arm = abs(ahead - 0.4 * size + 0.8 * abs(across)) * 0.78086881;
+  return vec2(
+    (1.0 - smoothstep(stroke - 0.5, stroke + 0.5, arm))
+      * (1.0 - smoothstep(size - 0.5, size + 0.5, abs(across))),
+    (1.0 - smoothstep(2.0 * stroke - 0.5, 2.0 * stroke + 0.5, arm))
+      * (1.0 - smoothstep(size + stroke - 0.5, size + stroke + 0.5, abs(across)))
+  );
+}
+
+float marked(float glow, vec2 p, vec2 dir, float across, float t, float sigma, float scale, float spread) {
+  float spacing = v_lattice.y;
+  float size = min(${CLOUD_MARK_SIZE[0].toFixed(1)} * sigma, ${CLOUD_MARK_SIZE[1].toFixed(1)} * u_marks.z);
+  float stroke = clamp(${CLOUD_MARK_STROKE[0].toFixed(1)} * sigma, ${CLOUD_MARK_STROKE[1].toFixed(1)} * u_marks.z, ${CLOUD_MARK_STROKE[2].toFixed(1)} * u_marks.z);
+  if (spacing <= 0.0 || abs(across) >= size + stroke + 0.5) return glow;
+  float strength = u_marks.x * mix(v_marks.x, v_marks.y, t)
+    * smoothstep(${CLOUD_MARK_LEAST[0].toFixed(1)} * u_marks.z, ${CLOUD_MARK_LEAST[1].toFixed(1)} * u_marks.z, size);
+  if (strength <= 0.0) return glow;
+  vec2 a = v_ends.xy;
+  vec2 b = v_ends.zw;
+  float line = v_lattice.x + dot(p - a, dir) / spacing;
+  float half_line = 0.5 * line;
+  vec2 mark = mix(
+    chevron((line - floor(line + 0.5)) * spacing, across, size, stroke),
+    chevron((half_line - floor(half_line + 0.5)) * 2.0 * spacing, across, size, stroke),
+    v_lattice.z
+  ) * strength;
+  return glow * (1.0 - ${CLOUD_MARK_CUT.toFixed(2)} * mark.y)
+    + ${CLOUD_MARK_ADD.toFixed(2)} * mark.x * v_heat * scale
+      * 0.5 * (erf(dot(p - a, v_joins.xy) * spread) + erf(dot(b - p, v_joins.zw) * spread));
+}
+`;
+
+/**
  * The quad of a stretch, and what its pixels need to know of it. Its
  * comments are here rather than in the shader, which is shipped as it is
  * written:
@@ -311,15 +469,21 @@ export interface HeatCloudStyle {
  *   periods of the flight's time along it (CLOUD_FLOW_CLOSEST).
  * - A stretch whose two ends are below the band of heights, or both above
  *   it, is left out whole: none of it is in the band.
+ * - A stretch that reaches behind the camera's near plane is cut there
+ *   (`kept`, the part of it left, from its start), and its ends have the
+ *   time, height, marks and place on the ground of the ends of that part,
+ *   the ground its glow is pulled to among them, and its pixels the heat
+ *   of that part, so what is drawn of it is where and when it was flown
+ *   and its marks meet those of the next.
  */
 const VERTEX_SHADER = `
 in vec2 a_corner;
 in vec4 a_before;
 in float a_in;
 in vec4 a_start;
-in vec2 a_heat;
+in vec3 a_heat;
 in vec4 a_end;
-in vec2 a_out;
+in vec3 a_out;
 in vec4 a_after;
 uniform vec2 u_heights;
 uniform vec3 u_centre;
@@ -339,7 +503,7 @@ flat out float v_heat;
 flat out vec2 v_time;
 flat out vec2 v_height;
 flat out float v_flow;
-
+${MARKS_VERTEX}
 vec4 project(vec4 point) {
   return projectTileFor3D(point.xy, point.z * u_heights.x + point.w * u_heights.y);
 }
@@ -376,8 +540,15 @@ void main() {
     gl_Position = vec4(0.0, 0.0, 2.0, 1.0);
     return;
   }
-  if (a.w < near) a = mix(a, b, (near - a.w) / (b.w - a.w));
-  if (b.w < near) b = mix(b, a, (near - b.w) / (a.w - b.w));
+  vec2 kept = vec2(0.0, 1.0);
+  if (a.w < near) {
+    kept.x = (near - a.w) / (b.w - a.w);
+    a = mix(a, b, kept.x);
+  }
+  if (b.w < near) {
+    kept.y = 1.0 - (near - b.w) / (a.w - b.w);
+    b = mix(b, a, 1.0 - kept.y);
+  }
   float middle = projectTileFor3D(u_centre.xy, u_centre.z).w;
   vec2 scales = vec2(middle / a.w, middle / b.w);
   vec2 blurs = u_sigma.x * scales;
@@ -409,7 +580,7 @@ void main() {
     + vec2(-dir.y, dir.x) * a_corner.y * reach;
   float pull = reach * w / u_depth.w;
   float pulled = w - pull;
-  vec4 point = atEnd ? a_end : a_start;
+  vec4 point = mix(a_start, a_end, atEnd ? kept.y : kept.x);
   float h = point.z * u_heights.x + u_ground.y;
   vec4 o = projectTileFor3D(point.xy, h);
   vec4 e = projectTileFor3D(point.xy + vec2(u_ground.x, 0.0), h) - o;
@@ -436,10 +607,19 @@ void main() {
     float f = length_px / (1.4142136 * (sigmas.x + sigmas.y));
     shade *= sqrt(1.0 - exp(-1.2732395 * f * f));
   }
-  v_heat = shade * u_gain * a_heat.x / max(length_px, 1e-3);
-  v_time = vec2(a_heat.y, a_out.y);
-  v_height = vec2(a_start.w, a_end.w);
-  float periods = abs(a_out.y - a_heat.y) * u_flow.x / (1.0 + u_flowMix.x);
+  v_heat = shade * u_gain * a_heat.x * (kept.y - kept.x) / max(length_px, 1e-3);
+  v_time = mix(vec2(a_heat.y), vec2(a_out.y), kept);
+  v_height = mix(vec2(a_start.w), vec2(a_end.w), kept);
+  v_marks = mix(vec2(a_heat.z), vec2(a_out.z), kept);
+  float axis = markAxis(a_start.xy, a_end.xy);
+  if (a_in > 0.0 && mod(markAxis(a_before.xy, a_start.xy) - axis, 8.0) != 0.0) v_marks.x = 0.0;
+  if (a_out.x > 0.0 && mod(markAxis(a_end.xy, a_after.xy) - axis, 8.0) != 0.0) v_marks.y = 0.0;
+  v_lattice = markLattice(
+    vec4(mix(a_start.xy, a_end.xy, kept.x), mix(a_start.xy, a_end.xy, kept.y)),
+    length_px,
+    v_time
+  );
+  float periods = abs(v_time.y - v_time.x) * u_flow.x / (1.0 + u_flowMix.x);
   v_flow = shadow ? 0.0 : smoothstep(
     ${CLOUD_FLOW_CLOSEST[0].toFixed(1)},
     ${CLOUD_FLOW_CLOSEST[1].toFixed(1)},
@@ -488,7 +668,7 @@ float erf(float x) {
     - 0.284496736) * t + 0.254829592) * t * exp(-x * x);
   return sign(x) * y;
 }
-
+${MARKS_FRAGMENT}
 void main() {
   vec2 a = v_ends.xy;
   vec2 b = v_ends.zw;
@@ -508,6 +688,7 @@ void main() {
     float spread = 0.70710678 / sigma;
     glow = v_heat * scale * exp(-0.5 * across * across / (sigma * sigma))
       * 0.5 * (erf(dot(p - a, v_joins.xy) * spread) + erf(dot(b - p, v_joins.zw) * spread));
+    if (u_marks.x > 0.0) glow = marked(glow, p, dir, across, t, sigma, scale, spread);
   }
   float height = mix(v_height.x, v_height.y, t);
   glow *= smoothstep(u_band.x, u_band.y, height) * (1.0 - smoothstep(u_band.z, u_band.w, height));
@@ -553,12 +734,13 @@ const UNIFORMS = [
   "u_flow",
   "u_flowMix",
   "u_band",
+  "u_marks",
 ] as const;
 
 /**
  * A stretch is the point it starts from and the one after it, with the
  * points on either side of them for the joins, the heat of the stretches
- * before and after it, and the time at either end
+ * before and after it, and the time and the marks at either end
  */
 function layout(gl: WebGL2RenderingContext): void {
   const stride = CLOUD_POINT_FLOATS * 4;
@@ -578,7 +760,7 @@ function layout(gl: WebGL2RenderingContext): void {
     gl.enableVertexAttribArray(location + 1);
     gl.vertexAttribPointer(
       location + 1,
-      point ? 2 : 1,
+      point ? 3 : 1,
       gl.FLOAT,
       false,
       stride,
@@ -596,6 +778,12 @@ export class HeatCloudLayer implements CustomLayerInterface {
   frames = 0;
   /** The stretches it drew in the last of them */
   drawn = 0;
+  /**
+   * How strongly it drew the pulses and the marks in the last of them,
+   * for the e2e tests (see markStrength)
+   */
+  pulses = 0;
+  marks = 0;
   private map: MapLibreMap | null = null;
   /** Its GL objects, made as it first draws (see LayerGl) */
   private readonly objects: LayerGl<(typeof UNIFORMS)[number]>;
@@ -795,8 +983,10 @@ export class HeatCloudLayer implements CustomLayerInterface {
     // The shadow on the ground, where the flights are lifted off it and the
     // cloud is not dimmed, the brightest of them kept; then the glow at
     // their heights, added up, and without its pulses while the map is
-    // exported
-    const flow = isMapStill(map) ? 0 : this.flow * CLOUD_FLOW_STRENGTH;
+    // exported. The marks of the way flown show in the glow in place of
+    // the pulses, and so in an exported image.
+    this.pulses = isMapStill(map) ? 0 : this.flow;
+    this.marks = markStrength(this.pulses, zoom);
     const passes = [
       [
         0,
@@ -805,14 +995,30 @@ export class HeatCloudLayer implements CustomLayerInterface {
         0,
         gl.MAX,
         CLOUD_SHADOW_LIFT_FT,
+        0,
       ],
-      [style.liftM, CLOUD_COLOUR, 1, flow, gl.FUNC_ADD, [0, 0]],
+      [
+        style.liftM,
+        CLOUD_COLOUR,
+        1,
+        this.pulses * CLOUD_FLOW_STRENGTH,
+        gl.FUNC_ADD,
+        [0, 0],
+        this.marks,
+      ],
     ] as const;
     const shadow = style.liftM > 0 && style.opacity >= 1;
-    for (const [liftM, colour, ceiling, pulses, blend, cast] of passes.slice(
-      shadow ? 0 : 1,
-    )) {
+    for (const [
+      liftM,
+      colour,
+      ceiling,
+      pulses,
+      blend,
+      cast,
+      marks,
+    ] of passes.slice(shadow ? 0 : 1)) {
       gl.blendEquation(blend);
+      gl.uniform3f(u.u_marks, marks, CLOUD_MARK_SPACING_PX * ratio, ratio);
       gl.uniform2f(u.u_heights, style.groundM, liftM);
       gl.uniform2f(u.u_shadow, cast[0], cast[1]);
       gl.uniform3f(u.u_colour, colour[0], colour[1], colour[2]);

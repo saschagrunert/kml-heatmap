@@ -899,8 +899,15 @@ that left the input are removed with it.
   darker; it is never drawn brighter. A faint copy of the glow on the ground
   under the flights shows how high they were, and pulses run along every
   track the way it was flown, for 20 seconds after the map was last used
-  and not at all with reduced motion. It follows the same switch, filters
-  and Isolate as the heatmap, and steps back under the Aviation Data layer
+  and not at all with reduced motion. Whenever they do not run (with
+  reduced motion, on a map at rest, in an exported image and during a
+  replay), faint chevrons along the tracks point the way they were flown
+  instead, at the same places for every flight along a track, and only
+  where most of the time there was flown one way: a runway or a circuit
+  flown both ways, or a route flown out and back, shows none. They fade out
+  from `z` 9 to `z` 7.5, where the routes of a region run together. It
+  follows the same switch, filters and Isolate as the heatmap, and steps
+  back under the Aviation Data layer
   and the lines of a selection as it does, but not under the ribbons of a
   colour layer, which are drawn in front of it; during a replay it stays
   at a quarter of its strength and without its pulses, so the chase view

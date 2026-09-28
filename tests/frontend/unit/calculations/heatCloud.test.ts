@@ -2,7 +2,9 @@
  * The points of the heat cloud of the 3D view: the fixes of the flights the
  * heatmap shows, at the heights of the ribbons, merged for the level, with
  * the seconds spent on each stretch between them, the time each was flown
- * at, and the heat of the busiest cells for the exposure.
+ * at, how strongly each may draw the marks of the way flown, and the heat
+ * of the busiest cells for the exposure. How the marks are weighed is
+ * cloudCells.test.ts'.
  */
 import { describe, it, expect } from "vitest";
 import {
@@ -43,6 +45,7 @@ interface Point {
   lift: number;
   heat: number;
   time: number;
+  marks: number;
 }
 
 /** The points of a cloud, without the empty one before and after them */
@@ -58,6 +61,7 @@ function pointsOf(cloud: CloudPoints): Point[] {
       lift: p[at + 3]!,
       heat: p[at + 4]!,
       time: p[at + 5]!,
+      marks: p[at + 6]!,
     });
   }
   return out;
@@ -1035,6 +1039,67 @@ describe("the busiest heat of the cloud", () => {
     const alone = cruise(1);
     expect(busiest(apart, 6) / busiest(alone, 6)).toBeCloseTo(2, 1);
     expect(busiest(apart, 11) / busiest(alone, 11)).toBeCloseTo(1, 1);
+  });
+});
+
+describe("the marks of the cloud's points", () => {
+  const marksOf = (
+    segments: PathSegment[],
+    weigh = heatWeight(false, false),
+  ): number[] => {
+    const flights = smoothFlights(segments, (i) => segments[i]!.altitude_ft, {
+      groundOf: () => 0,
+    });
+    return pointsOf(
+      cloudPoints(
+        segments,
+        flights,
+        everything,
+        11,
+        11,
+        null,
+        undefined,
+        weigh,
+      ),
+    ).map((p) => p.marks);
+  };
+
+  it("are in full along a flight alone, the last point of it taking those of the stretch before", () => {
+    const marks = marksOf(flight(1, line(8)));
+    expect(marks.length).toBeGreaterThan(1);
+    expect(marks).toEqual(new Array(marks.length).fill(1));
+  });
+
+  it("are none where the same track is flown out and back as much, wherever the stretches of either were merged", () => {
+    const out = line(8);
+    // The way back from half a step on, so no stretch of it starts or
+    // ends where one of the way out does
+    const back = line(8, 47, 11 + 0.0015).reverse();
+    const marks = marksOf([...flight(1, out), ...flight(2, back)]);
+    expect(marks).toEqual(new Array(marks.length).fill(0));
+  });
+
+  it("weigh the flights by their heat as the heatmap weighs it, and leave out what it leaves out", () => {
+    const out = flight(1, line(8));
+    // The way back taxied: twelve times the seconds of the way out
+    const back = flight(2, line(8).reverse(), undefined, 60).map((segment) => ({
+      ...segment,
+      groundspeed_knots: 10,
+    }));
+    const count = (weigh: ReturnType<typeof heatWeight>): number[] =>
+      marksOf([...out, ...back], weigh);
+    const timed = count(heatWeight(false, false));
+    // The slow way back is most of the time along the track: its marks
+    // show, and not those of the way out
+    expect(timed[0]).toBe(0);
+    expect(timed.at(-1)).toBe(1);
+    // Counted by the kilometre both ways are as much, and neither shows
+    const routes = count(heatWeight(true, false));
+    expect(routes).toEqual(new Array(routes.length).fill(0));
+    // Only in the air, the taxi is not there at all, and the way out
+    // shows in full
+    const airborne = count(heatWeight(false, true));
+    expect(airborne).toEqual(new Array(airborne.length).fill(1));
   });
 });
 
