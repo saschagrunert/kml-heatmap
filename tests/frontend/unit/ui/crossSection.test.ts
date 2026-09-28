@@ -650,27 +650,16 @@ describe("cross-section", () => {
       expect(summary()).toContain("from 1 selected flight within");
     });
 
-    it("weighs like the heatmap, again as its switches change", async () => {
-      // The flight east of the middle taxis, the one in it flies
-      const taxi = crossing(2, LON + 0.02).map((segment) => ({
-        ...segment,
-        groundspeed_knots: 10,
-      }));
+    it("weighs like the heatmap, again as its switch changes", async () => {
       const { app, canvas } = await setup({
-        currentData: createDataset(
-          [{ id: 1 }, { id: 2 }],
-          [...crossing(1), ...taxi],
-        ),
+        currentData: createDataset([{ id: 1 }], crossing(1)),
       });
       await open(app);
       drawLine(canvas);
-      expect(summary()).toMatch(/^Cross-section: [\d.]+ min from 2 flights/);
+      expect(summary()).toMatch(/^Cross-section: [\d.]+ min from 1 flight/);
       expect(part(".profile-stats").textContent).toMatch(/^Time [\d.]+ min/);
 
-      app.airborneOnly = true;
-      expect(summary()).toMatch(/^Cross-section: [\d.]+ min from 1 flight /);
-
-      // With Routes, the distance flown in the corridor: the 1 km across it
+      // By distance, the distance flown in the corridor: the 1 km across it
       app.routeWeighting = true;
       expect(summary()).toMatch(
         /^Cross-section: 1\.0 km flown by 1 flight within 500 m/,
@@ -1018,7 +1007,7 @@ describe("the figures", () => {
     expect(heightUnit(section({ reference: "msl" }))).toBe("ft MSL");
   });
 
-  it("says the distance flown with Routes", () => {
+  it("says the distance flown by distance", () => {
     expect(formatAmount(section(), 90)).toBe("1.5 min");
     expect(formatAmount(section({ route: true }), 90)).toBe("4.6 km");
     expect(formatAmount(section({ route: true }), 3600)).toBe("185 km");

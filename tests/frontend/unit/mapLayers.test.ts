@@ -107,13 +107,8 @@ describe("layer handles", () => {
       MAP_LAYERS.heatLinesGlow,
       MAP_LAYERS.heatLinesCore,
       MAP_LAYERS.heatIsolated,
-      MAP_LAYERS.heatNew,
     ]);
-    for (const id of [
-      MAP_SOURCES.heat,
-      MAP_SOURCES.heatIsolated,
-      MAP_SOURCES.heatNew,
-    ]) {
+    for (const id of [MAP_SOURCES.heat, MAP_SOURCES.heatIsolated]) {
       expect(map.source(id).spec).toMatchObject({
         type: "geojson",
         cluster: true,
@@ -134,9 +129,7 @@ describe("layer handles", () => {
 
     const order = map.getLayersOrder();
     const heat = order.indexOf(MAP_LAYERS.heat);
-    // The places new in a year under the heat, which draws those flown before
-    expect(order[heat - 1]).toBe(MAP_LAYERS.heatNew);
-    expect(order[heat - 2]).toBe(MAP_LAYERS.aviation);
+    expect(order[heat - 1]).toBe(MAP_LAYERS.aviation);
     expect(order[heat + 1]).toBe(MAP_LAYERS.heatIsolated);
     expect(order[heat + 2]).toBe(MAP_LAYERS.heatLinesGlow);
     expect(heat).toBeLessThan(order.indexOf(MAP_LAYERS.pathsAltitude));

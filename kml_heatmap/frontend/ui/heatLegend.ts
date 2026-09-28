@@ -1,7 +1,7 @@
 /**
  * The heat legend: the colours of the heat, of the flat heatmap and of the
  * cloud of the 3D view alike, with about how many flights' worth of time
- * spent, or of distance flown with Routes on, each stands for (see
+ * spent, or of distance flown with By distance on, each stands for (see
  * ui/heatScale.ts). Its markup is in the page, with the labels of the
  * heatmap drawn unscaled; it shows with the other colour legends (see
  * followLayerVisibility), and says what the cloud shows while the cloud
@@ -52,11 +52,11 @@ export function heatLegend(perFlight: number): {
 
 /**
  * What the heat counts, as the legend's title says it: the time spent, or
- * with Routes on the distance flown (see heatWeight)
+ * with By distance on the distance flown (see heatWeight)
  */
 export const HEAT_LEGEND_TITLES = {
   time: "Time spent",
-  routes: "Distance flown",
+  distance: "Distance flown",
 } as const;
 
 /**
@@ -82,7 +82,7 @@ export function followHeatLegend(app: MapApp): void {
     });
     if (what) {
       what.textContent =
-        HEAT_LEGEND_TITLES[app.routeWeighting ? "routes" : "time"];
+        HEAT_LEGEND_TITLES[app.routeWeighting ? "distance" : "time"];
     }
     if (about) about.hidden = !app.heatCloud;
   };

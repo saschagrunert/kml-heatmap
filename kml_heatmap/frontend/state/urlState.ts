@@ -148,9 +148,9 @@ function parsePathIds(urlParams: URLSearchParams): number[] | undefined {
  *   z - zoom level, in state units (one above the map's, see ZOOM_OFFSET)
  *   b - bearing in degrees, clockwise from north (absent: north up)
  *   t - tilt (pitch) in degrees (absent: flat)
- *   g, d, s, l - toggles with a parameter of their own, '1' when on: the
- *       globe, 3D, satellite imagery and the Flights tab of the
- *       statistics rail (absent: off)
+ *   g, d, s, l, r - toggles with a parameter of their own, '1' when on:
+ *       the globe, 3D, satellite imagery, the Flights tab of the
+ *       statistics rail and the heat counted by distance (absent: off)
  *   h - the heights above ground the 3D view's heat cloud shows, in feet:
  *       '500-3000', '1000-' without a top (absent: all of them)
  * @param params - URLSearchParams object or search string

@@ -6,9 +6,9 @@
  * or a drag; the map centre by keyboard) and shows, side on, where time was
  * spent within a corridor either side of it: distance along the line
  * across, height up, as a density image weighed like the heatmap, by its
- * Routes and Airborne switches (calculations/crossSection.ts): with Routes
- * its figures are distances rather than times. Heights are above the ground under each
- * fix by default, or above sea level with the terrain under the flights
+ * By distance switch (calculations/crossSection.ts), which makes its
+ * figures distances rather than times. Heights are above the ground under
+ * each fix by default, or above sea level with the terrain under the flights
  * drawn beneath them. The corridor is drawn on the map for as long as the
  * tool is open, and its two ends can be dragged, or moved with the arrow
  * keys, afterwards.
@@ -149,7 +149,7 @@ function formatKm(metres: number): string {
 
 /**
  * The heat of `seconds` of a section as its figures say it: the time
- * spent, or with Routes the distance flown (lengths at ROUTE_SPEED_MS)
+ * spent, or by distance the distance flown (lengths at ROUTE_SPEED_MS)
  */
 export function formatAmount(section: CrossSection, seconds: number): string {
   return section.route
@@ -165,7 +165,8 @@ export function heightUnit(section: CrossSection): string {
 
 /**
  * What the chart says, for a screen reader: the line, the corridor, the
- * time (the distance with Routes), the flights and where most of it was
+ * time (the distance flown, By distance on), the flights and where most
+ * of it was
  */
 export function sectionSummary(
   section: CrossSection,
@@ -621,7 +622,6 @@ function createTool(app: MapApp): Tool {
             halfWidthM: halfWidth,
             reference,
             route: app.routeWeighting,
-            airborne: app.airborneOnly,
             columns: COLUMNS,
             rows: ROWS,
           })
@@ -1203,7 +1203,6 @@ function createTool(app: MapApp): Tool {
       "selectedAircraft",
       "selectedPathIds",
       "routeWeighting",
-      "airborneOnly",
     ],
     () => {
       if (phase !== "shown") return;

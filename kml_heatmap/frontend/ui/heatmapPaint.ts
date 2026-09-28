@@ -282,10 +282,11 @@ export const HEATMAP_LEAST_POINT_CONTRIBUTION = 0.001;
  *
  * Where the fixes are drawn as they are, a fix weighs its heat, which is
  * less than 1 for one a second or less on (a logger that writes every
- * second, a taxi counted by its length for routes), and less again under
- * an exposure below 1. Under the 0.0006 such a point would drop out, and
- * a track of them with it, so it keeps HEATMAP_LEAST_POINT_CONTRIBUTION
- * down to the zoom from which the intensity stays.
+ * second, a taxi counted by its length with By distance on), and less
+ * again under an exposure below 1. Under the 0.0006 such a point would
+ * drop out, and a track of them with it, so it keeps
+ * HEATMAP_LEAST_POINT_CONTRIBUTION down to the zoom from which the
+ * intensity stays.
  */
 function heatmapWeight(): ExpressionSpecification {
   const heat: ExpressionSpecification = ["get", "w"];

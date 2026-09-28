@@ -1,9 +1,9 @@
 /**
  * The readout of the heat cloud: what the cloud under the pointer is made
- * of, as time spent (or distance flown, with Routes), flights and heights
- * (see ui/cloudReadout.ts). A custom
- * layer has no features the map could look under the pointer for, so the
- * readout is worked out from the segments themselves.
+ * of, as time spent (or distance flown, by distance), flights and heights
+ * (see ui/cloudReadout.ts). A custom layer has no features the map could
+ * look under the pointer for, so the readout is worked out from the
+ * segments themselves.
  *
  * "Under the pointer" is the line of sight through it. The cloud is drawn
  * at the heights of the flights and adds up every glow on a pixel (see
@@ -19,10 +19,10 @@
  *
  * The time is the cloud's: the heat of each segment in seconds, weighed as
  * the heatmap, its lines and the cloud weigh it (heatWeight: by time or by
- * distance, all of it or only what was airborne), of the part of the
- * segment within the radius. The segments near a place are found in a grid
- * of cells twice the radius (segmentGrid), made the first time a radius is
- * asked for and kept with the dataset, those of the last few radii.
+ * distance), of the part of the segment within the radius. The segments
+ * near a place are found in a grid of cells twice the radius
+ * (segmentGrid), made the first time a radius is asked for and kept with
+ * the dataset, those of the last few radii.
  */
 import type { PathSegment } from "../types";
 import {
@@ -212,7 +212,7 @@ export function readoutData(
   segments: readonly PathSegment[],
   sampled: boolean,
   level: number,
-  weigh: SegmentWeight = heatWeight(false, false),
+  weigh: SegmentWeight = heatWeight(false),
 ): ReadoutData {
   const entry = keptFor(segments);
   let seconds = entry.seconds.get(weigh);
@@ -393,8 +393,7 @@ function smoothstep(from: number, to: number, x: number): number {
  * sight `sight`, or null where none came that close. A segment is measured
  * against the place of the line at its own height, and counts with the
  * part of its seconds that its part within the radius is of its length;
- * one of no heat (left out by Airborne) counts for nothing, as the cloud
- * draws nothing of it.
+ * one of no heat counts for nothing, as the cloud draws nothing of it.
  * `band` is the band of heights the cloud is drawn for, as the edges of
  * its fade (see heightBandEdgesFt): a segment counts as much as the cloud
  * draws of it, and not at all outside it.
@@ -500,10 +499,11 @@ export function formatDistanceFlown(metres: number): string {
 
 /**
  * What a readout says, in two parts: the time within the radius, or with
- * `route` (Routes, whose heat is the distance flown at ROUTE_SPEED_MS) the
- * distance flown within it, and the flights and the heights ("17 flights ·
- * mostly 800 to 1,200 ft AGL"). "Mostly" is for a band that holds at least
- * half of it, "most often" for one that only holds more than any other.
+ * `route` (By distance, whose heat is the distance flown at
+ * ROUTE_SPEED_MS) the distance flown within it, and the flights and the
+ * heights ("17 flights · mostly 800 to 1,200 ft AGL"). "Mostly" is for a
+ * band that holds at least half of it, "most often" for one that only
+ * holds more than any other.
  */
 export function readoutText(
   { radiusM, seconds, flights, band }: CloudReadout,

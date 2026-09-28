@@ -49,9 +49,7 @@ function actionHandlers(app: MapApp) {
   return {
     toggleHeatmap: () => app.uiToggles.toggleHeatmap(),
     // Store writes the heatmap and the heat cloud follow
-    toggleRoutes: flip(app, "routeWeighting"),
-    toggleAirborne: flip(app, "airborneOnly"),
-    toggleNewAreas: flip(app, "newAreasVisible"),
+    toggleByDistance: flip(app, "routeWeighting"),
     // A store write: the rail follows the key, and the panel's own code,
     // which is lazily loaded, arrives on the first opening (ui/statsPanel.ts)
     toggleStats: flip(app, "statsPanelVisible"),

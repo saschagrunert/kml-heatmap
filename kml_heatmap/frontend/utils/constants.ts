@@ -104,7 +104,6 @@ export const MAP_SOURCES = {
   aviation: "aviation",
   heat: "heat",
   heatIsolated: "heat-isolated",
-  heatNew: "heat-new",
   heatLines: "heat-lines",
   selectionHighlight: "selection-highlight",
   replayRoute: "replay-route",
@@ -137,8 +136,6 @@ export const MAP_SOURCES = {
  */
 export const MAP_LAYERS = {
   aviation: "aviation",
-  // The places new in a year, under the heat (see ui/newAreas.ts)
-  heatNew: "heat-new",
   heat: "heat",
   heatIsolated: "heat-isolated",
   heatLinesGlow: "heat-lines-glow",
@@ -218,15 +215,13 @@ export const HEAT_LINES = {
  * The layers the heatmap toggle shows and hides: the heatmap first (the
  * e2e driver reads it off the front), then the lines it hands over to, and
  * the heatmap of an isolated selection, which only the one of them that
- * is not isolated draws (see DataManager.applyHeatmapEmphasis), and the
- * one of the places new in a year, drawn only while they are shown apart
+ * is not isolated draws (see DataManager.applyHeatmapEmphasis)
  */
 export const HEATMAP_LAYER_IDS = [
   MAP_LAYERS.heat,
   MAP_LAYERS.heatLinesGlow,
   MAP_LAYERS.heatLinesCore,
   MAP_LAYERS.heatIsolated,
-  MAP_LAYERS.heatNew,
 ] as const;
 
 /**

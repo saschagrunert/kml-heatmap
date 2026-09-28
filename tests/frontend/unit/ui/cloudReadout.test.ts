@@ -211,7 +211,7 @@ describe("the readout of the heat cloud", () => {
     expect(shown()).toBeNull();
   });
 
-  it("counts what the cloud draws with Routes and Airborne, and says the distance with Routes", async () => {
+  it("counts what the cloud draws by distance, and says the distance flown", async () => {
     enter3D();
     move(0, 0);
     await nextFrame();
@@ -222,12 +222,6 @@ describe("the readout of the heat cloud", () => {
     expect(shown()).toBeNull();
     await nextFrame();
     expect(shown()).toMatch(/^About [\d.]+ km flown within 1 km2 flights · /);
-
-    // Both flights at 23 kt, which Airborne leaves out
-    app.routeWeighting = false;
-    app.airborneOnly = true;
-    await nextFrame();
-    expect(shown()).toBeNull();
   });
 
   it("stands clear of the values of a flight", async () => {

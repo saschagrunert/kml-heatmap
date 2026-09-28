@@ -126,7 +126,6 @@ const CLOUD_KEYS: readonly (keyof StoreState)[] = [
   "airspeedVisible",
   "aviationVisible",
   "routeWeighting",
-  "airborneOnly",
 ];
 
 /**
@@ -165,7 +164,6 @@ function pointsKey(app: MapApp, forced: boolean): unknown[] {
     isolated,
     onReliefIn(app, forced),
     app.routeWeighting,
-    app.airborneOnly,
   ];
 }
 
@@ -547,7 +545,7 @@ export function followHeatCloud(app: MapApp): void {
       detail,
       box,
       exposure,
-      heatWeight(app.routeWeighting, app.airborneOnly),
+      heatWeight(app.routeWeighting),
     );
   };
 

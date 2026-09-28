@@ -428,9 +428,6 @@ describe("the heat cloud", () => {
 
     app.routeWeighting = false;
     expect(heatOf()).toEqual(byTime);
-    const calls = setPoints.mock.calls.length;
-    app.airborneOnly = true;
-    expect(setPoints.mock.calls.length).toBe(calls + 1);
   });
 
   it("keeps the points of the last few relief levels, for as long as what they are of stays", async () => {

@@ -76,18 +76,13 @@ export type SegmentWeight = (
 ) => number;
 
 /**
- * The groundspeed under which a segment counts as on the ground when only
- * the flights in the air are asked for: taxiing, run-ups and the apron
- */
-export const AIRBORNE_KNOTS = 30;
-/**
  * The speed a stretch is counted at where its length is what counts, in
  * metres per second: a cruise at 100 kt, the one the heat cloud's glow is
  * calibrated for (see CLOUD_REFERENCE_SPEED_MS in ui/heatCloudLayer.ts)
  */
 export const ROUTE_SPEED_MS = 51.4;
 
-/** The functions of heatWeight, by its switches */
+/** The functions of heatWeight, by its switch */
 const weighings: SegmentWeight[] = [];
 
 /**
@@ -99,21 +94,11 @@ const weighings: SegmentWeight[] = [];
  * the apron instead of under them. Either way no segment adds more than
  * MAX_SEGMENT_S: the heatmap puts it on one point and the lines on its
  * ends, so a leg of a planned route kilometres long would otherwise glow
- * at its corners. `airborne` leaves out what was logged under
- * AIRBORNE_KNOTS, and keeps what has no speed to tell: a track without
- * times, and a speed of 0, which the export writes for one it does not
- * know. The same switches give the same function, so it tells whether heat
- * was weighed alike.
+ * at its corners. The same switch gives the same function, so it tells
+ * whether heat was weighed alike.
  */
-export function heatWeight(route: boolean, airborne: boolean): SegmentWeight {
-  return (weighings[+route * 2 + +airborne] ??= (segment, next) => {
-    if (
-      airborne &&
-      segment.time !== undefined &&
-      (segment.groundspeed_knots || AIRBORNE_KNOTS) < AIRBORNE_KNOTS
-    ) {
-      return 0;
-    }
+export function heatWeight(route: boolean): SegmentWeight {
+  return (weighings[+route] ??= (segment, next) => {
     const cruise = Math.min(
       (segmentDistance(segment) * 1000) / ROUTE_SPEED_MS,
       MAX_SEGMENT_S,
@@ -231,7 +216,7 @@ function smoothAlongFlights(
 export function heatLineFeatures(
   segments: readonly PathSegment[],
   keep: (pathId: number) => boolean,
-  weigh: SegmentWeight = heatWeight(false, false),
+  weigh: SegmentWeight = heatWeight(false),
 ): GeoJSON.FeatureCollection<GeoJSON.LineString, { heat: number }> {
   const kept: PathSegment[] = [];
   /** Where each kept segment is in `segments`, and so on its curve */

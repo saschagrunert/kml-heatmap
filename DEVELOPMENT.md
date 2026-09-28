@@ -165,11 +165,9 @@ their traces in `test-results/`, and every run writes an HTML report to
 
 `npm run build` produces five bundles. `mapApp.bundle.js` starts the map,
 `features.bundle.js` holds Replay, the relief, the heat cloud and the
-ribbons of a selection of the 3D view, the satellite imagery, the places
-new in a year of the New areas switch (Wrapped counts their area with the
-app's code, and never fetches this bundle), the profile of a single
-selected flight, the cross-section (`ui/crossSection.ts`; the first
-visit carries only its control in the View group and its row in the
+ribbons of a selection of the 3D view, the satellite imagery, the profile
+of a single selected flight, the cross-section (`ui/crossSection.ts`; the
+first visit carries only its control in the View group and its row in the
 phone's More sheet) and the hotspot tour (`ui/hotspotTour.ts`, with its
 places found in `calculations/hotspots.ts`, carried the same way), and
 `wrapped.bundle.js` holds Wrapped, the content of
@@ -666,9 +664,8 @@ style layer draws a glow at a height: `heatmap` lies on the ground,
 kilobytes for one layer.
 
 `calculations/heatCloud.ts` makes the data, once per dataset, filter,
-isolated selection, weighing (the Routes and Airborne switches), zoom
-level and relief on or off, and from
-`CULL_FROM_ZOOM` in (`z` 9) for the part of the map around the view, as the
+isolated selection, weighing (the By distance switch), zoom level and
+relief on or off, and from `CULL_FROM_ZOOM` in (`z` 9) for the part of the map around the view, as the
 ribbons are (`viewBox`) but a whole view to each side of it rather than a
 quarter (`CLOUD_VIEW_SPARE`: a pan of a view, or a zoom out of one and a
 half levels, shows no edge of it before the map comes to rest; the GPU time
@@ -710,10 +707,9 @@ floats hold them to a fraction of a pixel), the ground under the point and
 the height above it in feet, and the seconds spent on the stretch to the
 next point: those of each segment as the heatmap and its lines count them
 (`heatWeight` in `calculations/heatLines.ts`: the time spent, or the length
-at 100 kt for Routes, without what was logged under 30 kt for Airborne,
-whose steps are neither merged nor written; counting fixes, as the heatmap
-once did, left a cruise logged at an uneven pace in beads), spread over the
-stretches of the curve along it by their length (`chainPieces`, kept per
+at 100 kt for By distance; steps of no heat are neither merged nor written;
+counting fixes, as the heatmap once did, left a cruise logged at an uneven
+pace in beads), spread over the stretches of the curve along it by their length (`chainPieces`, kept per
 curve, clock and weighing), and the time into its flight the point was flown
 at (the clock replay all plays by, from 0 at the flight's first fix, on
 across a gap in its log, whatever the weighing), and how strongly the
@@ -823,7 +819,7 @@ The exposure (`cloudExposure`) scales the heat so the busiest cells, at
 the gain of the zoom, glow no hotter than `CLOUD_WHITE_HEAT` (white), down
 to a quarter and never above 1, eased over a fraction of a second as the
 level or the zoom changes; the two years of the sample data never reach
-it. Weighed for Routes, a stretch carries its length at the reference
+it. Weighed by distance, a stretch carries its length at the reference
 cruise (`ROUTE_SPEED_MS` is `CLOUD_REFERENCE_SPEED_MS`), so the heat of a
 cell is how many flights passed it and the exposure darkens only where
 some sixty did. The pulses of the flow brighten and dim the glow by the time of each
@@ -899,16 +895,15 @@ used both ways, a route flown out and back, marks both ways at the same
 places would be noise, so `markStretches` (`calculations/cloudCells.ts`)
 adds up the directions of the stretches written in cells of `CLOUD_CELL_PX`
 (16 px of the level the points are cut for) weighed by their heat as the
-Routes and Airborne switches weigh it (their sum S and the sum T of their
+By distance switch weighs it (their sum S and the sum T of their
 outer products), each at two places a cell along it, so a stretch merged
 along a straight run counts in every cell it passes and not only where it
 starts; a stretch draws its marks by its agreement with the cells it passes,
 (d . S) / (d . T d), from none at 0.3 to in full at 0.8
 (`MARK_AGREEMENT_RANGE`): the heat along its axis its way less that the
 other way, over all of it, where flights across it count for neither. Steps
-of no heat are not written, so the taxiing that Airborne leaves out takes no
-marks away. The home field of the sample data flies its circuit both ways
-and shows almost none; the routes in and out show them. It runs on the
+of no heat are not written, so they take no marks away. The home field of
+the sample data flies its circuit both ways and shows almost none; the routes in and out show them. It runs on the
 points of each cut, those around the view, and takes about 15 ms for 100,000
 stretches on a desktop. How strongly a stretch may draw them is a float of
 its own, the seventh of each point, which the vertex shader reads at either
@@ -1019,11 +1014,10 @@ The heat legend (`#heat-legend` in the template, `ui/heatLegend.ts`, in the
 first visit's bundle) says what the colours of the flat heatmap, its heat
 lines and the cloud stand for: about how many flights' worth of heat, the
 heat one flight leaves over a place as a lone cruise at 100 kt does. That
-is the time spent there ("Time spent"), or with Routes on the length
+is the time spent there ("Time spent"), or with By distance on the length
 counted at that speed ("Distance flown", a flight's worth being one pass of
-any flight); Airborne leaves the ground out and the labels as they are. It
-is a `.color-legend`, so it stands where the altitude and groundspeed
-legends do and follows their rules beside the rail, the replay panel, the
+any flight). It is a `.color-legend`, so it stands where the altitude and
+groundspeed legends do and follows their rules beside the rail, the replay panel, the
 profile strip, the phone's bar and Wrapped. `followLayerVisibility` shows it
 while the heat is the colour the map shows (the Heatmap switch on, no
 colour layer, which brings its own legend, and no replay) and fades its bar
@@ -1085,9 +1079,9 @@ them.
 **The readout of the heat cloud:**
 
 Pointing at the cloud (a resting mouse, or a tap) shows a box beside the
-pointer with the time spent around the place (with Routes, the distance
-flown there), the flights that were there and the 400 ft band of height
-above the ground most of it was in. `ui/cloudReadout.ts` (feature bundle, started by `followHeatCloud`)
+pointer with the time spent around the place (with By distance, the
+distance flown there), the flights that were there and the 400 ft band of
+height above the ground most of it was in. `ui/cloudReadout.ts` (feature bundle, started by `followHeatCloud`)
 listens to the map's pointer events only while the 3D view draws the cloud
 (`threeDVisible` and `heatCloud`, the Heatmap switch on, no replay, not in
 Wrapped or its intro's `forcedHeatCloud`) and looks once per frame at most
@@ -1124,15 +1118,14 @@ is the maths:
   21 CSS px out to `z` 9.5, narrowing with `CLOUD_STOPS` to 7.5 px from 13
   in), so the box can say "within 1 km".
 - The time is the cloud's: the heat of each segment in seconds as
-  `heatWeight` weighs it for the Routes and Airborne switches (by time at
-  most 120 s, a track without times at a cruise; by Routes its length at
+  `heatWeight` weighs it for the By distance switch (by time at most
+  120 s, a track without times at a cruise; by distance its length at
   `ROUTE_SPEED_MS`), times the part of it within the circle
   (`insideFraction`), times the part of it the band of heights draws
   (`heightBandEdgesFt`, the fade of the cloud's shaders, at the height of
-  the segment). With Routes the box says the distance flown, the seconds
-  at `ROUTE_SPEED_MS`. A segment of no heat (what Airborne leaves out)
-  counts for nothing, as the cloud draws nothing of it, and a place with
-  none has no readout. The flights are the path ids with any heat within,
+  the segment). With By distance the box says the distance flown, the
+  seconds at `ROUTE_SPEED_MS`. A segment of no heat counts for nothing, as
+  the cloud draws nothing of it, and a place with none has no readout. The flights are the path ids with any heat within,
   of those the cloud draws (filters, Isolate, band of heights). The
   heights are above the ground the cloud stands on (`groundProfilesFt` at
   the relief level: the sampled ground on the relief, the line between the

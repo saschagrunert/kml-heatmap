@@ -3,18 +3,18 @@
  * strongest, which the hotspot tour flies to (ui/hotspotTour.ts).
  *
  * The heat is weighed as the heatmap, its lines and the heat cloud weigh
- * it (heatWeight, by the Routes and Airborne switches): each segment's
- * seconds, or with Routes the seconds of its length at ROUTE_SPEED_MS,
- * half at either end, added up in cells of a coarse grid about a
- * kilometre wide. The cell with the most heat around it seeds a hotspot,
- * which takes in every cell near it (HOTSPOT_RADIUS_M), so a field, its
- * circuit and its holding points are one place rather than three; the
- * next seed is the next such cell that is far enough from every hotspot
- * kept (HOTSPOT_APART_M), and so is the middle of its place. A place is
+ * it (heatWeight, by the By distance switch): each segment's seconds, or
+ * by distance the seconds of its length at ROUTE_SPEED_MS, half at either
+ * end, added up in cells of a coarse grid about a kilometre wide. The cell
+ * with the most heat around it seeds a hotspot, which takes in every cell
+ * near it (HOTSPOT_RADIUS_M), so a field, its circuit and its holding
+ * points are one place rather than three; the next seed is the next such
+ * cell that is far enough from every hotspot kept (HOTSPOT_APART_M), and
+ * so is the middle of its place. A place is
  * named after the nearest airport of the site, or by its distance and
  * direction from it.
  *
- * Only totals leave this module: the time spent at a place, or with Routes
+ * Only totals leave this module: the time spent at a place, or by distance
  * the distance flown there, and their share of the view's, never when.
  */
 import type { Airport, PathSegment } from "../types";
@@ -63,7 +63,7 @@ export interface Hotspot {
   /** `[lat, lng]`, the middle of its heat */
   center: Coordinate;
   /**
-   * Its heat, as weighed: the seconds spent there, or with Routes those of
+   * Its heat, as weighed: the seconds spent there, or by distance those of
    * the distance flown there at ROUTE_SPEED_MS
    */
   seconds: number;
@@ -122,7 +122,7 @@ function cellOf([lat, lng]: Readonly<Coordinate>): [number, number] {
 export function findHotspots(
   segments: readonly PathSegment[],
   keep: (pathId: number) => boolean,
-  weigh: SegmentWeight = heatWeight(false, false),
+  weigh: SegmentWeight = heatWeight(false),
 ): Hotspot[] {
   const cells = new Map<number, Cell>();
   let total = 0;
@@ -297,9 +297,9 @@ export function formatHotspotDistance(metres: number): string {
 
 /**
  * What the caption of a hotspot says below its name: "32 h, 22% of the
- * time", or "40 min, under 1% of the time"; with `route` (Routes, whose
- * heat is the distance flown at ROUTE_SPEED_MS) "1,250 km flown, 8% of
- * the distance"
+ * time", or "40 min, under 1% of the time"; with `route` (By distance,
+ * whose heat is the distance flown at ROUTE_SPEED_MS) "1,250 km flown, 8%
+ * of the distance"
  */
 export function hotspotDetail(hotspot: Hotspot, route = false): string {
   const percent = Math.round(hotspot.share * 100);

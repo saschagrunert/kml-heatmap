@@ -1,16 +1,14 @@
 /**
  * Where a year's flights went that no flight of an earlier year did: the
  * ground cut into cells of about a square kilometre, and the cells each
- * set of flights passed over. The heatmap draws the places of a year in
- * cells no earlier year visited in warm colours (see ui/newAreas.ts), and
- * Wrapped counts them as the airspace new that year.
+ * set of flights passed over. Wrapped counts them as the airspace new that
+ * year.
  *
  * A kilometre is coarse on purpose: a route flown a few hundred metres
  * beside last year's is the same country seen again, not new ground.
  *
- * The app and both lazy bundles reach this module (the data manager counts
- * the area for Wrapped, see DataManager.newAreaKm2, and the feature bundle
- * draws the places), so it is part of the shared chunk: see features.ts.
+ * The data manager counts the area for Wrapped (DataManager.newAreaKm2), so
+ * this module is part of the shared chunk: see features.ts.
  */
 import type { KMLDataset, PathSegment } from "../types";
 import {
@@ -68,8 +66,7 @@ const cellsOfDataset = new WeakMap<KMLDataset, Set<number>>();
 /**
  * The cells the flights of `data` pass over, kept with the dataset: the
  * years the data loader holds are the same objects for the session, so the
- * places a year is compared with are worked out once for the New areas
- * switch and Wrapped together
+ * places a year is compared with are worked out once
  */
 export function datasetCells(data: KMLDataset): Set<number> {
   let cells = cellsOfDataset.get(data);
@@ -86,19 +83,6 @@ export function visitedBefore(
   cell: number,
 ): boolean {
   return earlier.some((cells) => cells.has(cell));
-}
-
-/**
- * Which of `points` lie in cells none of `earlier` holds: 1 by index, as
- * the heatmap draws them apart (see Heat in ui/dataManager.ts)
- */
-export function freshPoints(
-  points: readonly Readonly<Coordinate>[],
-  earlier: readonly Set<number>[],
-): Uint8Array {
-  return Uint8Array.from(points, (point) =>
-    visitedBefore(earlier, cellOf(point)) ? 0 : 1,
-  );
 }
 
 /**

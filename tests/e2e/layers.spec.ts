@@ -23,6 +23,9 @@ import {
   setZoom,
 } from "./map";
 
+/** The Heat group of the right column, addressed by its own heading */
+const HEAT_GROUP =
+  '#right-buttons .control-group[aria-labelledby="heat-group-title"]';
 /** The Layers group of the right column, addressed by its own heading */
 const LAYERS_GROUP =
   '#right-buttons .control-group[aria-labelledby="layers-group-title"]';
@@ -34,6 +37,18 @@ function sourcePoints(page: Page, id: string): Promise<number> {
     return source?.type === "geojson" && typeof source.data !== "string"
       ? (source.data as GeoJSON.FeatureCollection).features.length
       : 0;
+  }, id);
+}
+
+/** The heat a GeoJSON source of the app holds, its points' `w` added up */
+function sourceHeat(page: Page, id: string): Promise<number> {
+  return page.evaluate((id) => {
+    const source = window.mapApp!.map!.getStyle().sources[id];
+    if (source?.type !== "geojson" || typeof source.data === "string") return 0;
+    return (source.data as GeoJSON.FeatureCollection).features.reduce(
+      (sum, feature) => sum + Number(feature.properties?.["w"] ?? 0),
+      0,
+    );
   }, id);
 }
 
@@ -141,9 +156,12 @@ test.describe("Layers", () => {
       "The Layers sheet drives this below the breakpoint; see mobile.spec.ts",
     );
     // Addressed through the named group rather than a position: the button
-    // has to be the one under the Layers heading, carrying its own icon
-    const btn = page.locator(`${LAYERS_GROUP} #heatmap-btn`);
+    // has to be the one under the Heat heading, carrying its own icon, with
+    // the switch of how the heat is counted beside it
+    const btn = page.locator(`${HEAT_GROUP} #heatmap-btn`);
     await expect(btn.locator("svg.icon")).toHaveCount(1);
+    await expect(page.locator("#heat-group-title")).toHaveText("Heat");
+    await expect(page.locator(`${HEAT_GROUP} #by-distance-btn`)).toBeVisible();
 
     await btn.click();
     await expectToggle(btn, false);
@@ -152,61 +170,27 @@ test.describe("Layers", () => {
     await expectToggle(btn, true);
   });
 
-  test("the heat's switches weigh the heatmap anew and go into the link", async ({
+  test("By distance weighs the heatmap anew and goes into the link", async ({
     page,
   }) => {
     /** How many points the heat source holds, as handed to the map */
     const heatPoints = (): Promise<number> => sourcePoints(page, "heat");
     const param = (name: string): Promise<string | null> =>
       Promise.resolve(new URL(page.url()).searchParams.get(name));
+    const heat = (): Promise<number> => sourceHeat(page, "heat");
     await expect.poll(heatPoints).toBeGreaterThan(0);
     const all = await heatPoints();
-
-    // Taxiing, run-ups and the apron are left out
-    await toggleLayer(page, "airborne");
-    await expect.poll(heatPoints).toBeLessThan(all);
-    await expect.poll(() => param("o")).toBe("1");
+    const byTime = await heat();
 
     // Every flight the same per kilometre: the same points, weighed anew
-    await toggleLayer(page, "routes");
+    await toggleLayer(page, "byDistance");
     await expect.poll(() => param("r")).toBe("1");
+    await expect.poll(heat).not.toBeCloseTo(byTime, 3);
+    expect(await heatPoints()).toBe(all);
 
-    await toggleLayer(page, "airborne");
-    await toggleLayer(page, "routes");
-    await expect.poll(heatPoints).toBe(all);
-    await expect.poll(() => param("o")).toBeNull();
+    await toggleLayer(page, "byDistance");
     await expect.poll(() => param("r")).toBeNull();
-  });
-
-  test("New areas draws the places no earlier year's flights passed apart", async ({
-    page,
-  }) => {
-    await expect.poll(() => sourcePoints(page, "heat")).toBeGreaterThan(0);
-    const all = await sourcePoints(page, "heat");
-    // All years and at least two of them: the newest, which the site opens
-    // on, has flights in a year before it
-    test.skip(
-      (await page.locator("#year-select option").count()) < 3,
-      "the site has a single year",
-    );
-
-    await toggleLayer(page, "newAreas");
-
-    // The year before loads, and the heat parts in two
-    await expect
-      .poll(() => sourcePoints(page, "heat-new"), { timeout: 20000 })
-      .toBeGreaterThan(0);
-    await expect
-      .poll(
-        async () =>
-          (await sourcePoints(page, "heat")) +
-          (await sourcePoints(page, "heat-new")),
-      )
-      .toBe(all);
-
-    await toggleLayer(page, "newAreas");
-    await expect.poll(() => sourcePoints(page, "heat-new")).toBe(0);
-    await expect.poll(() => sourcePoints(page, "heat")).toBe(all);
+    await expect.poll(heat).toBeCloseTo(byTime, 3);
   });
 
   test("the heat legend shows with the heatmap and says what its colours stand for", async ({
@@ -232,10 +216,10 @@ test.describe("Layers", () => {
       Number(text.replace(/\D/g, "")),
     );
     expect(counts.slice(1)).toEqual(counts.slice(0, 3).map((n) => n * 4));
-    // With Routes on, the heat counts the distance flown
-    await toggleLayer(page, "routes");
+    // With By distance on, the heat counts the distance flown
+    await toggleLayer(page, "byDistance");
     await expect(title).toHaveText("Distance flown");
-    await toggleLayer(page, "routes");
+    await toggleLayer(page, "byDistance");
     await expect(title).toHaveText("Time spent");
     const bar = legend.locator(".gradient-bar");
     await expect(bar).toHaveAttribute("role", "img");

@@ -285,7 +285,7 @@ describe("chainPieces", () => {
     const clock = flightClockOf(segments);
     const flights = groundedFlights(segments, true, 8);
     const bySeconds = chainPieces(segments, flights, 0, segments.length, clock);
-    const byRoute = heatWeight(true, false);
+    const byRoute = heatWeight(true);
 
     const routes = chainPieces(
       segments,

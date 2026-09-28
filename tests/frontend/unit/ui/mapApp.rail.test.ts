@@ -1346,7 +1346,6 @@ describe("MapApp controls and map", () => {
       expect(mockMap(app).getLayersOrder()).toEqual([
         "background",
         "aviation",
-        "heat-new",
         "heat",
         "heat-isolated",
         "heat-lines-glow",
@@ -1583,7 +1582,6 @@ describe("MapApp controls and map", () => {
           "background",
           "water",
           "aviation",
-          "heat-new",
           "heat",
           "heat-isolated",
           "heat-lines-glow",
