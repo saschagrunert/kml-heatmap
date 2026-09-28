@@ -17,7 +17,7 @@ from kml_heatmap.site_assets import (
     _copy_javascript_bundle,
     _escape_js_string,
     build_commit,
-    build_timestamp,
+    build_date,
     load_template,
     minify_html,
     package_assets,
@@ -277,7 +277,7 @@ class TestPackageAssets:
         assert "51.0" in config
         assert "test-carto\\'s" in config
         assert "$center_lat" not in config
-        assert re.search(r"builtAt:'\d{4}-\d{2}-\d{2}T\d{2}:\d{2}Z'", config)
+        assert re.search(r"builtOn:'\d{4}-\d{2}-\d{2}'", config)
         assert re.search(r"commit:'([0-9a-f]{7})?'", config)
         assert re.search(r"commitUrl:'(https://[^']+)?'", config)
         assert (tmp_path / "styles.css").stat().st_size > 0
@@ -306,18 +306,19 @@ class TestPackageAssets:
         assert (out / "mapApp.bundle.js.map").read_text() == "{}"
 
 
-class TestBuildTimestamp:
-    def test_is_the_current_time_in_utc(self, monkeypatch):
+class TestBuildDate:
+    def test_is_the_current_day_in_utc(self, monkeypatch):
         monkeypatch.delenv("SOURCE_DATE_EPOCH", raising=False)
-        assert re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}Z", build_timestamp())
+        assert re.fullmatch(r"\d{4}-\d{2}-\d{2}", build_date())
 
-    def test_honours_source_date_epoch(self, monkeypatch):
+    def test_honours_source_date_epoch_without_the_time(self, monkeypatch):
+        # 2026-09-21T14:13:20Z
         monkeypatch.setenv("SOURCE_DATE_EPOCH", "1790000000")
-        assert build_timestamp() == "2026-09-21T14:13Z"
+        assert build_date() == "2026-09-21"
 
     def test_ignores_a_source_date_epoch_that_is_not_one(self, monkeypatch):
         monkeypatch.setenv("SOURCE_DATE_EPOCH", "yesterday")
-        assert re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}Z", build_timestamp())
+        assert re.fullmatch(r"\d{4}-\d{2}-\d{2}", build_date())
 
 
 COMMIT_ENV = (

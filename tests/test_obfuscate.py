@@ -109,11 +109,17 @@ def _parse_utc(ts):
 
 
 class TestObfuscateContent:
-    def test_shifts_timestamps_to_jan_1(self):
+    def test_shifts_timestamps_to_midnight_on_jan_1(self):
         result = obfuscate_kml_content(SAMPLE_KML)
         assert result is not None
-        assert "2025-01-01T08:25:15.5848380Z" in result
+        # One shift of whole seconds: each timestamp keeps its fraction
+        assert _whens(result) == [
+            "2025-01-01T00:00:00.5848380Z",
+            "2025-01-01T00:00:05.5858380Z",
+            "2025-01-01T00:00:10.5868380Z",
+        ]
         assert "2025-03-03" not in result
+        assert "08:" not in result
 
     def test_preserves_time_deltas(self):
         result = obfuscate_kml_content(SAMPLE_KML)
@@ -167,7 +173,7 @@ class TestObfuscateContent:
         result = obfuscate_kml_content(kml)
         assert result is not None
         assert "<when>bad-timestamp</when>" in result
-        assert "<when>2025-01-01T08:30:00.0000000Z</when>" in result
+        assert "<when>2025-01-01T00:04:45.0000000Z</when>" in result
 
 
 class TestTimezoneHandling:
@@ -177,34 +183,37 @@ class TestTimezoneHandling:
             "<when>2025-03-03T08:26:15</when></kml>"
         )
         result = obfuscate_kml_content(kml)
-        assert _whens(result) == ["2025-01-01T08:25:15Z", "2025-01-01T08:26:15Z"]
+        assert _whens(result) == ["2025-01-01T00:00:00Z", "2025-01-01T00:01:00Z"]
 
     def test_offset_when_is_converted_to_utc_z(self):
-        kml = "<kml><when>2025-03-03T10:25:15+02:00</when></kml>"
+        kml = (
+            "<kml><when>2025-03-03T10:25:15+02:00</when>"
+            "<when>2025-03-03T10:30:15+02:00</when></kml>"
+        )
         result = obfuscate_kml_content(kml)
-        assert _whens(result) == ["2025-01-01T08:25:15Z"]
+        assert _whens(result) == ["2025-01-01T00:00:00Z", "2025-01-01T00:05:00Z"]
 
     def test_fraction_kept_with_offset(self):
         kml = "<kml><when>2025-03-03T10:25:15.25+02:00</when></kml>"
         result = obfuscate_kml_content(kml)
-        assert _whens(result) == ["2025-01-01T08:25:15.25Z"]
+        assert _whens(result) == ["2025-01-01T00:00:00.25Z"]
 
     def test_unshifted_offset_timestamp_is_written_in_utc(self, tmp_path):
         """Its local date would otherwise stay a day past the accepted window."""
         kml = (
-            "<kml><Placemark><when>2025-01-01T08:00:00Z</when>"
+            "<kml><Placemark><when>2025-01-01T00:00:00Z</when>"
             "<when>2025-01-04T01:00:00+02:00</when></Placemark></kml>"
         )
         result = obfuscate_kml_content(kml)
-        assert _whens(result) == ["2025-01-01T08:00:00Z", "2025-01-03T23:00:00Z"]
+        assert _whens(result) == ["2025-01-01T00:00:00Z", "2025-01-03T23:00:00Z"]
         kml_file = tmp_path / "offset.kml"
         kml_file.write_text(result, encoding="utf-8")
         assert check_kml_obfuscated(kml_file) == []
 
     def test_obfuscated_timestamps_are_left_as_written(self):
         kml = (
-            "<kml><when>2025-01-01T08:00:00.50Z</when>"
-            "<when>2025-01-01T08:01:00</when></kml>"
+            "<kml><when>2025-01-01T00:00:00.50Z</when>"
+            "<when>2025-01-01T00:01:00</when></kml>"
         )
         assert obfuscate_kml_content(kml) is None
 
@@ -222,14 +231,15 @@ class TestExtendedPatterns:
     def test_timespan_begin_end_shifted(self):
         result = obfuscate_kml_content(CHARTERWARE_KML)
         assert result is not None
-        assert "<begin>2026-01-01T15:01:00Z</begin>" in result
-        assert "<end>2026-01-01T16:11:30Z</end>" in result
+        assert "<begin>2026-01-01T00:00:00Z</begin>" in result
+        assert "<end>2026-01-01T01:10:30Z</end>" in result
 
-    def test_description_date_lands_on_jan_1(self):
+    def test_description_date_lands_on_jan_1_at_midnight(self):
         result = obfuscate_kml_content(CHARTERWARE_KML)
         assert result is not None
-        assert "Flight Jan 01 2026 03:01PM path of OE-AKI" in result
+        assert "Flight Jan 01 2026 12:00AM path of OE-AKI" in result
         assert "Jan 12" not in result
+        assert "03:01PM" not in result
 
     def test_description_without_full_timestamps(self):
         kml = (
@@ -238,16 +248,16 @@ class TestExtendedPatterns:
         )
         result = obfuscate_kml_content(kml)
         expected = (
-            "<kml><description>Flight Jan 01 2026 11:45PM path of D-EXYZ"
+            "<kml><description>Flight Jan 01 2026 12:00AM path of D-EXYZ"
             "</description></kml>"
         )
         assert result == expected
 
     def test_description_long_month_name_preserved(self):
-        kml = "<kml><description>Flight August 16 2026 12:05AM x</description></kml>"
+        kml = "<kml><description>Flight August 16 2026 12:05PM x</description></kml>"
         result = obfuscate_kml_content(kml)
         assert result is not None
-        assert "Flight January 01 2026 12:05AM x" in result
+        assert "Flight January 01 2026 12:00AM x" in result
 
     def test_route_name_date_shifted(self):
         result = obfuscate_kml_content(ROUTE_NAME_KML)
@@ -264,7 +274,7 @@ class TestExtendedPatterns:
         result = obfuscate_kml_content(kml)
         assert result is not None
         assert "<name>EDDS to EDDP - 01 Jan 2026</name>" in result
-        assert "<when>2026-01-01T23:30:00Z</when>" in result
+        assert "<when>2026-01-01T00:00:00Z</when>" in result
         assert obfuscate_kml_content(result) is None
         kml_file = tmp_path / "route.kml"
         kml_file.write_text(result, encoding="utf-8")
@@ -278,8 +288,8 @@ class TestExtendedPatterns:
         )
         result = obfuscate_kml_content(kml)
         assert result is not None
-        assert "Flight Jan 01 2026 12:30AM" in result
-        assert "<begin>2026-01-01T23:30:00Z</begin>" in result
+        assert "Flight Jan 01 2026 12:00AM" in result
+        assert "<begin>2026-01-01T00:00:00Z</begin>" in result
 
     def test_namespace_prefixed_elements(self):
         kml = (
@@ -292,8 +302,8 @@ class TestExtendedPatterns:
         )
         result = obfuscate_kml_content(kml)
         assert result is not None
-        assert '<kml:begin id="b">2025-01-01T09:12:00Z</kml:begin>' in result
-        assert "<kml:end>2025-01-01T10:12:00Z</kml:end>" in result
+        assert '<kml:begin id="b">2025-01-01T00:00:00Z</kml:begin>' in result
+        assert "<kml:end>2025-01-01T01:00:00Z</kml:end>" in result
         assert "<kml:name>Log Start: 2025-01-01</kml:name>" in result
         assert "<kml:name>EDDS to EDDP - 01 Jan 2025</kml:name>" in result
         assert "06-14" not in result
@@ -309,13 +319,34 @@ class TestExtendedPatterns:
         result = obfuscate_kml_content(kml)
         assert result is not None
         assert re.findall(r"<(?:begin|end)>([^<]+)<", result) == [
-            "2024-01-01T10:00:00Z",
-            "2024-01-01T11:00:00Z",
-            "2025-01-01T10:00:00Z",
-            "2025-01-01T11:30:00Z",
+            "2024-01-01T00:00:00Z",
+            "2024-01-01T01:00:00Z",
+            "2025-01-01T00:00:00Z",
+            "2025-01-01T01:30:00Z",
         ]
         assert obfuscate_kml_content(result) is None
         kml_file = tmp_path / "two.kml"
+        kml_file.write_text(result, encoding="utf-8")
+        assert check_kml_obfuscated(kml_file) == []
+
+    def test_the_tracks_of_one_flight_keep_their_gaps(self, tmp_path):
+        """One offset for the whole flight: its tracks keep order and gaps."""
+        kml = (
+            "<kml><Placemark><gx:Track><when>2025-06-14T09:40:10.5Z</when>"
+            "<when>2025-06-14T10:05:00Z</when></gx:Track></Placemark>"
+            "<Placemark><gx:Track><when>2025-06-14T10:50:00Z</when>"
+            "<when>2025-06-14T11:30:30Z</when></gx:Track></Placemark></kml>"
+        )
+        result = obfuscate_kml_content(kml)
+        assert result is not None
+        assert _whens(result) == [
+            "2025-01-01T00:00:00.5Z",
+            "2025-01-01T00:24:50Z",
+            "2025-01-01T01:09:50Z",
+            "2025-01-01T01:50:20Z",
+        ]
+        assert obfuscate_kml_content(result) is None
+        kml_file = tmp_path / "tracks.kml"
         kml_file.write_text(result, encoding="utf-8")
         assert check_kml_obfuscated(kml_file) == []
 
@@ -326,9 +357,9 @@ class TestExtendedPatterns:
             "<when>2025-06-16T21:00:00Z</when></Placemark></kml>"
         )
         assert _whens(obfuscate_kml_content(kml)) == [
-            "2025-01-01T22:00:00Z",
-            "2025-01-02T09:00:00Z",
-            "2025-01-03T21:00:00Z",
+            "2025-01-01T00:00:00Z",
+            "2025-01-01T11:00:00Z",
+            "2025-01-02T23:00:00Z",
         ]
 
     def test_a_track_with_a_long_pause_never_runs_backwards(self, tmp_path):
@@ -336,15 +367,15 @@ class TestExtendedPatterns:
         kml = (
             "<kml><Placemark><gx:Track>"
             "<when>2025-06-14T10:00:00Z</when><when>2025-06-14T11:00:00Z</when>"
-            "<when>2025-06-17T08:00:00Z</when><when>2025-06-17T09:00:00Z</when>"
+            "<when>2025-06-18T08:00:00Z</when><when>2025-06-18T09:00:00Z</when>"
             "</gx:Track></Placemark></kml>"
         )
         result = obfuscate_kml_content(kml)
         assert _whens(result) == [
-            "2025-01-01T10:00:00Z",
-            "2025-01-01T11:00:00Z",
-            "2025-01-04T08:00:00Z",
-            "2025-01-04T09:00:00Z",
+            "2025-01-01T00:00:00Z",
+            "2025-01-01T01:00:00Z",
+            "2025-01-04T22:00:00Z",
+            "2025-01-04T23:00:00Z",
         ]
         # Too long for the days after January 1st: the check fails closed
         kml_file = tmp_path / "paused.kml"
@@ -368,9 +399,9 @@ class TestExtendedPatterns:
         assert _whens(result) == [
             "2000-01-01T00:00:00Z",
             "2000-01-01T00:00:01Z",
-            "2026-01-01T10:00:00Z",
-            "2026-01-01T10:01:00Z",
-            "2026-01-01T10:02:00Z",
+            "2026-01-01T00:00:00Z",
+            "2026-01-01T00:01:00Z",
+            "2026-01-01T00:02:00Z",
         ]
         kml_file = tmp_path / "clock.kml"
         kml_file.write_text(result, encoding="utf-8")
@@ -396,14 +427,16 @@ class TestExtendedPatterns:
         )
         result = obfuscate_kml_content(kml)
         assert result is not None
+        # Four flights, each at midnight on January 1st of its year; the
+        # two of each year overlap now and count as one on the next run
         assert _whens(result) == [
-            "2025-01-01T14:00:00Z",
-            "2025-01-01T15:00:00Z",
-            "2025-01-01T23:40:00Z",
-            "2025-01-02T00:40:00Z",
-            "2026-01-01T09:00:00Z",
-            "2026-01-01T10:00:00Z",
-            "2026-01-01T12:00:00Z",
+            "2025-01-01T00:00:00Z",
+            "2025-01-01T01:00:00Z",
+            "2025-01-01T00:00:00Z",
+            "2025-01-01T01:00:00Z",
+            "2026-01-01T00:00:00Z",
+            "2026-01-01T01:00:00Z",
+            "2026-01-01T00:00:00Z",
         ]
         assert obfuscate_kml_content(result) is None
         kml_file = tmp_path / "new_year.kml"
@@ -416,8 +449,8 @@ class TestExtendedPatterns:
             "<when>2026-01-01T00:00:05Z</when></kml>"
         )
         assert _whens(obfuscate_kml_content(kml)) == [
-            "2025-01-01T23:59:50Z",
-            "2025-01-02T00:00:05Z",
+            "2025-01-01T00:00:00Z",
+            "2025-01-01T00:00:15Z",
         ]
 
     def test_a_flight_past_utc_midnight_stays_in_one_piece(self, tmp_path):
@@ -431,12 +464,12 @@ class TestExtendedPatterns:
         result = obfuscate_kml_content(kml)
         assert result is not None
         assert _whens(result) == [
-            "2025-01-01T18:00:00Z",
-            "2025-01-01T19:00:00Z",
-            "2025-01-01T23:30:00Z",
-            "2025-01-01T23:59:00Z",
-            "2025-01-02T00:10:00Z",
-            "2025-01-02T00:30:00Z",
+            "2025-01-01T00:00:00Z",
+            "2025-01-01T01:00:00Z",
+            "2025-01-01T00:00:00Z",
+            "2025-01-01T00:29:00Z",
+            "2025-01-01T00:40:00Z",
+            "2025-01-01T01:00:00Z",
         ]
         assert obfuscate_kml_content(result) is None
         kml_file = tmp_path / "evening.kml"
@@ -449,7 +482,7 @@ class TestExtendedPatterns:
             "<when>2025-06-17T00:00:00Z</when></kml>"
         )
         assert _whens(obfuscate_kml_content(kml)) == [
-            "2025-01-01T22:00:00Z",
+            "2025-01-01T00:00:00Z",
             "2025-01-01T00:00:00Z",
         ]
 
@@ -460,7 +493,7 @@ class TestExtendedPatterns:
             "<gx:coord>9 48 300</gx:coord></gx:Track></Placemark></kml>"
         )
         result = obfuscate_kml_content(kml)
-        assert _whens(result) == ["2025-01-01", "2025-01-01T09:12:00Z"]
+        assert _whens(result) == ["2025-01-01", "2025-01-01T00:00:00Z"]
         kml_file = tmp_path / "date_only.kml"
         kml_file.write_text(result, encoding="utf-8")
         assert check_kml_obfuscated(kml_file) == []
@@ -512,10 +545,10 @@ class TestRewriteGaps:
     @pytest.mark.parametrize(
         "when,expected",
         [
-            ("2024-03-14 09:12:00", "2024-01-01T09:12:00Z"),
-            ("2024-03-14T09:12:00z", "2024-01-01T09:12:00Z"),
-            ("<![CDATA[2024-03-14T09:12:00Z]]>", "2024-01-01T09:12:00Z"),
-            ("<![CDATA[ 2024-03-14 09:12:00.5z ]]>", "2024-01-01T09:12:00.5Z"),
+            ("2024-03-14 09:12:00", "2024-01-01T00:00:00Z"),
+            ("2024-03-14T09:12:00z", "2024-01-01T00:00:00Z"),
+            ("<![CDATA[2024-03-14T09:12:00Z]]>", "2024-01-01T00:00:00Z"),
+            ("<![CDATA[ 2024-03-14 09:12:00.5z ]]>", "2024-01-01T00:00:00.5Z"),
         ],
     )
     def test_loose_timestamps_are_rewritten_in_the_canonical_form(
@@ -527,10 +560,16 @@ class TestRewriteGaps:
         kml_file.write_text(result, encoding="utf-8")
         assert check_kml_obfuscated(kml_file) == []
 
-    def test_loose_timestamp_on_jan_1_is_normalized(self):
-        """The parsers read the canonical form; the date does not move."""
-        result = obfuscate_kml_content("<kml><when>2025-01-01 10:00:00</when></kml>")
-        assert result == "<kml><when>2025-01-01T10:00:00Z</when></kml>"
+    def test_loose_timestamp_at_midnight_on_jan_1_is_normalized(self):
+        """The parsers read the canonical form; the time does not move."""
+        result = obfuscate_kml_content(
+            "<kml><when>2025-01-01 00:00:00</when>"
+            "<when>2025-01-01 00:10:00</when></kml>"
+        )
+        assert result == (
+            "<kml><when>2025-01-01T00:00:00Z</when>"
+            "<when>2025-01-01T00:10:00Z</when></kml>"
+        )
 
     def test_route_name_with_a_single_digit_day(self):
         result = obfuscate_kml_content(
@@ -543,7 +582,7 @@ class TestRewriteGaps:
             "<kml><description>Flight Jan 12 2026 3:01PM path</description></kml>"
         )
         assert result == (
-            "<kml><description>Flight Jan 01 2026 03:01PM path</description></kml>"
+            "<kml><description>Flight Jan 01 2026 12:00AM path</description></kml>"
         )
 
 
@@ -553,7 +592,7 @@ class TestObfuscateFile:
         kml_file.write_bytes(SAMPLE_KML.replace("\n", "\r\n").encode())
         assert obfuscate_kml_file(kml_file) is True
         content = kml_file.read_bytes()
-        assert b"2025-01-01T08:25:15.5848380Z</when>\r\n" in content
+        assert b"2025-01-01T00:00:00.5848380Z</when>\r\n" in content
         assert content.count(b"\r\n") == SAMPLE_KML.count("\n")
 
     @pytest.mark.skipif(
@@ -596,7 +635,7 @@ class TestObfuscateFile:
         tmp_name, target = mock_replace.call_args[0]
         assert Path(tmp_name).parent == tmp_path
         assert Path(target) == kml_file
-        assert "2025-01-01T08:25:15" in kml_file.read_text(encoding="utf-8")
+        assert "2025-01-01T00:00:00" in kml_file.read_text(encoding="utf-8")
         assert sorted(p.name for p in tmp_path.iterdir()) == ["test.kml"]
         assert kml_file.stat().st_mode & 0o777 == 0o640
 
@@ -676,7 +715,9 @@ class TestCheckObfuscated:
         kml_file.write_text(SAMPLE_KML, encoding="utf-8")
         violations = check_kml_obfuscated(kml_file)
         assert any("Name element" in v for v in violations)
-        assert any("Flight does not start on Jan 1" in v for v in violations)
+        assert any(
+            "Flight does not start at 00:00:00 on Jan 1" in v for v in violations
+        )
 
     def test_detects_description_and_route_dates(self, tmp_path):
         (tmp_path / "c.kml").write_text(CHARTERWARE_KML, encoding="utf-8")
@@ -698,7 +739,7 @@ class TestCheckObfuscated:
     def test_real_creator_is_a_violation(self, tmp_path):
         kml_file = tmp_path / "test.kml"
         kml_file.write_text(
-            '<kml creator="SkyDemon"><when>2025-01-01T08:25:15Z</when></kml>',
+            '<kml creator="SkyDemon"><when>2025-01-01T00:00:00Z</when></kml>',
             encoding="utf-8",
         )
         violations = check_kml_obfuscated(kml_file)
@@ -708,7 +749,7 @@ class TestCheckObfuscated:
     def test_generic_creator_is_not_a_violation(self, tmp_path):
         kml_file = tmp_path / "test.kml"
         kml_file.write_text(
-            '<kml creator="kml-heatmap"><when>2025-01-01T08:25:15Z</when></kml>',
+            '<kml creator="kml-heatmap"><when>2025-01-01T00:00:00Z</when></kml>',
             encoding="utf-8",
         )
         assert check_kml_obfuscated(kml_file) == []
@@ -716,7 +757,8 @@ class TestCheckObfuscated:
     @pytest.mark.parametrize(
         "kml",
         [
-            "<kml><when>2025-01-01T08:25:15.0000000Z</when></kml>",
+            "<kml><when>2025-01-01T00:00:00.0000000Z</when></kml>",
+            "<kml><when>2025-01-01T00:00:00.25Z</when></kml>",
             "<kml><name>test</name></kml>",
             "<kml><when>not-a-timestamp</when></kml>",
         ],
@@ -740,7 +782,7 @@ class TestCheckObfuscated:
         """A full timestamp has no word boundary between the date and "T"."""
         kml_file = tmp_path / "test.kml"
         kml_file.write_text(
-            f"<kml><when>2025-01-01T08:00:00Z</when>{extra}</kml>", encoding="utf-8"
+            f"<kml><when>2025-01-01T00:00:00Z</when>{extra}</kml>", encoding="utf-8"
         )
         assert check_kml_obfuscated(kml_file) != []
 
@@ -752,7 +794,7 @@ class TestCheckObfuscated:
             encoding="utf-8",
         )
         assert any(
-            "Flight does not start on Jan 1" in v
+            "Flight does not start at 00:00:00 on Jan 1" in v
             for v in check_kml_obfuscated(kml_file)
         )
 
@@ -767,12 +809,15 @@ class TestCheckObfuscated:
     def test_second_flight_on_another_date_is_a_violation(self, tmp_path):
         kml_file = tmp_path / "test.kml"
         kml_file.write_text(
-            "<kml><when>2025-01-01T10:00:00Z</when>"
+            "<kml><when>2025-01-01T00:00:00Z</when>"
             "<when>2025-03-14T10:00:00Z</when></kml>",
             encoding="utf-8",
         )
         violations = check_kml_obfuscated(kml_file)
-        assert "Flight does not start on Jan 1: 2025-03-14T10:00:00Z" in violations
+        assert violations == [
+            "Flight does not start at 00:00:00 on Jan 1: 2025-03-14T10:00:00Z",
+            "Date not on Jan 1: 2025-03-14",
+        ]
 
     @pytest.mark.parametrize(
         "text,stray",
@@ -836,6 +881,8 @@ class TestCheckObfuscated:
             ("<gx:value>1710406320000</gx:value>", ["1710406320000"]),
             ('<SimpleData name="t">1710406320</SimpleData>', ["1710406320"]),
             ("<value>1735689600</value>", []),
+            # Noon on January 1st: the date passes, the time of day does not
+            ("<value>1735732800</value>", ["1735732800"]),
             ("<value>12345</value> 1710406320", []),
             # Ten digits, but not a time of this era
             ("<value>9999999999</value>", []),
@@ -864,7 +911,7 @@ class TestCheckObfuscated:
         """A rewrite killed before the rename leaves the original dates in a
         file the KML listing ignores."""
         (tmp_path / "a.kml").write_text(
-            "<kml><when>2025-01-01T10:00:00Z</when></kml>", encoding="utf-8"
+            "<kml><when>2025-01-01T00:00:00Z</when></kml>", encoding="utf-8"
         )
         leftover = tmp_path / ".a.kml.x1y2z3.tmp"
         leftover.write_text(SAMPLE_KML, encoding="utf-8")
@@ -892,7 +939,7 @@ class TestCheckObfuscated:
     def test_charterware_file_name_with_date_is_a_violation(self, tmp_path):
         kml_file = tmp_path / "2026-01-12_1513h_OE-AKI_LOAV-LOAV.kml"
         kml_file.write_text(
-            "<kml><when>2026-01-01T15:13:00Z</when></kml>", encoding="utf-8"
+            "<kml><when>2026-01-01T00:00:00Z</when></kml>", encoding="utf-8"
         )
         assert check_kml_obfuscated(kml_file) == [
             "File name contains the flight date: 2026-01-12_1513h_OE-AKI_LOAV-LOAV.kml"
@@ -971,19 +1018,68 @@ class TestCheckObfuscated:
         kml_file = tmp_path / "1_DEHYL_DA40.kml"
         kml_file.write_text(
             "<kml><Placemark><name>Saturday flight</name>"
-            "<when>2026-01-01T15:13:00Z</when></Placemark></kml>",
+            "<when>2026-01-01T00:00:00Z</when></Placemark></kml>",
             encoding="utf-8",
         )
         assert check_kml_obfuscated(kml_file) == [
             "Weekday gives the day of the flight away, remove it: Saturday"
         ]
 
-    def test_time_of_day_in_a_file_is_kept(self, tmp_path):
-        """Obfuscated files keep the time of day of their timestamps."""
+    @pytest.mark.parametrize(
+        ("element", "time"),
+        [
+            ("<name>EDDS 1513h</name>", "1513h"),
+            ("<name>Evening flight 18:30</name>", "18:30"),
+            ("<description>Off blocks 0930Z</description>", "0930Z"),
+            ("<description>logged 2026-01-01T09:12:00Z</description>", "T09:12:00Z"),
+        ],
+    )
+    def test_time_of_day_in_a_file_is_a_violation(self, tmp_path, element, time):
+        """The timestamps start at midnight, a time in a name would not."""
         kml_file = tmp_path / "1_DEHYL_DA40.kml"
         kml_file.write_text(
-            "<kml><Placemark><name>EDDS 1513h</name>"
-            "<when>2026-01-01T15:13:00Z</when></Placemark></kml>",
+            f"<kml><Placemark>{element}"
+            "<when>2026-01-01T00:00:00Z</when></Placemark></kml>",
+            encoding="utf-8",
+        )
+        assert check_kml_obfuscated(kml_file) == [
+            f"Time of day gives the flight away, remove it: {time}"
+        ]
+
+    @pytest.mark.parametrize(
+        "time",
+        [
+            "2026-01-01T15:13:00Z",
+            "2026-01-01T00:00:01Z",
+            "2026-01-01T00:01:00Z",
+            "2026-01-02T00:00:00Z",
+        ],
+    )
+    def test_a_flight_starting_at_another_time_is_a_violation(self, tmp_path, time):
+        """Only midnight on January 1st gives nothing away."""
+        kml_file = tmp_path / "1_DEHYL_DA40.kml"
+        kml_file.write_text(
+            f"<kml><Placemark><when>{time}</when>"
+            "<when>2026-01-03T00:00:00Z</when></Placemark></kml>",
+            encoding="utf-8",
+        )
+        assert check_kml_obfuscated(kml_file) == [
+            f"Flight does not start at 00:00:00 on Jan 1: {time}"
+        ]
+
+    def test_description_time_must_be_midnight(self, tmp_path):
+        kml_file = tmp_path / "c.kml"
+        kml_file.write_text(
+            "<kml><description>Flight Jan 01 2026 03:01PM path of OE-AKI"
+            "</description></kml>",
+            encoding="utf-8",
+        )
+        assert check_kml_obfuscated(kml_file) == [
+            "Description date not on Jan 1 at 12:00AM: Flight Jan 01 2026 03:01PM"
+        ]
+        kml_file.write_text(
+            "<kml><description>Flight Jan 01 2026 12:00AM path of OE-AKI"
+            "</description></kml>",
             encoding="utf-8",
         )
         assert check_kml_obfuscated(kml_file) == []
@@ -1009,10 +1105,11 @@ class TestDifferentYearsAndMidnight:
         )
         result = obfuscate_kml_content(kml_2026)
         assert result is not None
-        assert "2026-01-01T08:25:" in result
+        assert "2026-01-01T00:00:00.5848380Z" in result
         assert "2026-06-15" not in result
 
     def test_midnight_crossover(self, tmp_path):
+        """A flight across midnight starts at midnight and keeps its length."""
         kml = (
             "<kml><Placemark><name>Log Start: 03 Mar 2025 23:55 Z</name></Placemark>"
             "<when>2025-03-03T23:55:00.0000000Z</when>"
@@ -1021,8 +1118,10 @@ class TestDifferentYearsAndMidnight:
         )
         result = obfuscate_kml_content(kml)
         assert result is not None
-        assert "2025-01-01T23:55:00" in result
-        assert "2025-01-02T00:15:00" in result
+        assert _whens(result) == [
+            "2025-01-01T00:00:00.0000000Z",
+            "2025-01-01T00:20:00.0000000Z",
+        ]
         assert "<name>Log Stop: 2025-01-01</name>" in result
         kml_file = tmp_path / "late.kml"
         kml_file.write_text(result, encoding="utf-8")
@@ -1066,16 +1165,13 @@ class TestProperties:
 
         once = obfuscate_kml_content(content)
         if once is None:
-            # Already anchored on Jan 1
-            assert start.month == 1
-            assert start.day == 1
+            # Already at midnight on Jan 1
+            assert (start.month, start.day) == (1, 1)
+            assert start.time() == datetime.min.time()
             return
 
         shifted = [_parse_utc(ts) for ts in _whens(once)]
-        assert shifted[0].month == 1
-        assert shifted[0].day == 1
-        assert shifted[0].year == start.year
-        assert shifted[0].time() == start.time()
+        assert shifted[0] == start.replace(month=1, day=1, hour=0, minute=0, second=0)
         for original_gap, (a, b) in zip(gaps, pairwise(shifted), strict=True):
             assert (b - a) == timedelta(seconds=original_gap)
         assert obfuscate_kml_content(once) is None
@@ -1090,7 +1186,10 @@ class TestCLI:
         ):
             main()
         assert e.value.code == 1
-        assert "violations" in capsys.readouterr().out
+        out = capsys.readouterr().out
+        assert "violations" in out
+        # The way out, for a file an earlier version left at its time of day
+        assert "make obfuscate" in out
 
     def test_check_mode_exits_0_on_clean(self, tmp_path, capsys):
         kml_file = tmp_path / "test.kml"
@@ -1150,11 +1249,23 @@ class TestCLI:
     def test_each_date_is_reported_once(self, tmp_path):
         kml_file = tmp_path / "test.kml"
         kml_file.write_text(
-            "<kml><Placemark><when>2025-01-01T10:00:00Z</when></Placemark>"
+            "<kml><Placemark><when>2025-01-01T00:00:00Z</when></Placemark>"
             "<ExtendedData>2025-09-21 2025-09-21 2025-09-21</ExtendedData></kml>",
             encoding="utf-8",
         )
         assert check_kml_obfuscated(kml_file) == ["Date not on Jan 1: 2025-09-21"]
+
+    def test_a_unix_time_of_day_is_reported_as_one(self, tmp_path):
+        kml_file = tmp_path / "test.kml"
+        # Noon on January 1st: on the right day, at a time of day
+        kml_file.write_text(
+            "<kml><Placemark><when>2025-01-01T00:00:00Z</when></Placemark>"
+            "<ExtendedData><value>1735732800</value></ExtendedData></kml>",
+            encoding="utf-8",
+        )
+        assert check_kml_obfuscated(kml_file) == [
+            "Unix time not at midnight on Jan 1, remove it: 1735732800"
+        ]
 
     def test_exits_1_for_invalid_directory(self, tmp_path, capsys):
         with (
@@ -1177,7 +1288,7 @@ class TestUnparsableDates:
         result = obfuscate_module.obfuscate_kml_content(content)
         assert result is not None
         assert "Flight Foo 12 2025 03:01PM" in result
-        assert "2025-01-01T08:00:00Z" in result
+        assert "2025-01-01T00:00:00Z" in result
 
     def test_description_with_invalid_day(self):
         content = (

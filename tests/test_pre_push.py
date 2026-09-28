@@ -20,7 +20,7 @@ GIT = shutil.which("git")
 pytestmark = pytest.mark.skipif(GIT is None, reason="needs git")
 
 CLEAN_KML = (
-    "<kml><when>2025-01-01T08:25:15Z</when><when>2025-01-01T08:26:15Z</when></kml>"
+    "<kml><when>2025-01-01T00:00:00Z</when><when>2025-01-01T00:01:00Z</when></kml>"
 )
 REAL_KML = (
     "<kml><when>2025-03-03T08:25:15Z</when><when>2025-03-03T08:26:15Z</when></kml>"

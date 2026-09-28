@@ -1,17 +1,23 @@
 """KML date and timestamp obfuscation for privacy.
 
-Shifts the timestamps of a file so that every flight starts on January 1st of
-its actual (UTC) year, preserving the time of day and the intervals between
-the points of a flight. The timestamps are grouped into flights (see
-``_timestamp_groups``), so a file with flights on several dates puts each of
-them on January 1st of its own year. Covered are ``<when>`` (gx:Track and
-TimeStamp) and ``<TimeSpan><begin>/<end>``, with or without a namespace
-prefix.
+Shifts the timestamps of a file so that every flight starts at midnight
+(00:00:00 UTC) on January 1st of its actual (UTC) year: neither the date nor
+the time of day of a flight is kept. A flight moves by one offset of whole
+seconds, so everything computed from its timestamps stays exactly as it was:
+the intervals between its points, the gaps between its tracks, their order,
+its durations, speeds, landings and flight time, and its year. The
+timestamps are grouped into flights (see ``_timestamp_groups``); a file
+usually holds one and moves by one offset, while a file with flights on
+several dates puts each of them at midnight on January 1st of its own year.
+Covered are ``<when>`` (gx:Track and TimeStamp) and
+``<TimeSpan><begin>/<end>``, with or without a namespace prefix. The check
+holds every flight to that start (see ``_timestamp_violations``).
 
-Dates without a time move to January 1st of their own year: date-only
-timestamps, Charterware description dates ("Flight Jan 12 2026 03:01PM"),
-route names with dates ("EDDS to EDDP - 16 Aug 2026") and the SkyDemon marker
-names (Log Start, Takeoff, Landing, Log Stop). The ``creator`` attribute is
+Dates without a timestamp move to January 1st of their own year: date-only
+timestamps, Charterware description dates ("Flight Jan 12 2026 03:01PM"
+becomes "Flight Jan 01 2026 12:00AM"), route names with dates ("EDDS to
+EDDP - 16 Aug 2026") and the SkyDemon marker names (Log Start, Takeoff,
+Landing, Log Stop), which lose their time. The ``creator`` attribute is
 replaced with a generic value. Files are rewritten atomically and in place;
 ``rename_charterware_files`` removes the date and time from Charterware file
 names ("2026-01-12_1513h_OE-AKI_LOAV-LOAV.kml").
@@ -23,7 +29,7 @@ import os
 import re
 import sys
 from bisect import bisect_right
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, time, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, NamedTuple
 
@@ -200,6 +206,19 @@ def _is_jan_first(dt: datetime | None) -> bool:
     return dt is not None and dt.month == 1 and dt.day == 1
 
 
+def _is_canonical_start(dt: datetime | None) -> bool:
+    """Whether a time is midnight on January 1st, the start of every flight.
+
+    A fraction of a second may follow: the shift is one of whole seconds, so
+    that every timestamp keeps the fraction it was written with.
+    """
+    return (
+        dt is not None
+        and _is_jan_first(dt)
+        and dt.time().replace(microsecond=0) == time()
+    )
+
+
 def _timestamp_groups(
     timestamps: Iterable[datetime], placemarks: Iterable[Iterable[datetime]]
 ) -> list[list[datetime]]:
@@ -251,16 +270,20 @@ def _timestamp_groups(
 
 
 def _timestamp_offsets(groups: list[list[datetime]]) -> dict[datetime, timedelta]:
-    """Map every timestamp to the shift that puts its flight on January 1st.
+    """Map every timestamp to the shift that starts its flight at midnight.
 
-    The start of a flight moves to January 1st of its year at the same time
-    of day, and the rest of the flight moves with it. A second pass finds
-    every flight on January 1st already.
+    The start of a flight moves to 00:00:00 on January 1st of its year, and
+    the rest of the flight moves with it, so the flight keeps its intervals
+    and its year and gives neither its date nor its time of day away. The
+    shift is one of whole seconds (see ``_is_canonical_start``). A second
+    pass finds every flight at midnight on January 1st already: the flights
+    of one file may overlap in time then, and every one they form together
+    still starts at midnight.
     """
     offsets: dict[datetime, timedelta] = {}
     for group in groups:
         start = group[0]
-        offset = start.replace(month=1, day=1) - start
+        offset = start.replace(month=1, day=1, hour=0, minute=0, second=0) - start
         for dt in group:
             offsets[dt] = offset
     return offsets
@@ -356,13 +379,14 @@ def obfuscate_kml_content(content: str) -> str | None:
     # Route and description dates are local dates, not UTC like the
     # timestamps, so they move to January 1st of their own year directly.
     # Shifting them with a timestamp offset could leave them on January 2nd.
+    # The time of a description goes to midnight, like the start of a flight.
     def description_on_jan_first(match: re.Match[str]) -> str:
         dt = _parse_description_date(match)
         if dt is None:
             return match.group(0)
         long_month = len(match.group(2)) > 3
         return _format_description_date(
-            match.group(1), dt.replace(month=1, day=1), long_month
+            match.group(1), dt.replace(month=1, day=1, hour=0, minute=0), long_month
         )
 
     def route_on_jan_first(match: re.Match[str]) -> str:
@@ -630,13 +654,18 @@ _EPOCH_RANGE = (
 )
 
 
-def _epoch_near_jan_first(value: str) -> bool:
+def _epoch_is_obfuscated(value: str) -> bool:
+    """Whether a Unix time gives neither a date nor a time of day away.
+
+    The rewrite leaves data values alone, so only midnight passes, on
+    January 1st or the days a flight runs into after it.
+    """
     seconds = int(value) / (1000 if len(value) == 13 else 1)
     if not _EPOCH_RANGE[0] <= seconds < _EPOCH_RANGE[1]:
         # Not a time of this era: some other number
         return True
     dt = datetime.fromtimestamp(seconds, tz=UTC)
-    return near_jan_first(dt.month, dt.day)
+    return near_jan_first(dt.month, dt.day) and dt.time() == time()
 
 
 def _with_unescaped(content: str) -> str:
@@ -646,25 +675,56 @@ def _with_unescaped(content: str) -> str:
     return content
 
 
+def _find_stray_epochs(content: str) -> list[str]:
+    """The Unix times in data values that are not midnight near January 1st."""
+    return [
+        match.group(2)
+        for match in _EPOCH_VALUE_PATTERN.finditer(content)
+        if not _epoch_is_obfuscated(match.group(2))
+    ]
+
+
 def _find_stray_dates(content: str) -> list[str]:
     """Return date-like tokens that are not within the days after January 1st."""
     content = _with_unescaped(content)
-    found = find_date_tokens(content, skip_near_jan_first=True)
-    found.extend(
-        match.group(2)
-        for match in _EPOCH_VALUE_PATTERN.finditer(content)
-        if not _epoch_near_jan_first(match.group(2))
+    return find_date_tokens(content, skip_near_jan_first=True) + _find_stray_epochs(
+        content
     )
-    return found
+
+
+def _find_stray_times(content: str, stray_dates: list[str]) -> list[str]:
+    """The times of day in a name or a description ("Flight 14:30").
+
+    The obfuscator does not take them out: they have to go by hand. The
+    timestamps, which ``_timestamp_violations`` checks, and the description
+    dates of Charterware, which the rewrite puts at 12:00AM, are left out,
+    and so are the dates already reported: the year of the next one in a
+    list of dates ("2025-09-21 2025-09-22") would read as a time after it.
+    """
+    text = _with_unescaped(
+        DESCRIPTION_DATE_PATTERN.sub("", TIMESTAMP_PATTERN.sub("", content))
+    )
+    for date in dict.fromkeys(stray_dates):
+        text = text.replace(date, " ")
+    return find_time_tokens(text)
 
 
 def _timestamp_violations(content: str) -> list[str]:
-    """Flights that do not start on January 1st, and date-only timestamps."""
+    """Flights that do not start at midnight on January 1st, and dates.
+
+    The rule of the rewrite: the first timestamp of every flight (see
+    ``_timestamp_groups``) is 00:00:00 UTC on January 1st, give or take a
+    fraction of a second. Any other start carries the date or the time of
+    day of the flight.
+    """
     timestamps = _scan_timestamps(content)
     violations = [
-        f"Flight does not start on Jan 1: {timestamps.first_text[group[0]]}"
+        (
+            "Flight does not start at 00:00:00 on Jan 1: "
+            f"{timestamps.first_text[group[0]]}"
+        )
         for group in timestamps.groups
-        if not _is_jan_first(group[0])
+        if not _is_canonical_start(group[0])
     ]
 
     violations.extend(
@@ -716,9 +776,9 @@ def check_kml_obfuscated(filepath: Path) -> list[str]:
     violations.extend(_timestamp_violations(content))
 
     violations.extend(
-        f"Description date not on Jan 1: {match.group(0)}"
+        f"Description date not on Jan 1 at 12:00AM: {match.group(0)}"
         for match in DESCRIPTION_DATE_PATTERN.finditer(content)
-        if not _is_jan_first(_parse_description_date(match))
+        if not _is_canonical_start(_parse_description_date(match))
     )
 
     violations.extend(
@@ -739,14 +799,24 @@ def check_kml_obfuscated(filepath: Path) -> list[str]:
     # Coordinates cannot hold a date the parser would accept, and skipping
     # them saves most of the time the patterns take on a track
     without_coordinates = COORDINATES_PATTERN.sub("", content)
+    stray_dates = _find_stray_dates(without_coordinates)
+    # A Unix time on January 1st fails for its time of day
+    epochs = set(_find_stray_epochs(_with_unescaped(without_coordinates)))
     violations.extend(
-        f"Date not on Jan 1: {text}" for text in _find_stray_dates(without_coordinates)
+        f"Unix time not at midnight on Jan 1, remove it: {text}"
+        if text in epochs
+        else f"Date not on Jan 1: {text}"
+        for text in stray_dates
     )
     # The obfuscator neither moves a weekday along with the timestamps nor
     # takes one out: it has to go by hand
     violations.extend(
         f"Weekday gives the day of the flight away, remove it: {text}"
         for text in find_weekday_tokens(_with_unescaped(without_coordinates))
+    )
+    violations.extend(
+        f"Time of day gives the flight away, remove it: {text}"
+        for text in _find_stray_times(without_coordinates, stray_dates)
     )
 
     # A track repeats its date in every timestamp; one line per date is enough
@@ -820,6 +890,14 @@ def main() -> None:
         for filename, issues in violations.items():
             for issue in issues:
                 print(f"  {filename}: {issue}")
+        if args.check:
+            # A file obfuscated by an earlier version, which kept the time of
+            # day, only needs the rewrite
+            print(
+                "Run `python -m kml_heatmap.obfuscate "
+                f"{args.directory}` (`make obfuscate`) to rewrite the "
+                "timestamps, dates and names it knows; remove the rest by hand."
+            )
         sys.exit(1)
     if args.check:
         print(f"All {len(kml_files)} KML file(s) are properly obfuscated.")

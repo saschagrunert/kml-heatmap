@@ -242,13 +242,14 @@ examples:
 The input KML files are read and left alone. The generated site never carries
 a flight date finer than the year in the first place: a flight keeps its year
 and the intervals between its points, and every absolute timestamp is dropped
-on export. The only full date in it is the time the site was built.
+on export. The only full date in it is the day the site was built.
 
 --obfuscate-inputs additionally rewrites the input files THEMSELVES, IN PLACE
 and IRREVERSIBLY, so that the files on disk carry no real dates either (useful
 before committing or sharing them). All timestamps and dates are shifted so
-that every flight starts on January 1st of its year (time of day and intervals
-are preserved) and the creator attribute is replaced. Charterware files are
+that every flight starts at midnight (UTC) on January 1st of its year, which
+keeps the intervals between its points but neither its date nor its time of
+day, and the creator attribute is replaced. Charterware files are
 renamed to January 1st as well (2026-01-12_1513h_OE-AKI_LOAV-LOAV.kml becomes
 2026-01-01_0000h_...). Keep a copy of the originals if you need the real
 dates. The same rewrite is available on its own, without generating a site, as

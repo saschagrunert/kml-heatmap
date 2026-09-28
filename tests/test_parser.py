@@ -761,7 +761,9 @@ class TestYearAcrossNewYear:
         _, _, after = parse_kml_coordinates(kml_file)
 
         assert before[0]["year"] == after[0]["year"] == 2025
-        assert (after[0].get("timestamp") or "").startswith("2025-01-01T23:00")
+        # At midnight, and three hours long as before
+        assert after[0].get("timestamp") == "2025-01-01T00:00:00Z"
+        assert after[0].get("end_timestamp") == "2025-01-01T03:00:00Z"
 
 
 class TestMultiTrackFile:

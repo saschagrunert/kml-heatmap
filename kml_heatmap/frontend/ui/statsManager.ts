@@ -20,7 +20,7 @@ import {
   groupByCountry,
 } from "../features/airports";
 import { FEET_TO_METERS, NAUTICAL_MILES_TO_KM } from "../utils/constants";
-import { formatBuildTime, formatNumber } from "../utils/formatters";
+import { formatBuildDate, formatNumber } from "../utils/formatters";
 import {
   escapeHtml,
   markFlightTimeUnits,
@@ -324,12 +324,12 @@ function aircraftSection(stats: FilteredStatistics): string {
  * hash links to its commit only when the build knew which repository that is.
  */
 function buildInfo(config: MapApp["config"]): string {
-  const { builtAt, commit, commitUrl } = config;
+  const { builtOn, commit, commitUrl } = config;
   const parts: string[] = [];
-  const time = builtAt ? formatBuildTime(builtAt) : null;
-  if (builtAt && time) {
+  const date = builtOn ? formatBuildDate(builtOn) : null;
+  if (builtOn && date) {
     parts.push(
-      '<time datetime="' + escapeHtml(builtAt) + '">' + time + "</time>",
+      '<time datetime="' + escapeHtml(builtOn) + '">' + date + "</time>",
     );
   }
   if (commit) {

@@ -170,7 +170,7 @@ test.describe("Filters and Statistics", () => {
     );
     // The commit is left out where the build could not tell which one it was
     await expect(panel.locator(".kh-stats-build")).toHaveText(
-      /^Built \d{1,2} [A-Z][a-z]{2} \d{4}, \d{2}:\d{2} UTC( from [0-9a-f]{7})?$/,
+      /^Built \d{1,2} [A-Z][a-z]{2} \d{4}( from [0-9a-f]{7})?$/,
     );
     await expect(panel).toContainText("Flights");
     await expect(panel).toContainText("Distance");

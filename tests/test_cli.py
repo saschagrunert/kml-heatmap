@@ -526,7 +526,7 @@ class TestObfuscateFlag:
 
         _run(["--obfuscate-inputs", str(kml), "--output-dir", str(tmp_path / "out")])
 
-        assert "2025-01-01T08:25:15Z" in kml.read_text()
+        assert "2025-01-01T00:00:00Z" in kml.read_text()
 
     def test_renamed_charterware_files_are_processed_under_their_new_name(
         self, tmp_path
@@ -551,7 +551,7 @@ class TestObfuscateFlag:
 
         renamed = input_dir / "2025-01-01_0000h_OE-AKI_LOAV-LOAV.kml"
         assert not kml.exists()
-        assert "2025-01-01T08:25:15Z" in renamed.read_text()
+        assert "2025-01-01T00:00:00Z" in renamed.read_text()
         assert mock_create.call_args.args[0] == [str(renamed)]
 
 
@@ -608,7 +608,7 @@ class TestObfuscationFailsClosed:
         # A date in a place the obfuscation does not rewrite
         kml = input_dir / "2024-03-14 EDAQ.kml"
         kml.write_text(
-            '<?xml version="1.0"?><kml><when>2024-01-01T10:00:00Z</when></kml>',
+            '<?xml version="1.0"?><kml><when>2024-01-01T00:00:00Z</when></kml>',
             encoding="utf-8",
         )
 
@@ -628,7 +628,7 @@ class TestObfuscationFailsClosed:
         kml = input_dir / "flight.kml"
         dates = " ".join(f"2024-03-{day:02d}" for day in range(10, 20))
         kml.write_text(
-            "<kml><when>2024-01-01T10:00:00Z</when>"
+            "<kml><when>2024-01-01T00:00:00Z</when>"
             f"<ExtendedData>{dates}</ExtendedData></kml>",
             encoding="utf-8",
         )

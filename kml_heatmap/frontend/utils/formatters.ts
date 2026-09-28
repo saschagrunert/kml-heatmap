@@ -123,16 +123,17 @@ const MONTHS = [
 ];
 
 /**
- * Format the build time map_config.js carries (e.g., "21 Sep 2026, 14:03
- * UTC"). Always in UTC and in English, so every viewer reads the same text.
- * @param iso - "YYYY-MM-DDTHH:MMZ"
- * @returns Formatted time, or null when the value is not one
+ * Format the build date map_config.js carries (e.g., "21 Sep 2026"). In
+ * English, so every viewer reads the same text. The build carries no time
+ * of day, which would tell when a flight just before it ended.
+ * @param iso - "YYYY-MM-DD", the day in UTC
+ * @returns Formatted date, or null when the value is not one
  */
-export function formatBuildTime(iso: string): string | null {
-  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})Z$/.exec(iso);
+export function formatBuildDate(iso: string): string | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
   if (!match) return null;
-  const [, year, month, day, hours, minutes] = match;
+  const [, year, month, day] = match;
   const monthName = MONTHS[Number(month) - 1];
   if (!monthName) return null;
-  return `${Number(day)} ${monthName} ${year}, ${hours}:${minutes} UTC`;
+  return `${Number(day)} ${monthName} ${year}`;
 }

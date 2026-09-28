@@ -49,7 +49,7 @@ __all__ = [
     "BuildCommit",
     "available_country_flags",
     "build_commit",
-    "build_timestamp",
+    "build_date",
     "bundle_is_available",
     "load_template",
     "minify_html",
@@ -361,9 +361,11 @@ def render_html(
     )
 
 
-def build_timestamp() -> str:
-    """When the site was built, in UTC to the minute.
+def build_date() -> str:
+    """The day the site was built, in UTC ("2026-09-21").
 
+    Not the time: a site built right after a flight would give the time of
+    day of that flight away, which the flights themselves no longer carry.
     Honours SOURCE_DATE_EPOCH so that a build can be reproduced exactly.
     """
     epoch = os.environ.get("SOURCE_DATE_EPOCH", "").strip()
@@ -374,7 +376,7 @@ def build_timestamp() -> str:
         built_at = None
     if built_at is None:
         built_at = datetime.now(UTC)
-    return built_at.strftime("%Y-%m-%dT%H:%MZ")
+    return built_at.strftime("%Y-%m-%d")
 
 
 # A commit hash as git prints it, and the parts of a repository address
@@ -489,7 +491,7 @@ def _generate_map_config(
     config_vars = {
         "carto_api_key": _escape_js_string(carto_api_key),
         "data_dir_name": _escape_js_string(data_dir_name),
-        "built_at": build_timestamp(),
+        "built_on": build_date(),
         "commit": commit.hash,
         "commit_url": _escape_js_string(commit.url),
         "center_lat": str(bounds["center_lat"]),
