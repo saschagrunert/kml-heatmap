@@ -162,6 +162,7 @@ class TestNotARegistration:
         [
             ("1_16AUG26_DA40.kml", "DA40"),
             ("3_1430Z_DA40.kml", "DA40"),
+            ("4_MONDAY_DA40.kml", "DA40"),
             ("2026-01-01_0000h_16AUG26_LOAV-LOAV.kml", None),
         ],
     )

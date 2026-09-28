@@ -181,7 +181,11 @@ class TestExtractAirportName:
     @pytest.mark.parametrize(
         ("name", "expected"),
         [
-            ("Sunday flight 16 Aug 2026", "Sunday flight"),
+            ("Evening flight 16 Aug 2026", "Evening flight"),
+            # The weekday goes as well, and a single word is no airport
+            ("Sunday flight 16 Aug 2026", None),
+            ("Samstag EDDS 1513h", "EDDS"),
+            ("KFHR Friday Harbor Sa., 16.08.2026", "KFHR Friday Harbor"),
             ("Flight EDDS-EDDP 2026-08-16", "Flight EDDS-EDDP"),
             ("EDXX 16 Aug 2026", "EDXX"),
             ("EDDS Stuttgart (16.08.2026)", "EDDS Stuttgart"),

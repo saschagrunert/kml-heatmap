@@ -64,6 +64,39 @@ UNDATED_KML = """<?xml version="1.0" encoding="UTF-8"?>
   </coordinates></LineString></Placemark></Document></kml>
 """
 
+# A dated flight and an undated track in Spain in one file: the flight is
+# exported, the track left out
+PARTLY_DATED_KML = """<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2" xmlns:gx="http://www.google.com/kml/ext/2.2">
+  <Document><Placemark><name>EDAQ - EDDC</name><gx:Track>
+    <when>{year}-03-15T10:00:00Z</when><gx:coord>12.05 51.55 110</gx:coord>
+    <when>{year}-03-15T10:10:00Z</when><gx:coord>12.5 51.4 800</gx:coord>
+    <when>{year}-03-15T10:20:00Z</when><gx:coord>13.76 51.13 230</gx:coord>
+  </gx:Track></Placemark><Placemark>
+  <name>somewhere</name><LineString><coordinates>
+    -3.70,40.41,700 -3.60,40.50,900 -3.50,40.60,1200
+  </coordinates></LineString></Placemark></Document></kml>
+"""
+
+# A line whose altitudes are above the ground, not above sea level: its
+# points count, but it is no flight path
+CLAMPED_KML = """<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2"><Document><Placemark>
+  <name>EDAQ - EDDC</name><TimeStamp><when>{year}-03-15</when></TimeStamp>
+  <LineString><altitudeMode>relativeToGround</altitudeMode><coordinates>
+    12.05,51.55,0 12.5,51.4,700 13.76,51.13,0
+  </coordinates></LineString></Placemark></Document></kml>
+"""
+
+# A dated recording that never left its spot
+PARKED_KML = """<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2" xmlns:gx="http://www.google.com/kml/ext/2.2">
+  <Document><Placemark><name>EDAQ</name><gx:Track>
+    <when>{year}-03-15T10:00:00Z</when><gx:coord>12.05 51.55 110</gx:coord>
+    <when>{year}-03-15T10:10:00Z</when><gx:coord>12.05 51.55 111</gx:coord>
+  </gx:Track></Placemark></Document></kml>
+"""
+
 MAP_BOUNDS = re.compile(r"bounds:\[\[([-\d.]+),([-\d.]+)\],\[([-\d.]+),([-\d.]+)\]\]")
 
 
@@ -358,6 +391,22 @@ class TestParseKmlFiles:
         empty.write_text("<kml><Document/></kml>")
         with pytest.raises(KMLHeatmapError, match="No coordinates"):
             _parse_kml_files([str(empty)])
+
+    def test_a_file_without_a_flight_fails_the_run(self, tmp_path, capsys):
+        clamped = _write_kml(tmp_path / "2_DEAGJ_DA20.kml", template=CLAMPED_KML)
+        good = _write_kml(tmp_path / "1_DEAGJ_DA20.kml")
+
+        with pytest.raises(KMLHeatmapError, match="1 of 2 file"):
+            _parse_kml_files([clamped, good])
+        assert f"{clamped}: no track of two or more points" in capsys.readouterr().err
+
+    def test_a_path_without_a_year_next_to_a_flight_is_no_error(self, tmp_path):
+        """The file still has a flight to export; the path is left out later."""
+        paths, metadata = _parse_kml_files(
+            [_write_kml(tmp_path / "1.kml", template=PARTLY_DATED_KML)]
+        )
+        assert len(paths) == 2
+        assert {m["year"] for m in metadata} == {2025, None}
 
     def test_crashed_worker_pool_falls_back_to_sequential_parsing(
         self, tmp_path, capsys
@@ -737,14 +786,57 @@ class TestCreateProgressiveHeatmap:
         )
 
         assert ok is False
-        assert "No flight paths with a determinable year" in capsys.readouterr().err
+        err = capsys.readouterr().err
+        assert f"{kml_file}: no track with a determinable year" in err
+        assert "1 of 1 file(s) hold no flight to export" in err
         assert not (out / "index.html").exists()
+
+    @pytest.mark.usefixtures("bundle")
+    @pytest.mark.parametrize(
+        ("template", "reason"),
+        [
+            (UNDATED_KML, "no track with a determinable year"),
+            (CLAMPED_KML, "no track of two or more points with altitudes above"),
+            (PARKED_KML, "every track with a year stays on one spot"),
+        ],
+    )
+    def test_a_file_without_a_flight_fails_the_run(
+        self, tmp_path, capsys, template, reason
+    ):
+        """Its points count, but the site would be published without it."""
+        good = _write_kml(tmp_path / "input" / "1_DEAGJ_DA20.kml")
+        bad = _write_kml(tmp_path / "input" / "2_DEAGJ_DA20.kml", template=template)
+        out = tmp_path / "out"
+
+        ok = create_progressive_heatmap(
+            [good, bad], str(out / "index.html"), str(out / "data")
+        )
+
+        assert ok is False
+        err = capsys.readouterr().err
+        assert f"{bad}: {reason}" in err
+        assert good not in err
+        assert "1 of 2 file(s) hold no flight to export" in err
+        assert not out.exists()
+
+    @pytest.mark.usefixtures("bundle")
+    def test_a_copy_of_a_flight_does_not_fail_the_run(self, tmp_path):
+        """The export skips it with a warning, and the flight is on the site."""
+        files = [
+            _write_kml(tmp_path / "input" / "1_DEAGJ_DA20.kml"),
+            _write_kml(tmp_path / "input" / "2_DEAGJ_DA20.kml"),
+        ]
+        out = tmp_path / "out"
+
+        assert create_progressive_heatmap(
+            files, str(out / "index.html"), str(out / "data")
+        )
 
     @pytest.mark.usefixtures("bundle")
     def test_map_bounds_leave_out_excluded_paths(self, tmp_path):
         files = [
             _write_kml(tmp_path / "input" / "1_DEAGJ_DA20.kml"),
-            _write_kml(tmp_path / "input" / "spain.kml", template=UNDATED_KML),
+            _write_kml(tmp_path / "input" / "2.kml", template=PARTLY_DATED_KML),
         ]
         out = tmp_path / "out"
 

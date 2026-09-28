@@ -130,6 +130,11 @@ letter); a name such as `2025_summer_trip.kml` names no aircraft. An extra under
 filenames for privacy. Files are numbered sequentially in chronological order
 and processed in numeric order.
 
+Nor are times of day or weekdays: the type is published, so a `TYPE` that is
+one (`1_DEHYL_1513h.kml`, `1_DEHYL_15h13.kml`, `1_DEHYL_Saturday.kml`) is left
+out of the site, like a date (`1_DEHYL_2026-08-16.kml`), and
+`make check-obfuscation` fails on the name.
+
 #### Charterware Format
 
 ```
@@ -147,7 +152,7 @@ Where:
 
 The flight date used for the year filter is taken from the file's contents
 (the `<description>` element, for a file without timestamps), never from the
-filename.
+filename. Neither the date nor the time of the name reaches the site.
 
 Obfuscating the files renames them (see [Privacy](#privacy)): the date becomes
 January 1st of the same year and the time slot a sequence number per year and
@@ -398,8 +403,10 @@ deployed site. Leave it off for a server that compares the times by age
 
 The exit status is 1 when no site could be generated: a missing input path, a
 missing JavaScript bundle, an input file that is not valid KML or cannot be
-parsed (such as an empty file or a symlink), no flight with a determinable
-year, or an error such as an unwritable output directory.
+parsed (such as an empty file or a symlink), an input file without a flight
+to export (no track with altitudes above sea level, none with a determinable
+year, or none that moves), or an error such as an unwritable output
+directory.
 
 ## Adding New Flights
 
@@ -552,8 +559,9 @@ The build log names the file in every warning. `--debug` (or
   `<Folder>` or `<Document>`, never from the file name. A time that cannot
   be read (neither ISO 8601, `YYYY-MM-DD HH:MM:SSZ` nor a date without a
   time of day such as `2026-08-16`, `2026-08` or `2026`) does not count.
-  Export the flight again with its times. When no flight at all has a year,
-  the run fails with `No flight paths with a determinable year to export`.
+  Export the flight again with its times. This only leaves out a track of a
+  file that has another one to export; a file none of whose tracks has a
+  year stops the run (see below).
 - A `gx:Track` time more than seven days from the track's median, or out of
   order with its neighbours, is a logger glitch: that point loses its time
   (and so its groundspeed), the rest of the track keeps theirs. A position
@@ -572,6 +580,18 @@ silently misses a flight:
   `altitudeMode` is `clampToGround` or `relativeToGround`, because its
   altitudes are not above sea level. A track without `altitudeMode` is read
   as absolute, which is what flight logs write.
+- `<file>: <reason>`, followed by
+  `<n> of <m> file(s) hold no flight to export`: the file has coordinates,
+  but nothing of it would reach the site. A file whose flight is only
+  skipped as a copy of one in another file (see below) does not stop the
+  run. The reason says why:
+  - `no track of two or more points with altitudes above sea level`: it
+    holds only points, lines without altitudes, or tracks clamped to or
+    relative to the ground
+  - `no track with a determinable year`: see above for where the year
+    comes from
+  - `every track with a year stays on one spot`: a recording that never
+    moved
 - `<n> of <m> input file(s) are not valid KML files`: a file is empty, a
   symlink or larger than 100 MB.
 
@@ -641,7 +661,10 @@ flights of their own different names or times.
 `make obfuscate`, then check again. When a date cannot be removed (in a file
 name, or in an element the tool does not rewrite), the rewrite names the
 file and the date and stops rather than leaving it half scrubbed; remove
-the date by hand.
+the date by hand. The same goes for a weekday anywhere in a file or its name
+and a time of day in a file name (`1_DEHYL_1513h.kml`): the tool rewrites
+neither. A place named after a weekday other than `Friday Harbor`,
+`Thursday Island` and `Sunday Creek` needs another name as well.
 
 ## Privacy
 
@@ -702,7 +725,12 @@ Obfuscated KML files still contain:
 flight must start on January 1st, and no other date may appear anywhere in a
 file or its name (numeric, or with an English or German month name such as
 `16 Aug 2026` or `16. Mai 2026`), except the two days after January 1st that
-a flight past midnight runs into. Timestamps within one Placemark, or no more than 12 hours
+a flight past midnight runs into. Nor may a weekday named in full (`Saturday`,
+`Samstag`, `sonntags`): the timestamps no longer fall on it. The name of a
+file carries no time of day either (`1513h`, `1513H`, `15h13`, `0930Z`,
+`0930z`, `0930UTC`, `15:13`, `3pm`), except for the sequence number in the time slot of an
+obfuscated Charterware name; the timestamps inside keep theirs.
+Timestamps within one Placemark, or no more than 12 hours
 apart, count as one flight and are never split; a recording that runs longer
 than those days fails the check rather than being cut in two. When a date
 cannot be removed (in a file name, say, or an element the tool does not
@@ -734,15 +762,29 @@ Removed from the site:
 - Dates and times of day in placemark and file names (`16 Aug 2026`,
   `the 16th of August 2026`, `16/Aug/2026`, `16/08`, `16-08`, `16_08`,
   `26.08`, `16.8`, `16 08 2026`, `16AUG26`, `16-AUG-26`, `260816`,
-  `03/2026`, `2026/8/16`, `KW33 2026`, `14:30`, `1430Z`, `1430L`,
-  `14h30`, `14.30 Uhr`, `2026-08-16_1430`), also with German month names
+  `03/2026`, `2026/8/16`, `KW33 2026`, `14:30`, `1430Z`, `0930z`,
+  `1430 UTC`, `1430L`, `1513h`, `1513H`, `1430hrs`, `14h30`, `15.13h`,
+  `14.30 Uhr`, `3pm`, `2026-08-16_1430`), also with German month names
   written day first (`16. Mai 2026`, `16. März`, `16MAI26`, `Mai 2026`); a
   month name alone (`Flugplatz Juli`) stays, and so do runway designators in
   a name that speaks of a runway (`RWY 08/26`, `07L/25R`) and a version
   after a word that says so (`firmware 12.10`), while a bare `26/08` is
   August 26th and `EDDS 07/25` July 25th (or July 2025): where a name could
-  hold a date, the date goes
-- A registration that holds a date (`1_16AUG26_DA40.kml`), with a warning
+  hold a date, the date goes. A registration that looks like a time
+  keeps it (`N1513H`, `RA-1430L`)
+- Weekdays in placemark and file names: named in full in English or German
+  wherever they stand (`Saturday`, `Sundays`, `Samstag`, `sonntags`,
+  `Sonntagsflug`, `Samstagnachmittag`), and abbreviated only right next to a
+  date or a time (`Sat 16 Aug 2026`, `Sa., 16.08.2026`, `16.08.2026 (Sa)`).
+  An abbreviation on its own stays, since it is as often something else:
+  `Sun` and `Sat` are words, `SAT` and `THU` airport codes, `Do 27` a
+  Dornier, and a letter or a hyphen before it makes it a part of a
+  registration (`D-EFRI`, `OE-SAT`). Aircraft types (`C172`, `PA28`, `DA20`,
+  `SR22`) and ICAO codes (`EDMO`) are never touched. The places named after
+  a weekday keep it (`Friday Harbor`, `Thursday Island`, `Sunday Creek`);
+  a family name such as `Freitag` does not
+- A registration that holds a date, a time of day or a weekday
+  (`1_16AUG26_DA40.kml`, `1_MONDAY_DA40.kml`), with a warning
 
 The CARTO key is a public client-side tile key. It is embedded in the
 generated `map_config.js` and published with the site by design, because the
