@@ -663,8 +663,22 @@ level and reaches as far as the view; each cloud keeps its own exposures),
 and the intro fits the overview in one
 update with the cloud and the globe, so the end of that zoom finds them
 rather than cutting the cloud and the ribbons for the relief the globe
-leaves out. Points the cloud does not draw (cut ahead, left while the
-switch is off, or the other cloud's) go after `CLOUD_IDLE_MS` (15 s). No
+leaves out. Its moves are tagged, so the cloud stays cut for the overview
+all through the intro, and the camera comes down only two zoom levels
+closer than that (`HOME` in `ui/wrappedIntro.ts`): five levels closer, the
+few stretches the circuits and the taxiing at the home field are merged
+into at the overview's level were each a hundred pixels long and glowed
+far past white, a hard-edged polygon round the field. Side by side the map
+has the whole dialog while the intro plays and keeps that size while it
+draws back into its panel beside the cards (a `clip-path` transition in
+`wrapped.css`), with its view padded by the width of the cards on its way
+to the overview (`overviewIn`), which moves the middle of MapLibre's
+perspective into the panel's part; it is measured and fitted in its panel
+once there, where it shows the same. A fit padded for the panel alone saw
+the globe from off to the side and jumped as the map took its panel, and
+resizing the map on every frame would draw its canvas anew in each.
+Points the cloud does not draw (cut ahead, left while the switch is off,
+or the other cloud's) go after `CLOUD_IDLE_MS` (15 s). No
 style layer draws a glow at a height: `heatmap` lies on the ground,
 `circle` has no depth, and deck.gl or three.js would be several hundred
 kilobytes for one layer.

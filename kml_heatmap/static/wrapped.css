@@ -31,6 +31,9 @@
   --wrapped-year: calc(var(--text-display) * 3);
   --wrapped-stat: calc(var(--text-display) * 1.25);
   --wrapped-section: var(--text-base);
+  /* The width of the cards column side by side, which the map draws back
+     from at the end of the intro */
+  --wrapped-cards-width: 500px;
   position: fixed;
   inset: 0;
   width: 100%;
@@ -78,8 +81,10 @@
   flex-shrink: 0;
 }
 /* The cards are the only thing that scrolls. Scrolling the row itself took
-   the map with it and left most of the dialog empty for cards two to four. */
+   the map with it and left most of the dialog empty for cards two to four.
+   The map is laid over it while the intro plays (see below). */
 #wrapped-content {
+  position: relative;
   display: flex;
   gap: var(--space-lg);
   flex: 1;
@@ -149,30 +154,113 @@
   animation: fadeInUp 0.8s ease-out 0.9s forwards;
 }
 
-/* Wrapped's intro (ui/wrappedIntro.ts): the cards wait for the camera to
-   settle, the map shows at once, and it starts dark and brightens as the
-   camera flies in. Stacked, the map has the dialog to itself while it
-   plays, and the cards come in above it. */
+/* The page's own chrome goes as the dialog comes in, before its fade: the
+   heat legend and the stats rail, whose display lingers through a fade of
+   their own (see styles.css), and the phone's bar and compass showed
+   through the first frames of the intro */
+body:has(#wrapped-modal:not([hidden]))
+  :is(.color-legend, .mobile-bar, #stats-rail, #compass-float-btn) {
+  visibility: hidden;
+}
+
+/* Wrapped's intro (ui/wrappedIntro.ts). While it plays the map has the
+   dialog to itself, over the cards, which wait; it shows at once, under a
+   light shade and the title of the first card, which read as the start of
+   the intro while the tiles of the globe come in, and both lift as the
+   camera flies in. As it settles (is-settling, INTRO_SETTLE_MS) the cards
+   come in one after another, and the map draws back into its panel beside
+   them, still the size of the dialog, cut to the panel's part of it; the
+   camera settles on the overview as that part shows it, and the map is
+   measured again once it is there. Stacked it fades from over the cards
+   instead, and goes to its panel below them after. */
 #wrapped-modal.is-intro .wrapped-square-card,
 #wrapped-modal.is-intro .wrapped-square-card * {
   animation-play-state: paused;
 }
-#wrapped-modal.is-intro #wrapped-map-container {
+#wrapped-modal:is(.is-intro, .is-settling) #wrapped-map-container {
+  position: absolute;
+  inset: 0 var(--wrapped-gutter)
+    calc(var(--wrapped-gutter) + var(--safe-bottom));
+  z-index: 1;
+  min-width: 0;
+  clip-path: inset(0 round var(--radius-card));
+}
+/* For the whole opening an intro played in, not only while it plays: the
+   delay going back to 0.9 s as a Skip took is-intro off within the first
+   1.7 s started the map's fade-in over again */
+#wrapped-modal.has-intro #wrapped-map-container {
   animation-delay: 0s;
 }
+#wrapped-modal.is-settling #wrapped-map-container {
+  clip-path: inset(
+    0 0 0 calc(var(--wrapped-cards-width) + var(--space-lg)) round
+      var(--radius-card)
+  );
+  transition: clip-path 1.3s cubic-bezier(0.45, 0, 0.2, 1);
+}
+#wrapped-modal.is-settling .wrapped-square-card:nth-child(1) {
+  animation-delay: 0.3s;
+}
+#wrapped-modal.is-settling .wrapped-square-card:nth-child(2) {
+  animation-delay: 0.5s;
+}
+#wrapped-modal.is-settling .wrapped-square-card:nth-child(3) {
+  animation-delay: 0.7s;
+}
+#wrapped-modal.is-settling .wrapped-square-card:nth-child(4) {
+  animation-delay: 0.9s;
+}
+/* The shade: the middle of the globe clear enough to show from the first
+   frame, the edges darker under the title */
 #wrapped-modal.is-intro #wrapped-map-container::before {
   content: "";
   position: absolute;
   inset: 0;
   z-index: 1;
   pointer-events: none;
-  background: rgba(10, 10, 20, 0.92);
+  background: radial-gradient(
+    ellipse at 50% 50%,
+    rgba(10, 10, 20, 0.3) 0%,
+    rgba(10, 10, 20, 0.75) 80%
+  );
   opacity: 0;
-  transition: opacity 2.4s ease-in;
+  transition: opacity 1.6s ease-in;
 }
 #wrapped-modal.is-intro #wrapped-map-container.is-dark::before {
   opacity: 1;
   transition: none;
+}
+/* While the tiles come in the panel is the face of the cards, still,
+   under the title: the sweep over it read as a load */
+#wrapped-modal.is-intro #wrapped-map-container.is-awaiting-map::after {
+  animation: none;
+}
+#wrapped-intro-title {
+  display: none;
+}
+#wrapped-modal.is-intro #wrapped-intro-title {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: var(--wrapped-gutter);
+  pointer-events: none;
+  transition:
+    opacity 0.7s ease-in 0.3s,
+    transform 1s ease-in 0.3s;
+}
+/* It rises out of the way of the heat coming up under it */
+#wrapped-modal.is-intro
+  #wrapped-map-container:not(.is-dark)
+  #wrapped-intro-title {
+  opacity: 0;
+  transform: translateY(-15%);
+}
+#wrapped-intro-heading {
+  font-weight: 700;
 }
 
 /* Cards column - left side */
@@ -180,7 +268,7 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-lg);
-  width: 500px;
+  width: var(--wrapped-cards-width);
   flex-shrink: 0;
   min-height: 0;
   overflow-y: auto;
@@ -246,7 +334,8 @@
 /* Shared card styles */
 /* The card's own accent, the one its figures are drawn in. The title used
    to carry a third gradient family (pink, red, gold) of its own. */
-.wrapped-square-card h1 {
+.wrapped-square-card h1,
+#wrapped-intro-heading {
   font-size: var(--wrapped-title);
   margin: 0 0 var(--space-sm) 0;
   text-align: center;
@@ -266,7 +355,8 @@
 .wrapped-square-card h3 {
   margin: 0;
 }
-.wrapped-square-card .year {
+.wrapped-square-card .year,
+#wrapped-intro-year {
   font-size: var(--wrapped-year);
   font-weight: 900;
   text-align: center;
@@ -962,6 +1052,22 @@
   #wrapped-modal.is-intro #wrapped-cards-column {
     display: none;
   }
+  /* Between the gutters: the width of its panel ran past the right one */
+  #wrapped-modal:is(.is-intro, .is-settling) #wrapped-map-container {
+    width: auto;
+    height: auto;
+    padding-bottom: 0;
+  }
+  /* Faded from over the cards as they come in, rather than taken away
+     before them, which left a frame of the empty dialog between the two;
+     all but gone as the first comes in, as the cards showing through it
+     looked muddy, and not in the way of a tap on them */
+  #wrapped-modal.is-settling #wrapped-map-container {
+    clip-path: inset(0 round var(--radius-card));
+    transition: none;
+    animation: wrapped-intro-leave 0.45s linear both;
+    pointer-events: none;
+  }
 }
 
 /* ==========================================================================
@@ -1163,6 +1269,14 @@
   }
   50% {
     background-position: 100% 50%;
+  }
+}
+@keyframes wrapped-intro-leave {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
   }
 }
 @keyframes fadeInUp {

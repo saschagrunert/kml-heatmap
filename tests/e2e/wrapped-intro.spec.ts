@@ -1,9 +1,10 @@
 /**
  * Wrapped's intro (ui/wrappedIntro.ts): the flight over the heat cloud that
- * opens the dialog from its button, with every flight of the year playing
- * underneath, its Skip, and what it leaves behind:
- * nothing in the link or the saved state, and the user's view, globe and
- * 3D switches back once the dialog closes.
+ * opens the dialog from its button, over the whole dialog, with every
+ * flight of the year playing underneath, its Skip, the map settling into
+ * its panel beside the cards, and what it leaves behind: nothing in the
+ * link or the saved state, and the user's view, globe and 3D switches back
+ * once the dialog closes.
  *
  * The suite runs with reduced motion, under which the intro does not play,
  * so these ask for motion. The camera itself is left to the unit tests: a
@@ -76,6 +77,8 @@ interface SkippedMidFlight {
   /** Skip was shown, and a pointer at its middle would have hit it */
   visible: boolean;
   hit: boolean;
+  /** The map had the dialog to itself, over the column of the cards */
+  covers: boolean;
 }
 
 /**
@@ -113,6 +116,10 @@ async function skipMidFlight(page: Page) {
         box.left + box.width / 2,
         box.top + box.height / 2,
       );
+      const panel = container.getBoundingClientRect();
+      const cards = document
+        .getElementById("wrapped-cards-column")!
+        .getBoundingClientRect();
       seen.skippedMidFlight = {
         flying: map.isMoving(),
         replayAll: !!map.getLayer("replay-all"),
@@ -123,6 +130,7 @@ async function skipMidFlight(page: Page) {
           visibilityProperty: true,
         }),
         hit: !!hit && skip.contains(hit),
+        covers: panel.left <= cards.left && panel.right > cards.right,
       };
       skip.click();
     }).observe(container, { attributes: true, attributeFilter: ["class"] });
@@ -160,6 +168,7 @@ test.describe("Wrapped's intro", () => {
       forcedHeatCloud: true,
       visible: true,
       hit: true,
+      covers: true,
     });
 
     // Wrapped as it opens without the intro: the cards, the flat overview
@@ -190,6 +199,56 @@ test.describe("Wrapped's intro", () => {
       .poll(() => getOrientation(page))
       .toMatchObject({ bearing: 30, pitch: 20, projection: "mercator" });
     await expect.poll(() => getZoom(page)).toBeCloseTo(zoom, 5);
+  });
+
+  test("plays to its end, and the map settles into its panel beside the cards", async ({
+    page,
+  }) => {
+    // Six seconds of flight on timers, whatever the frames software WebGL
+    // on a loaded runner draws in them, after the far view is drawn
+    test.setTimeout(60000);
+    const modal = await openWithIntro(page);
+    await expect(modal).toHaveClass(/is-intro/);
+    // Over once the map has settled in its panel
+    await expect(modal).not.toHaveClass(/is-(intro|settling)/, {
+      timeout: 30000,
+    });
+    await expect(page.locator("#wrapped-skip-btn")).toBeHidden();
+    const placed = await page.evaluate(() => {
+      const map = window.mapApp!.map!;
+      const panel = document
+        .getElementById("wrapped-map-container")!
+        .getBoundingClientRect();
+      const cards = document
+        .getElementById("wrapped-cards-column")!
+        .getBoundingClientRect();
+      return {
+        beside: panel.left >= cards.right,
+        // Measured in its panel: the canvas is as wide as the panel
+        measured: Math.abs(map.getCanvas().clientWidth - panel.width) <= 1,
+        padding: map.getPadding(),
+      };
+    });
+    expect(placed).toEqual({
+      beside: true,
+      measured: true,
+      padding: { top: 0, right: 0, bottom: 0, left: 0 },
+    });
+    await expect
+      .poll(() => getOrientation(page))
+      .toMatchObject({ bearing: 0, pitch: 0, projection: "globe" });
+    await expect(
+      page.locator("#wrapped-stats .stat-card").first(),
+    ).toBeVisible();
+
+    await modal.locator(".close-btn").click();
+    await expect(modal).toBeHidden(CLOSED);
+    await expect
+      .poll(() => getOrientation(page))
+      .toMatchObject({ bearing: 30, pitch: 20, projection: "mercator" });
+    expect(await page.evaluate(() => window.mapApp!.map!.getPadding())).toEqual(
+      { top: 0, right: 0, bottom: 0, left: 0 },
+    );
   });
 
   test("keeps its globe and cloud out of the link and the saved state, and takes them away on close", async ({

@@ -145,7 +145,13 @@ function flights(): ReplayAllPoints {
   );
 }
 
-const STYLE: ReplayAllStyle = { groundM: 3, liftM: 3, time: 42, fade: 400 };
+const STYLE: ReplayAllStyle = {
+  groundM: 3,
+  liftM: 3,
+  time: 42,
+  fade: 400,
+  scale: 1,
+};
 
 describe("the replay of all flights' layer", () => {
   let gl: MockGl;
@@ -209,6 +215,24 @@ describe("the replay of all flights' layer", () => {
     expect(gl.depthMask).toHaveBeenNthCalledWith(1, false);
     expect(layer.frames).toBe(1);
     expect(layer.time).toBe(42);
+  });
+
+  it("draws the heads and trails at the size it is told", () => {
+    layer.setPoints(flights());
+    const sizes = (): unknown[][] =>
+      gl.uniform2f.mock.calls
+        .filter(
+          ([location]) => (location as { name: string }).name === "u_size",
+        )
+        .map((call): unknown[] => call.slice(1));
+
+    draw();
+    style = { ...STYLE, scale: 2 };
+    draw();
+
+    const [plain, doubled] = sizes() as [number[], number[]];
+    expect(doubled[0]).toBeCloseTo(2 * plain[0]!);
+    expect(doubled[1]).toBeCloseTo(2 * plain[1]!);
   });
 
   it("uploads the flights once, and a frame after that only the time", () => {

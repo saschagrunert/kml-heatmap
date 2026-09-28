@@ -323,6 +323,7 @@ export class Map
       | "isStyleLoaded"
       | "isSourceLoaded"
       | "loaded"
+      | "areTilesLoaded"
       | "getZoom"
       | "setZoom"
       | "getCenter"
@@ -340,6 +341,7 @@ export class Map
       | "setProjection"
       | "fitBounds"
       | "cameraForBounds"
+      | "setPadding"
       | "jumpTo"
       | "easeTo"
       | "flyTo"
@@ -636,6 +638,8 @@ export class Map
 
   isStyleLoaded = vi.fn(() => this.styleLoaded);
   loaded = vi.fn(() => this.styleLoaded);
+  /** Whether the tiles in view are in; the fake's always are */
+  areTilesLoaded = vi.fn(() => true);
 
   getZoom = vi.fn(() => this.zoom);
   setZoom = vi.fn((zoom: number) => {
@@ -733,6 +737,13 @@ export class Map
       bearing: options.bearing ?? 0,
     }),
   );
+
+  /** The padding of the view, which does not move the fake's camera */
+  padding: maplibregl.PaddingOptions = { top: 0, right: 0, bottom: 0, left: 0 };
+  setPadding = vi.fn((padding: maplibregl.PaddingOptions) => {
+    this.padding = padding;
+    return this;
+  });
 
   /** The camera moves apply at once; none of them animates or fires events */
   private moveTo(options: MockCameraOptions): this {

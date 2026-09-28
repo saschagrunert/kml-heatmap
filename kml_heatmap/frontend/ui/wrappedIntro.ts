@@ -1,15 +1,22 @@
 /**
  * Wrapped's intro - the camera flies in over the year before the cards
  *
- * Opened from its button, Wrapped starts on the globe, far out and dark.
- * The heat cloud fades in as the camera flies to the home base, tilting on
- * the way down and turning slowly once there, while every flight of the
- * overview plays underneath at a few hundred times its speed, so the year
- * blooms out of home (ReplayAllPlayer, ui/replayAll.ts); then it settles
- * on the overview Wrapped has always shown, the flights stop, and the
- * cards come in one after another. About six seconds. Skip, or a touch of the map, ends it at once
- * with Wrapped as it opens without it: not under reduced motion, nor when
- * the heat cloud's code does not arrive in time (INTRO_WAIT_MS).
+ * Opened from its button, Wrapped starts on the globe, far out, with the
+ * map filling the dialog under a light shade and the title of the first
+ * card over it (wrapped.css), which is what shows while the tiles of the
+ * globe come in. The shade and the title lift as the camera flies towards
+ * the home base, tilting on the way down and turning slowly once there,
+ * while every flight of the overview plays underneath at a few hundred
+ * times its speed and at a larger size, so the year blooms out of home
+ * (ReplayAllPlayer, ui/replayAll.ts). It comes down only a couple of zoom
+ * levels closer than the overview (HOME), where the shape of the whole
+ * year shows around home. Then it settles on the overview Wrapped has
+ * always shown, the flights stop, and the cards come in one after another
+ * as the map draws back into its panel beside them, or, stacked, fades
+ * from over them (see settle). About six seconds. Skip, or a touch of the
+ * map, ends it at once with Wrapped as it opens without it: not under
+ * reduced motion, nor when the heat cloud's code does not arrive in time
+ * (INTRO_WAIT_MS).
  *
  * The cloud is drawn without switching the 3D view on (forcedHeatCloud),
  * over the globe; both stay while Wrapped is open after the intro and go
@@ -30,6 +37,7 @@ import type {
 } from "maplibre-gl";
 import type { MapApp } from "../mapApp";
 import type { FeatureModule } from "../features";
+import type { CameraStop } from "./cameraScript";
 import type { ReplayAllPlayer } from "./replayAll";
 import { datasetIndex } from "../calculations/datasetIndex";
 import { ribbonWidthZoom } from "../calculations/lift";
@@ -37,28 +45,46 @@ import { loadFeatures } from "../services/featureLoader";
 import { domCache } from "../utils/domCache";
 import { logError } from "../utils/logger";
 import { segmentBounds, type Coordinate } from "../utils/geometry";
-import { toBounds, toLngLat } from "../utils/mapHelpers";
+import { REPLAY_CAMERA_MOVE, toBounds, toLngLat } from "../utils/mapHelpers";
 import { prefersReducedMotion } from "../utils/motion";
 
 /** Padding in pixels around the data when the dialog fits the map to it */
 export const FIT_PADDING = 80;
 
+/** A view of the map without padding (see overviewIn) */
+const NO_PADDING = { top: 0, right: 0, bottom: 0, left: 0 };
+
 /**
- * Where the intro opens: the globe whole in the panel, turned so the home
+ * Where the intro opens: the globe whole in the dialog, turned so the home
  * base comes up from the south west as the camera flies in
  */
 const FAR = { zoom: 1.2, west: 50, south: 15 };
 
-/** How the camera comes down over the home base */
-const HOME = { zoom: 9, pitch: 60, bearing: -20 };
+/**
+ * How the camera comes down over the home base: this many zoom levels
+ * closer than the overview it settles on, and no closer than the last of
+ * these, tilted and turned. It came down to zoom 9, tilted to 60 degrees,
+ * where the home field filled the view: the glows of its circuits ran into
+ * each other, the shadow of the cloud lay across it in grey bands, the
+ * flights playing were too small to tell, and the cloud, which is cut for
+ * the overview (see begin), drew the hours spent over the field as a
+ * hard-edged white polygon: the few stretches the circuits and the
+ * taxiing are merged into at the zoom level of the overview, each lit
+ * evenly along its length, were drawn five levels closer, where each is a
+ * hundred pixels long and glows far past white up to the joins with the
+ * next. Two levels closer the routes out of home show whole, the cloud
+ * keeps its look, and the settle has as far to go on every screen and for
+ * every year.
+ */
+const HOME = { above: 2, most: 9, pitch: 45, bearing: -15 };
 
 /** How far the camera turns once over the home base, in degrees */
-const TURN_DEG = 15;
+const TURN_DEG = 12;
 
 /** The steps of the intro, in milliseconds */
-export const INTRO_FLY_MS = 3000;
-export const INTRO_TURN_MS = 1400;
-export const INTRO_SETTLE_MS = 1500;
+export const INTRO_FLY_MS = 2800;
+export const INTRO_TURN_MS = 1200;
+export const INTRO_SETTLE_MS = 2000;
 
 /**
  * Longest the intro waits for the heat cloud's code once the map is in the
@@ -82,6 +108,12 @@ const DESTINATION_ZOOM = 10;
 const INTRO_REPLAY_SPEED = 300;
 
 /**
+ * How many times their size its flights are drawn (ReplayAllRun.scale): at
+ * their own, over the view of a whole year, they were specks
+ */
+const INTRO_REPLAY_SCALE = 1.8;
+
+/**
  * The player of each app's intro, made the first time the intro plays and
  * kept for the next: each listens to its map for as long as the map lives
  */
@@ -90,17 +122,18 @@ const introPlayers = new WeakMap<MapApp, ReplayAllPlayer>();
 /**
  * Step 3 of the storyboard: the flights of the overview start to play from
  * their first second, all at once, at INTRO_REPLAY_SPEED times real speed,
- * as the camera sets off for the home base, so they bloom out of it
- * underneath; the intro stops them as the cards come in, is skipped or is
- * closed. The player changes nothing of the app: no replay of the map
- * (replayActive), no filter, no link. Returns what stops it, or null when
- * nothing plays: a replay of the map runs already (Wrapped does not open
- * then, and the two would share the map), motion is unwelcome, or no
- * flight of the overview has a clock to play by.
+ * as the camera sets off for the home base at the map zoom `zoom`, so they
+ * bloom out of it underneath; the intro stops them as the cards come in,
+ * is skipped or is closed. The player changes nothing of the app: no
+ * replay of the map (replayActive), no filter, no link. Returns what stops
+ * it, or null when nothing plays: a replay of the map runs already
+ * (Wrapped does not open then, and the two would share the map), motion is
+ * unwelcome, or no flight of the overview has a clock to play by.
  */
 function startIntroReplay(
   app: MapApp,
   features: FeatureModule,
+  zoom: number,
 ): ReplayAllPlayer | null {
   const data = app.currentData;
   if (!data || app.replayActive || prefersReducedMotion()) return null;
@@ -116,7 +149,12 @@ function startIntroReplay(
   // Cut ahead for the view over home the camera flies to, as well as for
   // the far one it sets off from (see ReplayAllRun.zoom). Settles as the
   // last flight lands or the intro stops it: nothing waits.
-  void player.start({ pathIds, speed: INTRO_REPLAY_SPEED, zoom: HOME.zoom });
+  void player.start({
+    pathIds,
+    speed: INTRO_REPLAY_SPEED,
+    zoom,
+    scale: INTRO_REPLAY_SCALE,
+  });
   return player.active ? player : null;
 }
 
@@ -210,7 +248,7 @@ export interface IntroOverview {
  * scene once the map is in the dialog and measured, and says whether the
  * intro plays; `fly` starts the camera once the far view is drawn. `skip`
  * ends it with Wrapped as it opens without it, `stop` where it is, for a
- * close.
+ * close, the settle included.
  */
 export interface WrappedIntro {
   begin(): Promise<boolean>;
@@ -220,26 +258,53 @@ export interface WrappedIntro {
 }
 
 /**
- * The dialog while the intro plays: the cards held back and the map dark
- * (wrapped.css), and the Skip button
+ * Where the intro is: flying and turning over home, settling on the
+ * overview as the cards come in, or over (null)
  */
-function showIntroChrome(on: boolean): void {
+type IntroPhase = "intro" | "settle" | null;
+
+/**
+ * The dialog in each phase of the intro (wrapped.css): while it plays the
+ * map over the whole dialog, shaded and titled until the camera sets off,
+ * the cards held back, and the Skip button; while it settles the cards
+ * coming in and the map drawing back into its panel
+ */
+function showIntroChrome(phase: IntroPhase): void {
   const modal = domCache.get("wrapped-modal");
-  modal?.classList.toggle("is-intro", on);
-  domCache.get("wrapped-map-container")?.classList.toggle("is-dark", on);
+  const playing = phase === "intro";
+  modal?.classList.toggle("is-intro", playing);
+  modal?.classList.toggle("is-settling", phase === "settle");
+  domCache.get("wrapped-map-container")?.classList.toggle("is-dark", playing);
   const skip = domCache.get("wrapped-skip-btn");
   if (!skip) return;
   // A button that hides drops its focus to <body>
-  if (!on && document.activeElement === skip) {
+  if (!playing && document.activeElement === skip) {
     modal?.querySelector<HTMLElement>(".close-btn")?.focus();
   }
-  skip.hidden = !on;
+  skip.hidden = !playing;
+}
+
+/**
+ * How much of the map's width, from its left edge, the cards take once
+ * they are in: side by side, their column and the gap beside it, which
+ * the map covers while the intro plays. Stacked, none: the column is not
+ * laid out while the map has the dialog to itself, which is when this is
+ * asked, and the map's panel is below the cards after.
+ */
+function cardsRoom(): number {
+  const column = domCache.get("wrapped-cards-column");
+  const content = domCache.get("wrapped-content");
+  if (!column?.offsetWidth || !content) return 0;
+  return (
+    column.offsetWidth + (parseFloat(getComputedStyle(content).columnGap) || 0)
+  );
 }
 
 /**
  * Start the intro for a dialog that has just opened: `home` is where the
  * camera flies, `overview` where it comes to rest, and `onEnd` is told
- * once, however it ends.
+ * once, however it ends: once the map has settled in its panel, or at a
+ * skip or a close.
  */
 export function startWrappedIntro(
   app: MapApp,
@@ -247,9 +312,11 @@ export function startWrappedIntro(
   overview: IntroOverview,
   onEnd: () => void,
 ): WrappedIntro {
-  let playing = true;
+  let phase: IntroPhase = "intro";
   /** The feature bundle, once `begin` has it */
   let features: FeatureModule | null = null;
+  /** Where the camera comes down over home, once `begin` knows */
+  let over: CameraStop | null = null;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let replay: ReplayAllPlayer | null = null;
   /** Takes the listeners for a touch of the map off again */
@@ -270,36 +337,97 @@ export function startWrappedIntro(
   const fit = (options: FitBoundsOptions): void => {
     app.map?.fitBounds(overview.bounds, { ...overview.options, ...options });
   };
-  const after = (ms: number, step: () => void): void => {
-    timer = setTimeout(() => {
-      if (playing) step();
-    }, ms);
+  /**
+   * The camera of the overview as the map's panel will show it, north up
+   * and flat, where side by side the cards take `room` pixels of the map
+   * on its left (cardsRoom): fitted with the map's view padded by that
+   * much, which moves the middle of its perspective to the middle of the
+   * panel's part. Fitted with the room as a padding of the fit alone, the
+   * globe was seen from off to the side there and fitted a little closer,
+   * and the map jumped as it took its panel. The padding is put back at
+   * once, before a frame is drawn, and tagged, as no view to come to rest
+   * at.
+   */
+  const overviewIn = (map: MapLibreMap, room: number) => {
+    map.setPadding({ ...NO_PADDING, left: room }, REPLAY_CAMERA_MOVE);
+    const camera = map.cameraForBounds(overview.bounds, {
+      padding: FIT_PADDING,
+      bearing: 0,
+    });
+    map.setPadding(NO_PADDING, REPLAY_CAMERA_MOVE);
+    return camera && { ...camera, pitch: 0 };
   };
+  const after = (ms: number, step: () => void): void => {
+    timer = setTimeout(step, ms);
+  };
+  /**
+   * Over, however it ends: the camera stops where it is, and the map's
+   * view loses the cards' padding (see settle), whether the map is fitted
+   * in its panel next or goes back to the page
+   */
   const end = (): void => {
-    playing = false;
+    const map = app.map;
+    map?.stop();
+    if (phase === "settle") map?.setPadding(NO_PADDING);
+    phase = null;
     clearTimeout(timer);
     listening.abort();
     replay?.stop();
     replay = null;
-    showIntroChrome(false);
+    showIntroChrome(null);
     onEnd();
   };
+  /**
+   * Wrapped as it opens without the intro: the map in its panel beside or
+   * below the cards, measured again and fitted to the overview at once
+   */
+  const rest = (): void => {
+    if (!phase) return;
+    end();
+    app.map?.resize();
+    fit({ animate: false });
+  };
   const skip = (): void => {
-    if (!playing) return;
+    if (phase !== "intro") return;
     app.store.batch(() => {
       app.globeVisible = globeBefore;
       app.forcedHeatCloud = false;
     });
-    end();
+    rest();
+  };
+  /**
+   * To rest on the overview as the cards come in. Not tagged: the app
+   * follows where the map comes to rest from here on. Side by side the map
+   * keeps the size of the dialog while it draws back into its panel beside
+   * the cards (wrapped.css), so the camera settles on the overview as the
+   * panel shows it, its view padded by the cards' room on the way
+   * (overviewIn), and the map is measured and fitted again once it is
+   * there, where it shows the same: resized on every frame instead, it
+   * would draw its canvas anew in each. Stacked, it fades from over the
+   * cards coming in, and goes to its panel below them once it has.
+   */
+  const settle = (): void => {
+    phase = "settle";
+    replay?.stop();
+    replay = null;
+    // Taken while the stacked column is still out of the layout
+    const room = cardsRoom();
+    showIntroChrome("settle");
     const map = app.map;
-    map?.stop();
-    // Stacked, the map had the dialog to itself and is a square card below
-    // the others again: the overview is fitted to that
-    map?.resize();
-    fit({ animate: false });
+    const camera = map && overviewIn(map, room);
+    if (camera) {
+      map.easeTo({
+        ...camera,
+        padding: { ...NO_PADDING, left: room },
+        duration: INTRO_SETTLE_MS,
+      });
+    } else {
+      fit({ duration: INTRO_SETTLE_MS });
+    }
+    after(INTRO_SETTLE_MS, rest);
   };
 
-  showIntroChrome(true);
+  showIntroChrome("intro");
   return {
     async begin() {
       let waited: ReturnType<typeof setTimeout> | undefined;
@@ -311,23 +439,33 @@ export function startWrappedIntro(
       ]);
       clearTimeout(waited);
       const map = app.map;
-      if (!playing || !map) return false;
+      if (phase !== "intro" || !map) return false;
       if (!found) {
         skip();
         return false;
       }
       features = found;
-      // The overview first, untagged: the cloud is cut for the zoom the
-      // map comes to rest at (ui/heatCloud.ts). In one update with the
-      // cloud and the globe, which leaves the relief out: in the 3D view
-      // the end of that zoom cut the cloud and the ribbons for the relief of
-      // the overview on the way, and the cloud dropped what it had cut ahead
-      // of time for the intro (prepareWrappedIntro).
+      // The overview first, untagged, as it will be beside the cards: the
+      // cloud is cut for the zoom the map comes to rest at
+      // (ui/heatCloud.ts), and the camera comes down a couple of levels
+      // closer (HOME). In one update with the cloud and the globe, which
+      // leaves the relief out: in the 3D view the end of that zoom cut the
+      // cloud and the ribbons for the relief of the overview on the way,
+      // and the cloud dropped what it had cut ahead of time for the intro
+      // (prepareWrappedIntro).
       app.store.batch(() => {
         app.globeVisible = true;
         app.forcedHeatCloud = true;
-        fit({ animate: false });
+        const camera = overviewIn(map, cardsRoom());
+        if (camera) map.jumpTo(camera);
+        else fit({ animate: false });
       });
+      over = {
+        center: home,
+        zoom: Math.min(map.getZoom() + HOME.above, HOME.most),
+        pitch: HOME.pitch,
+        bearing: HOME.bearing,
+      };
       const [lat, lng] = home;
       found.jumpToStop(map, {
         center: [Math.max(lat - FAR.south, -60), lng - FAR.west],
@@ -336,41 +474,38 @@ export function startWrappedIntro(
         pitch: 0,
       });
       // The user takes over: a press, a wheel or a key on the map. The map
-      // stops the camera for them, and the intro makes way.
-      found.followTakeover(map, skip, listening.signal);
+      // stops the camera for them, and the intro makes way, or the settle
+      // ends where it was going.
+      found.followTakeover(
+        map,
+        () => (phase === "intro" ? skip() : rest()),
+        listening.signal,
+      );
       return true;
     },
 
     fly() {
       const map = app.map;
-      if (!playing || !features || timer !== undefined || !map) return;
-      // The dark fades away over the flight (wrapped.css)
+      if (phase !== "intro" || !features || !over || !map) return;
+      if (timer !== undefined) return;
+      const stop = over;
+      // The shade and the title fade away over the flight (wrapped.css)
       domCache.get("wrapped-map-container")?.classList.remove("is-dark");
       // The flights first: their curves are cut as they start, which the
       // camera would otherwise lose its first frames to
-      replay = startIntroReplay(app, features);
+      replay = startIntroReplay(app, features, stop.zoom);
       const { flyToStop, turnTo } = features;
-      flyToStop(map, { center: home, ...HOME }, INTRO_FLY_MS);
+      flyToStop(map, stop, INTRO_FLY_MS);
       after(INTRO_FLY_MS, () => {
-        turnTo(map, HOME.bearing + TURN_DEG, INTRO_TURN_MS);
-        // Then to rest on the overview, as the cards come in. Not tagged:
-        // the app follows where the map comes to rest from here on.
-        after(INTRO_TURN_MS, () => {
-          end();
-          // Stacked, the map had the dialog to itself and is a square card
-          // below the others again: the overview is fitted to that
-          map.resize();
-          fit({ duration: INTRO_SETTLE_MS });
-        });
+        turnTo(map, stop.bearing + TURN_DEG, INTRO_TURN_MS);
+        after(INTRO_TURN_MS, settle);
       });
     },
 
     skip,
 
     stop() {
-      if (!playing) return;
-      end();
-      app.map?.stop();
+      if (phase) end();
     },
   };
 }

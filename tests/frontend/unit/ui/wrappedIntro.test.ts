@@ -8,6 +8,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { resetSiteData } from "../../../../kml_heatmap/frontend/state/siteData";
 import { WrappedManager } from "../../../../kml_heatmap/frontend/ui/wrappedManager";
 import {
+  FIT_PADDING,
   INTRO_FLY_MS,
   INTRO_SETTLE_MS,
   INTRO_TURN_MS,
@@ -72,6 +73,9 @@ const MAP_IN_DIALOG_MS = 150;
 /** Frankfurt, the home base of the 2024 flights of the history */
 const HOME: [number, number] = [8.57, 50.03];
 
+/** A view of the map without padding */
+const NO_PADDING = { top: 0, right: 0, bottom: 0, left: 0 };
+
 describe("Wrapped's intro", () => {
   let wrappedManager: WrappedManager;
   let mockApp: MockApp;
@@ -80,6 +84,7 @@ describe("Wrapped's intro", () => {
   const modal = (): HTMLElement => el("wrapped-modal");
   const skipButton = (): HTMLElement => el("wrapped-skip-btn");
   const mapPanel = (): HTMLElement => el("wrapped-map-container");
+  const column = (): HTMLElement => el("wrapped-cards-column");
 
   beforeEach(() => {
     vi.useFakeTimers();
@@ -120,12 +125,18 @@ describe("Wrapped's intro", () => {
     return map()[move].mock.lastCall;
   }
 
-  it("plays from the button: dark and far out on the globe, the flight home, the turn, then the overview and the cards", async () => {
+  it("plays from the button: titled and far out on the globe, the flight home, the turn, then the overview and the cards", async () => {
+    map().setZoom(5.5);
     wrappedManager.showWrapped(true);
-    // Cards held back, the map dark, Skip on offer
+    // Cards held back, the map shaded under the title of the year, Skip
+    // on offer
     expect(modal().classList.contains("is-intro")).toBe(true);
     expect(mapPanel().classList.contains("is-dark")).toBe(true);
     expect(skipButton().hidden).toBe(false);
+    expect(el("wrapped-intro-heading").textContent).toBe(
+      el("wrapped-title").textContent,
+    );
+    expect(el("wrapped-intro-year").textContent).toBe("2024");
     expect(map().fitBounds).not.toHaveBeenCalled();
 
     await vi.advanceTimersByTimeAsync(MAP_IN_DIALOG_MS);
@@ -134,19 +145,24 @@ describe("Wrapped's intro", () => {
     expect(mockApp.store.get("forcedHeatCloud")).toBe(true);
     expect(mockApp.store.get("globeVisible")).toBe(true);
     expect(mockApp.store.get("threeDVisible")).toBe(false);
-    // Fitted to the overview first, untagged, which the cloud is cut for;
-    // then far out, tagged
-    expect(map().fitBounds).toHaveBeenCalledOnce();
-    expect(lastMove("fitBounds")![1]).toMatchObject({ animate: false });
-    const [far, farTag] = lastMove("jumpTo")!;
-    expect(far).toMatchObject({ zoom: 1.2, pitch: 0, bearing: 0 });
+    // On the overview first, untagged, which the cloud is cut for; then
+    // far out, tagged
+    const [overview, far] = map().jumpTo.mock.calls;
+    expect(overview).toEqual([
+      expect.objectContaining({ bearing: 0, pitch: 0, zoom: 5.5 }),
+    ]);
+    const [farView, farTag] = far!;
+    expect(farView).toMatchObject({ zoom: 1.2, pitch: 0, bearing: 0 });
     expect(farTag).toBe(REPLAY_CAMERA_MOVE);
+    expect(map().padding).toEqual(NO_PADDING);
 
-    // The far view drawn, the camera flies home and the dark lifts
+    // The far view drawn, the camera flies home and the shade lifts: two
+    // levels closer than the overview, tilted
     const [fly, flyTag] = lastMove("flyTo")!;
     expect(fly).toMatchObject({
       center: HOME,
-      pitch: 60,
+      zoom: 7.5,
+      pitch: 45,
       duration: INTRO_FLY_MS,
     });
     expect(flyTag).toBe(REPLAY_CAMERA_MOVE);
@@ -162,15 +178,12 @@ describe("Wrapped's intro", () => {
       (fly as { bearing: number }).bearing,
     );
     expect(turnTag).toBe(REPLAY_CAMERA_MOVE);
-    expect(map().fitBounds).toHaveBeenCalledOnce();
 
-    // And settles on the overview, untagged, as the cards come in, fitted
-    // to the map panel as it is with them
+    // And settles on the overview, untagged, as the cards come in
     const measured = map().resize.mock.calls.length;
     await vi.advanceTimersByTimeAsync(INTRO_TURN_MS);
-    expect(map().resize.mock.calls.length).toBe(measured + 1);
-    expect(map().fitBounds).toHaveBeenCalledTimes(2);
-    const [, settle, settleTag] = lastMove("fitBounds")!;
+    expect(map().easeTo).toHaveBeenCalledTimes(2);
+    const [settle, settleTag] = lastMove("easeTo")!;
     expect(settle).toMatchObject({
       bearing: 0,
       pitch: 0,
@@ -178,24 +191,46 @@ describe("Wrapped's intro", () => {
     });
     expect(settleTag).toBeUndefined();
     expect(modal().classList.contains("is-intro")).toBe(false);
+    expect(modal().classList.contains("is-settling")).toBe(true);
     expect(skipButton().hidden).toBe(true);
+    expect(map().resize.mock.calls.length).toBe(measured);
+
+    // Where it is measured in its panel and fitted to it once there
+    await vi.advanceTimersByTimeAsync(INTRO_SETTLE_MS);
+    expect(modal().classList.contains("is-settling")).toBe(false);
+    expect(map().resize.mock.calls.length).toBe(measured + 1);
+    expect(map().fitBounds).toHaveBeenCalledOnce();
+    expect(lastMove("fitBounds")![1]).toMatchObject({
+      bearing: 0,
+      pitch: 0,
+      animate: false,
+    });
+    expect(map().padding).toEqual(NO_PADDING);
     // The cloud and the globe stay while the dialog is open
     expect(mockApp.store.get("forcedHeatCloud")).toBe(true);
     expect(mockApp.store.get("globeVisible")).toBe(true);
 
     // Nothing more moves the camera
     await vi.runAllTimersAsync();
-    expect(map().fitBounds).toHaveBeenCalledTimes(2);
-    expect(map().easeTo).toHaveBeenCalledOnce();
+    expect(map().fitBounds).toHaveBeenCalledOnce();
+    expect(map().easeTo).toHaveBeenCalledTimes(2);
+  });
+
+  it("comes down no closer than zoom 9 over home", async () => {
+    map().setZoom(8);
+    await openWithIntro();
+    expect(lastMove("flyTo")![0]).toMatchObject({ zoom: 9 });
   });
 
   it("fits the overview with the cloud and the globe on, so the end of that zoom cuts nothing for the relief the globe leaves out", async () => {
     const seen: unknown[] = [];
-    map().fitBounds.mockImplementation(() => {
-      seen.push([
-        mockApp.store.get("forcedHeatCloud"),
-        mockApp.store.get("globeVisible"),
-      ]);
+    map().jumpTo.mockImplementation((_options, eventData) => {
+      if (!eventData) {
+        seen.push([
+          mockApp.store.get("forcedHeatCloud"),
+          mockApp.store.get("globeVisible"),
+        ]);
+      }
       return map();
     });
     await openWithIntro();
@@ -212,14 +247,40 @@ describe("Wrapped's intro", () => {
       threeDVisible: true,
     });
 
+    // Closed as it settles, with the map's view padded for the cards
     await vi.advanceTimersByTimeAsync(INTRO_FLY_MS + INTRO_TURN_MS);
+    expect(modal().classList.contains("is-settling")).toBe(true);
     wrappedManager.closeWrapped();
+    expect(modal().classList.contains("is-settling")).toBe(false);
+    expect(map().padding).toEqual(NO_PADDING);
     expect(mockApp.store.get("globeVisible")).toBe(false);
     expect(mockApp.store.get("threeDVisible")).toBe(true);
     expect(mockApp.store.get("forcedHeatCloud")).toBe(false);
     await vi.advanceTimersByTimeAsync(100);
     expect(lastMove("jumpTo")![0]).toMatchObject({ zoom: 11 });
     expect(wrappedManager.userMapView()).toBeNull();
+    // Nor does the end of the settle move it any more
+    await vi.runAllTimersAsync();
+    expect(lastMove("jumpTo")![0]).toMatchObject({ zoom: 11 });
+    expect(map().fitBounds).not.toHaveBeenCalled();
+  });
+
+  it("sets off as soon as the tiles of the far globe are drawn, before its labels have faded in", async () => {
+    map().loaded.mockReturnValue(false);
+    map().areTilesLoaded.mockReturnValue(false);
+    await openWithIntro();
+    const renders = map().listenerCount("render");
+    expect(mapPanel().classList.contains("is-awaiting-map")).toBe(true);
+
+    map().emit("render");
+    expect(mapPanel().classList.contains("is-awaiting-map")).toBe(true);
+    expect(map().flyTo).not.toHaveBeenCalled();
+
+    map().areTilesLoaded.mockReturnValue(true);
+    map().emit("render");
+    expect(mapPanel().classList.contains("is-awaiting-map")).toBe(false);
+    expect(map().flyTo).toHaveBeenCalledOnce();
+    expect(map().listenerCount("render")).toBe(renders - 1);
   });
 
   it("stops where it is when the dialog closes while it plays", async () => {
@@ -233,13 +294,14 @@ describe("Wrapped's intro", () => {
     await vi.runAllTimersAsync();
     // Neither the turn nor the settle
     expect(map().easeTo).not.toHaveBeenCalled();
-    expect(map().fitBounds).toHaveBeenCalledOnce();
+    expect(map().fitBounds).not.toHaveBeenCalled();
   });
 
   describe("skipped", () => {
     /** Wrapped as it opens without the intro */
     function expectWrappedAsToday(): void {
       expect(modal().classList.contains("is-intro")).toBe(false);
+      expect(modal().classList.contains("is-settling")).toBe(false);
       expect(mapPanel().classList.contains("is-dark")).toBe(false);
       expect(skipButton().hidden).toBe(true);
       expect(mockApp.store.get("globeVisible")).toBe(false);
@@ -260,6 +322,9 @@ describe("Wrapped's intro", () => {
 
       expect(map().stop).toHaveBeenCalled();
       expectWrappedAsToday();
+      // The map keeps showing: a fade-in that started over from its delay
+      // left the panel empty for a moment
+      expect(modal().classList.contains("has-intro")).toBe(true);
       // Measured with the cards back in, before the fit: stacked, the map
       // had the dialog to itself
       expect(map().resize.mock.calls.length).toBe(measured + 1);
@@ -346,6 +411,7 @@ describe("Wrapped's intro", () => {
     // A restored state reopens it
     wrappedManager.showWrapped();
     expect(modal().classList.contains("is-intro")).toBe(false);
+    expect(modal().classList.contains("has-intro")).toBe(false);
     wrappedManager.closeWrapped();
     await vi.runAllTimersAsync();
 
@@ -353,6 +419,85 @@ describe("Wrapped's intro", () => {
     wrappedManager.showWrapped(true);
     expect(modal().classList.contains("is-intro")).toBe(false);
     expect(loader.loadFeatures).not.toHaveBeenCalled();
+  });
+
+  describe("settling beside the cards", () => {
+    /** The cards column side by side, 500 px wide and 24 px from the map */
+    beforeEach(() => {
+      Object.defineProperty(column(), "offsetWidth", {
+        configurable: true,
+        get: () => 500,
+      });
+      el("wrapped-content").style.columnGap = "24px";
+    });
+
+    /** The padding of the map's view as each overview was fitted */
+    let fitted: unknown[] = [];
+    beforeEach(() => {
+      fitted = [];
+      const fit = map().cameraForBounds.getMockImplementation()!;
+      map().cameraForBounds.mockImplementation((bounds, options) => {
+        fitted.push({ ...map().padding });
+        return fit(bounds, options);
+      });
+    });
+    const paddingsFitted = (): unknown[] => fitted;
+
+    it("fits the overview as the map's panel shows it, its view padded by the room of the cards, and sets it back once there", async () => {
+      await openWithIntro();
+      await vi.advanceTimersByTimeAsync(INTRO_FLY_MS + INTRO_TURN_MS);
+
+      // Both fits, the one the cloud is cut for and the settle's
+      const room = { ...NO_PADDING, left: 524 };
+      expect(paddingsFitted()).toEqual([room, room]);
+      expect(map().cameraForBounds.mock.calls[0]![1]).toMatchObject({
+        padding: FIT_PADDING,
+        bearing: 0,
+      });
+      // The settle eases the padding in with the camera, and the map is
+      // not measured until it is in its panel
+      expect(lastMove("easeTo")![0]).toMatchObject({ padding: room });
+      map().resize.mockClear();
+
+      await vi.advanceTimersByTimeAsync(INTRO_SETTLE_MS);
+      // Unpadded before it is measured and fitted in its panel
+      expect(map().padding).toEqual(NO_PADDING);
+      expect(map().setPadding.mock.invocationCallOrder.at(-1)!).toBeLessThan(
+        map().resize.mock.invocationCallOrder[0]!,
+      );
+      expect(map().resize.mock.invocationCallOrder[0]!).toBeLessThan(
+        map().fitBounds.mock.invocationCallOrder[0]!,
+      );
+    });
+
+    it("ends where it was going at a press on the map, with the globe and the cloud kept", async () => {
+      await openWithIntro();
+      await vi.advanceTimersByTimeAsync(INTRO_FLY_MS + INTRO_TURN_MS);
+      const measured = map().resize.mock.calls.length;
+
+      map().getContainer().dispatchEvent(new Event("pointerdown"));
+      expect(modal().classList.contains("is-settling")).toBe(false);
+      expect(map().stop).toHaveBeenCalled();
+      expect(map().padding).toEqual(NO_PADDING);
+      expect(map().resize.mock.calls.length).toBe(measured + 1);
+      expect(lastMove("fitBounds")![1]).toMatchObject({ animate: false });
+      expect(mockApp.store.get("globeVisible")).toBe(true);
+      expect(mockApp.store.get("forcedHeatCloud")).toBe(true);
+
+      // And only once
+      await vi.runAllTimersAsync();
+      expect(map().fitBounds).toHaveBeenCalledOnce();
+    });
+
+    it("fits the overview to the whole map where the cards are stacked", async () => {
+      Object.defineProperty(column(), "offsetWidth", {
+        configurable: true,
+        get: () => 0,
+      });
+      await openWithIntro();
+      await vi.advanceTimersByTimeAsync(INTRO_FLY_MS + INTRO_TURN_MS);
+      expect(paddingsFitted()).toEqual([NO_PADDING, NO_PADDING]);
+    });
   });
 
   describe("with every flight of the overview playing underneath", () => {
@@ -369,12 +514,14 @@ describe("Wrapped's intro", () => {
       expect(replay.app).toBe(mockApp);
       expect(replay.start).toHaveBeenCalledOnce();
       const [run] = replay.start.mock.lastCall as [
-        { pathIds: Set<number>; speed: number; zoom: number },
+        { pathIds: Set<number>; speed: number; zoom: number; scale: number },
       ];
       // The flights Wrapped describes: the year's, of the aircraft chosen
       expect([...run.pathIds].sort()).toEqual([1, 2]);
       expect(run.speed).toBeGreaterThanOrEqual(100);
       expect(run.speed).toBeLessThanOrEqual(500);
+      // Larger than their own size, over the view of a whole year
+      expect(run.scale).toBeGreaterThan(1);
       // Cut for the view over home the camera flies to, and cut before it
       // sets off, as the dark lifts
       const [fly] = lastMove("flyTo")! as [{ zoom: number }];
@@ -390,7 +537,7 @@ describe("Wrapped's intro", () => {
       expect(replay.stop).toHaveBeenCalledOnce();
       // Stopped before the settle's move, as the cards come in
       expect(replay.stop.mock.invocationCallOrder[0]!).toBeLessThan(
-        map().fitBounds.mock.invocationCallOrder.at(-1)!,
+        map().easeTo.mock.invocationCallOrder.at(-1)!,
       );
       // Not a replay of the map: nothing of the app changed for it
       expect(mockApp.store.get("replayActive")).toBe(false);
