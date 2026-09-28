@@ -23,8 +23,8 @@ import type { Airport, AirportMarker, KMLDataset } from "./types";
  * A restored/URL year that is not available falls back to the latest year
  * (with a toast) so the select never ends up blank. The page ships with
  * the latest year as an option, and a restored one may have one of its own
- * (see MapApp.restoreState), which the list replaces: the dropdown named
- * the year it opens on from the start.
+ * (see restoreState in ui/stateRestore.ts), which the list replaces: the
+ * dropdown named the year it opens on from the start.
  * @param app - The MapApp instance to operate on
  * @param availableYears - Years listed in the metadata
  */

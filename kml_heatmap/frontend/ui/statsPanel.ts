@@ -5,9 +5,10 @@
  * Wrapped bundle (ui/statsManager.ts, calculations/panelStats.ts): most
  * visits never open the panel, and it is too large to ship with the map.
  * The rail, its triggers and the `statsPanelVisible` key stay in the app
- * (see MapApp.setupStatsRail), so it opens at once; this fetches the bundle
- * the first time it does and starts the stats manager, which follows the
- * store from then on. Until the bundle is in, the panel says it is loading.
+ * (see setupStatsRail in ui/appChrome.ts), so it opens at once; this
+ * fetches the bundle the first time it does and starts the stats manager,
+ * which follows the store from then on. Until the bundle is in, the panel
+ * says it is loading.
  * When it cannot be fetched the app says so (see MapApp.loadStats) and the
  * rail closes again, so opening it once more tries again.
  */

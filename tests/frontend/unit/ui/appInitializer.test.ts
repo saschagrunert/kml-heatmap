@@ -91,7 +91,7 @@ describe("appInitializer", () => {
 
     it("replaces the year the page ships with, and a restored one, with the list", () => {
       // The template names the latest year (site_assets.render_html), and
-      // MapApp.restoreState adds one of a link
+      // restoreState (ui/stateRestore.ts) adds one of a link
       yearSelect().add(new Option("2024", "2024", true, true));
       yearSelect().add(new Option("1999"));
 
@@ -792,7 +792,7 @@ describe("appInitializer", () => {
 
         await loadInitialData(asMapApp(app));
 
-        // Applied once the load is over (MapApp.applyPendingFilterChanges)
+        // Applied once the load is over (applyPendingFilterChanges)
         expect(yearSelect().value).toBe("2024");
       });
 

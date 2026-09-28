@@ -648,7 +648,7 @@ export class ReplayManager {
       currentResSegments.length > 0 ? currentResSegments : this.state.segments;
 
     // The flight's own ranges, as the colour layers draw it selected (see
-    // LayerManager.resolveColorRange), its colours spread by its values
+    // resolveColorRange in ui/pathLook.ts), its colours spread by its values
     this.state.colorAltRange = calculateAltitudeRange(
       sourceSegments,
       this.app.altitudeRange,

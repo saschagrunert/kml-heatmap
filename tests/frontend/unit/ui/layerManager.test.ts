@@ -1,10 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { Point, type LngLat, type Map as MapLibreMap } from "maplibre-gl";
 import { LngLatBounds } from "../../../mocks/maplibre-gl";
-import {
-  LayerManager,
-  type LayerMode,
-} from "../../../../kml_heatmap/frontend/ui/layerManager";
+import { LayerManager } from "../../../../kml_heatmap/frontend/ui/layerManager";
+import type { LayerMode } from "../../../../kml_heatmap/frontend/ui/pathRuns";
 import { addDataLayers } from "../../../../kml_heatmap/frontend/mapLayers";
 import {
   airspeedColorAt,

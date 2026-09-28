@@ -204,7 +204,7 @@ class TestRenderHtml:
         ]
         # The style is the one the page fetches
         app = (
-            Path(__file__).parents[1] / "kml_heatmap" / "frontend" / "mapApp.ts"
+            Path(__file__).parents[1] / "kml_heatmap" / "frontend" / "baseStyle.ts"
         ).read_text()
         assert f'"{assets_module.CARTO_STYLE_URL}"' in app
 

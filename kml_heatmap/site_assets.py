@@ -278,7 +278,7 @@ def warn_about_a_stale_bundle() -> None:
         )
 
 
-#: The base style the app fetches (CARTO_STYLE_URL in mapApp.ts), and the
+#: The base style the app fetches (CARTO_STYLE_URL in baseStyle.ts), and the
 #: index of the vector tiles it names, which MapLibre asks for next
 CARTO_STYLE_URL = "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json"
 CARTO_TILEJSON_URL = (
@@ -298,7 +298,7 @@ def _carto_preloads(api_key: str) -> str:
     has answered: the page's scripts, the map's start, the style and then
     the index. A preload is only used for the very same URL, so the key goes
     on as the page puts it on (encodeURIComponent, see cartoStyleUrl and
-    cartoTransformRequest in mapApp.ts), and none goes on without one.
+    cartoTransformRequest in baseStyle.ts), and none goes on without one.
     """
     # encodeURIComponent leaves these as they are, and quote() does not
     query = "?key=" + quote(api_key, safe="!*'()") if api_key else ""

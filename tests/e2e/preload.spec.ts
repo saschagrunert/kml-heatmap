@@ -54,7 +54,7 @@ test("CARTO's style and tile index are preloaded as the page asks for them", asy
   // The base style has arrived and gone under the flights
   await expect(attributionControl(page)).toContainText("CARTO");
 
-  // With the site's key, or without one when it has none (mapApp.ts)
+  // With the site's key, or without one when it has none (baseStyle.ts)
   const key = await page.evaluate(() => window.MAP_CONFIG!.cartoApiKey);
   const query = key ? `?key=${encodeURIComponent(key)}` : "";
   const preloaded = await page
