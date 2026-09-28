@@ -100,8 +100,7 @@ const FRONTEND_DIR = join(__dirname, "kml_heatmap/frontend");
 // replay and Wrapped use and the app does not would still get a chunk of
 // its own; assertExpectedOutputs() fails the build when that happens (move
 // it where the app reaches it, as with segmentBounds in utils/geometry.ts,
-// or out of the lazy code that uses it, as calculations/panelStats.ts does
-// without utils/arrayHelpers.ts, which replay uses).
+// or inline it in each lazy module that uses it).
 /** @type {import("esbuild").BuildOptions} */
 const buildOptions = {
   entryPoints: [

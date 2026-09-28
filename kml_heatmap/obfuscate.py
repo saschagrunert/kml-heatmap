@@ -18,18 +18,16 @@ names ("2026-01-12_1513h_OE-AKI_LOAV-LOAV.kml").
 """
 
 import argparse
-import contextlib
 import html
 import os
 import re
-import shutil
 import sys
-import tempfile
 from bisect import bisect_right
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, NamedTuple
 
+from .cache import atomic_write
 from .constants import MAX_TIMESTAMP_DISTANCE_SECONDS
 from .date_tokens import (
     MONTHS_LONG,
@@ -105,7 +103,7 @@ CHARTERWARE_NAME_PATTERN = re.compile(
 )
 MINUTES_PER_DAY = 24 * 60
 
-# The temp file of _write_atomic: ".<name>.kml.XXXXXXXX.tmp"
+# The temp file of _write_atomic (cache.atomic_write): ".<name>.kml.XXXXXXXX.tmp"
 TEMP_FILE_PATTERN = re.compile(r"^\..*\.kml\.[^.]+\.tmp$", re.IGNORECASE)
 
 # Timestamps further apart than this belong to different flights, unless they
@@ -391,20 +389,6 @@ def obfuscate_kml_content(content: str) -> str | None:
     return new_content if new_content != content else None
 
 
-def _fsync_directory(directory: Path) -> None:
-    """Flush a directory entry to disk (best effort, not every FS supports it)."""
-    try:
-        fd = os.open(directory, os.O_RDONLY)
-    except OSError:
-        return
-    try:
-        os.fsync(fd)
-    except OSError:
-        pass
-    finally:
-        os.close(fd)
-
-
 def _write_atomic(filepath: Path, content: str) -> bool:
     """Write content via a temp file in the same directory and os.replace.
 
@@ -413,32 +397,17 @@ def _write_atomic(filepath: Path, content: str) -> bool:
     crash in between leaves either the old file or the complete new one. Line
     endings are written as they were read, and the file keeps its mode.
     """
-    tmp_name: str | None = None
     try:
-        with tempfile.NamedTemporaryFile(
-            mode="w",
-            encoding="utf-8",
+        atomic_write(
+            filepath,
+            lambda tmp: tmp.write(content),
             newline="",
-            dir=filepath.parent,
-            prefix=f".{filepath.name}.",
-            suffix=".tmp",
-            delete=False,
-        ) as tmp:
-            tmp_name = tmp.name
-            tmp.write(content)
-            tmp.flush()
-            os.fsync(tmp.fileno())
-        shutil.copymode(filepath, tmp_name)
-        os.replace(tmp_name, filepath)
-        tmp_name = None
-        _fsync_directory(filepath.parent)
+            durable=True,
+            keep_mode=True,
+        )
     except OSError as e:
         logger.warning("Skipping %s: failed to write (%s)", filepath, e)
         return False
-    finally:
-        if tmp_name is not None:
-            with contextlib.suppress(OSError):
-                os.unlink(tmp_name)
     return True
 
 

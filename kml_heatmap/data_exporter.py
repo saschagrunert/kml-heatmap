@@ -16,29 +16,21 @@ of the year file as JSON fragments and returns its counts and groundspeed
 range instead of the segments themselves; the main process concatenates the
 fragments into the year file without parsing them.
 
-Path ids are derived from the path content (see ``path_content_id``) in the
+Path ids are derived from the path content (see ``path_content``) in the
 main process, before the work is chunked. They end up in shared links and in
 the saved state of the frontend, so a re-export has to keep the id of every
 flight that is still there, whatever was added or removed around it. Within a
 year file the paths keep the input order.
 
-``SiteOutput`` has every file written into staging directories and moves them
-into place only once all of them were written, so a run that fails while
-writing leaves the previous site as it was. One run at a time writes to an
-output directory.
+The files are written into the staging directories of a ``SiteOutput`` (see
+``site_output``), which publishes them all at once.
 """
 
-import contextlib
-import errno
-import hashlib
 import json
 import logging
 import math
 import os
-import re
 import shutil
-import struct
-import tempfile
 from concurrent.futures import (
     FIRST_COMPLETED,
     Executor,
@@ -49,7 +41,7 @@ from concurrent.futures import (
 from concurrent.futures.process import BrokenProcessPool
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import IO, TYPE_CHECKING, Self
+from typing import IO, TYPE_CHECKING
 
 from .aircraft import resolve_aircraft_models
 from .cache import atomic_write
@@ -64,41 +56,43 @@ from .export_writers import (
 )
 from .landings import detect_landings
 from .logger import logger
+from .path_content import (
+    PATH_ID_BITS,
+    assign_path_ids,
+    drop_duplicate_paths,
+    exported_contents,
+    is_exportable_path,
+    path_content_id,
+)
 from .segment_codec import FORMAT_VERSION, encode_ground, encode_rows, encode_start
 from .site_assets import available_country_flags
+from .site_output import STABLE_MTIMES_ENV, STAGING_PREFIX, YEAR_FILE, SiteOutput
 from .terrain import (
     elevations_by_coordinate,
     ground_profile_ft,
     sample_path_elevations,
 )
-from .types import COORDINATE_DECIMALS
-from .validation import is_protected_directory
 from .workers import init_worker
 
-try:
-    import fcntl
-except ImportError:  # pragma: no cover - Windows has no fcntl
-    # Without file locks two runs on one output directory are not detected;
-    # the export itself works
-    fcntl = None  # type: ignore[assignment]
-
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Mapping, Sequence
+    from collections.abc import Mapping, Sequence
 
     from .landings import FlightLandings
     from .terrain import PointElevations, TileSource
     from .types import (
         AirportData,
-        FlightPath,
         FlightPathGroup,
         PathMetadata,
         YearFileHeader,
     )
 
+# What moved to path_content and site_output is exported here as well, for
+# the callers that import it from here
 __all__ = [
     "MIN_PATHS_PER_CHUNK",
     "PATH_ID_BITS",
     "STABLE_MTIMES_ENV",
+    "STAGING_PREFIX",
     "ChunkResult",
     "ExportResult",
     "GroundspeedRange",
@@ -113,32 +107,14 @@ __all__ = [
     "process_year_chunk",
 ]
 
-YEAR_DIR_PATTERN = re.compile(r"^\d{4}$")
-YEAR_FILE = "data.json"
-TOOL_OWNED_FILES = ("airports.json", "metadata.json")
-# Hidden directories a run writes its files into before publishing them
-STAGING_PREFIX = ".kml-heatmap-staging-"
-# Published last: they reference the other files, so a page loaded while the
-# files are moved never points at one that is not in place yet
-ENTRY_POINT_FILES = ("metadata.json", "index.html")
 # A year is not split below this many paths per chunk: a worker process only
 # pays off when it has real work to do
 MIN_PATHS_PER_CHUNK = 50
 # Chunks handed to the process pool ahead of time, per worker
 MAX_QUEUED_CHUNKS_PER_WORKER = 2
 JSON_SEPARATORS = (",", ":")
-# Path ids are this wide: exact JavaScript numbers, short enough for a link,
-# and wide enough that 100,000 flights rarely need a collision resolved
-PATH_ID_BITS = 40
 # Segment row layout: [lat, lon, altitude_ft, groundspeed_knots, time?]
 SEGMENT_SPEED_INDEX = 3
-# Set to "1", every published file gets a modification time derived from
-# its content (see content_mtime)
-STABLE_MTIMES_ENV = "KML_HEATMAP_STABLE_MTIMES"
-# The content-derived modification times lie this many seconds after
-# 2001-09-09 at most: in the past, where no tool warns about them
-_CONTENT_MTIME_EPOCH = 1_000_000_000
-_CONTENT_MTIME_RANGE = 1 << 28
 
 
 @dataclass
@@ -210,138 +186,6 @@ class _ChunkPlan:
     # One entry per path index: its landings, see landings.detect_landings;
     # empty for none at all
     landings: list[FlightLandings | None] = field(default_factory=list)
-
-
-def is_exportable_path(path: FlightPath) -> bool:
-    """Whether a path gets an id and an entry in the export.
-
-    It has to move at the exported precision: points that all round to one
-    coordinate make no segment row, and a flight without rows would still
-    count in the frontend with its airports and aircraft.
-    """
-    if len(path) < 2:
-        return False
-    start = (
-        round(path[0].lat, COORDINATE_DECIMALS),
-        round(path[0].lon, COORDINATE_DECIMALS),
-    )
-    return any(
-        (round(point.lat, COORDINATE_DECIMALS), round(point.lon, COORDINATE_DECIMALS))
-        != start
-        for point in path[1:]
-    )
-
-
-def _path_content(path: FlightPath) -> bytes:
-    """The coordinates, rounded the way they are exported, and altitudes."""
-    values: list[float] = []
-    for point in path:
-        values.append(round(point.lat, COORDINATE_DECIMALS))
-        values.append(round(point.lon, COORDINATE_DECIMALS))
-        values.append(math.nan if point.alt is None else round(point.alt, 1))
-    return struct.pack(f"<{len(values)}d", *values)
-
-
-def _content_id(content: bytes) -> int:
-    digest = hashlib.blake2b(content, digest_size=8).digest()
-    return int.from_bytes(digest, "big") >> (64 - PATH_ID_BITS)
-
-
-def path_content_id(path: FlightPath) -> int:
-    """The id a path gets unless an earlier path already holds it.
-
-    A hash of the coordinates, rounded the way they are exported, and of the
-    altitudes. It survives a re-export, flights added or removed around it
-    and the renaming of Charterware files, none of which a position in the
-    input or a file name would.
-    """
-    return _content_id(_path_content(path))
-
-
-def exported_contents(
-    paths_by_year: Mapping[int, list[int]],
-    all_path_groups: FlightPathGroup,
-    exportable: Sequence[bool],
-) -> dict[int, bytes]:
-    """The content of every exportable path (see ``_path_content``), by index.
-
-    In input order. Packed once here for ``drop_duplicate_paths``, which
-    compares it, and ``assign_path_ids``, which hashes it.
-    """
-    return {
-        index: _path_content(all_path_groups[index])
-        for index in sorted(
-            index for indices in paths_by_year.values() for index in indices
-        )
-        if exportable[index]
-    }
-
-
-def drop_duplicate_paths(
-    paths_by_year: Mapping[int, list[int]],
-    contents: Mapping[int, bytes],
-    all_path_metadata: Sequence[PathMetadata],
-) -> dict[int, list[int]]:
-    """Leave out every exported path that repeats an earlier one exactly.
-
-    ``contents`` are those of the exported paths (see ``exported_contents``).
-    The same recording under two file names (a copy, a renamed export)
-    would otherwise count twice in every statistic. Paths are compared by
-    their exported content itself, not by its hash, so two different
-    flights that share a hash both stay. The first one in input order is
-    kept and a warning names both files. A year left without an exported
-    path is left out.
-    """
-    first_by_content: dict[bytes, int] = {}
-    duplicates: set[int] = set()
-    for index in sorted(contents):
-        first = first_by_content.setdefault(contents[index], index)
-        if first != index:
-            duplicates.add(index)
-            logger.warning(
-                "Skipping a flight in %s: the same flight as in %s",
-                all_path_metadata[index].get("filename") or f"path {index}",
-                all_path_metadata[first].get("filename") or f"path {first}",
-            )
-    if not duplicates:
-        return dict(paths_by_year)
-    kept = {
-        year: [index for index in indices if index not in duplicates]
-        for year, indices in paths_by_year.items()
-    }
-    return {
-        year: indices
-        for year, indices in kept.items()
-        if any(index in contents for index in indices)
-    }
-
-
-def assign_path_ids(
-    paths_by_year: Mapping[int, list[int]], contents: Mapping[int, bytes]
-) -> dict[int, int]:
-    """The id of every exported path, keyed by its index in the input.
-
-    ``contents`` are those of the exported paths (see ``exported_contents``).
-    A path whose content id an earlier path (in input order) already holds,
-    a real collision (``drop_duplicate_paths`` removes exact duplicates
-    before), takes the next free id. The ids therefore only depend on the
-    paths and their order, never on the chunking or the number of workers.
-    """
-    exported = sorted(
-        index
-        for indices in paths_by_year.values()
-        for index in indices
-        if index in contents
-    )
-    ids: dict[int, int] = {}
-    taken: set[int] = set()
-    for index in exported:
-        path_id = _content_id(contents[index])
-        while path_id in taken:
-            path_id = (path_id + 1) % (1 << PATH_ID_BITS)
-        taken.add(path_id)
-        ids[index] = path_id
-    return ids
 
 
 def _part_paths(output_dir: str, year: int, index: int) -> tuple[Path, Path]:
@@ -719,287 +563,6 @@ def _export_chunks(
         chunks = [chunk for chunk in chunk_results if chunk.year == year]
         year_results.append(_assemble_year_file(year, chunks, output_dir))
     return year_results
-
-
-def _refuse_symlink(path: Path) -> ValueError:
-    return ValueError(
-        f"Refusing to write through the symlink {path}; "
-        "remove it or choose a different output directory"
-    )
-
-
-def _check_target(root: Path, relative: Path) -> None:
-    """Refuse a destination that a staged file cannot safely be moved to.
-
-    Symlinks are neither written through nor replaced, and nothing but a
-    regular file (or a directory on the way to one) is replaced. The
-    permission to create the file is checked as well, so that a read-only
-    directory stops the run before the first file was moved.
-    """
-    directory = root
-    for part in relative.parts[:-1]:
-        child = directory / part
-        if child.is_symlink():
-            raise _refuse_symlink(child)
-        if not child.exists():
-            break
-        if not child.is_dir():
-            raise ValueError(f"Refusing to write into {child}: not a directory")
-        directory = child
-    else:
-        target = root / relative
-        if target.is_symlink():
-            raise _refuse_symlink(target)
-        if target.exists() and not target.is_file():
-            raise ValueError(f"Refusing to replace {target}: not a regular file")
-    if not os.access(directory, os.W_OK | os.X_OK):
-        raise PermissionError(errno.EACCES, os.strerror(errno.EACCES), str(directory))
-
-
-def content_mtime(path: Path) -> int:
-    """A modification time for a file that only its content decides.
-
-    GitHub Pages derives the ETag of a file from its modification time and
-    size, and a site built afresh on every deploy gives every file the time
-    of the build: every deploy made every browser download every file again,
-    changed or not. A time taken from a hash of the content keeps the ETag
-    of a file that did not change. It is no real time, only a label, and
-    only for a server that compares it for equality (nginx, GitHub Pages)
-    and sends a Cache-Control of its own: ``python -m http.server`` answers
-    304 to an older time and sends none, so browsers would cache a file of
-    2005 for years. Hence only on request, see ``STABLE_MTIMES_ENV``.
-    """
-    digest = hashlib.blake2b(digest_size=8)
-    with open(path, "rb") as f:
-        while chunk := f.read(1 << 20):
-            digest.update(chunk)
-    offset = int.from_bytes(digest.digest(), "big") % _CONTENT_MTIME_RANGE
-    return _CONTENT_MTIME_EPOCH + offset
-
-
-def _staged_files(stage: Path) -> list[Path]:
-    """The files of a staging directory, relative to it, in publishing order.
-
-    Files in subdirectories (the year files) come first and the entry points
-    last, see ``ENTRY_POINT_FILES``.
-    """
-    files = [path.relative_to(stage) for path in stage.rglob("*") if path.is_file()]
-    return sorted(
-        files,
-        key=lambda relative: (
-            len(relative.parts) == 1,
-            relative.name in ENTRY_POINT_FILES,
-            relative.as_posix(),
-        ),
-    )
-
-
-def _remove_stale_file(path: Path) -> None:
-    """Remove a tool-owned file that the published run did not produce.
-
-    The new site is already in place at this point, so a file that cannot be
-    removed only gets a warning; a symlink is somebody else's and left alone.
-    """
-    if path.is_symlink():
-        logger.warning("Leaving symlink in output directory: %s", path)
-    elif path.is_file():
-        try:
-            path.unlink()
-        except OSError as e:
-            logger.warning("Could not remove stale output %s: %s", path, e)
-
-
-def _remove_stale_data(data_dir: Path, years: set[str]) -> None:
-    """Remove year files that are not part of the site any more.
-
-    Anything the tool does not own is left in place with a warning.
-    """
-    for child in sorted(data_dir.iterdir()):
-        if child.name in TOOL_OWNED_FILES or child.name.startswith(STAGING_PREFIX):
-            continue
-        if (
-            child.is_dir()
-            and not child.is_symlink()
-            and YEAR_DIR_PATTERN.match(child.name)
-        ):
-            if child.name not in years:
-                _remove_stale_file(child / YEAR_FILE)
-                try:
-                    child.rmdir()
-                except OSError:
-                    logger.warning("Leaving non-empty year directory: %s", child)
-            continue
-        logger.warning("Leaving unexpected item in output directory: %s", child)
-
-
-def _lock_directory(directory: Path) -> int:
-    """Take the lock of an output directory, or fail when a run holds it.
-
-    Two runs writing one site would delete each other's staging directories.
-    The lock is on the directory itself, so no lock file ends up published
-    with the site. It is released when the returned descriptor is closed.
-    """
-    fd = os.open(directory, os.O_RDONLY)
-    if fcntl is None:
-        return fd
-    try:
-        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except BlockingIOError:
-        os.close(fd)
-        raise KMLHeatmapError(
-            f"Another run is writing to {directory}; wait for it to finish"
-        ) from None
-    except OSError:
-        # A file system without locks: run unguarded, as before
-        pass
-    return fd
-
-
-def _remove_leftover_stages(directory: Path) -> None:
-    """Remove the staging directories of runs that were killed.
-
-    Only called with the directory's lock held, so no stage of a running
-    run is among them.
-    """
-    for child in directory.iterdir():
-        if (
-            child.name.startswith(STAGING_PREFIX)
-            and child.is_dir()
-            and not child.is_symlink()
-        ):
-            shutil.rmtree(child, ignore_errors=True)
-
-
-class SiteOutput:
-    """Write a site into staging directories and publish it all at once.
-
-    Every file is written into a hidden staging directory inside its
-    destination, which keeps the final renames on one filesystem, and moved
-    into place only once all files were written. A failed run leaves the
-    previous site untouched instead of deleting it or mixing two versions.
-    Files the tool does not own are never touched.
-
-    Use it as a context manager: write the data files into ``data_stage`` and
-    the page and its assets into ``site_stage``, then call ``publish``. The
-    staging directories are removed on exit, published or not.
-    """
-
-    site_stage: Path
-    data_stage: Path
-
-    def __init__(
-        self,
-        output_dir: str | Path,
-        data_dir: str | Path,
-        site_files: Iterable[str] = (),
-        site_patterns: Iterable[str] = (),
-        stable_mtimes: bool = False,
-    ) -> None:
-        """Prepare the output of a site.
-
-        ``site_files`` are the paths the tool owns in ``output_dir``, each
-        relative to it and with forward slashes; the ones a run does not
-        produce are removed when it is published. ``site_patterns`` are glob
-        patterns of owned files whose names are not known in advance, such
-        as the flag of each country visited: every match that a run does
-        not produce is removed as well, or a flight removed from the input
-        would still give away its country. ``stable_mtimes`` gives every
-        published file a modification time derived from its content (see
-        ``content_mtime``).
-        """
-        self.output_dir = Path(output_dir).resolve()
-        self.data_dir = Path(data_dir).resolve()
-        for given, resolved in (
-            (output_dir, self.output_dir),
-            (data_dir, self.data_dir),
-        ):
-            if is_protected_directory(resolved):
-                raise ValueError(f"Refusing to use dangerous output directory: {given}")
-        self.site_files = tuple(site_files)
-        self.site_patterns = tuple(site_patterns)
-        self.stable_mtimes = stable_mtimes
-        self._cleanup = contextlib.ExitStack()
-
-    def __enter__(self) -> Self:
-        try:
-            for destination in dict.fromkeys((self.output_dir, self.data_dir)):
-                destination.mkdir(parents=True, exist_ok=True)
-                self._cleanup.callback(os.close, _lock_directory(destination))
-                _remove_leftover_stages(destination)
-            self.site_stage = self._stage(self.output_dir)
-            self.data_stage = self._stage(self.data_dir)
-        except BaseException:
-            self._cleanup.close()
-            raise
-        return self
-
-    def __exit__(self, *exc_info: object) -> None:
-        self._cleanup.close()
-
-    def _stage(self, destination: Path) -> Path:
-        stage = Path(tempfile.mkdtemp(prefix=STAGING_PREFIX, dir=destination))
-        self._cleanup.callback(shutil.rmtree, stage, ignore_errors=True)
-        return stage
-
-    def publish(self, years: Iterable[int]) -> None:
-        """Move the staged files into place, then remove stale outputs.
-
-        Every destination is checked before the first file moves, so that a
-        refusal leaves the previous site as it was. The data files move
-        first and the page last. ``years`` are the years of the new site.
-        """
-        for stage, required in (
-            (self.site_stage, "index.html"),
-            (self.data_stage, "metadata.json"),
-        ):
-            # A stage that lost its page or metadata is a bug or a stage
-            # removed from under the run; publishing it would break the site
-            if not (stage / required).is_file():
-                raise KMLHeatmapError(f"Staged site is incomplete: {required} missing")
-        site_files = _staged_files(self.site_stage)
-        moves = [
-            (self.data_stage, self.data_dir, relative)
-            for relative in _staged_files(self.data_stage)
-        ] + [(self.site_stage, self.output_dir, relative) for relative in site_files]
-
-        for _, destination, relative in moves:
-            _check_target(destination, relative)
-        if self.stable_mtimes:
-            for stage, _, relative in moves:
-                mtime = content_mtime(stage / relative)
-                os.utime(stage / relative, (mtime, mtime))
-        for stage, destination, relative in moves:
-            target = destination / relative
-            target.parent.mkdir(parents=True, exist_ok=True)
-            os.replace(stage / relative, target)
-
-        # Compared as relative paths, not base names: the vendored files sit
-        # in a subdirectory, and two of them could share a name
-        produced = {relative.as_posix() for relative in site_files}
-        for name in self.site_files:
-            if name not in produced:
-                _remove_stale_file(self.output_dir / name)
-        for pattern in self.site_patterns:
-            self._remove_stale_matches(pattern, produced)
-        _remove_stale_data(self.data_dir, {str(year) for year in years})
-
-    def _remove_stale_matches(self, pattern: str, produced: set[str]) -> None:
-        """Remove the files matching ``pattern`` that were not produced.
-
-        A directory on the way that is a symlink is somebody else's and not
-        searched; one that ends up empty is removed.
-        """
-        directory = self.output_dir
-        for part in Path(pattern).parent.parts:
-            directory = directory / part
-            if directory.is_symlink() or not directory.is_dir():
-                return
-        for match in sorted(directory.glob(Path(pattern).name)):
-            if match.relative_to(self.output_dir).as_posix() not in produced:
-                _remove_stale_file(match)
-        if directory != self.output_dir:
-            with contextlib.suppress(OSError):
-                directory.rmdir()
 
 
 def export_all_data(

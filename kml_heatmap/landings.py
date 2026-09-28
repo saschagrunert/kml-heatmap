@@ -65,6 +65,7 @@ from .constants import (
     METERS_TO_FEET,
     SECONDS_PER_HOUR,
 )
+from .geometry import longitude_difference, true_bearing
 from .logger import logger
 
 if TYPE_CHECKING:
@@ -134,6 +135,8 @@ _CELL_DEGREES = 0.1
 _METRES_PER_DEGREE = 111_320.0
 # The height of a cell, and its width at the equator
 _CELL_KM = _CELL_DEGREES * _METRES_PER_DEGREE / 1000
+# The cells around a parallel
+_COLUMNS = round(360 / _CELL_DEGREES)
 
 
 class Field(NamedTuple):
@@ -148,15 +151,12 @@ class Field(NamedTuple):
 
 
 def _planar_km(lat0: float, lon0: float, lat1: float, lon1: float) -> float:
-    """Distance in km on a plane tangent at the first point; fine for 10 km."""
-    dx = (lon1 - lon0) * math.cos(math.radians(lat0))
+    """Distance in km on a plane tangent at the first point; fine for 10 km.
+
+    The short way round across the antimeridian.
+    """
+    dx = longitude_difference(lon0, lon1) * math.cos(math.radians(lat0))
     return math.hypot(dx, lat1 - lat0) * _METRES_PER_DEGREE / 1000
-
-
-def _bearing(lat0: float, lon0: float, lat1: float, lon1: float) -> float:
-    """True bearing from the first point to the second, in degrees."""
-    dx = (lon1 - lon0) * math.cos(math.radians((lat0 + lat1) / 2))
-    return math.degrees(math.atan2(dx, lat1 - lat0)) % 360
 
 
 def _angle_off(a: float, b: float) -> float:
@@ -179,7 +179,12 @@ class FieldIndex:
 
     @staticmethod
     def _cell(lat: float, lon: float) -> tuple[int, int]:
-        return (math.floor(lat / _CELL_DEGREES), math.floor(lon / _CELL_DEGREES))
+        # -180 and 180 degrees are one meridian, and the columns either side
+        # of it neighbours
+        return (
+            math.floor(lat / _CELL_DEGREES),
+            math.floor(lon / _CELL_DEGREES) % _COLUMNS,
+        )
 
     def nearest(
         self, lat: float, lon: float, radius_km: float = FIELD_RADIUS_KM
@@ -201,7 +206,8 @@ class FieldIndex:
         best: tuple[Field, float] | None = None
         for d_row in range(-rows, rows + 1):
             for d_column in range(-columns, columns + 1):
-                for candidate in self._cells.get((row + d_row, column + d_column), ()):
+                cell = (row + d_row, (column + d_column) % _COLUMNS)
+                for candidate in self._cells.get(cell, ()):
                     distance = _planar_km(lat, lon, candidate.lat, candidate.lon)
                     if distance <= radius_km and (best is None or distance < best[1]):
                         best = (candidate, distance)
@@ -394,7 +400,7 @@ def _runway(
         APPROACH_MIN_METRES
     ):
         return None
-    track = _bearing(start.lat, start.lon, end.lat, end.lon)
+    track = true_bearing(start.lat, start.lon, end.lat, end.lon)
     off, designator = min(
         (_angle_off(track, runway.heading), runway.designator) for runway in at.runways
     )

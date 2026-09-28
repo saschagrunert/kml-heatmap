@@ -17,7 +17,7 @@
     "typecheck:node": "tsc -p tsconfig.node.json",
     "typecheck:tests": "tsc --noEmit -p tsconfig.test.json",
     "lint": "eslint .",
-    "lint:unused": "knip",
+    "lint:unused": "knip && knip --production --include files",
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
     "format:check": "prettier --check .",

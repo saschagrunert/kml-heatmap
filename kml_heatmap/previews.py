@@ -34,7 +34,6 @@ import logging
 import math
 import os
 import struct
-import tempfile
 import time
 import zlib
 from array import array
@@ -48,7 +47,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 from urllib.parse import quote, urlsplit
 
-from .cache import CACHE_DIR, REGULAR_FILE_MODE
+from .cache import CACHE_DIR, atomic_bytes_write
 from .export_pipeline import build_path_info
 from .logger import logger
 from .workers import init_worker
@@ -451,26 +450,9 @@ class PreviewJob:
 
 
 def _write_file(path: Path, data: bytes) -> None:
-    """Write ``data`` atomically, with the mode of a regular write.
-
-    The temp file is removed when anything fails, the write itself included
-    (see ``cache.atomic_write``, which writes text).
-    """
+    """Write ``data`` atomically, making its directory first."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp_path: str | None = None
-    try:
-        with tempfile.NamedTemporaryFile(
-            dir=path.parent, prefix=f".{path.name}.", suffix=".tmp", delete=False
-        ) as tmp:
-            tmp_path = tmp.name
-            tmp.write(data)
-        os.chmod(tmp_path, REGULAR_FILE_MODE)
-        os.replace(tmp_path, path)
-        tmp_path = None
-    finally:
-        if tmp_path is not None:
-            with contextlib.suppress(OSError):
-                os.unlink(tmp_path)
+    atomic_bytes_write(path, data)
 
 
 def _cached(entry: Path) -> bytes | None:

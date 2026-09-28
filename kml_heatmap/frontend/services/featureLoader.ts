@@ -3,13 +3,13 @@
  *
  * Replay and Wrapped are a quarter of the frontend and most visits open
  * neither, so each is an entry point of its own that is imported the first
- * time it is used: features.ts (features.bundle.js) for replay, the relief
- * and the heat cloud of the 3D view, the satellite imagery, the profile
- * of a single selected flight and the places new in a year, wrapped.ts
- * (wrapped.bundle.js)
- * for Wrapped and the statistics panel. They are apart because opening one
- * says nothing about the other. Each gets one shared promise, and a failure
- * that resolves rather than throws so the caller can say something useful.
+ * time it is used: features.ts (features.bundle.js) for replay, the relief,
+ * the heat cloud and the selection ribbons of the 3D view, the satellite
+ * imagery, the profile of a single selected flight, the cross-section and
+ * the hotspot tour, wrapped.ts (wrapped.bundle.js) for Wrapped and the
+ * statistics panel. They are apart because opening one says nothing about
+ * the other. Each gets one shared promise, and a failure that resolves
+ * rather than throws so the caller can say something useful.
  *
  * Their styles ride along in features.css and wrapped.css for the same
  * reason (see the header of static/styles.css). A bundle and its stylesheet

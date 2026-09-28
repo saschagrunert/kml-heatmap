@@ -42,7 +42,6 @@ import math
 import os
 import ssl
 import struct
-import tempfile
 import threading
 import time
 import urllib.error
@@ -55,9 +54,10 @@ from typing import TYPE_CHECKING, NamedTuple, Protocol
 from urllib.request import Request, urlopen
 
 from . import __version__
-from .cache import CACHE_DIR, REGULAR_FILE_MODE
+from .cache import CACHE_DIR, atomic_bytes_write
 from .constants import METERS_TO_FEET
 from .exceptions import TerrainUnavailableError
+from .geometry import longitude_difference
 from .logger import logger
 from .segment_codec import GROUND_STEP
 from .types import COORDINATE_DECIMALS
@@ -350,23 +350,11 @@ def _read_pixel_planes(path: Path, data: bytes) -> bytes | None:
 def _keep_pixel_planes(path: Path, data: bytes, planes: bytes) -> None:
     """Keep the planes of a decoded tile next to its PNG, atomically."""
     header = _PIXELS_HEADER.pack(_PIXELS_MAGIC, _PIXELS_VERSION, zlib.crc32(data))
-    tmp_path: str | None = None
     try:
-        with tempfile.NamedTemporaryFile(
-            dir=path.parent, prefix=".tile.", suffix=".tmp", delete=False
-        ) as tmp:
-            tmp_path = tmp.name
-            tmp.write(header + zlib.compress(planes, 6))
-        os.chmod(tmp_path, REGULAR_FILE_MODE)
-        os.replace(tmp_path, _pixels_path(path))
-        tmp_path = None
+        atomic_bytes_write(_pixels_path(path), header + zlib.compress(planes, 6))
     except OSError as e:
         # Only the next build pays for it: it decodes the tile again
         logger.debug("Cannot keep the pixels of %s: %s", path.name, e)
-    finally:
-        if tmp_path is not None:
-            with contextlib.suppress(OSError):
-                os.unlink(tmp_path)
 
 
 def _elevations_at(planes: bytes, indices: Sequence[int]) -> array[float]:
@@ -488,24 +476,13 @@ class TerrariumTiles:
         if len(data) > MAX_TILE_BYTES or not data.startswith(PNG_SIGNATURE):
             logger.debug("Elevation tile %s is not a PNG tile", url)
             return 0
-        tmp_path: str | None = None
         try:
-            with tempfile.NamedTemporaryFile(
-                dir=self.cache_dir, prefix=".tile.", suffix=".tmp", delete=False
-            ) as tmp:
-                tmp_path = tmp.name
-                tmp.write(data)
-            # A shared cache (a build container, a CI runner) needs it readable
-            os.chmod(tmp_path, REGULAR_FILE_MODE)
-            os.replace(tmp_path, self.path(tile))
-            tmp_path = None
+            # Readable like a regular write, for a shared cache (a build
+            # container, a CI runner)
+            atomic_bytes_write(self.path(tile), data)
         except OSError as e:
             logger.debug("Cannot cache elevation tile %s: %s", url, e)
             return 0
-        finally:
-            if tmp_path is not None:
-                with contextlib.suppress(OSError):
-                    os.unlink(tmp_path)
         return len(data)
 
     def fetch(self, tiles: Iterable[TileKey]) -> None:
@@ -901,7 +878,7 @@ def ground_profile_ft(
     points = [(start[0], start[1]), *((row[_LAT], row[_LON]) for row in rows)]
     for (lat0, lon0), (lat1, lon1) in pairwise(points):
         # The short way round across the antimeridian
-        dlon = (lon1 - lon0 + 180) % 360 - 180
+        dlon = longitude_difference(lon0, lon1)
         total += math.hypot(
             dlon * METRES_PER_DEGREE * math.cos(math.radians((lat0 + lat1) / 2)),
             (lat1 - lat0) * METRES_PER_DEGREE,

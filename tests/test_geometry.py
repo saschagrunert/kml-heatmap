@@ -9,6 +9,8 @@ from hypothesis import strategies as st
 from kml_heatmap.geometry import (
     EARTH_RADIUS_KM,
     haversine_distance,
+    longitude_difference,
+    true_bearing,
 )
 
 latitudes = st.floats(min_value=-90.0, max_value=90.0)
@@ -74,3 +76,31 @@ class TestHaversineProperties:
         # Relative slack: near antipodal points the rounding error of a
         # 20,000 km distance is about 1e-5 km, more than any absolute epsilon
         assert direct <= via * (1 + 1e-9) + 1e-6
+
+
+class TestLongitudeDifference:
+    def test_the_short_way_round(self):
+        assert longitude_difference(8.0, 9.5) == pytest.approx(1.5)
+        assert longitude_difference(9.5, 8.0) == pytest.approx(-1.5)
+        assert longitude_difference(179.5, -179.5) == pytest.approx(1.0)
+        assert longitude_difference(-179.5, 179.5) == pytest.approx(-1.0)
+
+    @given(longitudes, longitudes)
+    def test_bounded(self, lon0, lon1):
+        assert -180.0 <= longitude_difference(lon0, lon1) < 180.0
+
+
+class TestTrueBearing:
+    def test_the_points_of_the_compass(self):
+        assert true_bearing(50.0, 8.0, 50.1, 8.0) == pytest.approx(0.0)
+        assert true_bearing(50.0, 8.0, 50.0, 8.1) == pytest.approx(90.0)
+        assert true_bearing(50.0, 8.0, 49.9, 8.0) == pytest.approx(180.0)
+        assert true_bearing(50.0, 8.0, 50.0, 7.9) == pytest.approx(270.0)
+
+    def test_across_the_antimeridian(self):
+        assert true_bearing(-16.7, 179.99, -16.7, -179.99) == pytest.approx(90.0)
+        assert true_bearing(-16.7, -179.99, -16.7, 179.99) == pytest.approx(270.0)
+
+    def test_a_runway_is_narrower_eastward_further_north(self):
+        """A degree of longitude is half as long at 60 degrees."""
+        assert true_bearing(60.0, 8.0, 60.01, 8.02) == pytest.approx(45.0, abs=0.1)

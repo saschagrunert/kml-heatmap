@@ -1,5 +1,8 @@
 """Tests for the lazily resolved package exports."""
 
+import ast
+from pathlib import Path
+
 import pytest
 
 import kml_heatmap
@@ -22,6 +25,26 @@ class TestLazyExports:
         assert kml_heatmap.create_progressive_heatmap is create_progressive_heatmap
         assert kml_heatmap.obfuscate_kml_files is obfuscate_kml_files
         assert kml_heatmap.check_kml_obfuscated is check_kml_obfuscated
+
+    def test_the_type_checker_sees_every_lazy_export(self):
+        """The imports under TYPE_CHECKING name what __getattr__ resolves."""
+        tree = ast.parse(Path(kml_heatmap.__file__).read_text(encoding="utf-8"))
+        block = next(
+            node
+            for node in tree.body
+            if isinstance(node, ast.If)
+            and isinstance(node.test, ast.Name)
+            and node.test.id == "TYPE_CHECKING"
+        )
+        imported = {
+            alias.name: "." + (node.module or "")
+            for node in block.body
+            if isinstance(node, ast.ImportFrom)
+            for alias in node.names
+            # Only an alias of the same name re-exports it
+            if alias.asname == alias.name
+        }
+        assert imported == kml_heatmap._LAZY_EXPORTS
 
     def test_renderer_internals_are_not_exported(self):
         assert "minify_html" not in kml_heatmap.__all__

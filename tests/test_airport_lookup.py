@@ -142,6 +142,12 @@ class TestIsValidCsvFile:
     def test_missing_file_invalid(self, tmp_path):
         assert _is_valid_csv_file(tmp_path / "missing.csv") is False
 
+    def test_unreadable_header_invalid(self, tmp_path):
+        """A header the csv module refuses: a field past its size limit."""
+        path = tmp_path / "airports.csv"
+        path.write_bytes(b'"' + b"x" * 200_000 + b"\n")
+        assert _is_valid_csv_file(path) is False
+
 
 class TestIsCacheValid:
     def test_missing_cache(self, tmp_path):
