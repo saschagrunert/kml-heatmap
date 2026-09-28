@@ -26,6 +26,7 @@ import {
   followSatelliteSwitch,
 } from "./ui/layerVisibility";
 import { followSelectionHighlight } from "./ui/selectionHighlight";
+import { followHeatLegend } from "./ui/heatLegend";
 import { followStatsPanel } from "./ui/statsPanel";
 import { MobileBar } from "./ui/mobileBar";
 import { bindActions } from "./ui/actions";
@@ -980,6 +981,7 @@ export class MapApp {
     this.uiToggles = new UIToggles(this);
     this.mobileBar = MobileBar.mountFor(this);
     followLayerVisibility(this);
+    followHeatLegend(this);
     followSatelliteSwitch(this);
     followSelectionHighlight(this);
     followStatsPanel(this);

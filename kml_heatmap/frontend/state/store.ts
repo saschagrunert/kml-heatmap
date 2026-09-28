@@ -50,6 +50,18 @@ export interface StoreState extends ToggleFlags {
    */
   heatCloud: boolean;
   /**
+   * How brightly the heat cloud draws a flight's worth of heat where the
+   * map came to rest, 1 for a lone cruise at full strength, 0 without
+   * points (see ui/heatCloud.ts, its only writer, and ui/heatScale.ts)
+   */
+  heatCloudScale: number;
+  /**
+   * What the flat heatmap and its lines scale their heat by (heatExposure
+   * in ui/heatmapPaint.ts), 1 before there is any (see
+   * DataManager.setHeatmapPoints, its only writer, and ui/heatScale.ts)
+   */
+  heatmapExposure: number;
+  /**
    * Whether the heat cloud is drawn with the 3D view off as well: for
    * Wrapped's intro (ui/wrappedIntro.ts), which flies over it without
    * lifting the flights, until the intro is skipped or the dialog closes
@@ -106,6 +118,8 @@ export const STORE_ACCESSOR_KEYS = [
   "reliefShaded",
   "reliefLevel",
   "heatCloud",
+  "heatCloudScale",
+  "heatmapExposure",
   "forcedHeatCloud",
   "heightBand",
   "selectionRibbons",
@@ -152,6 +166,8 @@ export function createDefaultState(): StoreState {
     reliefShaded: false,
     reliefLevel: 0,
     heatCloud: false,
+    heatCloudScale: 0,
+    heatmapExposure: 1,
     forcedHeatCloud: false,
     heightBand: "",
     selectionRibbons: false,

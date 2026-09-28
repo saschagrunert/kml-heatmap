@@ -32,7 +32,7 @@ export const HEATMAP_RADIUS_PX = 22;
  * of about 0.015, which the gradient below draws in teal.
  */
 const HEATMAP_REFERENCE_ZOOM = 12;
-const HEATMAP_REFERENCE_INTENSITY = 0.0375;
+export const HEATMAP_REFERENCE_INTENSITY = 0.0375;
 /** Opacity of the layer when no colour layer is drawn over it */
 export const HEATMAP_OPACITY = 1;
 /**
@@ -68,14 +68,33 @@ export const HEATMAP_GRADIENT: readonly (readonly [number, string, number])[] =
   ];
 
 /**
+ * The density the ridge of a lone cruise is drawn at unscaled (see
+ * heatExposure), the gradient's third stop, which
+ * HEATMAP_REFERENCE_INTENSITY is chosen for (heatScale.test.ts holds the
+ * two together): a flight's worth of heat (see ui/heatScale.ts)
+ */
+export const HEAT_FLIGHT_DENSITY = HEATMAP_GRADIENT[2]![0];
+
+/**
+ * The seconds around a stretch (see calculations/heatLines.ts) a lone pass
+ * is drawn with: the time between two fixes, about 5 s, which the lines
+ * round to a power of two. The heat lines' flight's worth, as
+ * HEAT_FLIGHT_DENSITY is the heatmap's.
+ */
+const HEAT_LINE_FLIGHT_SECONDS = 4;
+
+/**
  * The heat lines the heatmap hands over to (see HEAT_LINES) speak its
  * colours: each stop of the gradient above, from the faintest on, stands
- * for the seconds spent around a stretch (see calculations/heatLines.ts)
- * named here, four times the one before like the densities. A route flown
- * once at cruise speed is deep blue, a circuit flown every week cyan, and
- * taxiways, holding points and the apron glow white.
+ * for the seconds spent around a stretch that as many flights' worth leave
+ * as the density of the stop stands for in the heatmap. So a place flown
+ * over n times is drawn in the same colour on either side of the hand-over:
+ * a route flown once azure, a busy route cyan, and the circuits, taxiways,
+ * holding points and apron flown and taxied every week white.
  */
-const HEAT_LINE_SECONDS = [1, 5, 20, 80, 320, 1500] as const;
+const HEAT_LINE_SECONDS = HEATMAP_GRADIENT.slice(1).map(
+  ([density]) => (HEAT_LINE_FLIGHT_SECONDS * density) / HEAT_FLIGHT_DENSITY,
+);
 /**
  * The lines are drawn as a wide blurred glow and a thin core over it, both
  * in the colour of their heat; the core is fainter where less time was
@@ -89,9 +108,9 @@ const HEAT_LINE_GLOW = {
 const HEAT_LINE_CORE = {
   /** Opacity by heat: `[seconds, opacity]` */
   opacity: [
-    [HEAT_LINE_SECONDS[0], 0.45],
-    [HEAT_LINE_SECONDS[2], 0.8],
-    [HEAT_LINE_SECONDS[4], 1],
+    [HEAT_LINE_SECONDS[0]!, 0.45],
+    [HEAT_LINE_SECONDS[2]!, 0.8],
+    [HEAT_LINE_SECONDS[4]!, 1],
   ],
   /**
    * Width by zoom and heat, `[zoom, px of the coolest, px of the hottest]`:
@@ -391,7 +410,7 @@ export function heatLineOpacities(strength: number): {
 
 /** Width of the heat line cores by zoom and heat, see HEAT_LINE_CORE */
 function heatLineCoreWidth(): ExpressionSpecification {
-  const coolest = HEAT_LINE_SECONDS[0];
+  const coolest = HEAT_LINE_SECONDS[0]!;
   const hottest = HEAT_LINE_SECONDS[HEAT_LINE_SECONDS.length - 1]!;
   return [
     "interpolate",

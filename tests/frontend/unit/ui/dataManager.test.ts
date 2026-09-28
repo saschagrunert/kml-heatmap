@@ -1028,9 +1028,20 @@ describe("DataManager", () => {
         [10.0, 52.0],
         [11.0, 53.0],
       ]);
+      // The heat legend follows the exposure of the heat drawn
+      const exposureOf = (keep: (pathId: number) => boolean): number => {
+        const { points, weights } = heatmapPoints(
+          data.path_segments,
+          keep,
+          heatWeight(false, false),
+        );
+        return heatExposure(points, weights);
+      };
+      expect(mockApp.heatmapExposure).toBe(exposureOf((id) => id === 2));
 
       // And leaving it nothing but a switch of the two
       mockApp.isolateSelection = false;
+      expect(mockApp.heatmapExposure).toBe(exposureOf(() => true));
       expect(heatSource().setData).toHaveBeenCalledOnce();
       expect(isolatedSource().setData).toHaveBeenCalledOnce();
       expect(drawnHeatPoints()).toEqual(HEAT_POINTS);
@@ -1220,6 +1231,8 @@ describe("DataManager", () => {
       const exposure = heatExposure(points, weights);
       expect(exposure).not.toBe(1);
       expect(heatOfPoints()).toEqual(weights.map((w) => w * exposure));
+      // The heat legend reads it (ui/heatScale.ts)
+      expect(mockApp.heatmapExposure).toBe(exposure);
       // The paint stays as it is: the heat is what is scaled
       expect(heatLayer().paint).toEqual(heatmapPaint());
       const lines = mockApp.map!.source(MAP_SOURCES.heatLines)

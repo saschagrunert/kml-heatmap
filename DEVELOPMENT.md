@@ -933,6 +933,74 @@ upload took under a millisecond. In software WebGL (SwiftShader) it took
 that the layer is on the map and drew stretches (`drawn`, which the layer
 counts per frame), not what the pixels look like.
 
+**The heat legend and the heat scale:**
+
+The heat legend (`#heat-legend` in the template, `ui/heatLegend.ts`, in the
+first visit's bundle) says what the colours of the flat heatmap, its heat
+lines and the cloud stand for: about how many flights' worth of heat, the
+heat one flight leaves over a place as a lone cruise at 100 kt does. That
+is the time spent there ("Time spent"), or with Routes on the length
+counted at that speed ("Distance flown", a flight's worth being one pass of
+any flight); Airborne leaves the ground out and the labels as they are. It
+is a `.color-legend`, so it stands where the altitude and groundspeed
+legends do and follows their rules beside the rail, the replay panel, the
+profile strip, the phone's bar and Wrapped. `followLayerVisibility` shows it
+while the heat is the colour the map shows (the Heatmap switch on, no
+colour layer, which brings its own legend, and no replay) and fades its bar
+with the heat when that steps back for the aviation chart or a selection.
+In the 3D view a `<details>` in it (`#heat-cloud-about`) says what the
+glow, the shadow (under lifted flights) and the pulses (while the map is in
+use, left out under reduced motion) mean; `followHeatLegend` shows it while
+`heatCloud` is set, and `features.css`, which arrives with the cloud,
+styles it.
+
+What a colour stands for is read through one function, `heatScale(app)` in
+`ui/heatScale.ts`: the density on the heat ramp (`HEATMAP_GRADIENT`, 0 to 1)
+that one flight's worth is drawn at right now. The heat of flights that
+overlap adds up, so n flights' worth is drawn at n times it.
+
+- The flat heatmap weighs its points by their heat and puts the ridge of a
+  lone cruise at about the ramp's third colour, 0.015
+  (`HEAT_FLIGHT_DENSITY`, which `HEATMAP_REFERENCE_INTENSITY` is chosen
+  for; a test holds the two together), at every zoom, times its adaptive
+  exposure (`heatExposure`). `DataManager.setHeatmapPoints` writes that
+  exposure of the heat drawn, an isolated selection's while there is one,
+  to the store (`heatmapExposure`).
+- The heat lines colour the seconds around a fix, scaled by the same
+  exposure: a lone pass leaves the time between two fixes, about 5 s,
+  which they round to 4 s. Their stops (`HEAT_LINE_SECONDS`) are the
+  gradient's densities at 4 s per flight's worth, so n passes get the
+  heatmap's colour of n flights under any exposure and the hand-over to
+  them changes nothing, up to the white of 64.
+- The cloud fills its colours so that a lone cruise glows like that density
+  (`CLOUD_COLOUR`), and hands the store the factor it draws a flight's
+  worth with where the map came to rest (`heatCloudScale`: the gain of
+  `CLOUD_STOPS` at that zoom times `cloudExposure` of its busiest cells),
+  which `heatScale` reads in place of the flat exposure while `heatCloud`
+  is set. The height band leaves that exposure alone.
+
+The heatmap and the cloud count the heat whatever the pace of the fixes.
+The lines add it up in 40 m cells, which a lone pass logged every few
+seconds leaves the time between two fixes in, so a log of a fix a second
+reads there as about a quarter of a flight. The legend's first label says
+"≈" for that and for the latitude, which widens or narrows a kernel of
+fixed pixels on the ground.
+
+`followHeatLegend` labels the legend anew as the store keys that change
+the scale or what is counted do: `heatCloud`, `heatCloudScale`,
+`heatmapExposure` and `routeWeighting`.
+
+The labels are four steps of four apart, the step of the ramp's colours:
+the first is the power of two nearest the flights' worth of the ramp's
+colour of one flight, at least one, so the flat heatmap unscaled and its
+lines read "≈1 flight, 4, 16, 64", a logbook drawn at a quarter "≈4
+flights, 16, 64, 256" and the cloud closer in, drawn at half, "≈2 flights,
+8, 32, 128". Each label sits in the middle of its quarter of the bar, and
+the bar is drawn on a scale of those steps from the ramp's own colours
+(`heatLegend`), shifted so that the colour under a label is the one its
+count is drawn in: the labels stay round numbers and the ramp moves under
+them.
+
 **The satellite imagery:**
 
 The Satellite switch (`satelliteVisible` in the store, `s=1` in the link)
