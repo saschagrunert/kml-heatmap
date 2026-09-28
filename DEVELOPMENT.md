@@ -89,16 +89,21 @@ was built with `CARTO_API_KEY` (any value works) and skip otherwise; CI tests
 a site with a dummy key and, for the specs about the base map requests
 (`base-style`, `error-free`, `layers`) on the desktop, one without. It builds
 both once, in the `e2e-sites` job, and runs every e2e job in the Playwright
-image the visual job uses. The `desktop` project is split into three shards
-(`--shard`) and the `mobile` project into two, and the relief tests of the
-3D view ("on the relief" in `orientation.spec.ts`) of the `desktop` and
-`webkit-desktop` projects run in jobs of their own, with the whole runner to
-themselves, since software WebGL takes seconds per frame of the relief. The
-desktop one then runs the specs without a key. In CI a failed test of the
-`desktop` project is retried once, which only tells a flaky failure from a
-steady one: `failOnFlakyTests` fails the run either way. The `mobile`,
-`visual`, `webkit` and `webkit-desktop` projects do not retry, and neither
-do the relief tests, where one attempt takes minutes.
+image the visual job uses, with a browser per core of the runner. The
+`desktop` project is split into three shards (`--shard`), the first of which
+then runs the specs without a key, and the `mobile` project into two. The
+tests tagged `@heavy` (`HEAVY` in `tests/e2e/fixtures.ts`: the 3D view with
+its relief, heat cloud or chase view, and the globe turned with the flights
+loaded) of the `desktop` and `webkit-desktop` projects run in a job of their
+own per engine with two browsers (`--grep @heavy --workers=2`), since
+software WebGL takes seconds per frame of them; the other jobs of those
+projects leave them out (`--grep-invert @heavy`). Tag a new spec that waits
+on frames of either, a describe with `HEAVY` and a single test with `@heavy`
+at the end of its title. In CI a failed test of the `desktop` project is
+retried once, which only tells a flaky failure from a steady one:
+`failOnFlakyTests` fails the run either way. The `mobile`, `visual`, `webkit`
+and `webkit-desktop` projects do not retry, and neither do the heavy tests,
+where one attempt takes minutes.
 
 The tests run against `docs/` (the `visual` project against `visual-site/`,
 with the same checks), which must be built from the current sources first. A

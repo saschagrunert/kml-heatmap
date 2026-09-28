@@ -381,8 +381,8 @@ jobs:
       github.actor == 'dependabot[bot]' &&
       startsWith(github.head_ref, 'dependabot/npm_and_yarn/playwright'))
     runs-on: ubuntu-latest
-    # The relief tests allow three minutes each (orientation.spec.ts), so
-    # their jobs get longer
+    # The heavy tests allow up to five minutes each (the relief tests of
+    # orientation.spec.ts three), so their jobs get longer
     timeout-minutes: ${{ matrix.timeout-minutes || 15 }}
     container:
       image: mcr.microsoft.com/playwright:v1.63.0-noble@sha256:eff16c30e6f3f4af0a03fa4b706120d5e9b0891c344a27d64559aff5900a4a27
@@ -394,37 +394,47 @@ jobs:
       # Without a key only the requests for the base map change, so that
       # variant runs just the specs that make and check those requests
       # (no-key-specs), on the desktop, instead of the whole suite a second
-      # time. It rides along in the desktop relief job, after the relief
-      # tests, rather than paying for a runner and its setup of its own.
+      # time. It rides along in the first desktop shard, after its tests,
+      # rather than paying for a runner and its setup of its own.
       #
       # Software WebGL runs one browser per core of the 4-vCPU runner. The
       # desktop project is split into three shards and the mobile project
       # into two, on runners of their own; with two, the second desktop
-      # shard took 6 to 6.5 minutes against 5 of the first. The relief of
-      # the 3D view ("on the relief" in orientation.spec.ts) takes seconds
-      # per frame there and failed most often while other browsers shared
-      # the cores, in Chromium and in WebKit alike, so in both engines it
-      # runs alone: its tests run one after the other in one worker, which
-      # then has the whole runner. A renamed describe leaves those jobs with
-      # no tests, which fails them.
+      # shard took 6 to 6.5 minutes against 5 of the first.
+      #
+      # The tests tagged @heavy (HEAVY in tests/e2e/fixtures.ts) draw the 3D
+      # view or turn the globe with the flights on it, which takes seconds per
+      # frame there. Among three other browsers they ran out of time (Reset
+      # view and the band of heights in state.spec.ts, the globe of
+      # orientation.spec.ts, the hotspot tour, the chase view) and took the
+      # cores from the specs beside them, so in both engines they run in a job
+      # of their own with two browsers, and without a retry, which would not
+      # turn the run green (failOnFlakyTests) and doubles an attempt of
+      # minutes: with it, a run where they all time out would outlast the job
+      # and lose its report. The relief tests among them still run one after
+      # the other in one worker (orientation.spec.ts). The other jobs of the
+      # desktop and webkit-desktop projects leave them out. A tag that matches
+      # nothing leaves the heavy jobs with no tests, which fails them.
       matrix:
         include:
-          - name: desktop-1
+          - name: desktop-1+no-key
             project: desktop
             shard: 1/3
-            grep-invert: on the relief
+            grep-invert: "@heavy"
+            no-key-specs: base-style.spec.ts error-free.spec.ts layers.spec.ts
           - name: desktop-2
             project: desktop
             shard: 2/3
-            grep-invert: on the relief
+            grep-invert: "@heavy"
           - name: desktop-3
             project: desktop
             shard: 3/3
-            grep-invert: on the relief
-          - name: desktop-relief+no-key
+            grep-invert: "@heavy"
+          - name: desktop-heavy
             project: desktop
-            grep: on the relief
-            no-key-specs: base-style.spec.ts error-free.spec.ts layers.spec.ts
+            grep: "@heavy"
+            workers: 2
+            retries: 0
             timeout-minutes: 25
           - name: mobile-1
             project: mobile
@@ -439,10 +449,12 @@ jobs:
           # in Safari's engine
           - name: webkit-desktop
             project: webkit-desktop
-            grep-invert: on the relief
-          - name: webkit-relief
+            grep-invert: "@heavy"
+          # The project does not retry
+          - name: webkit-heavy
             project: webkit-desktop
-            grep: on the relief
+            grep: "@heavy"
+            workers: 2
             timeout-minutes: 20
             # WebKit's own output in the job log: its page crashed once in
             # the sloped relief test without a page or console error, after
@@ -476,12 +488,16 @@ jobs:
           SHARD: ${{ matrix.shard }}
           GREP: ${{ matrix.grep }}
           GREP_INVERT: ${{ matrix.grep-invert }}
+          WORKERS: ${{ matrix.workers }}
+          RETRIES: ${{ matrix.retries }}
           DEBUG: ${{ matrix.debug }}
         run: |
           args=(--project="$PROJECT")
           if [ -n "$SHARD" ]; then args+=(--shard="$SHARD"); fi
           if [ -n "$GREP" ]; then args+=(--grep="$GREP"); fi
           if [ -n "$GREP_INVERT" ]; then args+=(--grep-invert="$GREP_INVERT"); fi
+          if [ -n "$WORKERS" ]; then args+=(--workers="$WORKERS"); fi
+          if [ -n "$RETRIES" ]; then args+=(--retries="$RETRIES"); fi
           npx playwright test "${args[@]}"
       # Also when the run above failed, so one run reports both. The site
       # replaces docs/, where the test server looks; the results and the

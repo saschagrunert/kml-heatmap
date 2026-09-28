@@ -181,8 +181,8 @@ class TestLockFiles:
 
 
 class TestToolsLock:
-    """make lock installs pip-tools from requirements-tools.lock, unattended
-    in the lock workflow, so the lock has to pin what the .in file asks for."""
+    """make lock installs pip-tools from requirements-tools.lock, so the lock
+    has to pin what the .in file asks for."""
 
     def test_a_pin_other_than_the_input_fails(self, repo, capsys):
         (repo / "requirements-tools.in").write_text(

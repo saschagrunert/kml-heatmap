@@ -5,7 +5,7 @@ updates:
   # the Python dependencies, and the pip-tools pin in requirements-tools.in.
   # Dependabot does not read the *.lock files and cannot recompile them, so
   # the lint job fails a bump the locks no longer satisfy; run `make lock` on
-  # the branch. The weekly "lock" workflow recompiles them as well.
+  # the branch.
   #
   # Until then such a pull request tests nothing new: every job installs the
   # old lock files. The test workflow therefore runs only its cheap jobs
