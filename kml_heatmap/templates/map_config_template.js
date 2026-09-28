@@ -5,7 +5,7 @@ window.MAP_CONFIG = {
     bounds: [[$min_lat, $min_lon], [$max_lat, $max_lon]],
     cartoApiKey: '$carto_api_key',
     dataDir: '$data_dir_name',
-    builtAt: '$built_at',
+    builtOn: '$built_on',
     commit: '$commit',
     commitUrl: '$commit_url'
 };

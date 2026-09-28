@@ -112,8 +112,8 @@ export interface MapConfig {
   bounds: [[number, number], [number, number]];
   cartoApiKey?: string | undefined;
   dataDir: string;
-  /** When the site was built, "YYYY-MM-DDTHH:MMZ" in UTC */
-  builtAt?: string | undefined;
+  /** The day the site was built, "YYYY-MM-DD" in UTC */
+  builtOn?: string | undefined;
   /** Short hash of the commit the site was built from, "" when unknown */
   commit?: string | undefined;
   /** The commit's page, "" when the repository it is in is unknown */

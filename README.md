@@ -472,14 +472,17 @@ make check-obfuscation  # every file in data/ passes
 
 The published site never carries a date finer than the year, whatever the
 KML files hold. The files in `data/` are committed to a public repository,
-though, so they must not carry real dates either. `make obfuscate` rewrites
-them in place, irreversibly: every timestamp moves to January 1st of its
-year (the time of day and the intervals between points stay), dates in
-placemark names and descriptions and the creator field are replaced, and a
-Charterware file is renamed to `YYYY-01-01_NNNNh_...` with a sequence number
-in place of the time. Files that are already obfuscated are left as they
-are. Keep a copy of the original export if you want the real dates. It runs
-locally and needs the Python environment from
+though, so they must not carry real dates or times either. `make obfuscate`
+rewrites them in place, irreversibly: every flight moves to start at
+midnight (UTC) on January 1st of its year (the intervals between its points
+stay, its time of day does not), dates in placemark names and descriptions
+and the creator field are replaced, and a Charterware file is renamed to
+`YYYY-01-01_NNNNh_...` with a sequence number in place of the time. Files
+that are already obfuscated are left as they are; files obfuscated by an
+earlier version, which kept the time of day, fail the check until
+`make obfuscate` has moved them to midnight. Keep a copy of the original
+export if you want the real dates. It runs locally and needs the Python
+environment from
 [CONTRIBUTING.md](CONTRIBUTING.md); `--obfuscate-inputs` does the same as
 part of a build. See [Privacy](#privacy) for what is kept.
 
@@ -644,9 +647,11 @@ export copied under two numbers, is kept once and the copy is skipped with
 a warning. So is the same flight recorded twice, by a phone and the panel
 GPS or exported by two tools: two recordings with times that overlap by
 more than half of the shorter one, and are in the same place at the times
-they share, are one flight. The one whose file name gives the aircraft
-stays, otherwise the one with more points, and the warning names both
-files. Delete the copy from `data/`.
+they share, are one flight. The clocks of obfuscated files need not
+agree, since each starts at midnight: such recordings are lined up by
+where they flew, and then have to be within 150 m of each other. The one
+whose file name gives the aircraft stays, otherwise the one with more
+points, and the warning names both files. Delete the copy from `data/`.
 
 **One flight shows as several, or two as one.** A logger that writes a
 long track as several `LineString`s, each starting where the one before
@@ -663,8 +668,11 @@ flights of their own different names or times.
 name, or in an element the tool does not rewrite), the rewrite names the
 file and the date and stops rather than leaving it half scrubbed; remove
 the date by hand. The same goes for a weekday anywhere in a file or its name
-and a time of day in a file name (`1_DEHYL_1513h.kml`): the tool rewrites
-neither. A place named after a weekday other than `Friday Harbor`,
+and a time of day in a file name (`1_DEHYL_1513h.kml`) or anywhere in a
+file besides its timestamps, such as a placemark name or description
+(`Evening flight 18:30`): the tool rewrites neither. A duration written
+like a time of day (`Flight time 1:25`) cannot be told from one and has to
+go as well. A place named after a weekday other than `Friday Harbor`,
 `Thursday Island` and `Sunday Creek` needs another name as well.
 
 ## Privacy
@@ -677,14 +685,14 @@ done to them before generating a site. The site shows where you have been and
 how much you have flown, but not when.
 
 The one full date it does carry is when it was built: `map_config.js` holds
-the build time (UTC, to the minute) and the short hash of the commit it was
-built from, and the statistics panel shows both. A site built right after a
-flight therefore hints at when that flight was. Set `SOURCE_DATE_EPOCH` to
-stamp a different time. The commit is `KML_HEATMAP_COMMIT` (with its remote in
-`KML_HEATMAP_REPOSITORY`, which `make build` sets from your checkout), else
-`GITHUB_SHA` on GitHub Actions, else `HEAD` of the checkout the tool runs
-from. The hash links to the commit on GitHub only when the repository is
-known.
+the build date (the day in UTC, without the time) and the short hash of the
+commit it was built from, and the statistics panel shows both. A site built
+right after a flight therefore hints at the day of that flight, but not at
+its time. Set `SOURCE_DATE_EPOCH` to stamp a different day. The commit is
+`KML_HEATMAP_COMMIT` (with its remote in `KML_HEATMAP_REPOSITORY`, which
+`make build` sets from your checkout), else `GITHUB_SHA` on GitHub Actions,
+else `HEAD` of the checkout the tool runs from. The hash links to the commit
+on GitHub only when the repository is known.
 
 **Your input files are read and left alone** unless you pass
 `--obfuscate-inputs`, which cannot be undone.
@@ -710,27 +718,34 @@ saved state or the link they followed turns it on.
 That is a separate need: this repository commits the files in `data/`, and
 they must not carry real dates. `--obfuscate-inputs`, or
 `python -m kml_heatmap.obfuscate <dir>` on its own, rewrites them in place
-(atomically, after validation). Timestamps are shifted to January 1st of their
-year while keeping the intervals between points; a file holding flights on
-several dates moves each of them to January 1st of its own year. Date-bearing
-names, descriptions, Charterware file names and the creator field are
-replaced. Read-only files and symlinks are reported instead of rewritten.
-Obfuscated KML files still contain:
+(atomically, after validation). The timestamps of a flight are shifted by one
+offset of whole seconds so that it starts at 00:00:00 UTC on January 1st of
+its year: the intervals between its points, the gaps between its tracks and
+so its durations, speeds, landings and flight time stay exactly as they
+were, while neither its date nor its time of day is left. A flight across
+midnight stays in one piece and in the year it started in. A file holding
+flights on several dates moves each of them to midnight on January 1st of
+its own year. Date-bearing names, descriptions (a Charterware description
+keeps `12:00AM` as its time), Charterware file names and the creator field
+are replaced. Read-only files and symlinks are reported instead of
+rewritten. Obfuscated KML files still contain:
 
 - The year of each flight
-- The UTC time of day and the durations between points
+- The durations between points, counted from midnight
 - Full precision coordinates and altitudes
 - The order of the flights (from the file numbering)
 
-`python -m kml_heatmap.obfuscate <dir> --check` verifies a directory: every
-flight must start on January 1st, and no other date may appear anywhere in a
-file or its name (numeric, or with an English or German month name such as
+`python -m kml_heatmap.obfuscate <dir> --check` verifies a directory: the
+first timestamp of every flight must be 00:00:00 on January 1st (a fraction
+of a second may follow), and no other date may appear anywhere in a file or
+its name (numeric, or with an English or German month name such as
 `16 Aug 2026` or `16. Mai 2026`), except the two days after January 1st that
 a flight past midnight runs into. Nor may a weekday named in full (`Saturday`,
 `Samstag`, `sonntags`): the timestamps no longer fall on it. The name of a
 file carries no time of day either (`1513h`, `1513H`, `15h13`, `0930Z`,
 `0930z`, `0930UTC`, `15:13`, `3pm`), except for the sequence number in the time slot of an
-obfuscated Charterware name; the timestamps inside keep theirs.
+obfuscated Charterware name, and neither do its names and descriptions, nor
+a Unix time in a data value.
 Timestamps within one Placemark, or no more than 12 hours
 apart, count as one flight and are never split; a recording that runs longer
 than those days fails the check rather than being cut in two. When a date

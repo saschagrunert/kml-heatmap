@@ -57,9 +57,10 @@ __all__ = [
     "strip_dates",
 ]
 
-# The obfuscator moves a flight to January 1st, and a flight keeps its
-# intervals, so after the shift its timestamps may run into the following
-# days. Dates up to this many days after January 1st are no giveaway.
+# The obfuscator moves a flight to midnight on January 1st, and a flight
+# keeps its intervals, so after the shift its timestamps may run into the
+# following days. Dates up to this many days after January 1st are no
+# giveaway.
 MAX_DAYS_AFTER_JAN_1 = 2
 
 MONTHS_SHORT = (
@@ -633,9 +634,9 @@ def find_time_tokens(text: str) -> list[str]:
     """The times of day of a text, those ``strip_dates`` takes out.
 
     The obfuscator's check reports them in file names, which it keeps free
-    of the time of a flight as it does of the date: the time of a
-    Charterware name becomes a sequence number. The timestamps in a file
-    keep theirs, so this is not for the content of a file.
+    of the time of a flight as it does of the date (the time of a
+    Charterware name becomes a sequence number), and in the content of a
+    file without its timestamps, which start every flight at midnight.
     """
     dates = _date_spans(text)
     with_times = _with_time_after(text, dates)

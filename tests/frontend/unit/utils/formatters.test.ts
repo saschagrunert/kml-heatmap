@@ -4,7 +4,7 @@ import {
   formatTime,
   formatSpeed,
   formatFileSize,
-  formatBuildTime,
+  formatBuildDate,
   formatTrack,
 } from "../../../../kml_heatmap/frontend/utils/formatters";
 
@@ -127,21 +127,17 @@ describe("formatter utilities", () => {
     });
   });
 
-  describe("formatBuildTime", () => {
-    it("formats the stamp in UTC and in English", () => {
-      expect(formatBuildTime("2026-09-21T14:03Z")).toBe(
-        "21 Sep 2026, 14:03 UTC",
-      );
-      expect(formatBuildTime("2027-01-05T00:00Z")).toBe(
-        "5 Jan 2027, 00:00 UTC",
-      );
+  describe("formatBuildDate", () => {
+    it("formats the day in English", () => {
+      expect(formatBuildDate("2026-09-21")).toBe("21 Sep 2026");
+      expect(formatBuildDate("2027-01-05")).toBe("5 Jan 2027");
     });
 
-    it("rejects anything that is not a stamp", () => {
-      expect(formatBuildTime("")).toBeNull();
-      expect(formatBuildTime("2026-13-01T00:00Z")).toBeNull();
-      expect(formatBuildTime("2026-09-21T14:03:00Z")).toBeNull();
-      expect(formatBuildTime("<b>")).toBeNull();
+    it("rejects anything that is not a date, a time of day included", () => {
+      expect(formatBuildDate("")).toBeNull();
+      expect(formatBuildDate("2026-13-01")).toBeNull();
+      expect(formatBuildDate("2026-09-21T14:03Z")).toBeNull();
+      expect(formatBuildDate("<b>")).toBeNull();
     });
   });
 });

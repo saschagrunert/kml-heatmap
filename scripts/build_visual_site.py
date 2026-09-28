@@ -29,8 +29,8 @@ AIRPORTS = ROOT / "tests" / "fixtures" / "airports.csv"
 RUNWAYS = ROOT / "tests" / "fixtures" / "runways.csv"
 SITE_DIR = ROOT / "visual-site"
 
-# The statistics panel prints when and from which commit the site was built.
-# Both are fixed, to values that are obviously not real: the first second of
+# The statistics panel prints the day and the commit the site was built from.
+# Both are fixed, to values that are obviously not real: the first day of
 # the year the spec pins, and a hash no commit has.
 BUILD_ENVIRONMENT = {
     "SOURCE_DATE_EPOCH": "1735689600",

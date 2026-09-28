@@ -3,11 +3,19 @@
 import logging
 from typing import Any, cast
 
-from kml_heatmap.duplicates import drop_overlapping_paths
+from kml_heatmap.duplicates import _Timed, drop_overlapping_paths, same_flight
 from kml_heatmap.types import TrackPoint
 
+# East at 50 m/s (97 kt) at 50 degrees north
+SPEED = 0.0007
+# 2025-06-01T00:00:00Z: a recording that starts after it runs on the real
+# clock. One that starts near 0 (January 1st, 1970) is taken for an
+# obfuscated one, whose clock may be anything.
+JUNE_2025 = 1748736000.0
+JANUARY_2025 = 1735689600.0
 
-def _recording(start_s, seconds, step_s=10.0, lat=50.0, lon=8.0, lon_per_s=0.0002):
+
+def _recording(start_s, seconds, step_s=10.0, lat=50.0, lon=8.0, lon_per_s=SPEED):
     """A flight east from (lat, lon), a fix every ``step_s`` seconds."""
     count = int(seconds / step_s) + 1
     return [
@@ -29,11 +37,13 @@ def _drop(paths, names=None):
 
 class TestDropOverlappingPaths:
     def test_two_recordings_of_one_flight_count_once(self, caplog):
-        """A phone and a panel GPS: other fixes, the same flight."""
-        coarse = _recording(1000.0, 3600.0, step_s=10.0)
+        """A phone and a panel GPS: other fixes, the same flight, on the
+        real clock (files that are not obfuscated)."""
+        start = JUNE_2025 + 1000.0
+        coarse = _recording(start, 3600.0, step_s=10.0)
         # Started a minute later, a fix every 3 s, a few metres off
-        fine = _recording(1060.0, 3500.0, step_s=3.0, lat=50.0001)
-        fine = [p._replace(lon=8.0 + 0.0002 * (p.ts - 1000.0)) for p in fine]
+        fine = _recording(start + 60.0, 3500.0, step_s=3.0, lat=50.0001)
+        fine = [p._replace(lon=8.0 + SPEED * (p.ts - start)) for p in fine]
 
         with caplog.at_level(logging.WARNING, logger="kml_heatmap"):
             kept = _drop([coarse, fine], ["phone.kml", "panel.kml"])
@@ -43,6 +53,70 @@ class TestDropOverlappingPaths:
         assert "phone.kml" in caplog.text
         assert "panel.kml" in caplog.text
         assert _drop([fine, coarse]) == {2025: [0]}
+
+    def test_recordings_with_clocks_of_their_own_count_once(self, caplog):
+        """Obfuscated files each start at midnight, so the phone started a
+        minute before the panel GPS no longer lines up with it in time."""
+        coarse = _recording(1000.0, 3600.0, step_s=10.0)
+        # The same flight from a minute in, its clock starting at 0
+        fine = [
+            p._replace(lon=8.0 + SPEED * (p.ts - 1000.0), ts=p.ts - 1060.0)
+            for p in _recording(1060.0, 3500.0, step_s=3.0, lat=50.0001)
+        ]
+
+        with caplog.at_level(logging.WARNING, logger="kml_heatmap"):
+            kept = _drop([coarse, fine], ["phone.kml", "panel.kml"])
+
+        assert kept == {2025: [1]}
+        assert "recorded twice" in caplog.text
+        assert _drop([fine, coarse]) == {2025: [0]}
+
+    def test_a_real_and_an_obfuscated_recording_of_one_flight_count_once(self):
+        start = JUNE_2025 + 1000.0
+        real = _recording(start, 3600.0, step_s=10.0)
+        # Obfuscated on its own: started a minute later, at midnight now
+        obfuscated = [
+            p._replace(lon=8.0 + SPEED * (p.ts - start), ts=p.ts - start - 60.0)
+            for p in _recording(start + 60.0, 3500.0, step_s=3.0, lat=50.0001)
+        ]
+        obfuscated = [p._replace(ts=p.ts + JANUARY_2025) for p in obfuscated]
+        assert _drop([real, obfuscated]) == {2025: [1]}
+
+    def test_real_clocks_tell_the_same_way_on_another_day_apart(self):
+        """Two flights alike in the air: the real clock tells them apart,
+        an obfuscated one cannot."""
+        today = _recording(JUNE_2025 + 1000.0, 3600.0)
+        tomorrow = _recording(JUNE_2025 + 1000.0 + 86400.0, 3600.0, lat=50.0001)
+        assert _drop([today, tomorrow]) == {2025: [0, 1]}
+        obfuscated = [
+            [p._replace(ts=p.ts - path[0].ts) for p in path]
+            for path in (today, tomorrow)
+        ]
+        assert _drop(obfuscated) == {2025: [0]}
+
+    def test_flights_that_share_the_ground_only_are_two(self):
+        """Obfuscated flights from one field, standing at the same place for
+        most of their time: lined up by where they stood, they would agree."""
+        ground = [TrackPoint(50.0, 8.0, 100.0, float(t)) for t in range(0, 1800, 10)]
+        east = ground + _recording(1800.0, 600.0)
+        north = ground + [
+            p._replace(lat=50.0 + SPEED * (p.ts - 1800.0), lon=8.0)
+            for p in _recording(1800.0, 600.0)
+        ]
+        assert _drop([east, north]) == {2025: [0, 1]}
+
+    def test_the_same_way_at_another_pace_is_another_flight_at_any_time(self):
+        first = _recording(1000.0, 3600.0)
+        second = _recording(50000.0, 3600.0, lon_per_s=1.5 * SPEED)
+        assert _drop([first, second]) == {2025: [0, 1]}
+
+    def test_the_same_way_back_is_another_flight(self):
+        out = _recording(1000.0, 3600.0)
+        back = [
+            p._replace(lon=8.0 + SPEED * 3600.0 - SPEED * (p.ts - 1000.0))
+            for p in _recording(1000.0, 3600.0)
+        ]
+        assert _drop([out, back]) == {2025: [0, 1]}
 
     def test_as_many_points_keep_the_first(self):
         path = _recording(1000.0, 3600.0)
@@ -56,14 +130,14 @@ class TestDropOverlappingPaths:
 
     def test_the_same_way_at_another_pace_is_another_flight(self):
         first = _recording(1000.0, 3600.0)
-        second = _recording(1000.0, 3600.0, lon_per_s=0.0003)
+        second = _recording(1000.0, 3600.0, lon_per_s=1.5 * SPEED)
         assert _drop([first, second]) == {2025: [0, 1]}
 
     def test_little_overlap_in_time_is_another_flight(self):
         first = _recording(1000.0, 3600.0)
         # Starts where the first is after 40 minutes, in the same place
         later = [
-            p._replace(lon=8.0 + 0.0002 * (p.ts - 1000.0))
+            p._replace(lon=8.0 + SPEED * (p.ts - 1000.0))
             for p in _recording(1000.0 + 2400.0, 3600.0)
         ]
         assert _drop([first, later]) == {2025: [0, 1]}
@@ -107,3 +181,80 @@ class TestDropOverlappingPaths:
         metadata[1].pop("aircraft_type")
         kept = drop_overlapping_paths({2025: [0, 1]}, paths, metadata, exported)
         assert kept == {2025: [1]}
+
+
+class TestSameFlight:
+    def test_a_fix_or_two_that_jumped_are_forgiven(self):
+        path = _recording(1000.0, 3600.0)
+        # The fixes at two of the 20 moments compared jumped 11 km north
+        jumped = [
+            p._replace(lat=p.lat + (0.1 if p.ts in (1090.0, 1270.0) else 0.0))
+            for p in path
+        ]
+        first, second = _Timed.of(path), _Timed.of(jumped)
+        assert first is not None
+        assert second is not None
+        assert same_flight(first, second)
+
+        lost = [p._replace(lat=p.lat + (0.1 if p.ts < 1600.0 else 0.0)) for p in path]
+        third = _Timed.of(lost)
+        assert third is not None
+        assert not same_flight(first, third)
+
+    def test_a_shift_lines_up_the_clocks(self):
+        first = _Timed.of(_recording(1000.0, 3600.0))
+        second = _Timed.of(_recording(0.0, 3600.0))
+        assert first is not None
+        assert second is not None
+        assert same_flight(first, second, shift=-1000.0)
+        assert not same_flight(first, second, shift=-900.0)
+
+
+class TestMoving:
+    def test_from_the_takeoff_run_to_the_landing(self):
+        # Taxiing at 7 m/s to where the takeoff run starts at 300 s
+        taxi = [
+            TrackPoint(50.0, 8.0 - 0.0001 * (300 - t), 100.0, float(t))
+            for t in range(0, 300, 5)
+        ]
+        flight = _recording(300.0, 600.0)
+        end = flight[-1]
+        parked = [end._replace(ts=end.ts + t) for t in range(5, 300, 5)]
+        recording = _Timed.of(taxi + flight + parked)
+        assert recording is not None
+        moving = recording.moving()
+        assert moving is not None
+        # From the last fix before the run, whose next 10 s were fast
+        assert moving.times[0] == 295.0
+        assert moving.times[-1] == 900.0
+        assert moving.clock_known == recording.clock_known
+
+    def test_none_for_a_recording_that_never_left_the_ground(self):
+        taxi = [TrackPoint(50.0, 8.0 + 0.0001 * t, 100.0, float(t)) for t in range(600)]
+        recording = _Timed.of(taxi)
+        assert recording is not None
+        assert recording.moving() is None
+
+
+class TestTimeNear:
+    def test_between_fixes_and_where_the_aircraft_stood(self):
+        # Standing at the start for 20 s, then east at 0.0002 degrees a second
+        path = [TrackPoint(50.0, 8.0, 500.0, 0.0), TrackPoint(50.0, 8.0, 500.0, 10.0)]
+        path += _recording(20.0, 600.0, lon_per_s=0.0002)[1:]
+        recording = _Timed.of(path)
+        assert recording is not None
+        assert recording.time_near(50.0, 8.0) == 0.0
+        # Halfway between two fixes, a few metres off the line
+        near = recording.time_near(50.00003, 8.0 + 0.0002 * 25.0)
+        assert near is not None
+        assert abs(near - 45.0) < 0.01
+        # Further away than DUPLICATE_DISTANCE_KM from every fix
+        assert recording.time_near(50.01, 8.0) is None
+
+    def test_between_fixes_far_apart(self):
+        """A fix a minute, 2.9 km apart: the line between them counts."""
+        recording = _Timed.of(_recording(0.0, 600.0, step_s=60.0))
+        assert recording is not None
+        near = recording.time_near(50.001, 8.0 + SPEED * 90.0)
+        assert near is not None
+        assert abs(near - 90.0) < 0.01

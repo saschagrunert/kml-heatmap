@@ -408,10 +408,27 @@ drops a recording of a flight another one of the same year records as
 well: two timed recordings are one flight when they overlap in time by
 more than half of the shorter one and are within 300 m of each other at 20
 moments spread over the time they share (two of them may be further
-apart). The recording that names the aircraft stays, its registration
+apart). That holds for recordings on the real clock, the files of a user
+who does not obfuscate them. Obfuscated files, though, start every flight
+at midnight on January 1st, so two recordings of one flight line up only
+if they were started in the same second, and every flight of a year
+overlaps every other. Where one of two recordings starts in the first
+three days of its year (`_clock_known`), only the time from its takeoff
+run to its last landing counts (`_Timed.moving`, faster than 20 m/s over
+10 s), since two flights from one field stand and taxi in the same
+places. At 20 moments of the shorter one, `_clock_shifts` looks up (in a
+grid of 300 m cells, which also holds the lines between fixes far apart)
+when the other passed closest to where it was, and a shift of the clock
+that at least three of them agree on to within 5 s is checked as above,
+but within 150 m: with the time free, circuits flown at one field on
+different days come within 300 m often enough. The flights of `data/`
+all start at the same moment, and the two of them that come closest to
+one flight (two flights of D-EAGJ at EDAQ) are still apart at 11 of the
+20 moments. A copy of each of them with 11 m of noise and a clock of its
+own is found for all 103, and for 98 of them when it keeps every tenth
+fix only. The recording that names the aircraft stays, its registration
 first and then its type, and of two that name as much the one with more
-points; the warning names both files. Recordings without times are not
-compared.
+points; the warning names both files. Recordings without times are not compared.
 
 **Year file format and the ground column:**
 
