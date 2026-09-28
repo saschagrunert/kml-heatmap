@@ -19,7 +19,7 @@
 import type { PathSegment } from "../types";
 import type { SmoothedFlights } from "./smoothing";
 import { planarMetres, type Coordinate } from "../utils/geometry";
-import { segmentSeconds } from "./heatLines";
+import { segmentSeconds, type SegmentWeight } from "./heatLines";
 
 /**
  * A logged step longer than this is a break in the log rather than time
@@ -127,8 +127,8 @@ export function chainTimes(
 
 /**
  * What the pieces of the curve of a chain are, point by point (see
- * chainPieces): the metres from the point before, the seconds of the heat
- * spent on them, and the time into its flight at each point
+ * chainPieces): the metres from the point before, the heat of them in
+ * seconds, and the time into its flight at each point
  */
 export interface ChainPieces {
   lengths: Float64Array;
@@ -137,23 +137,26 @@ export interface ChainPieces {
 }
 
 /**
- * The pieces of each curve, by its points, and the clock they were timed
- * by: a flight's curve is the same on every ground and at every level (see
- * groundedFlights), which only lift its points, so the cloud and the
- * replay of every level take them from here. They go with the curves.
+ * The pieces of each curve, by its points, and by how their heat is
+ * weighed, all timed by one clock: a flight's curve is the same on every
+ * ground and at every level (see groundedFlights), which only lift its
+ * points, so the cloud and the replay of every level take them from here.
+ * They go with the curves.
  */
 const piecesOf = new WeakMap<
   readonly Coordinate[],
-  ChainPieces & { clock: FlightClock }
+  Map<SegmentWeight, ChainPieces & { clock: FlightClock }>
 >();
 
 /**
  * The pieces of the curve of the chain the segments `first` to `end`
  * (exclusive) of `segments` are smoothed into, as `flights` has it: the
- * metres of each (pieceLengths), the seconds of each by the heat lines'
- * count of its segment's (segmentSeconds) spread over its pieces by their
- * length, and the time into its flight at each point by `clock`
- * (chainTimes). Worked out once for a curve and its clock.
+ * metres of each (pieceLengths), the heat of each as `weigh` counts its
+ * segment's (segmentSeconds, or see heatWeight) spread over its pieces by
+ * their length, and the time into its flight at each point by `clock`
+ * (chainTimes), whatever `weigh` counts. Worked out once for a curve, its
+ * clock and its weighing; another weighing of the same clock measures and
+ * times the curve alike, and only weighs it anew.
  */
 export function chainPieces(
   segments: readonly PathSegment[],
@@ -161,25 +164,35 @@ export function chainPieces(
   first: number,
   end: number,
   clock: FlightClock,
+  weigh: SegmentWeight = segmentSeconds,
 ): ChainPieces {
   const { chains, chainOf, from, to } = flights;
   const points = chains[chainOf[first]!]!.points;
-  const held = piecesOf.get(points);
-  if (held?.clock === clock) return held;
-  const lengths = pieceLengths(flights, first, end);
+  // The weighings of a curve are all timed by the same clock; another one
+  // lets go of them
+  let weighings = piecesOf.get(points);
+  let alike = weighings?.values().next().value;
+  if (!weighings || alike?.clock !== clock) {
+    weighings = new Map();
+    piecesOf.set(points, weighings);
+    alike = undefined;
+  }
+  const held = weighings.get(weigh);
+  if (held) return held;
+  const lengths = alike?.lengths ?? pieceLengths(flights, first, end);
   const seconds = new Float64Array(points.length);
   for (let m = first; m < end; m++) {
     let total = 0;
     for (let j = from[m]! + 1; j <= to[m]!; j++) total += lengths[j]!;
-    const spent = segmentSeconds(segments[m]!, segments[m + 1]);
+    const spent = weigh(segments[m]!, segments[m + 1]);
     const pieces = to[m]! - from[m]!;
     for (let j = from[m]! + 1; j <= to[m]!; j++) {
       seconds[j] = total > 0 ? (spent * lengths[j]!) / total : spent / pieces;
     }
   }
-  const times = chainTimes(flights, clock, first, end, lengths);
+  const times = alike?.times ?? chainTimes(flights, clock, first, end, lengths);
   const made = { lengths, seconds, times, clock };
-  piecesOf.set(points, made);
+  weighings.set(weigh, made);
   return made;
 }
 

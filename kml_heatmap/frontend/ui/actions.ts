@@ -5,7 +5,7 @@
  * same actions through `runAction`, so both ways in obey the same rules.
  */
 import type { MapApp } from "../mapApp";
-import type { ToggleAction } from "../state/toggles";
+import type { ToggleAction, ToggleKey } from "../state/toggles";
 import { logError } from "../utils/logger";
 
 /**
@@ -32,6 +32,13 @@ export const DEFERRED_WHILE_INITIALIZING: ReadonlySet<ActionName> =
 
 type ActionHandler = (e?: Event) => void;
 
+/** The action of a toggle that is a store write and nothing else */
+function flip(app: MapApp, key: ToggleKey): ActionHandler {
+  return () => {
+    app[key] = !app[key];
+  };
+}
+
 /**
  * Every action by name. The toggles name theirs in state/toggles.ts, and
  * the compiler holds this to handling each of them.
@@ -39,11 +46,13 @@ type ActionHandler = (e?: Event) => void;
 function actionHandlers(app: MapApp) {
   return {
     toggleHeatmap: () => app.uiToggles.toggleHeatmap(),
+    // Store writes the heatmap and the heat cloud follow
+    toggleRoutes: flip(app, "routeWeighting"),
+    toggleAirborne: flip(app, "airborneOnly"),
+    toggleNewAreas: flip(app, "newAreasVisible"),
     // A store write: the rail follows the key, and the panel's own code,
     // which is lazily loaded, arrives on the first opening (ui/statsPanel.ts)
-    toggleStats: () => {
-      app.statsPanelVisible = !app.statsPanelVisible;
-    },
+    toggleStats: flip(app, "statsPanelVisible"),
     toggleAltitude: () => app.uiToggles.toggleAltitude(),
     toggleAirspeed: () => app.uiToggles.toggleAirspeed(),
     toggleAirports: () => app.uiToggles.toggleAirports(),

@@ -164,7 +164,7 @@ describe("decodeYearBytes", () => {
 });
 
 describe("expandYearData", () => {
-  it("expands segment rows into path segments and heatmap coordinates", () => {
+  it("expands segment rows into path segments", () => {
     const raw = rawYear(
       2025,
       {
@@ -218,14 +218,6 @@ describe("expandYearData", () => {
         altitude_ft: 500,
         groundspeed_knots: 80,
       },
-    ]);
-    // start of every segment + end of the last segment per path
-    expect(data.coordinates).toEqual([
-      [50, 8],
-      [50.1, 8.1],
-      [50.2, 8.2],
-      [51, 9],
-      [51.1, 9.1],
     ]);
   });
 
@@ -307,15 +299,7 @@ describe("expandYearData", () => {
       }),
     );
     expect(data.path_segments).toHaveLength(1);
-    expect(data.coordinates).toHaveLength(2);
-    expect(data.coordinates.every((c) => Array.isArray(c))).toBe(true);
-  });
-
-  it("shares the start coordinate array between segment and heatmap point", () => {
-    const data = expandYearData(
-      rawYear(2025, { "1": path([50, 8], [[50.1, 8.1, 1, 1]]) }),
-    );
-    expect(data.coordinates[0]).toBe(data.path_segments[0]!.coords[0]);
+    expect(data.path_segments.every(Boolean)).toBe(true);
   });
 
   it("shares one coordinate array between neighbouring segments", () => {
@@ -355,9 +339,11 @@ describe("expandYearData", () => {
     /** Only the good path made it, and it has no holes or NaN in it */
     function expectOnlyTheGoodPath(data: KMLDataset): void {
       expect(data.path_segments.map((s) => s.path_id)).toEqual([2]);
-      expect(data.coordinates).toEqual([
-        [51, 9],
-        [51.1, 9.1],
+      expect(data.path_segments.map((s) => s.coords)).toEqual([
+        [
+          [51, 9],
+          [51.1, 9.1],
+        ],
       ]);
       expect(warn).toHaveBeenCalledOnce();
       expect(warn.mock.calls[0]![0]).toContain("Path 1");
@@ -392,12 +378,15 @@ describe("expandYearData", () => {
         const data = expandWith(raw);
 
         // A difference is lost, so nothing after it has a known position
-        expect(data.path_segments.map((s) => s.path_id)).toEqual([1, 2]);
-        expect(data.coordinates).toEqual([
-          [50, 8],
-          [50.1, 8.1],
-          [51, 9],
-          [51.1, 9.1],
+        expect(data.path_segments.map((s) => s.coords)).toEqual([
+          [
+            [50, 8],
+            [50.1, 8.1],
+          ],
+          [
+            [51, 9],
+            [51.1, 9.1],
+          ],
         ]);
         // Every slot is filled: the preallocated arrays are trimmed
         expect(data.path_segments.every(Boolean)).toBe(true);

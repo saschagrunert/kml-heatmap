@@ -165,7 +165,9 @@ their traces in `test-results/`, and every run writes an HTML report to
 
 `npm run build` produces five bundles. `mapApp.bundle.js` starts the map,
 `features.bundle.js` holds Replay, the relief, the heat cloud and the
-ribbons of a selection of the 3D view and the satellite imagery, and
+ribbons of a selection of the 3D view, the satellite imagery and the places
+new in a year of the New areas switch (Wrapped counts their area with the
+app's code, and never fetches this bundle), and
 `wrapped.bundle.js` holds Wrapped, the content of
 the statistics panel and the flight list of its Flights tab (the rail
 itself is part of the app, and says it is loading until the bundle is in;
@@ -656,7 +658,8 @@ style layer draws a glow at a height: `heatmap` lies on the ground,
 kilobytes for one layer.
 
 `calculations/heatCloud.ts` makes the data, once per dataset, filter,
-isolated selection, zoom level and relief on or off, and from
+isolated selection, weighing (the Routes and Airborne switches), zoom
+level and relief on or off, and from
 `CULL_FROM_ZOOM` in (`z` 9) for the part of the map around the view, as the
 ribbons are (`viewBox`) but a whole view to each side of it rather than a
 quarter (`CLOUD_VIEW_SPARE`: a pan of a view, or a zoom out of one and a
@@ -698,12 +701,15 @@ x and y in Mercator
 units from an origin in the middle of them (so 32-bit floats hold them to a
 fraction of a pixel), the ground under the point and the height above it in
 feet, and the seconds spent on the stretch to the next point: those of each
-segment (`segmentSeconds`, as the heat lines count them; counting fixes, as
-the heatmap does, left a cruise logged at an uneven pace in beads), spread
-over the stretches of the curve along it by their length, and the time
-into its flight the point was flown at (the same seconds added up from 0 at
-the flight's first fix, on across a gap in its log; `CLOUD_POINT_FLOATS`,
-6). A stretch is kept where either end is around the view, or where it
+segment as the heatmap and its lines count them (`heatWeight` in
+`calculations/heatLines.ts`: the time spent, or the length at 100 kt for
+Routes, without what was logged under 30 kt for Airborne, whose steps are
+neither merged nor written; counting fixes, as the heatmap once did, left a
+cruise logged at an uneven pace in beads), spread over the stretches of the
+curve along it by their length (`chainPieces`, kept per curve, clock and
+weighing), and the time into its flight the point was flown at (the clock
+replay all plays by, from 0 at the flight's first fix, on across a gap in
+its log, whatever the weighing; `CLOUD_POINT_FLOATS`, 6). A stretch is kept where either end is around the view, or where it
 crosses it with neither (a fix logged a kilometre or more after the last
 does, close in). On the way the heat of each step of the relief level
 (whatever zoom level the points are cut for) over its length is added up in
@@ -808,7 +814,10 @@ The exposure (`cloudExposure`) scales the heat so the busiest cells, at
 the gain of the zoom, glow no hotter than `CLOUD_WHITE_HEAT` (white), down
 to a quarter and never above 1, eased over a fraction of a second as the
 level or the zoom changes; the two years of the sample data never reach
-it. The pulses of the flow brighten and dim the glow by the time of each
+it. Weighed for Routes, a stretch carries its length at the reference
+cruise (`ROUTE_SPEED_MS` is `CLOUD_REFERENCE_SPEED_MS`), so the heat of a
+cell is how many flights passed it and the exposure darkens only where
+some sixty did. The pulses of the flow brighten and dim the glow by the time of each
 pixel's stretch, a comet brightest at its head moving the way the flights
 went, about 90 px of a cruise apart at any zoom (two spacings a power of
 two apart, blended by the zoom so they do not jump: the longer of one

@@ -51,6 +51,7 @@ import {
 } from "../calculations/groundProfile";
 import type { SmoothedFlights } from "../calculations/smoothing";
 import { datasetIndex } from "../calculations/datasetIndex";
+import { heatWeight } from "../calculations/heatLines";
 import {
   FULL_BAND,
   heightBandEdgesFt,
@@ -120,6 +121,8 @@ const CLOUD_KEYS: readonly (keyof StoreState)[] = [
   "altitudeVisible",
   "airspeedVisible",
   "aviationVisible",
+  "routeWeighting",
+  "airborneOnly",
 ];
 
 /**
@@ -142,9 +145,10 @@ function onReliefIn(app: MapApp, forced: boolean): boolean {
 
 /**
  * What the points of the cloud were made of, as a key: the dataset, the
- * filter, the isolated selection, and the ground they stand on, in the
- * 3D view's cloud or in Wrapped's (`forced`); the zoom level they are cut
- * for is kept apart (see CLOUD_LEVELS_KEPT)
+ * filter, the isolated selection, the ground they stand on and how their
+ * heat is weighed (heatWeight), in the 3D view's cloud or in Wrapped's
+ * (`forced`); the zoom level they are cut for is kept apart (see
+ * CLOUD_LEVELS_KEPT). Another key forgets the exposures as well.
  */
 function pointsKey(app: MapApp, forced: boolean): unknown[] {
   const isolated = isolatesIn(app, forced)
@@ -156,6 +160,8 @@ function pointsKey(app: MapApp, forced: boolean): unknown[] {
     app.selectedAircraft,
     isolated,
     onReliefIn(app, forced),
+    app.routeWeighting,
+    app.airborneOnly,
   ];
 }
 
@@ -516,7 +522,16 @@ export function followHeatCloud(app: MapApp): void {
       : (pathId: number) => kept.has(pathId);
     const segments = data.path_segments;
     const flights = flightsFor(segments, level, forced);
-    return cloudPoints(segments, flights, keep, level, detail, box, exposure);
+    return cloudPoints(
+      segments,
+      flights,
+      keep,
+      level,
+      detail,
+      box,
+      exposure,
+      heatWeight(app.routeWeighting, app.airborneOnly),
+    );
   };
 
   /** Put the layer where it belongs, or take it off */

@@ -4,10 +4,9 @@
  * that the cloud's layer draws as a soft glow (see ui/heatCloudLayer.ts).
  * This module is the data: which points of the curves, where and how high,
  * and how much heat each stretch between two of them carries: the seconds
- * spent on it, as the heat lines count them (segmentSeconds). The heatmap
- * counts fixes, which a logger writes at a steady pace, but not every
- * logger does: one that writes a fix per turn or per change of speed left
- * a straight cruise in beads of light and dark.
+ * spent on it, as the heatmap and its lines count them (heatWeight), not
+ * the fixes along it: a logger that writes a fix per turn or per change of
+ * speed left a straight cruise in beads of light and dark.
  *
  * The curves and their heights are the ribbons' (smoothing.ts, lift.ts):
  * each flight smoothed through its fixes, at its altitude above the ground
@@ -31,6 +30,7 @@ import {
 } from "../utils/geometry";
 import { FEET_TO_METERS } from "../utils/constants";
 import { overlaps, type Box } from "../utils/viewBox";
+import { heatWeight, type SegmentWeight } from "./heatLines";
 import { liftExaggeration } from "./lift";
 import { chainPieces, flightClockOf } from "./flightClock";
 import type { SmoothedFlights } from "./smoothing";
@@ -90,7 +90,10 @@ export const CLOUD_MERGE_MAX_PX = 64;
  */
 export const CLOUD_MERGE_HEAT = 1.5;
 
-/** The least heat a stretch carries, in seconds */
+/**
+ * The least heat a stretch of any carries, in seconds, so its 32-bit float
+ * is not 0, which to the layer is no stretch at all
+ */
 const MIN_HEAT_S = 0.01;
 
 /**
@@ -370,12 +373,15 @@ function cellHeat(): {
  *
  * A point of the curve is kept where it is CLOUD_STEP_PX of the level on
  * from the last one kept, or its height has changed by CLOUD_HEIGHT_STEP_PX,
- * and at either end of a flight: the steps of the cloud. The seconds of a
- * segment (segmentSeconds) are spread over the pieces of the curve along it
- * by their length, and a step carries those of the curve it is merged
- * from. The steps along a straight run are merged into one stretch (see
- * CLOUD_MERGE_PX), which carries their heat and the time its first point
- * was flown at; steps out of the box are neither merged nor written.
+ * and at either end of a flight: the steps of the cloud. The heat of a
+ * segment, as `weigh` counts it (see heatWeight), is spread over the
+ * pieces of the curve along it by their length, and a step carries that
+ * of the curve it is merged from. The steps along a straight run are
+ * merged into one stretch (see CLOUD_MERGE_PX), which carries their heat
+ * and the time its first point was flown at, on replay all's clock
+ * whatever `weigh` counts; steps out of the box, and steps of no heat
+ * (what only the flights in the air leave out), are neither merged nor
+ * written.
  *
  * The exposure (CloudPoints.busiest) adds up the heat of the steps of the
  * relief level, of every flight, in the box or not, so it is the same
@@ -391,6 +397,7 @@ export function cloudPoints(
   detail = level,
   box: Box | null = null,
   busiest?: number,
+  weigh: SegmentWeight = heatWeight(false, false),
 ): CloudPoints {
   const exaggeration = liftExaggeration(level);
   const values: number[] = [];
@@ -429,7 +436,7 @@ export function cloudPoints(
       // The pixels of the level a foot of height is drawn as
       const pixelsPerFt = (FEET_TO_METERS * exaggeration) / pixelM;
       const heightStepFt = CLOUD_HEIGHT_STEP_PX / pixelsPerFt;
-      // The length, the seconds and the time of each piece of the curve,
+      // The length, the heat and the time of each piece of the curve,
       // the same at every level (see chainPieces)
       const { lengths, seconds, times } = chainPieces(
         segments,
@@ -437,6 +444,7 @@ export function cloudPoints(
         i,
         end,
         clock,
+        weigh,
       );
       const groundAt = (j: number): number => (ground ? ground[j]! : 0);
       const heightAt = (j: number): number => groundAt(j) + heights[j]!;
@@ -483,14 +491,17 @@ export function cloudPoints(
       const step = (j: number, heat: number, metres: number): void => {
         const point = points[j]!;
         const inside = !box || inBox(box, point);
-        if (!inside && !prevIn && !crosses(box, points[prev]!, point)) {
-          // Out of the box from end to end: neither drawn nor merged, and
-          // a stretch starts anew where it ends
+        if (
+          heat === 0 ||
+          (!inside && !prevIn && !crosses(box, points[prev]!, point))
+        ) {
+          // Of no heat, or out of the box from end to end: neither drawn
+          // nor merged, and a stretch starts anew where it ends
           if (merging) flush();
           merging = false;
           open = false;
           prev = j;
-          prevIn = false;
+          prevIn = inside;
           known = false;
           return;
         }
@@ -565,12 +576,15 @@ export function cloudPoints(
             cellAlong >= cellStepM ||
             Math.abs(heightAt(j) - cellFt) >= cellHeightStepFt
           ) {
-            // Into the cell it starts in, over as many metres as it spans
-            cells.add(
-              Math.floor(cellX / cell),
-              Math.floor(cellY / cell),
-              Math.max(cellSeconds, MIN_HEAT_S) / Math.max(cellAlong, cellM),
-            );
+            // Into the cell it starts in, over as many metres as it spans;
+            // one of no heat is not busy at all
+            if (cellSeconds > 0) {
+              cells.add(
+                Math.floor(cellX / cell),
+                Math.floor(cellY / cell),
+                Math.max(cellSeconds, MIN_HEAT_S) / Math.max(cellAlong, cellM),
+              );
+            }
             [cellX, cellY] = mercatorOf(points[j]!);
             cellFt = heightAt(j);
             cellAlong = 0;
@@ -582,10 +596,8 @@ export function cloudPoints(
           along >= stepM ||
           Math.abs(heightAt(j) - keptFt) >= heightStepFt
         ) {
-          // The heat of the step goes on the point it starts from; a step
-          // of none (a track without times or speeds) gets a trace, since
-          // none is no stretch at all to the layer
-          step(j, Math.max(heat, MIN_HEAT_S), along);
+          // The heat of the step goes on the point it starts from
+          step(j, heat > 0 ? Math.max(heat, MIN_HEAT_S) : 0, along);
           keptFt = heightAt(j);
           along = 0;
           heat = 0;

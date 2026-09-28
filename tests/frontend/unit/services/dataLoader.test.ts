@@ -477,7 +477,6 @@ describe("DataLoader", () => {
       expect(result).not.toBeNull();
       expect(result!.path_segments).toHaveLength(1);
       expect(result!.path_segments[0]!.path_id).toBe(1);
-      expect(result!.coordinates).toHaveLength(2);
       expect(mockShowLoading).toHaveBeenCalledTimes(1);
       expect(mockHideLoading).toHaveBeenCalledTimes(1);
     });
@@ -521,6 +520,17 @@ describe("DataLoader", () => {
 
       expect(mockFetchJson).toHaveBeenCalledTimes(1);
       expect(second).toBe(first);
+    });
+
+    it("hands out a year it holds without loading one it does not", async () => {
+      defineYear(2025);
+      expect(loader.cachedData("2025")).toBeUndefined();
+
+      const data = await loader.loadData("2025");
+
+      expect(loader.cachedData("2025")).toBe(data);
+      expect(loader.cachedData("2024")).toBeUndefined();
+      expect(mockFetchJson).toHaveBeenCalledTimes(1);
     });
 
     it("dedupes concurrent loads of the same year", async () => {

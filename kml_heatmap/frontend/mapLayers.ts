@@ -231,15 +231,23 @@ function addDataLayersTo(map: MapLibreMap): void {
   // The look of the heatmap (radius, intensity, colours) belongs to the
   // data manager, which sets it as paint properties. The source merges the
   // fixes into clusters for the zooms at which they are too many to draw
-  // one by one (see HEATMAP_CLUSTER). Isolate draws the selected flights
-  // from a source of their own, so neither is written again for it.
-  for (const id of [MAP_LAYERS.heat, MAP_LAYERS.heatIsolated]) {
+  // one by one (see HEATMAP_CLUSTER), adding up the heat of each point, `w`
+  // (see heatmapFeatures in ui/dataManager.ts). Isolate draws the selected
+  // flights from a source of their own, so neither is written again for
+  // it. The places new in a year are drawn from one of their own too, under
+  // the heatmap (see ui/newAreas.ts).
+  for (const id of [
+    MAP_LAYERS.heatNew,
+    MAP_LAYERS.heat,
+    MAP_LAYERS.heatIsolated,
+  ]) {
     map.addSource(id, {
       type: "geojson",
       data: emptyGeoJson(),
       cluster: true,
       clusterRadius: HEATMAP_CLUSTER.radius,
       clusterMaxZoom: HEATMAP_CLUSTER.maxZoom,
+      clusterProperties: { w: ["+", ["get", "w"]] },
     });
     map.addLayer({ id, type: "heatmap", source: id, layout: hidden }, before);
   }

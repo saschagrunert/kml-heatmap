@@ -121,7 +121,6 @@ describe("MapApp", () => {
       expect(app.fullPathSegments).toBeNull();
 
       const data: KMLDataset = {
-        coordinates: [],
         path_segments: [createSegment({ path_id: 1 })],
         path_info: [{ id: 1 }],
         original_points: 0,
@@ -135,7 +134,6 @@ describe("MapApp", () => {
 
     it("lists the paths of each airport among the flights the filter keeps", () => {
       app.currentData = {
-        coordinates: [],
         path_segments: [],
         path_info: [
           {

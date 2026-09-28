@@ -535,7 +535,6 @@ describe("AppStore", () => {
       store.subscribe("currentData", fn);
 
       const data = {
-        coordinates: [],
         path_segments: [],
         path_info: [],
         resolution: "full",

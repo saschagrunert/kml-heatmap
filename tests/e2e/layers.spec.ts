@@ -27,6 +27,16 @@ import {
 const LAYERS_GROUP =
   '#right-buttons .control-group[aria-labelledby="layers-group-title"]';
 
+/** How many points a GeoJSON source of the app holds, as handed to the map */
+function sourcePoints(page: Page, id: string): Promise<number> {
+  return page.evaluate((id) => {
+    const source = window.mapApp!.map!.getStyle().sources[id];
+    return source?.type === "geojson" && typeof source.data !== "string"
+      ? (source.data as GeoJSON.FeatureCollection).features.length
+      : 0;
+  }, id);
+}
+
 /** How many airport codes the map has placed in view */
 function placedAirportLabels(page: Page): Promise<number> {
   return page.evaluate(
@@ -140,6 +150,63 @@ test.describe("Layers", () => {
 
     await btn.click();
     await expectToggle(btn, true);
+  });
+
+  test("the heat's switches weigh the heatmap anew and go into the link", async ({
+    page,
+  }) => {
+    /** How many points the heat source holds, as handed to the map */
+    const heatPoints = (): Promise<number> => sourcePoints(page, "heat");
+    const param = (name: string): Promise<string | null> =>
+      Promise.resolve(new URL(page.url()).searchParams.get(name));
+    await expect.poll(heatPoints).toBeGreaterThan(0);
+    const all = await heatPoints();
+
+    // Taxiing, run-ups and the apron are left out
+    await toggleLayer(page, "airborne");
+    await expect.poll(heatPoints).toBeLessThan(all);
+    await expect.poll(() => param("o")).toBe("1");
+
+    // Every flight the same per kilometre: the same points, weighed anew
+    await toggleLayer(page, "routes");
+    await expect.poll(() => param("r")).toBe("1");
+
+    await toggleLayer(page, "airborne");
+    await toggleLayer(page, "routes");
+    await expect.poll(heatPoints).toBe(all);
+    await expect.poll(() => param("o")).toBeNull();
+    await expect.poll(() => param("r")).toBeNull();
+  });
+
+  test("New areas draws the places no earlier year's flights passed apart", async ({
+    page,
+  }) => {
+    await expect.poll(() => sourcePoints(page, "heat")).toBeGreaterThan(0);
+    const all = await sourcePoints(page, "heat");
+    // All years and at least two of them: the newest, which the site opens
+    // on, has flights in a year before it
+    test.skip(
+      (await page.locator("#year-select option").count()) < 3,
+      "the site has a single year",
+    );
+
+    await toggleLayer(page, "newAreas");
+
+    // The year before loads, and the heat parts in two
+    await expect
+      .poll(() => sourcePoints(page, "heat-new"), { timeout: 20000 })
+      .toBeGreaterThan(0);
+    await expect
+      .poll(
+        async () =>
+          (await sourcePoints(page, "heat")) +
+          (await sourcePoints(page, "heat-new")),
+      )
+      .toBe(all);
+
+    await toggleLayer(page, "newAreas");
+    await expect.poll(() => sourcePoints(page, "heat-new")).toBe(0);
+    await expect.poll(() => sourcePoints(page, "heat")).toBe(all);
   });
 
   test("altitude toggle shows altitude layer and legend", async ({

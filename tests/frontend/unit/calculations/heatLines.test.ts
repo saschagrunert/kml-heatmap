@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { heatLineFeatures } from "../../../../kml_heatmap/frontend/calculations/heatLines";
+import {
+  AIRBORNE_KNOTS,
+  heatLineFeatures,
+  heatWeight,
+  ROUTE_SPEED_MS,
+  segmentSeconds,
+} from "../../../../kml_heatmap/frontend/calculations/heatLines";
 import type { PathSegment } from "../../../../kml_heatmap/frontend/types";
 import { createSegment } from "../../testHelpers";
 
@@ -340,5 +346,104 @@ describe("heatLineFeatures smoothing", () => {
     const coolStart = heatAt(lines, 50, 8);
     const hotEnd = heatAt(lines, 50 + (5 * 235 + 100) * DEG_PER_M, 8);
     expect(hotEnd).toBeGreaterThan(coolStart * 16);
+  });
+});
+
+describe("heatWeight", () => {
+  const [first, second] = flight(1, { count: 2, stepM: 235, stepS: 5 });
+
+  it("counts the seconds spent by time, as the heat lines always did", () => {
+    const byTime = heatWeight(false, false);
+    expect(byTime(first!, second)).toBe(segmentSeconds(first!, second));
+    expect(byTime(first!, second)).toBeCloseTo(5);
+  });
+
+  it("counts a track without times or speeds as flown at cruise speed", () => {
+    const planned = createSegment({
+      groundspeed_knots: 0,
+      coords: [
+        [50, 8],
+        [50 + 514 * DEG_PER_M, 8],
+      ],
+    });
+    expect(segmentSeconds(planned, undefined)).toBe(0);
+    expect(heatWeight(false, false)(planned, undefined)).toBeCloseTo(
+      514 / ROUTE_SPEED_MS,
+      1,
+    );
+  });
+
+  it("counts every flight the same per kilometre for routes", () => {
+    const slow = flight(2, { count: 1, stepM: 235, stepS: 60 })[0]!;
+    const byRoute = heatWeight(true, false);
+    expect(byRoute(slow, undefined)).toBeCloseTo(byRoute(first!, second), 6);
+    expect(byRoute(first!, second)).toBeCloseTo(235 / ROUTE_SPEED_MS, 1);
+  });
+
+  it("leaves out what was logged on the ground, only when asked", () => {
+    const taxi = createSegment({ time: 0, groundspeed_knots: 12 });
+    const air = createSegment({ time: 0, groundspeed_knots: AIRBORNE_KNOTS });
+    const untimed = createSegment({ groundspeed_knots: 0 });
+    const airborne = heatWeight(false, true);
+
+    expect(heatWeight(false, false)(taxi, undefined)).toBeGreaterThan(0);
+    expect(airborne(taxi, undefined)).toBe(0);
+    expect(heatWeight(true, true)(taxi, undefined)).toBe(0);
+    expect(airborne(air, undefined)).toBeGreaterThan(0);
+    // A track without times has no speeds to tell the ground by, and a
+    // timed one without a speed the export could work out neither
+    expect(airborne(untimed, undefined)).toBeGreaterThan(0);
+    const unknown = createSegment({ time: 0, groundspeed_knots: 0 });
+    expect(airborne(unknown, undefined)).toBeGreaterThan(0);
+  });
+
+  it("adds no more for a leg kilometres long than the time mode does", () => {
+    const leg = createSegment({
+      groundspeed_knots: 0,
+      coords: [
+        [50, 8],
+        [50 + 20000 * DEG_PER_M, 8],
+      ],
+    });
+    const most = heatWeight(false, false)(
+      createSegment({ time: 0, groundspeed_knots: 1 }),
+      createSegment({ time: 590 }),
+    );
+    expect(most).toBe(120);
+    expect(heatWeight(false, false)(leg, undefined)).toBe(most);
+    expect(heatWeight(true, false)(leg, undefined)).toBe(most);
+  });
+
+  it("is the same function for the same switches", () => {
+    expect(heatWeight(true, false)).toBe(heatWeight(true, false));
+    expect(heatWeight(true, false)).not.toBe(heatWeight(false, false));
+    expect(heatWeight(false, true)).not.toBe(heatWeight(true, false));
+  });
+
+  it("draws no line of what only the flights in the air leave out", () => {
+    const taxi = flight(1, { count: 5, stepM: 20, stepS: 5 });
+    const air = flight(2, { count: 5, lat: 51 });
+    for (const segment of taxi) segment.groundspeed_knots = 10;
+    const segments = [...taxi, ...air];
+    const at = ([lat, lng]: [number, number]): string => [lng, lat].join();
+    const drawn = (weigh = heatWeight(false, false)): Set<string> =>
+      new Set(
+        heatLineFeatures(segments, all, weigh).features.flatMap((line) =>
+          line.geometry.coordinates.map((point) => point.join()),
+        ),
+      );
+
+    expect(drawn().has(at(taxi[0]!.coords[0]))).toBe(true);
+    const airborne = drawn(heatWeight(false, true));
+    expect(airborne.has(at(taxi[0]!.coords[0]))).toBe(false);
+    expect(airborne.has(at(taxi[4]!.coords[1]))).toBe(false);
+    expect(airborne.has(at(air[0]!.coords[0]))).toBe(true);
+  });
+
+  it("weighs the heat lines", () => {
+    const taxi = flight(1, { count: 5, stepM: 20, stepS: 60 });
+    const byTime = heatLineFeatures(taxi, all);
+    const byRoute = heatLineFeatures(taxi, all, heatWeight(true, false));
+    expect(heatAt(byRoute, 50, 8)).toBeLessThan(heatAt(byTime, 50, 8) / 8);
   });
 });

@@ -14,7 +14,10 @@ import {
   groundedFlights,
   releaseGroundProfiles,
 } from "../../../../kml_heatmap/frontend/calculations/groundProfile";
-import { segmentSeconds } from "../../../../kml_heatmap/frontend/calculations/heatLines";
+import {
+  heatWeight,
+  segmentSeconds,
+} from "../../../../kml_heatmap/frontend/calculations/heatLines";
 import { planarMetres } from "../../../../kml_heatmap/frontend/utils/geometry";
 import {
   smoothFlights,
@@ -276,5 +279,43 @@ describe("chainPieces", () => {
     const timed = chainPieces(segments, at9, 0, segments.length, other);
     expect(timed).not.toBe(pieces);
     expect(timed).toEqual({ ...pieces, clock: other });
+  });
+
+  it("weighs them anew for another weighing, measured and timed alike", () => {
+    const clock = flightClockOf(segments);
+    const flights = groundedFlights(segments, true, 8);
+    const bySeconds = chainPieces(segments, flights, 0, segments.length, clock);
+    const byRoute = heatWeight(true, false);
+
+    const routes = chainPieces(
+      segments,
+      flights,
+      0,
+      segments.length,
+      clock,
+      byRoute,
+    );
+
+    expect(routes.seconds).not.toEqual(bySeconds.seconds);
+    expect(routes.lengths).toBe(bySeconds.lengths);
+    expect(routes.times).toBe(bySeconds.times);
+    // Both kept for the clock, and let go of for another
+    expect(chainPieces(segments, flights, 0, segments.length, clock)).toBe(
+      bySeconds,
+    );
+    expect(
+      chainPieces(segments, flights, 0, segments.length, clock, byRoute),
+    ).toBe(routes);
+    const other = flightClock(segments);
+    const retimed = chainPieces(
+      segments,
+      flights,
+      0,
+      segments.length,
+      other,
+      byRoute,
+    );
+    expect(retimed).not.toBe(routes);
+    expect(retimed.seconds).toEqual(routes.seconds);
   });
 });

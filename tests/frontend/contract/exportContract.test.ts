@@ -649,7 +649,6 @@ describe("export contract (inline new-format sample)", () => {
   it("expands the sample into the in-memory dataset shape", () => {
     const data = expandYearData(sampleYear2025);
     expect(data.path_segments).toHaveLength(3);
-    expect(data.coordinates).toHaveLength(5);
     // In path_info order, although JavaScript lists the key "5" first
     expect(data.path_segments.map((segment) => segment.path_id)).toEqual([
       840108108563, 840108108563, 5,

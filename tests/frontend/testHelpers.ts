@@ -46,9 +46,7 @@ export function createDataset(
   segments: PathSegment[] = [],
   originalPoints = 0,
 ): KMLDataset {
-  const coordinates = segments.flatMap((s) => (s.coords ? [s.coords[0]] : []));
   return {
-    coordinates,
     path_segments: segments,
     path_info: pathInfo,
     original_points: originalPoints,
@@ -105,6 +103,7 @@ interface MockManagers {
     applyHeatmapEmphasis: Mock;
     showHeatmap: Mock;
     dismissFailures: Mock;
+    newAreaKm2: Mock;
   };
   layerManager: {
     clearLayer: Mock;
@@ -300,6 +299,7 @@ function createMockManagers(): MockManagers {
       applyHeatmapEmphasis: vi.fn(),
       showHeatmap: vi.fn(),
       dismissFailures: vi.fn(),
+      newAreaKm2: vi.fn(() => null),
     },
     layerManager: {
       clearLayer: vi.fn(),

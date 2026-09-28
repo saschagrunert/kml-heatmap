@@ -1,7 +1,8 @@
 /**
  * The look of the heatmap and of the heat lines it hands over to: the
- * MapLibre paint expressions, pure functions of the constants below. The
- * data manager gives the layers this paint and changes their opacity.
+ * MapLibre paint expressions, pure functions of the constants below, and
+ * how far the heat is scaled for them (heatExposure). The data manager
+ * gives the layers this paint and changes their opacity.
  */
 import type {
   ExpressionSpecification,
@@ -14,6 +15,7 @@ import {
   MAP_LAYERS,
   MAP_MAX_ZOOM,
 } from "../utils/constants";
+import { DEGREES_TO_RADIANS, type Coordinate } from "../utils/geometry";
 
 /*
  * The look of the heatmap, tuned side by side against what leaflet.heat drew
@@ -54,15 +56,16 @@ export const HEATMAP_OPACITY = 1;
  * near white. The faintest stop keeps leaflet.heat's least opacity, below
  * which a lone track is lost on the map.
  */
-const HEATMAP_GRADIENT: readonly (readonly [number, string, number])[] = [
-  [0, "10, 30, 120", 0],
-  [0.004, "20, 60, 190", 0.25],
-  [0.015, "20, 120, 235", 0.5],
-  [0.06, "40, 190, 255", 0.7],
-  [0.25, "120, 230, 255", 0.85],
-  [0.6, "200, 248, 255", 0.95],
-  [1, "255, 255, 255", 1],
-];
+export const HEATMAP_GRADIENT: readonly (readonly [number, string, number])[] =
+  [
+    [0, "10, 30, 120", 0],
+    [0.004, "20, 60, 190", 0.25],
+    [0.015, "20, 120, 235", 0.5],
+    [0.06, "40, 190, 255", 0.7],
+    [0.25, "120, 230, 255", 0.85],
+    [0.6, "200, 248, 255", 0.95],
+    [1, "255, 255, 255", 1],
+  ];
 
 /**
  * The heat lines the heatmap hands over to (see HEAT_LINES) speak its
@@ -134,6 +137,81 @@ function heatmapIntensity(): ExpressionSpecification {
   ];
 }
 
+/**
+ * Adaptive exposure: the heat of a year of flights, of one aircraft or of
+ * one isolated flight is drawn so that its busiest places come out alike.
+ * The heat is added up in a grid whose cells are two standard deviations
+ * of a point's kernel (a third of its radius) wide at EXPOSURE_ZOOM, a
+ * region of a few airfields, and scaled so that the cell at
+ * EXPOSURE_PERCENTILE of those with any heat reaches EXPOSURE_DENSITY, a
+ * light cyan: the busiest routes and circuits, with the airfields white
+ * beyond them. That is about where all the sample flights are drawn
+ * unscaled, and a year of them came out far fainter. However few cells
+ * there are, the EXPOSURE_TOP_CELLS busiest stay beyond it: a lone flight
+ * has few, and its 99th percentile was the airfields it stood and taxied
+ * on, which scaled to cyan left a quarter of the sample flights fainter
+ * than unscaled. A lone flight comes
+ * out as brightly as its routes do in a year of them instead of as a faint
+ * trace, and a logbook of many years does not wash out to white. Within
+ * EXPOSURE_RANGE: a single short flight is not lit like a year, nor a
+ * hundred years dimmed to nothing.
+ *
+ * The heat itself is scaled, rather than the paint: the points' weights,
+ * which leaves the least a point contributes where it was (see
+ * heatmapWeight), and the heat of the lines the heatmap hands over to, so
+ * they take over in the colours it had.
+ */
+const EXPOSURE_ZOOM = 10;
+const EXPOSURE_PERCENTILE = 0.99;
+const EXPOSURE_DENSITY = 0.15;
+const EXPOSURE_TOP_CELLS = 4;
+const EXPOSURE_RANGE = [0.25, 3] as const;
+/**
+ * The mean density over a cell two standard deviations wide of the heat in
+ * it, per unit of weight times intensity: a kernel (MapLibre's Gaussian,
+ * peak 1 / sqrt(2 pi)) holds 2 pi sigma^2 / sqrt(2 pi) of density in all,
+ * spread over (2 sigma)^2
+ */
+const DENSITY_PER_CELL_WEIGHT = Math.sqrt(2 * Math.PI) / 4;
+
+/**
+ * The exposure of the heat of `points`, each weighing `weights` of the
+ * same index (see heatmapPoints in ui/dataManager.ts): what the heat is
+ * scaled by, 1 for no heat at all
+ */
+export function heatExposure(
+  points: readonly Coordinate[],
+  weights: ArrayLike<number>,
+): number {
+  // In degrees of longitude, and of the Mercator latitude in the same unit
+  const cell = (720 * HEATMAP_RADIUS_PX) / 3 / (512 * 2 ** EXPOSURE_ZOOM);
+  const cells = new Map<number, number>();
+  points.forEach(([lat, lng], index) => {
+    const y = Math.atanh(Math.sin(lat * DEGREES_TO_RADIANS));
+    // A key the engine keeps as a small integer: a row holds fewer than
+    // 2^15 columns either side of the meridian
+    const key =
+      Math.floor(y / DEGREES_TO_RADIANS / cell) * 2 ** 16 +
+      Math.floor(lng / cell);
+    cells.set(key, (cells.get(key) ?? 0) + weights[index]!);
+  });
+  const sums = Float64Array.from(cells.values()).sort();
+  const rank = Math.min(
+    Math.floor((sums.length - 1) * EXPOSURE_PERCENTILE),
+    sums.length - 1 - EXPOSURE_TOP_CELLS,
+  );
+  const busy =
+    (sums[Math.max(rank, 0)] ?? 0) *
+    intensityAt(EXPOSURE_ZOOM) *
+    DENSITY_PER_CELL_WEIGHT;
+  return busy > 0
+    ? Math.min(
+        Math.max(EXPOSURE_DENSITY / busy, EXPOSURE_RANGE[0]),
+        EXPOSURE_RANGE[1],
+      )
+    : 1;
+}
+
 /** What heatmapIntensity comes to at `zoom` */
 function intensityAt(zoom: number): number {
   return (
@@ -149,17 +227,26 @@ function intensityAt(zoom: number): number {
  */
 const HEATMAP_FIXES_FROM_ZOOM = HEATMAP_CLUSTER.maxZoom + 1;
 export const HEATMAP_LEAST_CONTRIBUTION = intensityAt(HEATMAP_FIXES_FROM_ZOOM);
+/**
+ * The least a point contributes where the fixes are drawn as they are:
+ * well under what a fix of weight 1 does, so only the lightest points are
+ * lifted, and still with a kernel half as wide as that fix's (see
+ * heatmapWeight)
+ */
+export const HEATMAP_LEAST_POINT_CONTRIBUTION = 0.001;
 
 /**
- * Weight of a drawn point by zoom. Every fix counts the same, a track has no
- * heavier and lighter ones, and a cluster (see HEATMAP_CLUSTER) counts as the
- * fixes it stands for.
+ * Weight of a drawn point by zoom: its heat, `w` (see heatmapFeatures in
+ * ui/dataManager.ts), and a cluster (see HEATMAP_CLUSTER) the heat of the
+ * fixes it stands for. A fix of a track weighs about 1, the time spent
+ * around it in units of the few seconds a logger writes a fix in.
  *
  * But not every fix finds a cluster. The exporter keeps the vertices a KML
  * has, and those of a planned route or a slow logger are kilometres apart,
- * further than the cluster radius reaches. Such a fix stays a point of
- * weight 1 at every zoom while the intensity keeps halving. MapLibre sizes
- * the kernel of a point from weight times intensity: under about 0.004 the
+ * further than the cluster radius reaches. Such a fix stays a point of its
+ * own at every zoom, of the capped heat of its segment (see heatWeight),
+ * while the intensity keeps halving. MapLibre sizes the kernel of a point
+ * from weight times intensity: under about 0.004 the
  * kernel shrinks, and under 0.0006 its size is not a number at all. So the
  * weight never lets a point contribute less than a fix does at the first
  * zoom without clusters, where it is a faint dot: at zoom z that takes a
@@ -168,27 +255,29 @@ export const HEATMAP_LEAST_CONTRIBUTION = intensityAt(HEATMAP_FIXES_FROM_ZOOM);
  * track as a line at every zoom, but it also lifts the clusters of a lone
  * normal track, which then changes colour at the first zoom without them.
  *
- * A cluster of a normal track holds more fixes than that at every zoom (see
+ * A cluster of a normal track holds more heat than that at every zoom (see
  * HEATMAP_CLUSTER), so the floor leaves it alone. `zoom` may only be the
  * input of a top-level interpolation, hence a stop per level with the floor
  * inside. Between two levels the floor halves, which the base 1/2 follows
- * exactly; a count above both floors is the same at both stops and stays.
+ * exactly; a heat above both floors is the same at both stops and stays.
+ *
+ * Where the fixes are drawn as they are, a fix weighs its heat, which is
+ * less than 1 for one a second or less on (a logger that writes every
+ * second, a taxi counted by its length for routes), and less again under
+ * an exposure below 1. Under the 0.0006 such a point would drop out, and
+ * a track of them with it, so it keeps HEATMAP_LEAST_POINT_CONTRIBUTION
+ * down to the zoom from which the intensity stays.
  */
 function heatmapWeight(): ExpressionSpecification {
-  const count: ExpressionSpecification = [
-    "coalesce",
-    ["get", "point_count"],
-    1,
-  ];
+  const heat: ExpressionSpecification = ["get", "w"];
   const stops: (number | ExpressionSpecification)[] = [];
-  for (let zoom = 0; zoom < HEATMAP_FIXES_FROM_ZOOM; zoom++) {
-    stops.push(zoom, [
-      "max",
-      count,
-      HEATMAP_LEAST_CONTRIBUTION / intensityAt(zoom),
-    ]);
+  for (let zoom = 0; zoom <= HEATMAP_REFERENCE_ZOOM; zoom++) {
+    const least =
+      zoom < HEATMAP_FIXES_FROM_ZOOM
+        ? HEATMAP_LEAST_CONTRIBUTION
+        : HEATMAP_LEAST_POINT_CONTRIBUTION;
+    stops.push(zoom, ["max", heat, least / intensityAt(zoom)]);
   }
-  stops.push(HEATMAP_FIXES_FROM_ZOOM, count);
   return [
     "interpolate",
     ["exponential", 0.5],

@@ -485,6 +485,26 @@ describe("wrapped feature", () => {
       expect(facts.some((f) => f.category === "speed")).toBe(true);
     });
 
+    it("names the airspace new in the year, once known", () => {
+      expect(
+        generateFunFacts(yearStats, null, "2025").some(
+          (f) => f.category === "explore",
+        ),
+      ).toBe(false);
+
+      const fact = generateFunFacts(yearStats, null, "2025", 1240).find(
+        (f) => f.category === "explore",
+      );
+      expect(fact?.text).toContain("<strong>1,240 km²</strong>");
+      expect(fact?.text).toContain("in 2025");
+      // Nothing new is no fact
+      expect(
+        generateFunFacts(yearStats, null, "2025", 0).some(
+          (f) => f.category === "explore",
+        ),
+      ).toBe(false);
+    });
+
     it("generates achievement facts for high altitude", () => {
       const facts = generateFunFacts(yearStats, { max_altitude_ft: 45000 });
 

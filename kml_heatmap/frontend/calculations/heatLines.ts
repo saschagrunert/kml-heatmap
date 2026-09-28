@@ -4,11 +4,11 @@
  *
  * The heatmap hands over to them when zoomed in (see HEAT_LINES in
  * constants.ts), and they keep saying what it said: where the time was
- * spent. The heatmap counts fixes, which a logger writes at a steady pace,
- * so its density is time as well. Here the time is added up per cell of a
- * grid over the ground, and every stretch takes the time of the cells it
- * lies in. A taxiway, a holding point or a circuit flown every week come
- * out hot; a route flown once at cruise speed stays cool.
+ * spent, both weighing each stretch alike (heatWeight). Here the time is
+ * added up per cell of a grid over the ground, and every stretch takes the
+ * time of the cells it lies in. A taxiway, a holding point or a circuit
+ * flown every week come out hot; a route flown once at cruise speed stays
+ * cool.
  */
 import type { PathSegment } from "../types";
 import { DEGREES_TO_RADIANS, METRES_PER_DEGREE } from "../utils/geometry";
@@ -64,6 +64,62 @@ export function segmentSeconds(
         : 0;
   }
   return Math.min(seconds, most);
+}
+
+/**
+ * How much heat a segment carries, in seconds (see heatWeight); `next` is
+ * the segment after it in the dataset
+ */
+export type SegmentWeight = (
+  segment: PathSegment,
+  next: PathSegment | undefined,
+) => number;
+
+/**
+ * The groundspeed under which a segment counts as on the ground when only
+ * the flights in the air are asked for: taxiing, run-ups and the apron
+ */
+export const AIRBORNE_KNOTS = 30;
+/**
+ * The speed a stretch is counted at where its length is what counts, in
+ * metres per second: a cruise at 100 kt, the one the heat cloud's glow is
+ * calibrated for (see CLOUD_REFERENCE_SPEED_MS in ui/heatCloudLayer.ts)
+ */
+export const ROUTE_SPEED_MS = 51.4;
+
+/** The functions of heatWeight, by its switches */
+const weighings: SegmentWeight[] = [];
+
+/**
+ * The heat of a segment, as the heatmap, its lines and the heat cloud all
+ * count it. By time, the seconds spent on it (segmentSeconds); a track
+ * without times or speeds counts as flown at ROUTE_SPEED_MS rather than not
+ * at all. By `route`, its length at that speed: every flight counts the
+ * same per kilometre, so a route flown once stands beside the circuits and
+ * the apron instead of under them. Either way no segment adds more than
+ * MAX_SEGMENT_S: the heatmap puts it on one point and the lines on its
+ * ends, so a leg of a planned route kilometres long would otherwise glow
+ * at its corners. `airborne` leaves out what was logged under
+ * AIRBORNE_KNOTS, and keeps what has no speed to tell: a track without
+ * times, and a speed of 0, which the export writes for one it does not
+ * know. The same switches give the same function, so it tells whether heat
+ * was weighed alike.
+ */
+export function heatWeight(route: boolean, airborne: boolean): SegmentWeight {
+  return (weighings[+route * 2 + +airborne] ??= (segment, next) => {
+    if (
+      airborne &&
+      segment.time !== undefined &&
+      (segment.groundspeed_knots || AIRBORNE_KNOTS) < AIRBORNE_KNOTS
+    ) {
+      return 0;
+    }
+    const cruise = Math.min(
+      (segmentDistance(segment) * 1000) / ROUTE_SPEED_MS,
+      MAX_SEGMENT_S,
+    );
+    return route ? cruise : segmentSeconds(segment, next) || cruise;
+  });
 }
 
 /** The cells of the grid: a row per `HEAT_CELL_M` of latitude */
@@ -160,8 +216,9 @@ function smoothAlongFlights(
  * Every segment's time goes half to the cell of each end. A segment then
  * takes the lesser of the time around its two ends: one that only crosses
  * a busy place (a departure across the runway) is not drawn as busy along
- * its whole length. Only the kept flights count, so a filter recolours the
- * lines the way it redraws the heatmap.
+ * its whole length. Only the kept flights count, and of them the segments
+ * with any heat, so a filter or a weighing recolours the lines the way it
+ * redraws the heatmap.
  *
  * The heat is then smoothed along each flight and rounded to a power of
  * two, so that neighbouring segments of about the same heat merge into one
@@ -174,6 +231,7 @@ function smoothAlongFlights(
 export function heatLineFeatures(
   segments: readonly PathSegment[],
   keep: (pathId: number) => boolean,
+  weigh: SegmentWeight = heatWeight(false, false),
 ): GeoJSON.FeatureCollection<GeoJSON.LineString, { heat: number }> {
   const kept: PathSegment[] = [];
   /** Where each kept segment is in `segments`, and so on its curve */
@@ -187,7 +245,10 @@ export function heatLineFeatures(
 
   segments.forEach((segment, index) => {
     if (!keep(segment.path_id)) return;
-    const seconds = segmentSeconds(segment, segments[index + 1]);
+    const seconds = weigh(segment, segments[index + 1]);
+    // No heat, no line: what only the flights in the air leave out is not
+    // drawn, as the heatmap leaves out its point
+    if (!(seconds > 0)) return;
     addTo(segment.coords[0], seconds / 2);
     addTo(segment.coords[1], seconds / 2);
     kept.push(segment);

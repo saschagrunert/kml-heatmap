@@ -79,9 +79,8 @@ const ROWS_PER_CHECK = 1024;
 /**
  * Add rows to the dataset until `isDue` says to stop.
  *
- * Heatmap coordinates are every segment's start point plus the last end
- * point of each path, and neighbouring segments share the very same
- * coordinate array: each segment creates exactly one object.
+ * Neighbouring segments share the very same coordinate array: each
+ * segment creates exactly one object.
  * @returns Whether every path has been added
  */
 function addRows(
@@ -94,7 +93,7 @@ function addRows(
     decoded;
   // Filled with push: arrays preallocated with new Array(n) have holes
   // until they are full, which V8 keeps treating as the slower kind
-  const { coordinates, path_segments } = dataset;
+  const { path_segments } = dataset;
   let { path, point, row, pathEnd, previous } = cursor;
 
   while (path < pathIds.length) {
@@ -118,11 +117,9 @@ function addRows(
       const ground = grounds[row]!;
       if (!Number.isNaN(ground)) segment.ground_ft = ground;
       path_segments.push(segment);
-      coordinates.push(previous);
       previous = next;
     }
     if (row === pathEnd) {
-      coordinates.push(previous);
       previous = null;
       path++;
     }
@@ -135,7 +132,6 @@ function addRows(
 
 function emptyDataset(decoded: DecodedYear): KMLDataset {
   return {
-    coordinates: [],
     path_segments: [],
     path_info: decoded.path_info,
     original_points: decoded.original_points,
@@ -206,35 +202,27 @@ export async function buildDatasetInSlices(
 export function combineYearData(
   yearDatasets: (KMLDataset | null | undefined)[],
 ): KMLDataset {
-  let coordinateCount = 0;
   let segmentCount = 0;
   let pathInfoCount = 0;
   let originalPoints = 0;
 
   for (const data of yearDatasets) {
     if (!data) continue;
-    coordinateCount += data.coordinates.length;
     segmentCount += data.path_segments.length;
     pathInfoCount += data.path_info.length;
     originalPoints += data.original_points || 0;
   }
 
   const combined: KMLDataset = {
-    coordinates: new Array<Coordinate>(coordinateCount),
     path_segments: new Array<PathSegment>(segmentCount),
     path_info: new Array<KMLDataset["path_info"][number]>(pathInfoCount),
     original_points: originalPoints,
   };
 
-  let ci = 0;
   let si = 0;
   let pi = 0;
   for (const data of yearDatasets) {
     if (!data) continue;
-    const coords = data.coordinates;
-    for (let i = 0; i < coords.length; i++) {
-      combined.coordinates[ci++] = coords[i]!;
-    }
     const segments = data.path_segments;
     for (let i = 0; i < segments.length; i++) {
       combined.path_segments[si++] = segments[i]!;

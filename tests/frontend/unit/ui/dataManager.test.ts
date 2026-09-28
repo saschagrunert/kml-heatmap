@@ -1,13 +1,21 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
   DataManager,
-  heatmapCoordinates,
   heatmapFeatures,
+  heatmapPoints,
 } from "../../../../kml_heatmap/frontend/ui/dataManager";
 import {
+  heatLineFeatures,
+  heatWeight,
+  segmentSeconds,
+} from "../../../../kml_heatmap/frontend/calculations/heatLines";
+import { segmentDistance } from "../../../../kml_heatmap/frontend/calculations/statistics";
+import {
+  heatExposure,
   heatLinesPaint,
   heatmapPaint,
   HEATMAP_LEAST_CONTRIBUTION,
+  HEATMAP_LEAST_POINT_CONTRIBUTION,
 } from "../../../../kml_heatmap/frontend/ui/heatmapPaint";
 import {
   HEAT_LINES,
@@ -18,9 +26,14 @@ import {
   MAP_SOURCES,
 } from "../../../../kml_heatmap/frontend/utils/constants";
 import { domCache } from "../../../../kml_heatmap/frontend/utils/domCache";
+import {
+  resetSiteData,
+  siteData,
+} from "../../../../kml_heatmap/frontend/state/siteData";
 import type {
   KMLDataset,
   LoadingState,
+  Metadata,
 } from "../../../../kml_heatmap/frontend/types";
 import type { DataLoaderOptions } from "../../../../kml_heatmap/frontend/services/dataLoader";
 import {
@@ -38,6 +51,7 @@ const loaderMocks = vi.hoisted(() => ({
   loadData: vi.fn(),
   loadAirports: vi.fn(),
   loadMetadata: vi.fn(),
+  cachedData: vi.fn(),
   destroy: vi.fn(),
   options: null as DataLoaderOptions | null,
 }));
@@ -49,6 +63,7 @@ vi.mock("../../../../kml_heatmap/frontend/services/dataLoader", () => ({
       loadData: loaderMocks.loadData,
       loadAirports: loaderMocks.loadAirports,
       loadMetadata: loaderMocks.loadMetadata,
+      cachedData: loaderMocks.cachedData,
       destroy: loaderMocks.destroy,
     };
   }),
@@ -60,6 +75,13 @@ const toastMock = vi.hoisted(() => ({
   dismissToast: vi.fn(),
 }));
 vi.mock("../../../../kml_heatmap/frontend/utils/toast", () => toastMock);
+
+const featureMocks = vi.hoisted(() => ({
+  drawNewAreas: vi.fn(() => Promise.resolve()),
+}));
+vi.mock("../../../../kml_heatmap/frontend/services/featureLoader", () => ({
+  loadFeatures: () => Promise.resolve(featureMocks),
+}));
 
 /** A state of the loader, one year of unknown size unless said otherwise */
 function loading(overrides: Partial<LoadingState> = {}): LoadingState {
@@ -103,6 +125,15 @@ describe("DataManager", () => {
     expect(opacity(MAP_LAYERS.heat) === 0).toBe(isolated);
     return pointsOf(isolated ? isolatedSource() : heatSource());
   };
+  /**
+   * The heatmap's points of baseData: the start of every segment, which
+   * carries the time until the next fix, `[lng, lat]`
+   */
+  const HEAT_POINTS = [
+    [8.0, 50.0],
+    [8.1, 50.1],
+    [10.0, 52.0],
+  ];
   /** Every fix of baseData's segments, `[lng, lat]` */
   const ALL_FIXES = [
     [8.0, 50.0],
@@ -692,6 +723,33 @@ describe("DataManager", () => {
       expect(toastMock.dismissToast).not.toHaveBeenCalled();
     });
 
+    it("loads a year aside without touching the page's Retry or its failures", async () => {
+      const retry = { label: "Retry", run: vi.fn() };
+      loaderMocks.loadData.mockImplementationOnce(() => {
+        loaderMocks.options!.onLoadError!(["2025"]);
+        return Promise.resolve(null);
+      });
+      await dataManager.loadData("2025", undefined, retry);
+      toastMock.showToast.mockClear();
+
+      // One that loads takes no failure away, and one that fails says
+      // nothing: the caller does (see ui/newAreas.ts)
+      loaderMocks.loadData.mockResolvedValueOnce(baseData());
+      expect(await dataManager.loadOtherYear("2023")).not.toBeNull();
+      loaderMocks.loadData.mockResolvedValueOnce(null);
+      expect(await dataManager.loadOtherYear("2022")).toBeNull();
+      expect(toastMock.dismissToast).not.toHaveBeenCalled();
+      expect(toastMock.showToast).not.toHaveBeenCalled();
+
+      // The page's own load still fails with its Retry
+      loaderMocks.options!.onLoadError!(["2025"]);
+      expect(toastMock.showToast).toHaveBeenLastCalledWith(
+        "Failed to load flight data for 2025",
+        "error",
+        retry,
+      );
+    });
+
     it("asks for a reload when the site changed since the page loaded", () => {
       loaderMocks.options!.onLoadError!(["2024", "2025"], true);
 
@@ -724,11 +782,8 @@ describe("DataManager", () => {
       publish(data);
 
       expect(heatSource().setData).toHaveBeenCalledTimes(1);
-      expect(heatSource().data).toEqual(
-        heatmapFeatures(data.coordinates.map(([lat, lon]) => [lon, lat])),
-      );
-      expect(heatPoints()).toHaveLength(data.coordinates.length);
-      expect(heatPoints()[0]).toEqual([8.0, 50.0]);
+      expect(heatPoints()).toEqual(HEAT_POINTS);
+      expect(data.path_segments).toHaveLength(HEAT_POINTS.length);
     });
 
     it("loads nothing: the dataset is published by whoever loaded it", () => {
@@ -824,10 +879,13 @@ describe("DataManager", () => {
       expect(heatPoints()).toEqual([
         [8.0, 50.0],
         [8.1, 50.1],
+      ]);
+      // The heat lines draw the same flights, to their ends
+      expect(heatLinePoints()).toEqual([
+        [8.0, 50.0],
+        [8.1, 50.1],
         [8.2, 50.2],
       ]);
-      // The heat lines draw the same flights
-      expect(heatLinePoints()).toEqual(heatPoints());
     });
 
     it("hands the heat lines every flight when unfiltered", () => {
@@ -844,10 +902,7 @@ describe("DataManager", () => {
 
       mockApp.selectedAircraft = "D-EFGH";
 
-      expect(heatPoints()).toEqual([
-        [10.0, 52.0],
-        [11.0, 53.0],
-      ]);
+      expect(heatPoints()).toEqual([[10.0, 52.0]]);
     });
 
     it("filters heatmap coordinates by selection in isolate mode", () => {
@@ -859,14 +914,9 @@ describe("DataManager", () => {
         mockApp.isolateSelection = true;
       });
 
-      expect(drawnHeatPoints()).toEqual([
-        [10.0, 52.0],
-        [11.0, 53.0],
-      ]);
+      expect(drawnHeatPoints()).toEqual([[10.0, 52.0]]);
       // The heat source keeps the dataset's points, and is not written again
-      expect(heatPoints()).toEqual(
-        baseData().coordinates.map(([lat, lng]) => [lng, lat]),
-      );
+      expect(heatPoints()).toEqual(HEAT_POINTS);
       expect(heatSource().setData).toHaveBeenCalledOnce();
     });
 
@@ -880,10 +930,7 @@ describe("DataManager", () => {
 
       publish(baseData());
 
-      expect(drawnHeatPoints()).toEqual([
-        [10.0, 52.0],
-        [11.0, 53.0],
-      ]);
+      expect(drawnHeatPoints()).toEqual([[10.0, 52.0]]);
     });
 
     it("only restyles the paths for a selection outside isolate mode", () => {
@@ -910,7 +957,7 @@ describe("DataManager", () => {
       mockApp.selectedPathIds.add(2);
       mockApp.store.notifyMutation("selectedPathIds");
 
-      expect(drawnHeatPoints()).toEqual(ALL_FIXES);
+      expect(drawnHeatPoints()).toEqual(HEAT_POINTS);
       expect(mockApp.layerManager.updateSelectionStyles).toHaveBeenCalledTimes(
         1,
       );
@@ -920,14 +967,9 @@ describe("DataManager", () => {
       mockApp.store.notifyMutation("selectedPathIds");
       mockApp.isolateSelection = false;
       // Back to the dataset's own points
-      expect(drawnHeatPoints()).toEqual(
-        baseData().coordinates.map(([lat, lng]) => [lng, lat]),
-      );
+      expect(drawnHeatPoints()).toEqual(HEAT_POINTS);
       mockApp.isolateSelection = true;
-      expect(drawnHeatPoints()).toEqual([
-        [10.0, 52.0],
-        [11.0, 53.0],
-      ]);
+      expect(drawnHeatPoints()).toEqual([[10.0, 52.0]]);
 
       expect(mockApp.layerManager.updateSelectionStyles).toHaveBeenCalledTimes(
         4,
@@ -981,25 +1023,22 @@ describe("DataManager", () => {
       });
       expect(heatSource().setData).toHaveBeenCalledOnce();
       expect(isolatedSource().setData).toHaveBeenCalledOnce();
-      expect(drawnHeatPoints()).toEqual([
+      expect(drawnHeatPoints()).toEqual([[10.0, 52.0]]);
+      expect(heatLinePoints()).toEqual([
         [10.0, 52.0],
         [11.0, 53.0],
       ]);
-      expect(heatLinePoints()).toEqual(drawnHeatPoints());
 
       // And leaving it nothing but a switch of the two
       mockApp.isolateSelection = false;
       expect(heatSource().setData).toHaveBeenCalledOnce();
       expect(isolatedSource().setData).toHaveBeenCalledOnce();
-      expect(drawnHeatPoints()).toHaveLength(data.coordinates.length);
+      expect(drawnHeatPoints()).toEqual(HEAT_POINTS);
       expect(heatLinePoints()).toEqual(ALL_FIXES);
       // Isolated again, the same selection's points are still there
       mockApp.isolateSelection = true;
       expect(isolatedSource().setData).toHaveBeenCalledOnce();
-      expect(drawnHeatPoints()).toEqual([
-        [10.0, 52.0],
-        [11.0, 53.0],
-      ]);
+      expect(drawnHeatPoints()).toEqual([[10.0, 52.0]]);
       mockApp.isolateSelection = false;
 
       // The same points of another dataset are other points
@@ -1129,6 +1168,350 @@ describe("DataManager", () => {
     });
   });
 
+  describe("the heat's switches", () => {
+    const publish = (data: KMLDataset): void => {
+      mockApp.currentData = data;
+    };
+    /** The heat of each point the heat source holds */
+    const heatOfPoints = (): number[] =>
+      (
+        heatSource().data as GeoJSON.FeatureCollection<
+          GeoJSON.Point,
+          { w: number }
+        >
+      ).features.map((feature) => feature.properties.w);
+    /** A flight that taxies out and takes off, with times */
+    const departure = (): KMLDataset =>
+      createDataset(
+        [{ id: 1, year: 2025 }],
+        [
+          createSegment({ time: 0, groundspeed_knots: 12 }),
+          createSegment({
+            time: 60,
+            groundspeed_knots: 80,
+            coords: [
+              [50.1, 8.1],
+              [50.2, 8.2],
+            ],
+          }),
+          createSegment({
+            time: 90,
+            groundspeed_knots: 90,
+            coords: [
+              [50.2, 8.2],
+              [50.3, 8.3],
+            ],
+          }),
+        ],
+      );
+
+    it("scales the heat of the points by its exposure, and the lines' alike", () => {
+      mockApp.map!.jumpTo({ zoom: HEAT_LINES.fromZoom });
+      mockApp.heatmapLayer.setVisible(true);
+      const data = departure();
+
+      publish(data);
+
+      const { points, weights } = heatmapPoints(
+        data.path_segments,
+        () => true,
+        heatWeight(false, false),
+      );
+      const exposure = heatExposure(points, weights);
+      expect(exposure).not.toBe(1);
+      expect(heatOfPoints()).toEqual(weights.map((w) => w * exposure));
+      // The paint stays as it is: the heat is what is scaled
+      expect(heatLayer().paint).toEqual(heatmapPaint());
+      const lines = mockApp.map!.source(MAP_SOURCES.heatLines)
+        .data as GeoJSON.FeatureCollection<
+        GeoJSON.LineString,
+        { heat: number }
+      >;
+      const unscaled = heatLineFeatures(data.path_segments, () => true);
+      expect(lines.features.map((line) => line.properties.heat)).not.toEqual(
+        unscaled.features.map((line) => line.properties.heat),
+      );
+    });
+
+    it("leaves the ground out while only the flights in the air are asked for", () => {
+      publish(departure());
+      expect(heatPoints()).toHaveLength(3);
+      vi.mocked(mockApp.layerManager.syncModes).mockClear();
+
+      mockApp.airborneOnly = true;
+
+      expect(heatPoints()).toEqual([
+        [8.1, 50.1],
+        [8.2, 50.2],
+      ]);
+      // The colour layers draw every flight as it is
+      expect(mockApp.layerManager.syncModes).not.toHaveBeenCalled();
+
+      mockApp.airborneOnly = false;
+      expect(heatPoints()).toHaveLength(3);
+    });
+
+    it("counts every flight the same per kilometre for routes", () => {
+      publish(departure());
+      const byTime = heatOfPoints();
+
+      mockApp.routeWeighting = true;
+
+      const byRoute = heatOfPoints();
+      expect(heatSource().setData).toHaveBeenCalledTimes(2);
+      // Each point's heat is its segment's length, whatever the time spent
+      const lengths = departure().path_segments.map(
+        (segment) => segmentDistance(segment) * 1000,
+      );
+      for (let i = 1; i < lengths.length; i++) {
+        expect(byRoute[i]! / byRoute[0]!).toBeCloseTo(
+          lengths[i]! / lengths[0]!,
+        );
+      }
+      // The taxi out counted by its minute, now by its length
+      expect(byRoute[0]! / byRoute[1]!).toBeLessThan(byTime[0]! / byTime[1]!);
+    });
+
+    it("weighs an isolated selection anew with the switches", () => {
+      publish(departure());
+      mockApp.store.batch(() => {
+        mockApp.selectedPathIds = new Set([1]);
+        mockApp.isolateSelection = true;
+      });
+      expect(isolatedSource().setData).toHaveBeenCalledOnce();
+
+      mockApp.airborneOnly = true;
+
+      expect(isolatedSource().setData).toHaveBeenCalledTimes(2);
+      expect(drawnHeatPoints()).toHaveLength(2);
+    });
+  });
+
+  describe("places new in a year", () => {
+    const publish = (data: KMLDataset): void => {
+      mockApp.currentData = data;
+    };
+
+    it("are drawn by the feature bundle while asked for", async () => {
+      publish(baseData());
+      expect(featureMocks.drawNewAreas).not.toHaveBeenCalled();
+
+      mockApp.newAreasVisible = true;
+      await vi.waitFor(() =>
+        expect(featureMocks.drawNewAreas).toHaveBeenCalledWith(mockApp),
+      );
+    });
+
+    it("leave the heat source for their own, and come back to it", () => {
+      const newSource = (): MockSource =>
+        mockApp.map!.source(MAP_SOURCES.heatNew);
+      publish(baseData());
+      const heat = dataManager.heat!;
+      // Nothing was ever shown apart
+      expect(newSource().setData).not.toHaveBeenCalled();
+
+      dataManager.showNewAreas(heat, Uint8Array.from([0, 1, 0]));
+
+      expect(heatSource().setData).toHaveBeenCalledTimes(2);
+      expect(heatPoints()).toEqual([
+        [8.0, 50.0],
+        [10.0, 52.0],
+      ]);
+      expect(pointsOf(newSource())).toEqual([[8.1, 50.1]]);
+
+      dataManager.showNewAreas(heat, undefined);
+      expect(heatPoints()).toEqual(HEAT_POINTS);
+      expect(pointsOf(newSource())).toEqual([]);
+      // And, empty, is not written again for the heat that follows
+      mockApp.airborneOnly = true;
+      expect(newSource().setData).toHaveBeenCalledTimes(2);
+    });
+
+    describe("while shown", () => {
+      /** A flight of 2025 whose first stretch was flown in 2024 as well */
+      const year = (): KMLDataset =>
+        createDataset(
+          [{ id: 1, year: 2025 }],
+          [
+            createSegment(),
+            createSegment({
+              coords: [
+                [50.1, 8.1],
+                [50.2, 8.2],
+              ],
+            }),
+            createSegment({
+              coords: [
+                [52.0, 10.0],
+                [53.0, 11.0],
+              ],
+            }),
+          ],
+        );
+      const before = createDataset(
+        [{ id: 2, year: 2024 }],
+        [createSegment({ path_id: 2 })],
+      );
+
+      beforeEach(() => {
+        siteData.metadata = { available_years: [2024, 2025] } as Metadata;
+        loaderMocks.cachedData.mockImplementation((known: string) =>
+          known === "2024" ? before : undefined,
+        );
+        mockApp.selectedYear = "2025";
+        publish(year());
+        mockApp.newAreasVisible = true;
+        dataManager.showNewAreas(dataManager.heat!, Uint8Array.from([0, 0, 1]));
+      });
+
+      afterEach(() => {
+        resetSiteData();
+      });
+
+      it("send the heat once to each source when it is weighed anew, from the years before held", () => {
+        const writes = heatSource().setData.mock.calls.length;
+
+        mockApp.routeWeighting = true;
+
+        expect(heatSource().setData).toHaveBeenCalledTimes(writes + 1);
+        // Worked out here: the drawing of them finds nothing to send again
+        expect(Array.from(dataManager.heat!.fresh!)).toEqual([0, 0, 1]);
+        expect(heatPoints()).toEqual([
+          [8.0, 50.0],
+          [8.1, 50.1],
+        ]);
+      });
+
+      it("are left to the drawing of them while a year before is not held", () => {
+        loaderMocks.cachedData.mockReturnValue(undefined);
+
+        mockApp.routeWeighting = true;
+
+        expect(dataManager.heat!.fresh).toBeUndefined();
+        expect(heatPoints()).toHaveLength(3);
+      });
+    });
+
+    it("are not taken for heat the source no longer shows", () => {
+      publish(baseData());
+      const before = dataManager.heat!;
+      mockApp.airborneOnly = true;
+      const writes = heatSource().setData.mock.calls.length;
+
+      dataManager.showNewAreas(before, Uint8Array.from([1, 1, 1]));
+
+      expect(dataManager.heat!.fresh).toBeUndefined();
+      expect(heatSource().setData).toHaveBeenCalledTimes(writes);
+    });
+
+    it("stay with the heat while a selection is isolated", () => {
+      const data = baseData();
+      // Weighed only for the heat of the filter: path 2 is not isolated
+      const weighed = vi.fn(() => 100);
+      Object.defineProperty(data.path_segments[2]!, "groundspeed_knots", {
+        get: weighed,
+      });
+      publish(data);
+      const heat = dataManager.heat!;
+      const weighings = weighed.mock.calls.length;
+      expect(weighings).toBeGreaterThan(0);
+      dataManager.showNewAreas(heat, Uint8Array.from([0, 1, 0]));
+      const writes = heatSource().setData.mock.calls.length;
+
+      mockApp.store.batch(() => {
+        mockApp.selectedPathIds = new Set([1]);
+        mockApp.isolateSelection = true;
+      });
+      mockApp.isolateSelection = false;
+
+      // Neither worked out nor written again
+      expect(weighed).toHaveBeenCalledTimes(weighings);
+      expect(dataManager.heat).toBe(heat);
+      expect(heat.fresh).toEqual(Uint8Array.from([0, 1, 0]));
+      expect(heatSource().setData).toHaveBeenCalledTimes(writes);
+    });
+
+    it("are drawn as the heatmap is while shown apart, and not for an isolated selection", () => {
+      const newOpacity = (): unknown =>
+        mockApp.map!.layer(MAP_LAYERS.heatNew).paint["heatmap-opacity"];
+      publish(baseData());
+      // Nothing to draw, so the map leaves the layer out
+      expect(newOpacity()).toBe(0);
+
+      dataManager.showNewAreas(dataManager.heat!, Uint8Array.from([0, 1, 0]));
+      expect(newOpacity()).toEqual(heatLayer().paint["heatmap-opacity"]);
+      // Stepping back under a colour layer alike
+      mockApp.altitudeVisible = true;
+      dataManager.applyHeatmapEmphasis();
+      expect(newOpacity()).toEqual(heatLayer().paint["heatmap-opacity"]);
+
+      mockApp.store.batch(() => {
+        mockApp.selectedPathIds = new Set([1]);
+        mockApp.isolateSelection = true;
+      });
+      expect(newOpacity()).toBe(0);
+    });
+
+    describe("counted for Wrapped", () => {
+      /** A flight along the latitude `lat`, a segment of about 700 m a fix */
+      const flightAt = (lat: number): KMLDataset["path_segments"] =>
+        Array.from({ length: 4 }, (_, i) =>
+          createSegment({
+            path_id: 1,
+            coords: [
+              [lat, 12 + i * 0.01],
+              [lat, 12 + (i + 1) * 0.01],
+            ],
+          }),
+        );
+      const years: Record<string, KMLDataset> = {
+        "2023": createDataset([], flightAt(50)),
+        "2024": createDataset([], flightAt(51)),
+      };
+
+      beforeEach(() => {
+        siteData.metadata = {
+          available_years: [2023, 2024, 2025],
+        } as Metadata;
+        loaderMocks.cachedData.mockImplementation(
+          (year: string) => years[year],
+        );
+      });
+
+      afterEach(() => {
+        resetSiteData();
+      });
+
+      it("from the earlier years the page holds, without loading any", () => {
+        const segments = [...flightAt(51), ...flightAt(52)];
+
+        const km2 = dataManager.newAreaKm2("2025", segments);
+
+        // The year before flew the first flight: only the second is new,
+        // about 3 km along the latitude, over a cell or two either side
+        expect(km2).toBeGreaterThanOrEqual(3);
+        expect(km2).toBeLessThanOrEqual(8);
+        expect(dataManager.newAreaKm2("2025", flightAt(50))).toBe(0);
+        // 2024 is compared with 2023 alone, which flew elsewhere
+        expect(dataManager.newAreaKm2("2024", flightAt(51))).toBeGreaterThan(0);
+        expect(loaderMocks.cachedData).not.toHaveBeenCalledWith("2025");
+        expect(loaderMocks.loadData).not.toHaveBeenCalled();
+      });
+
+      it("not while an earlier year is not loaded, nor where there is none", () => {
+        const segments = flightAt(52);
+        loaderMocks.cachedData.mockImplementation((year: string) =>
+          year === "2023" ? undefined : years[year],
+        );
+
+        expect(dataManager.newAreaKm2("2025", segments)).toBeNull();
+        expect(dataManager.newAreaKm2("2023", segments)).toBeNull();
+        expect(dataManager.newAreaKm2("all", segments)).toBeNull();
+        expect(loaderMocks.loadData).not.toHaveBeenCalled();
+      });
+    });
+  });
+
   describe("a lost WebGL context", () => {
     /**
      * The map as MapLibre leaves it between the loss and the restored
@@ -1155,14 +1538,16 @@ describe("DataManager", () => {
 
       restore();
 
-      const kept = [
+      expect(heatSource().setData).toHaveBeenCalledTimes(2);
+      expect(heatPoints()).toEqual([
+        [8.0, 50.0],
+        [8.1, 50.1],
+      ]);
+      expect(heatLinePoints()).toEqual([
         [8.0, 50.0],
         [8.1, 50.1],
         [8.2, 50.2],
-      ];
-      expect(heatSource().setData).toHaveBeenCalledTimes(2);
-      expect(heatPoints()).toEqual(kept);
-      expect(heatLinePoints()).toEqual(kept);
+      ]);
     });
 
     it("leaves the heat and its lines the restored sources hold as they are, the last written", () => {
@@ -1190,7 +1575,7 @@ describe("DataManager", () => {
 
       mockApp.currentData = data;
 
-      expect(heatPoints()).toHaveLength(data.coordinates.length);
+      expect(heatPoints()).toHaveLength(data.path_segments.length);
       expect(heatLayer().layout["visibility"]).toBe("none");
       expect(mockApp.layerManager.syncModes).toHaveBeenCalledTimes(1);
     });
@@ -1273,19 +1658,16 @@ describe("DataManager", () => {
      * shape heatmapWeight builds is understood: an interpolation over the
      * zoom whose outputs are the count or `["max", count, floor]`.
      */
-    const weightAt = (
-      zoom: number,
-      properties: { point_count?: number },
-    ): number => {
+    const weightAt = (zoom: number, properties: { w?: number }): number => {
       const weight = paint["heatmap-weight"] as unknown[];
       expect(weight.slice(0, 3)).toEqual([
         "interpolate",
         ["exponential", 0.5],
         ["zoom"],
       ]);
-      const count = properties.point_count ?? 1;
+      const count = properties.w ?? 1;
       const output = (value: unknown): number => {
-        const countExpression = ["coalesce", ["get", "point_count"], 1];
+        const countExpression = ["get", "w"];
         if (JSON.stringify(value) === JSON.stringify(countExpression)) {
           return count;
         }
@@ -1308,8 +1690,8 @@ describe("DataManager", () => {
     };
 
     it("never lets a lone fix contribute less than at the first zoom without clusters", () => {
-      // No spacing of the fixes assumed: a feature without `point_count` is
-      // a fix that found no cluster, however far out the map is
+      // No spacing of the fixes assumed: a fix of the heat of one that found
+      // no cluster, however far out the map is
       expect(HEATMAP_LEAST_CONTRIBUTION).toBeGreaterThanOrEqual(0.004);
       expect(HEATMAP_LEAST_CONTRIBUTION).toBe(
         intensityAt(HEATMAP_CLUSTER.maxZoom + 1),
@@ -1332,18 +1714,40 @@ describe("DataManager", () => {
       }
     });
 
-    it("weighs a fix as one where fixes are drawn, and a big cluster as its fixes", () => {
+    it("weighs a fix by its heat where fixes are drawn, and a big cluster by the heat of its fixes", () => {
       for (
         let zoom = HEATMAP_CLUSTER.maxZoom + 1;
         zoom <= MAP_MAX_ZOOM;
         zoom++
       ) {
         expect(weightAt(zoom, {})).toBe(1);
+        expect(weightAt(zoom, { w: 0.4 })).toBe(0.4);
       }
       for (let zoom = 0; zoom <= HEATMAP_CLUSTER.maxZoom; zoom += 0.5) {
-        expect(weightAt(zoom, { point_count: 100000 })).toBe(100000);
+        expect(weightAt(zoom, { w: 100000 })).toBe(100000);
         // The floor only ever adds
-        expect(weightAt(zoom, { point_count: 3 })).toBeGreaterThanOrEqual(3);
+        expect(weightAt(zoom, { w: 3 })).toBeGreaterThanOrEqual(3);
+      }
+    });
+
+    it("keeps the lightest point drawn where the fixes are drawn as they are", () => {
+      // MapLibre's kernel has no size under weight times intensity times
+      // 1 / sqrt(2 pi) of 1 / 255 / 16, and the point drops out
+      const collapses = 1 / 255 / 16 / 0.3989422804014327;
+      expect(HEATMAP_LEAST_POINT_CONTRIBUTION).toBeGreaterThan(collapses);
+      expect(HEATMAP_LEAST_POINT_CONTRIBUTION).toBeLessThan(
+        HEATMAP_LEAST_CONTRIBUTION / 4,
+      );
+      for (
+        let zoom = HEATMAP_CLUSTER.maxZoom + 1;
+        zoom <= MAP_MAX_ZOOM;
+        zoom += 0.5
+      ) {
+        // A fix a tenth of a second on, under the least exposure
+        expect(weightAt(zoom, { w: 0.00625 }) * intensityAt(zoom)).toBeCloseTo(
+          HEATMAP_LEAST_POINT_CONTRIBUTION,
+          9,
+        );
       }
     });
 
@@ -1467,57 +1871,192 @@ describe("DataManager", () => {
     });
   });
 
-  describe("heatmapCoordinates", () => {
+  describe("heatExposure", () => {
+    /** A track of `count` fixes 150 m apart to the east, of heat `w` each */
+    const track = (
+      count: number,
+      w: number,
+    ): { points: [number, number][]; weights: number[] } => ({
+      points: Array.from({ length: count }, (_, i): [number, number] => [
+        51,
+        12 + i * 0.0022,
+      ]),
+      weights: Array.from({ length: count }, () => w),
+    });
+    /** Tracks that overlap `times` times, and around them one lone track */
+    const busy = (times: number): ReturnType<typeof track> => {
+      const lone = track(1000, 1);
+      const over = track(100, times);
+      return {
+        points: [
+          ...lone.points.map(([lat, lng]): [number, number] => [lat + 1, lng]),
+          ...over.points,
+        ],
+        weights: [...lone.weights, ...over.weights],
+      };
+    };
+
+    it("leaves heat that is not there as it is", () => {
+      expect(heatExposure([], [])).toBe(1);
+    });
+
+    it("scales the busiest places of the heat to the same colour", () => {
+      const once = busy(4);
+      const twice = busy(8);
+
+      const a = heatExposure(once.points, once.weights);
+      const b = heatExposure(twice.points, twice.weights);
+
+      expect(b).toBeCloseTo(a / 2);
+      expect(a).toBeGreaterThan(0.25);
+      expect(a).toBeLessThan(3);
+    });
+
+    it("takes a lone flight's route, not the airfields it stood on, for its busiest places", () => {
+      const route = track(100, 1);
+      const stood = {
+        points: [...route.points, route.points[0]!, route.points[99]!],
+        weights: [...route.weights, 300, 300],
+      };
+
+      expect(heatExposure(stood.points, stood.weights)).toBe(
+        heatExposure(route.points, route.weights),
+      );
+    });
+
+    it("neither lights a lone short flight like a year, nor dims a logbook to nothing", () => {
+      const lone = track(10, 1);
+      expect(heatExposure(lone.points, lone.weights)).toBe(3);
+      const lots = track(10, 1e6);
+      expect(heatExposure(lots.points, lots.weights)).toBe(0.25);
+    });
+  });
+
+  describe("heatmapPoints", () => {
     const start: [number, number] = [50, 8];
     const mid: [number, number] = [50.1, 8.1];
     const end: [number, number] = [50.2, 8.2];
     const other: [number, number] = [52, 10];
     const otherEnd: [number, number] = [53, 11];
     const segments = [
-      createSegment({ path_id: 1, coords: [start, mid] }),
-      createSegment({ path_id: 1, coords: [mid, end] }),
+      createSegment({ path_id: 1, coords: [start, mid], time: 0 }),
+      createSegment({ path_id: 1, coords: [mid, end], time: 8 }),
       createSegment({ path_id: 2, coords: [other, otherEnd] }),
     ];
+    const byTime = heatWeight(false, false);
 
-    it("lists every start point once and each path's end point", () => {
-      expect(heatmapCoordinates(segments, () => true)).toEqual([
-        start,
-        mid,
-        end,
-        other,
-        otherEnd,
-      ]);
+    it("lists every start point once, with the time until the next fix", () => {
+      const { points, weights } = heatmapPoints(segments, () => true, byTime);
+
+      expect(points).toEqual([start, mid, other]);
+      // In units of 4 s, about the pace a flight logger writes fixes at
+      expect(weights[0]).toBe(2);
+      // The last of a flight and one without times take their length at
+      // their groundspeed
+      expect(weights[1]).toBeCloseTo(
+        segmentSeconds(segments[1]!, undefined) / 4,
+      );
+      expect(weights[2]).toBeCloseTo(
+        segmentSeconds(segments[2]!, undefined) / 4,
+      );
+    });
+
+    it("weighs a flight by the time it took, not by how often its logger wrote", () => {
+      // The same 20 s, logged every 2 s and every 5 s
+      const logged = (pathId: number, step: number): typeof segments =>
+        Array.from({ length: 20 / step }, (_, i) =>
+          createSegment({
+            path_id: pathId,
+            coords: [
+              [50 + (i * step) / 1000, 8],
+              [50 + ((i + 1) * step) / 1000, 8],
+            ],
+            time: i * step,
+          }),
+        );
+      /** The heat of all but the last fix, whose time is its speed's */
+      const heat = (list: typeof segments): number =>
+        heatmapPoints(list, () => true, byTime)
+          .weights.slice(0, -1)
+          .reduce((a, b) => a + b, 0);
+
+      const often = logged(1, 2);
+      const seldom = logged(2, 5);
+      expect(heat(often)).toBeCloseTo(18 / 4);
+      expect(heat(seldom)).toBeCloseTo(15 / 4);
+      // Counted by the fix, the one would weigh 9 and the other 3
     });
 
     it("keeps only the paths the filter accepts", () => {
-      expect(heatmapCoordinates(segments, (id) => id === 2)).toEqual([
+      expect(heatmapPoints(segments, (id) => id === 2, byTime).points).toEqual([
         other,
-        otherEnd,
       ]);
-      expect(heatmapCoordinates(segments, () => false)).toEqual([]);
+      expect(heatmapPoints(segments, () => false, byTime)).toEqual({
+        points: [],
+        weights: [],
+      });
+    });
+
+    it("leaves out the points of no heat", () => {
+      const taxi = createSegment({
+        path_id: 3,
+        coords: [start, mid],
+        time: 0,
+        groundspeed_knots: 10,
+      });
+      const climb = createSegment({
+        path_id: 3,
+        coords: [mid, end],
+        time: 30,
+        groundspeed_knots: 70,
+      });
+
+      expect(heatmapPoints([taxi, climb], () => true, byTime).points).toEqual([
+        start,
+        mid,
+      ]);
+      expect(
+        heatmapPoints([taxi, climb], () => true, heatWeight(false, true))
+          .points,
+      ).toEqual([mid]);
     });
   });
 
   describe("heatmapFeatures", () => {
-    /** `count` points along a line, `[lng, lat]`, each telling its index */
+    /** `count` points along a line, `[lat, lng]` */
     const line = (count: number): [number, number][] =>
-      Array.from({ length: count }, (_, i): [number, number] => [8 + i, 50]);
+      Array.from({ length: count }, (_, i): [number, number] => [50, 8 + i]);
 
-    it("makes one Point per fix, which is what the source can cluster", () => {
+    it("makes one Point per fix with its heat, which is what the source can cluster", () => {
       const points = line(3);
 
-      expect(heatmapFeatures(points)).toEqual({
+      expect(heatmapFeatures({ points, weights: [1, 2, 3] })).toEqual({
         type: "FeatureCollection",
-        features: points.map((coordinates) => ({
+        features: points.map(([lat, lng], i) => ({
           type: "Feature",
-          properties: null,
-          geometry: { type: "Point", coordinates },
+          properties: { w: i + 1 },
+          geometry: { type: "Point", coordinates: [lng, lat] },
         })),
       });
     });
 
+    it("leaves out the points in places new in their year, or keeps only them", () => {
+      const heat = {
+        points: line(3),
+        weights: [1, 2, 3],
+        fresh: Uint8Array.from([0, 1, 0]),
+      };
+      const weights = (fresh?: number): unknown[] =>
+        heatmapFeatures(heat, fresh).features.map(
+          (feature) => feature.properties.w,
+        );
+
+      expect(weights()).toEqual([1, 3]);
+      expect(weights(1)).toEqual([2]);
+    });
+
     it("has no features without any point", () => {
-      expect(heatmapFeatures([])).toEqual({
+      expect(heatmapFeatures({ points: [], weights: [] })).toEqual({
         type: "FeatureCollection",
         features: [],
       });
