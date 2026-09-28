@@ -54,6 +54,7 @@ import { heatWeight } from "../calculations/heatLines";
 import { findHomeBase } from "../features/airports";
 import { siteData } from "../state/siteData";
 import { applyToggleButtonState } from "../utils/buttonState";
+import { holdControls } from "./heldControls";
 import { domCache } from "../utils/domCache";
 import {
   DEGREES_TO_RADIANS,
@@ -300,11 +301,8 @@ export class HotspotTour {
    * not to wherever the flight back had come to
    */
   private returning: TourCamera | null = null;
-  /** The held controls, and whether each was disabled before */
-  private readonly held = new Map<
-    HTMLButtonElement | HTMLSelectElement,
-    boolean
-  >();
+  /** Gives the held controls back as they were (see holdControls) */
+  private release: (() => void) | null = null;
   /** Ends what follows the map and the store while it runs */
   private listening: AbortController | null = null;
   private panel: TourPanel | null = null;
@@ -403,7 +401,8 @@ export class HotspotTour {
       app.heatmapVisible = true;
       app.heightBand = "";
     });
-    this.hold(true);
+    this.release?.();
+    this.release = holdControls(HELD_CONTROL_IDS);
     this.showRunning(true);
 
     const listening = new AbortController();
@@ -562,7 +561,8 @@ export class HotspotTour {
     this.listening?.abort();
     this.listening = null;
     app.tourView = null;
-    this.hold(false);
+    this.release?.();
+    this.release = null;
     this.showRunning(false);
     panel.root.hidden = true;
     document.body.style.removeProperty(TOUR_PANEL_HEIGHT_VAR);
@@ -630,25 +630,6 @@ export class HotspotTour {
     if (button) {
       setControlIcon(button, running ? "stop" : "trophy");
       applyToggleButtonState(button, running);
-    }
-  }
-
-  /** Hold the controls, or give them back as they were */
-  private hold(held: boolean): void {
-    if (!held) {
-      for (const [control, disabled] of this.held) control.disabled = disabled;
-      this.held.clear();
-      return;
-    }
-    for (const id of HELD_CONTROL_IDS) {
-      const control = domCache.get(id);
-      if (
-        control instanceof HTMLButtonElement ||
-        control instanceof HTMLSelectElement
-      ) {
-        this.held.set(control, control.disabled);
-        control.disabled = true;
-      }
     }
   }
 

@@ -43,9 +43,11 @@ export function followHeightBand(app: MapApp): HTMLElement {
   const thumb = (end: string, name: string): string =>
     `<input type="range" id="height-band-${end}" min="0" max="${OPEN_TOP}"` +
     ` step="1" aria-label="${name} height above ground">`;
+  // An arrow up from a line, the height above the ground: the ruler it had
+  // is the cross-section's, which reads the heights along a line
   root.innerHTML =
     `<div class="height-band-head"><span id="height-band-title">` +
-    `${icon("ruler", 16)}Height AGL</span>` +
+    `${icon("climb", 16)}Height AGL</span>` +
     '<span class="height-band-value"></span></div>' +
     `<div class="height-band-track">${thumb("low", "Lowest")}` +
     `${thumb("high", "Highest")}</div>`;

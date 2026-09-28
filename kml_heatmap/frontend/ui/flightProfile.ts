@@ -44,6 +44,7 @@ import { airplaneLiftPx, liftExaggeration } from "../calculations/lift";
 import { prepareReplaySegments } from "../features/replay";
 import { siteData } from "../state/siteData";
 import { domCache } from "../utils/domCache";
+import { formatDuration } from "../utils/duration";
 import { formatNumber, formatSpeed, formatTime } from "../utils/formatters";
 import type { Coordinate } from "../utils/geometry";
 import { setControlIcon } from "../utils/icons";
@@ -322,7 +323,7 @@ export function followFlightProfile(app: MapApp): HTMLElement {
     if (profile.lowSeconds !== null) {
       figures.push([
         `Below ${formatNumber(LOW_HEIGHT_FT)}${unit}`,
-        formatTime(profile.lowSeconds),
+        formatDuration(profile.lowSeconds),
       ]);
     }
     stats.replaceChildren();

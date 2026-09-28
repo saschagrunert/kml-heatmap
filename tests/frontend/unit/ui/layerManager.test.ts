@@ -400,14 +400,14 @@ describe("LayerManager", () => {
       layerManager.updateAltitudeLegend({ min: 1000, max: 5000 });
 
       expect(document.getElementById("legend-min")!.textContent).toBe(
-        "1,000 ft (305 m)",
+        "1,000 ft\n(305 m)",
       );
       expect(document.getElementById("legend-max")!.textContent).toBe(
-        "5,000 ft (1,524 m)",
+        "5,000 ft\n(1,524 m)",
       );
     });
 
-    it("names the median in the middle, where the colours are spread by rank", () => {
+    it("names the median in the middle, in both units as the ends", () => {
       layerManager.updateAltitudeLegend({
         min: 0,
         max: 10000,
@@ -415,13 +415,14 @@ describe("LayerManager", () => {
           i < 16 ? i * 100 : i * 300,
         ),
       });
+      // With the second unit the ends have (it went without it)
       expect(document.getElementById("legend-mid")!.textContent).toBe(
-        "4,800 ft",
+        "4,800 ft\n(1,463 m)",
       );
       // Evenly from end to end, halfway between them
       layerManager.updateAirspeedLegend({ min: 100, max: 200 });
       expect(document.getElementById("airspeed-legend-mid")!.textContent).toBe(
-        "150 kt",
+        "150 kt\n(278 km/h)",
       );
     });
 
@@ -429,20 +430,20 @@ describe("LayerManager", () => {
       layerManager.updateAirspeedLegend({ min: 100, max: 200 });
 
       expect(document.getElementById("airspeed-legend-min")!.textContent).toBe(
-        "100 kt (185 km/h)",
+        "100 kt\n(185 km/h)",
       );
       expect(document.getElementById("airspeed-legend-max")!.textContent).toBe(
-        "200 kt (370 km/h)",
+        "200 kt\n(370 km/h)",
       );
     });
 
     it("rounds legend values", () => {
       layerManager.updateAltitudeLegend({ min: 1234.6, max: 5678.4 });
       expect(document.getElementById("legend-min")!.textContent).toBe(
-        "1,235 ft (376 m)",
+        "1,235 ft\n(376 m)",
       );
       expect(document.getElementById("legend-max")!.textContent).toBe(
-        "5,678 ft (1,731 m)",
+        "5,678 ft\n(1,731 m)",
       );
     });
 
@@ -754,7 +755,7 @@ describe("LayerManager", () => {
         { pathId: 1, options: { color, weight: 6, opacity: 1 } },
       ]);
       expect(document.getElementById("legend-min")!.textContent).toBe(
-        "3,000 ft (914 m)",
+        "3,000 ft\n(914 m)",
       );
     });
 
@@ -829,10 +830,10 @@ describe("LayerManager", () => {
       drawMode(layerManager, "altitude");
 
       expect(document.getElementById("legend-min")!.textContent).toBe(
-        "0 ft (0 m)",
+        "0 ft\n(0 m)",
       );
       expect(document.getElementById("legend-max")!.textContent).toBe(
-        "5,000 ft (1,524 m)",
+        "5,000 ft\n(1,524 m)",
       );
     });
 
@@ -912,7 +913,7 @@ describe("LayerManager", () => {
       );
       expect(features(ALTITUDE_SELECTED)).toEqual([]);
       expect(document.getElementById("legend-max")!.textContent).toBe(
-        "5,000 ft (1,524 m)",
+        "5,000 ft\n(1,524 m)",
       );
     });
 
@@ -955,7 +956,7 @@ describe("LayerManager", () => {
         stepColor(airspeedColorAt, 100, 0, 200),
       );
       expect(document.getElementById("airspeed-legend-max")!.textContent).toBe(
-        "200 kt (370 km/h)",
+        "200 kt\n(370 km/h)",
       );
     });
 
@@ -1152,7 +1153,7 @@ describe("LayerManager", () => {
         },
       ]);
       expect(document.getElementById("legend-min")!.textContent).toBe(
-        "3,000 ft (914 m)",
+        "3,000 ft\n(914 m)",
       );
     });
 
@@ -1215,7 +1216,7 @@ describe("LayerManager", () => {
         },
       ]);
       expect(document.getElementById("legend-max")!.textContent).toBe(
-        "5,000 ft (1,524 m)",
+        "5,000 ft\n(1,524 m)",
       );
     });
 
@@ -1284,7 +1285,7 @@ describe("LayerManager", () => {
       ]);
       expect(paint(AIRSPEED)["line-opacity"]).toBe(0.1);
       expect(document.getElementById("airspeed-legend-min")!.textContent).toBe(
-        "80 kt (148 km/h)",
+        "80 kt\n(148 km/h)",
       );
     });
   });

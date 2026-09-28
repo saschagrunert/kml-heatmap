@@ -27,6 +27,7 @@ import {
   turnOf,
   type Coordinate,
 } from "../utils/geometry";
+import { formatDuration } from "../utils/duration";
 import { formatNumber } from "../utils/formatters";
 import { heatWeight, ROUTE_SPEED_MS, type SegmentWeight } from "./heatLines";
 
@@ -277,16 +278,6 @@ export function hotspotName(
   return `${Math.round(nearestKm)} km ${direction} of ${nearest.name}`;
 }
 
-/** Time spent as "41 h", "2.5 h" or "35 min": a total, never a time of day */
-export function formatHotspotTime(seconds: number): string {
-  const minutes = Math.round(seconds / 60);
-  // Not "60 min" for a little under the hour
-  if (minutes < 60) return `${Math.max(1, minutes)} min`;
-  const hours = seconds / 3600;
-  if (hours >= 10) return `${Math.round(hours)} h`;
-  return `${(Math.round(hours * 10) / 10).toString()} h`;
-}
-
 /** A distance flown as "1,250 km", "4.5 km" or "800 m" */
 export function formatHotspotDistance(metres: number): string {
   const hundreds = Math.round(metres / 100);
@@ -297,7 +288,8 @@ export function formatHotspotDistance(metres: number): string {
 
 /**
  * What the caption of a hotspot says below its name: "32 h, 22% of the
- * time", or "40 min, under 1% of the time"; with `route` (By distance,
+ * time", or "40 min, under 1% of the time" (a total in the page's words,
+ * formatDuration, never a time of day); with `route` (By distance,
  * whose heat is the distance flown at ROUTE_SPEED_MS) "1,250 km flown, 8%
  * of the distance"
  */
@@ -306,5 +298,5 @@ export function hotspotDetail(hotspot: Hotspot, route = false): string {
   const share = percent >= 1 ? `${percent}%` : "under 1%";
   return route
     ? `${formatHotspotDistance(hotspot.seconds * ROUTE_SPEED_MS)} flown, ${share} of the distance`
-    : `${formatHotspotTime(hotspot.seconds)}, ${share} of the time`;
+    : `${formatDuration(hotspot.seconds)}, ${share} of the time`;
 }

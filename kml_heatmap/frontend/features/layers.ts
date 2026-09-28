@@ -249,24 +249,29 @@ export function calculateSegmentProperties(options: {
 }
 
 /**
- * Format an altitude legend label, e.g. "1000 ft (305 m)"
+ * Format an altitude legend label, e.g. "1,000 ft" over "(305 m)". Each of
+ * the three labels carries both units, the second on a line of its own
+ * (the legend keeps the line break, see styles.css): on one line the ends
+ * made the legend 70 px wider than the heat's, and the middle, which had
+ * no room for the second unit, went without it.
  */
 export function formatAltitudeLabel(valueFt: number): string {
   return (
     formatNumber(valueFt) +
-    " ft (" +
+    " ft\n(" +
     formatNumber(valueFt * FEET_TO_METERS) +
     " m)"
   );
 }
 
 /**
- * Format a groundspeed legend label, e.g. "100 kt (185 km/h)"
+ * Format a groundspeed legend label, e.g. "100 kt" over "(185 km/h)" (see
+ * formatAltitudeLabel)
  */
 export function formatAirspeedLabel(valueKt: number): string {
   return (
     formatNumber(valueKt) +
-    " kt (" +
+    " kt\n(" +
     formatNumber(valueKt * NAUTICAL_MILES_TO_KM) +
     " km/h)"
   );

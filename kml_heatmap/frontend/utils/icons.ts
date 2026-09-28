@@ -2,9 +2,10 @@
  * Inline SVG icon set.
  *
  * The shapes come from Lucide (ISC, https://lucide.dev), imported by name so
- * the bundler keeps only the ones this page draws. Two are drawn here
- * instead: Lucide carries no brand marks, and the replay marker needs an
- * aircraft seen from above, which no general purpose set has.
+ * the bundler keeps only the ones this page draws. Three are drawn here
+ * instead: Lucide carries no brand marks, the replay marker needs an
+ * aircraft seen from above, which no general purpose set has, and Stop is
+ * a filled square.
  *
  * They are inlined rather than drawn from an icon font: an icon is part of
  * the markup it is drawn into, so it shows with the first paint, needs no
@@ -47,7 +48,6 @@ import {
   Satellite,
   Ruler,
   SlidersHorizontal,
-  Square,
   Star,
   Trophy,
   X,
@@ -99,16 +99,19 @@ export type IconName =
   | "aircraftTop";
 
 /**
- * The two shapes Lucide does not carry. The GitHub mark is a brand, which
- * the set dropped on purpose; the aircraft is drawn nose up and solid, so
- * the replay marker's rotation is the track itself and the silhouette holds
- * together over live map data.
+ * The shapes Lucide does not carry. The GitHub mark is a brand, which the
+ * set dropped on purpose; the aircraft is drawn nose up and solid, so the
+ * replay marker's rotation is the track itself and the silhouette holds
+ * together over live map data. Stop is filled, as on a player: Lucide's
+ * outlined square, which the replays and the hotspot tour swap their
+ * control's icon to while they run, looked like an empty checkbox.
  */
 const OWN_PATHS = {
   github:
     '<path d="M12 2.5A9.5 9.5 0 0 0 9 21.2c.5.1.7-.2.7-.5v-1.7C7.1 19.6 6.5 18 6.5 18a2.5 2.5 0 0 0-1-1.4c-.8-.6.1-.6.1-.6a2 2 0 0 1 1.4 1 2 2 0 0 0 2.7.8 2 2 0 0 1 .6-1.3c-2-.2-4.2-1-4.2-4.7a3.6 3.6 0 0 1 1-2.5 3.4 3.4 0 0 1 .1-2.5s.8-.3 2.7 1a9.2 9.2 0 0 1 4.8 0c1.9-1.3 2.7-1 2.7-1a3.4 3.4 0 0 1 .1 2.5 3.6 3.6 0 0 1 1 2.5c0 3.7-2.2 4.5-4.2 4.7a2.3 2.3 0 0 1 .6 1.7v2.5c0 .3.2.6.7.5A9.5 9.5 0 0 0 12 2.5z"/>',
   aircraftTop:
     '<path d="M12 2.6c1.1 0 1.8 1.3 1.8 2.8v3.1l6.7 3.9v2.2l-6.7-2v4.2l2.2 1.6v1.6L12 19.3l-4 .7v-1.6l2.2-1.6v-4.2l-6.7 2v-2.2l6.7-3.9V5.4c0-1.5.7-2.8 1.8-2.8z"/>',
+  stop: '<rect x="5" y="5" width="14" height="14" rx="2" fill="currentColor"/>',
 } as const;
 
 /** What each name in the interface is drawn as */
@@ -119,7 +122,6 @@ const NODES: Record<Exclude<IconName, keyof typeof OWN_PATHS>, IconNode> = {
   wrapped: Star,
   play: Play,
   pause: Pause,
-  stop: Square,
   isolate: Crosshair,
   heatmap: Flame,
   airport: MapPin,
@@ -154,6 +156,7 @@ const NODES: Record<Exclude<IconName, keyof typeof OWN_PATHS>, IconNode> = {
   earth: Earth,
   milestone: Milestone,
   ruler: Ruler,
+  // A climb, and the height above the ground of the heat cloud's band
   climb: ArrowUpFromLine,
   reset: RotateCcw,
 };

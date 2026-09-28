@@ -8,7 +8,6 @@ import {
   compassPoint,
   findHotspots,
   formatHotspotDistance,
-  formatHotspotTime,
   hotspotDetail,
   hotspotName,
   HOTSPOT_APART_M,
@@ -296,15 +295,15 @@ describe("naming a place", () => {
 });
 
 describe("the time of a place", () => {
-  it("puts it in hours or minutes, never a time of day", () => {
-    expect(formatHotspotTime(41.4 * 3600)).toBe("41 h");
-    expect(formatHotspotTime(2.46 * 3600)).toBe("2.5 h");
-    expect(formatHotspotTime(1 * 3600)).toBe("1 h");
-    expect(formatHotspotTime(35 * 60)).toBe("35 min");
-    // A little under the hour is the hour, not 60 minutes
-    expect(formatHotspotTime(3580)).toBe("1 h");
-    expect(formatHotspotTime(9.97 * 3600)).toBe("10 h");
-    expect(formatHotspotTime(20)).toBe("1 min");
+  it("puts it as the page puts a length of time, never a time of day", () => {
+    const detail = (seconds: number): string =>
+      hotspotDetail({ center: HOME, seconds, share: 0.5, radiusM: 0 });
+    expect(detail(41.4 * 3600)).toBe("41 h, 50% of the time");
+    // Hours and minutes under ten hours, as the profile and the
+    // cross-section say them (utils/duration.ts)
+    expect(detail(2.46 * 3600)).toBe("2 h 28 min, 50% of the time");
+    expect(detail(35 * 60)).toBe("35 min, 50% of the time");
+    expect(detail(20)).toBe("20 s, 50% of the time");
   });
 
   it("says its share of the time, a sliver as under a percent", () => {

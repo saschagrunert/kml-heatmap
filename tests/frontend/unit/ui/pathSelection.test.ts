@@ -20,6 +20,12 @@ vi.mock("../../../../kml_heatmap/frontend/services/dataLoader", () => ({
   }),
 }));
 
+// The profile of a picked flight comes with the feature bundle, which
+// the view waits for before it frames the flight
+vi.mock("../../../../kml_heatmap/frontend/services/featureLoader", () => ({
+  loadFeatures: vi.fn(() => Promise.resolve(null)),
+}));
+
 const mapHelpers = vi.hoisted(() => ({
   resizeMapAfterTransition: vi.fn(),
 }));
@@ -381,6 +387,27 @@ describe("PathSelection", () => {
       expect(padding.bottom).toBe(24);
       for (const element of made) if (element !== chip) element.remove();
     });
+
+    it("counts a phone's profile above the bar at the bottom, not at a side", () => {
+      // As wide as the map and 81 px up, over the bar and the credit
+      const map = mockApp.map!;
+      vi.spyOn(map.getContainer(), "getBoundingClientRect").mockReturnValue(
+        rect(0, 0, 390, 844),
+      );
+      const profile = document.createElement("div");
+      profile.id = "flight-profile";
+      vi.spyOn(profile, "getBoundingClientRect").mockReturnValue(
+        rect(8, 635, 374, 128),
+      );
+      document.body.append(profile);
+
+      const padding = mapChromePadding(map as never);
+
+      expect(padding.bottom).toBe(209 + 24);
+      expect(padding.left).toBe(24);
+      expect(padding.right).toBe(24);
+      profile.remove();
+    });
   });
 
   describe("while replay runs", () => {
@@ -470,6 +497,156 @@ describe("PathSelection", () => {
 
       pathSelection.selectFlight(1, true);
       expect([...mockApp.selectedPathIds]).toEqual([2]);
+    });
+
+    describe("bringing the flight into view", () => {
+      const box = (x: number, y: number, w: number, h: number): DOMRect =>
+        ({
+          x,
+          y,
+          left: x,
+          top: y,
+          width: w,
+          height: h,
+          right: x + w,
+          bottom: y + h,
+        }) as DOMRect;
+      /** Where the map draws every point of the flights */
+      let drawnAt: { x: number; y: number };
+      let profile: HTMLElement;
+      /** The bundle, and the two frames the layout takes after it */
+      const settled = async (): Promise<void> => {
+        for (let i = 0; i < 4; i++) {
+          await new Promise((resolve) => setTimeout(resolve, 0));
+        }
+      };
+
+      beforeEach(() => {
+        mockApp.currentData = createDataset(
+          [{ id: 1 }, { id: 2 }, { id: 3 }],
+          [1, 2, 3].map((id) =>
+            createSegment({
+              path_id: id,
+              coords: [
+                [50 + id, 8],
+                [51 + id, 9],
+              ],
+            }),
+          ),
+        );
+        const map = mockApp.map!;
+        vi.spyOn(map.getContainer(), "getBoundingClientRect").mockReturnValue(
+          box(0, 0, 1200, 800),
+        );
+        drawnAt = { x: 600, y: 300 };
+        map.project.mockImplementation(() => drawnAt);
+        // The profile of the picked flight, at the bottom of the map
+        profile = document.createElement("div");
+        profile.id = "flight-profile";
+        vi.spyOn(profile, "getBoundingClientRect").mockReturnValue(
+          box(360, 660, 560, 113),
+        );
+        document.body.append(profile);
+        vi.spyOn(globalThis, "requestAnimationFrame").mockImplementation(
+          (callback) => setTimeout(() => callback(0), 0) as unknown as number,
+        );
+      });
+
+      afterEach(() => {
+        profile.remove();
+        vi.mocked(globalThis.requestAnimationFrame).mockRestore();
+      });
+
+      it("frames a flight picked from a list that is off the map", async () => {
+        drawnAt = { x: -400, y: 300 };
+
+        pathSelection.selectFlight(2);
+        await settled();
+
+        const map = mockApp.map!;
+        expect(map.fitBounds).toHaveBeenCalledTimes(1);
+        const [bounds, options] = map.fitBounds.mock.calls[0]!;
+        expect(bounds).toEqual([
+          [8, 52],
+          [9, 53],
+        ]);
+        // Clear of the profile under it
+        expect(options).toMatchObject({ padding: { bottom: 140 + 24 } });
+      });
+
+      it("frames one under its own profile", async () => {
+        drawnAt = { x: 600, y: 700 };
+
+        pathSelection.selectFlight(2);
+        await settled();
+
+        expect(mockApp.map!.fitBounds).toHaveBeenCalledTimes(1);
+      });
+
+      it("leaves the map alone when all of the flight is in view", async () => {
+        pathSelection.selectFlight(2);
+        await settled();
+
+        expect(mockApp.map!.fitBounds).not.toHaveBeenCalled();
+      });
+
+      it("leaves it alone for a flight added, taken out, or clicked on the map", async () => {
+        drawnAt = { x: -400, y: 300 };
+
+        pathSelection.selectFlight(2, true);
+        pathSelection.selectFlight(2, true);
+        // A click on a path: the user is looking at it
+        pathSelection.togglePathSelection(3);
+        // The whole selection, picked again: nothing is selected then
+        mockApp.selectedPathIds.clear();
+        mockApp.selectedPathIds.add(1);
+        pathSelection.selectFlight(1);
+        await settled();
+
+        expect(mockApp.map!.fitBounds).not.toHaveBeenCalled();
+      });
+
+      it("leaves the map to a user who moved it while it waited", async () => {
+        drawnAt = { x: -400, y: 300 };
+        const map = mockApp.map!;
+
+        pathSelection.selectFlight(2);
+        map.emit("movestart", { originalEvent: new MouseEvent("mousedown") });
+        await settled();
+
+        expect(map.fitBounds).not.toHaveBeenCalled();
+
+        // A move of the app's own is not the user's
+        pathSelection.selectFlight(3);
+        map.emit("movestart", {});
+        await settled();
+
+        expect(map.fitBounds).toHaveBeenCalledTimes(1);
+      });
+
+      it("leaves the map to the hotspot tour and Wrapped", async () => {
+        drawnAt = { x: -400, y: 300 };
+
+        mockApp.tourView = {} as never;
+        pathSelection.selectFlight(2);
+        await settled();
+        mockApp.tourView = null;
+        mockApp.wrappedVisible = true;
+        pathSelection.selectFlight(3);
+        await settled();
+
+        expect(mockApp.map!.fitBounds).not.toHaveBeenCalled();
+      });
+
+      it("leaves it alone when the selection changed while it waited", async () => {
+        drawnAt = { x: -400, y: 300 };
+
+        pathSelection.selectFlight(2);
+        pathSelection.togglePathSelection(3);
+        await settled();
+
+        expect(mockApp.map!.fitBounds).not.toHaveBeenCalled();
+      });
     });
   });
 

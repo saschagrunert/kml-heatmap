@@ -12,7 +12,6 @@ import {
   densityReference,
   followCrossSection,
   formatAmount,
-  formatMinutes,
   heightUnit,
   sectionSummary,
   toggleCrossSection,
@@ -203,6 +202,8 @@ describe("cross-section", () => {
       expect(root().nextElementSibling?.id).toBe("map");
       expect(document.body.classList.contains("cross-section-open")).toBe(true);
       expect(button.getAttribute("aria-pressed")).toBe("true");
+      // The class draws the pressed look, as for the other toggles
+      expect(button.classList).toContain("active");
       expect(map.dragPan.isEnabled()).toBe(false);
       expect(map.getContainer().classList).toContain("is-drawing-section");
       expect(part(".section-hint").textContent).toContain("two points");
@@ -259,11 +260,11 @@ describe("cross-section", () => {
         "500",
       );
       expect(summary()).toMatch(
-        /^Cross-section: [\d.]+ min from 1 flight within 500 m of a 5\.0 km line, most of it in the air between 1,000 and 1,125 ft AGL$/,
+        /^Cross-section: \d+ (s|min) from 1 flight within 500 m of a 5\.0 km line, most of it in the air between 1,000 and 1,125 ft AGL$/,
       );
       expect(part(".visually-hidden").textContent).toBe(summary());
       const stats = part(".profile-stats").textContent;
-      expect(stats).toMatch(/Time [\d.]+ min/);
+      expect(stats).toMatch(/Time \d+ (s|min)/);
       expect(stats).toContain("Flights 1");
       expect(stats).toContain("Most flown 1,000 to 1,125 ft AGL");
       expect(part(".profile-axis").textContent).toBe("A · 0 km5.0 km · B");
@@ -446,6 +447,7 @@ describe("cross-section", () => {
       expect(map.getLayer(CROSS_SECTION_LAYERS.line)).toBeUndefined();
       expect(map.getSource(CROSS_SECTION_SOURCE)).toBeUndefined();
       expect(button.getAttribute("aria-pressed")).toBe("false");
+      expect(button.classList).not.toContain("active");
       expect(document.activeElement).toBe(button);
       // Closed, Escape is not its own
       expect(escape()).toBe(true);
@@ -567,7 +569,7 @@ describe("cross-section", () => {
         pointer("pointermove", { clientX: 100, clientY: 64 - 0.82 * 64 }),
       );
       expect(part(".profile-readout").textContent).toMatch(
-        /^2\.5 km · [\d,]+ to [\d,]+ ft AGL · [\d.]+ min$/,
+        /^2\.5 km · [\d,]+ to [\d,]+ ft AGL · \d+ (s|min)$/,
       );
       expect(part(".section-hover").getAttribute("visibility")).toBe("visible");
       expect(part(".section-window").getAttribute("visibility")).toBe(
@@ -683,8 +685,8 @@ describe("cross-section", () => {
       });
       await open(app);
       drawLine(canvas);
-      expect(summary()).toMatch(/^Cross-section: [\d.]+ min from 1 flight/);
-      expect(part(".profile-stats").textContent).toMatch(/^Time [\d.]+ min/);
+      expect(summary()).toMatch(/^Cross-section: \d+ (s|min) from 1 flight/);
+      expect(part(".profile-stats").textContent).toMatch(/^Time \d+ (s|min)/);
 
       // By distance, the distance flown in the corridor: the 1 km across it
       app.routeWeighting = true;
@@ -1022,10 +1024,13 @@ describe("the figures", () => {
     ...overrides,
   });
 
-  it("says minutes, and hours from ten of them", () => {
-    expect(formatMinutes(30)).toBe("0.5 min");
-    expect(formatMinutes(42 * 60)).toBe("42 min");
-    expect(formatMinutes(10 * 3600)).toBe("10 h");
+  it("says the time as the page says a length of time", () => {
+    // Seconds, minutes, hours and minutes, and whole hours from ten of them
+    // (utils/duration.ts): "485 min" was eight hours
+    expect(formatAmount(section(), 30)).toBe("30 s");
+    expect(formatAmount(section(), 42 * 60)).toBe("42 min");
+    expect(formatAmount(section(), 485 * 60)).toBe("8 h 5 min");
+    expect(formatAmount(section(), 10 * 3600)).toBe("10 h");
   });
 
   it("names the heights' unit", () => {
@@ -1035,14 +1040,14 @@ describe("the figures", () => {
   });
 
   it("says the distance flown by distance", () => {
-    expect(formatAmount(section(), 90)).toBe("1.5 min");
+    expect(formatAmount(section(), 90)).toBe("2 min");
     expect(formatAmount(section({ route: true }), 90)).toBe("4.6 km");
     expect(formatAmount(section({ route: true }), 3600)).toBe("185 km");
   });
 
   it("sums the chart up", () => {
     expect(sectionSummary(section(), 0)).toBe(
-      "Cross-section: 60 min from 3 flights within 1 km of a 12 km line",
+      "Cross-section: 1 h from 3 flights within 1 km of a 12 km line",
     );
     expect(sectionSummary(section({ route: true }), 0)).toBe(
       "Cross-section: 185 km flown by 3 flights within 1 km of a 12 km line",

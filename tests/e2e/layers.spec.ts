@@ -203,11 +203,11 @@ test.describe("Layers", () => {
     const title = legend.locator("#heat-legend-what");
     await expect(title).toHaveText("Time spent");
     // The heatmap as it is drawn under the exposure of the site's flights:
-    // about so many flights' worth of time, each label four times the one
+    // about so many passes' worth of time, each label four times the one
     // before
     const labels = legend.locator(".labels > *");
     await expect(labels).toHaveText([
-      /^≈\d+ flights?$/,
+      /^≈\d+ pass(es)?$/,
       /^\d+$/,
       /^\d+$/,
       /^\d+$/,

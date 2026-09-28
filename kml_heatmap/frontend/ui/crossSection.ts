@@ -46,7 +46,9 @@ import {
 } from "../calculations/crossSection";
 import { datasetIndex } from "../calculations/datasetIndex";
 import { ROUTE_SPEED_MS } from "../calculations/heatLines";
+import { applyToggleButtonState } from "../utils/buttonState";
 import { MAP_LAYERS } from "../utils/constants";
+import { formatDuration } from "../utils/duration";
 import { formatNumber } from "../utils/formatters";
 import { frameCoalescer } from "../utils/frameCoalescer";
 import {
@@ -135,13 +137,6 @@ function widthLabel(metres: number): string {
   return metres < 1000 ? `±${metres} m` : `±${metres / 1000} km`;
 }
 
-/** Minutes, or hours from ten of them, as the figures say them */
-export function formatMinutes(seconds: number): string {
-  const minutes = seconds / 60;
-  if (minutes >= 600) return `${formatNumber(minutes / 60)} h`;
-  return `${formatNumber(minutes, minutes < 10 ? 1 : 0)} min`;
-}
-
 /** Kilometres, with a decimal under ten */
 function formatKm(metres: number): string {
   const km = metres / 1000;
@@ -155,7 +150,7 @@ function formatKm(metres: number): string {
 export function formatAmount(section: CrossSection, seconds: number): string {
   return section.route
     ? formatKm(seconds * ROUTE_SPEED_MS)
-    : formatMinutes(seconds);
+    : formatDuration(seconds);
 }
 
 /** The unit of the heights of a section */
@@ -448,9 +443,10 @@ function createTool(app: MapApp): Tool {
     const open = phase !== "closed";
     root.hidden = !open;
     document.body.classList.toggle("cross-section-open", open);
-    document
-      .getElementById(CROSS_SECTION_BUTTON_ID)
-      ?.setAttribute("aria-pressed", String(open));
+    // The class draws the pressed look (see utils/buttonState.ts), which
+    // aria-pressed alone left out
+    const button = document.getElementById(CROSS_SECTION_BUTTON_ID);
+    if (button) applyToggleButtonState(button, open);
     const placing = phase === "placing";
     place.hidden = !placing;
     plot.hidden = placing;

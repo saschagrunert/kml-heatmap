@@ -602,10 +602,11 @@
       </div>
     </div>
     <!-- The colours of the heat, of the heatmap and of the 3D view's cloud,
-         with how many flights' worth of time spent each stands for. The
-         labels are those of the heatmap as it is drawn; ui/heatLegend.ts
-         follows the exposure (ui/heatScale.ts), draws the bar under them
-         and shows what the cloud means while it draws the heat. -->
+         with how many passes' worth of time spent (of distance flown, By
+         distance on) each stands for. The labels are those of the heatmap
+         as it is drawn; ui/heatLegend.ts follows the exposure
+         (ui/heatScale.ts), draws the bar under them and shows what the
+         cloud means while it draws the heat. -->
     <div
       id="heat-legend"
       class="color-legend"
@@ -622,7 +623,7 @@
         aria-label="Heat gradient from dark blue, the least, to white, the most"
       ></div>
       <div class="labels">
-        <span>≈1 flight</span><span>4</span><span>16</span><span>64</span>
+        <span>≈1 pass</span><span>4</span><span>16</span><span>64</span>
       </div>
       <details id="heat-cloud-about" hidden>
         <summary>What the cloud shows</summary>

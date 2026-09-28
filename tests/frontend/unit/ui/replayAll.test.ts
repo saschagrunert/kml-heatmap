@@ -113,7 +113,10 @@ function clockedFrames() {
 /** Held while every flight replays */
 const HELD = [
   "heatmap-btn",
+  // The heat is not the replay's to count again
+  "by-distance-btn",
   "altitude-btn",
+  "airspeed-btn",
   "year-select",
   "aircraft-select",
   "isolate-btn",
@@ -672,6 +675,22 @@ describe("the replay of all flights", () => {
       expect(button.getAttribute("aria-pressed")).toBe("false");
       expect(document.activeElement).toBe(button);
       expect(onMap()).toBe(false);
+    });
+
+    it("gives a control back disabled when it was before (regression)", () => {
+      // The speed layer on a site without timing data: closing the replay
+      // turned it on
+      const speed = document.getElementById(
+        "airspeed-btn",
+      ) as HTMLButtonElement;
+      speed.disabled = true;
+      controls.show();
+      expect(held("airspeed-btn")).toBe(true);
+
+      controls.close();
+
+      expect(held("airspeed-btn")).toBe(true);
+      expect(held("altitude-btn")).toBe(false);
     });
 
     it("closes on Escape, but not from the speed picker", () => {

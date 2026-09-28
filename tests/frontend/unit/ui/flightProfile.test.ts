@@ -165,7 +165,8 @@ describe("flight profile", () => {
       const stats = text(root, ".profile-stats");
       expect(stats).toContain("Highest 3,040 ft");
       expect(stats).toContain("Lowest en route 800 ft AGL");
-      expect(stats).toContain("Below 1,000 ft AGL 2:00");
+      // A length of time, not a clock: "2:16" read as hours and minutes
+      expect(stats).toContain("Below 1,000 ft AGL 2 min");
       expect(text(root, ".profile-axis")).toBe("0:009:00");
       expect(
         root.querySelector(".profile-plot")!.getAttribute("aria-label"),

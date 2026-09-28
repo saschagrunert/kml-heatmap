@@ -88,7 +88,7 @@ test.describe("Hotspot tour", HEAVY, () => {
         count: expect.stringMatching(/^1 of [1-5]$/),
         name: expect.stringMatching(/./),
         detail: expect.stringMatching(
-          /^\d+(\.\d)? (h|min), (\d+%|under 1%) of the time$/,
+          /^[\d,]+ (s|min|h)( \d+ min)?, (\d+%|under 1%) of the time$/,
         ),
         liveMode: "polite",
         live: expect.stringMatching(/^1 of \d: .+ of the time$/),

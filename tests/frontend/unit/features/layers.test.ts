@@ -404,15 +404,16 @@ describe("layers feature", () => {
 
   describe("legend labels", () => {
     it("formats altitude with meters", () => {
-      expect(formatAltitudeLabel(1000)).toBe("1,000 ft (305 m)");
-      expect(formatAltitudeLabel(1234.6)).toBe("1,235 ft (376 m)");
-      expect(formatAltitudeLabel(0)).toBe("0 ft (0 m)");
+      // The second unit on a line of its own (see styles.css)
+      expect(formatAltitudeLabel(1000)).toBe("1,000 ft\n(305 m)");
+      expect(formatAltitudeLabel(1234.6)).toBe("1,235 ft\n(376 m)");
+      expect(formatAltitudeLabel(0)).toBe("0 ft\n(0 m)");
     });
 
     it("formats airspeed with km/h", () => {
-      expect(formatAirspeedLabel(100)).toBe("100 kt (185 km/h)");
-      expect(formatAirspeedLabel(123.4)).toBe("123 kt (229 km/h)");
-      expect(formatAirspeedLabel(0)).toBe("0 kt (0 km/h)");
+      expect(formatAirspeedLabel(100)).toBe("100 kt\n(185 km/h)");
+      expect(formatAirspeedLabel(123.4)).toBe("123 kt\n(229 km/h)");
+      expect(formatAirspeedLabel(0)).toBe("0 kt\n(0 km/h)");
     });
   });
 

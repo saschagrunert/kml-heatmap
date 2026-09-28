@@ -40,6 +40,11 @@ describe("icons", () => {
       expect(svg).not.toContain("aria-hidden");
     });
 
+    it("draws Stop as a filled square, not an empty checkbox", () => {
+      // A running replay's control swaps to it (regression)
+      expect(icon("stop", 16)).toMatch(/<rect [^>]*fill="currentColor"/);
+    });
+
     it("escapes a title so it cannot break out of the attribute", () => {
       const svg = icon("close", 16, '<b>A & "B"</b>');
 

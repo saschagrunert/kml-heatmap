@@ -8,6 +8,7 @@ import { domCache } from "../utils/domCache";
 import { announceInRegion, announceStatus, showToast } from "../utils/toast";
 import { formatTime } from "../utils/formatters";
 import { applyToggleButtonState } from "../utils/buttonState";
+import { holdControls } from "./heldControls";
 import { setControlIcon } from "../utils/icons";
 import { AUTO_ZOOM_FOLLOW, MAP_SOURCES } from "../utils/constants";
 import {
@@ -70,10 +71,13 @@ export const CHASE_REDUCED_MOTION_MESSAGE =
  * with no way to pause, and the end of the replay zoomed the overview to
  * the single flight. Isolate and the selection chip's clear button would
  * change the selection the replay is playing (PathSelection ignores them
- * then as well), and so would Reset view (MapApp.resetView).
+ * then as well), and so would Reset view (MapApp.resetView). By distance
+ * goes with the Heatmap switch: the replay hides the heat, and the 3D
+ * view's faint cloud behind it is not the replay's to count again.
  */
 const REPLAY_DISABLED_CONTROL_IDS = [
   "heatmap-btn",
+  "by-distance-btn",
   "airports-btn",
   "aviation-btn",
   "wrapped-btn",
@@ -162,6 +166,8 @@ export class ReplayManager {
   private speedBeforeChase: string | null = null;
   /** Measures the legends while a replay runs (REPLAY_LEGEND_HEIGHT_VAR) */
   private legendWatch: ResizeObserver | null = null;
+  /** Gives the held controls back as they were (see holdControls) */
+  private release: (() => void) | null = null;
   private readonly onVisibilityChange = (): void => {
     // No frames run in a hidden tab, so the first one after it comes back
     // would count all the hidden time; start timing afresh instead
@@ -336,7 +342,8 @@ export class ReplayManager {
     this.updateChaseButton();
 
     document.body.classList.add("replay-active");
-    this.setElementsDisabled(REPLAY_DISABLED_CONTROL_IDS, true);
+    this.release?.();
+    this.release = holdControls(REPLAY_DISABLED_CONTROL_IDS);
     this.followLayers();
   }
 
@@ -479,7 +486,8 @@ export class ReplayManager {
 
     // The layers come back the way the user left them, and the mobile bar
     // returns (see ui/layerVisibility.ts, MobileBar)
-    this.setElementsDisabled(REPLAY_DISABLED_CONTROL_IDS, false);
+    this.release?.();
+    this.release = null;
     this.app.replayActive = false;
     // After the bar is back, which may be the control that takes focus
     this.restoreFocusAfterReplay();
@@ -770,16 +778,6 @@ export class ReplayManager {
       ...(this.state.autoZoom ? { zoom: AUTO_ZOOM_FOLLOW } : {}),
       duration: AUTO_ZOOM_PAN_MS,
       animate: !prefersReducedMotion(),
-    });
-  }
-
-  /** The stylesheet dims what is disabled (see `.control-btn:disabled`) */
-  private setElementsDisabled(ids: string[], disabled: boolean): void {
-    ids.forEach((id) => {
-      const el = domCache.get(id);
-      if (el instanceof HTMLButtonElement || el instanceof HTMLSelectElement) {
-        el.disabled = disabled;
-      }
     });
   }
 

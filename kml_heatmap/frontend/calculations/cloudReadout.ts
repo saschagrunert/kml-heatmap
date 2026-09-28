@@ -32,6 +32,7 @@ import {
   planarMetres,
   type Coordinate,
 } from "../utils/geometry";
+import { formatDuration } from "../utils/duration";
 import { formatNumber } from "../utils/formatters";
 import { pluralFlights } from "../utils/htmlGenerators";
 import { ROUTE_SPEED_MS, heatWeight, type SegmentWeight } from "./heatLines";
@@ -497,17 +498,14 @@ export function readoutAt(
 }
 
 /**
- * "Under a minute", "About 42 min", "About 3 h 25 min" (to five minutes)
- * or, from ten hours, "About 120 h"
+ * "Under a minute", "About 42 min", "About 3 h 25 min" (to five minutes
+ * from the hour) or, from ten hours, "About 120 h": the page's words for a
+ * length of time (formatDuration), rounded
  */
 export function formatTimeSpent(seconds: number): string {
-  const minutes = Math.round(seconds / 60);
   if (seconds < 60) return "Under a minute";
-  if (minutes < 60) return `About ${minutes} min`;
-  if (minutes >= 600) return `About ${formatNumber(minutes / 60)} h`;
-  const rounded = Math.round(minutes / 5) * 5;
-  const rest = rounded % 60;
-  return `About ${Math.floor(rounded / 60)} h${rest ? ` ${rest} min` : ""}`;
+  const rounded = seconds < 3600 ? seconds : Math.round(seconds / 300) * 300;
+  return `About ${formatDuration(rounded)}`;
 }
 
 /**

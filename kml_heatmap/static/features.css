@@ -1162,10 +1162,14 @@ body.cross-section-open .toast-stack {
 /* The profile of a selected flight has the same place, and the tour's
    caption is what is read there while it runs. The cloud shows every
    height meanwhile, without the control of the band, as in Wrapped; its
-   readout under a pointer turns itself off (ui/cloudReadout.ts). */
-body.hotspot-tour-active #flight-profile,
-body.hotspot-tour-active #height-band {
+   readout under a pointer turns itself off (ui/cloudReadout.ts). The band
+   gives up its room as well: hidden in place it left a gap as tall as
+   itself inside the Map group. Nothing measures it while the tour runs. */
+body.hotspot-tour-active #flight-profile {
   visibility: hidden;
+}
+body.hotspot-tour-active #height-band {
+  display: none;
 }
 /* The toasts stack above the panel, as above the replay's. The tour
    measures --tour-panel-h. */
