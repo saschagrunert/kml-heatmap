@@ -166,9 +166,11 @@ body:has(#wrapped-modal:not([hidden]))
 /* Wrapped's intro (ui/wrappedIntro.ts). While it plays the map has the
    dialog to itself, over the cards, which wait; it shows at once, under a
    light shade and the title of the first card, which read as the start of
-   the intro while the tiles of the globe come in, and both lift as the
-   camera flies in. As it settles (is-settling, INTRO_SETTLE_MS) the cards
-   come in one after another, and the map draws back into its panel beside
+   the intro while the tiles of the globe come in, and both lift once the
+   camera has flown in for two seconds: lifted as it set off, the title was
+   gone within a second of the globe showing. As it settles (is-settling,
+   INTRO_SETTLE_MS) the cards come in one after another, slower than
+   without the intro, and the map draws back into its panel beside
    them, still the size of the dialog, cut to the panel's part of it; the
    camera settles on the overview as that part shows it, and the map is
    measured again once it is there. Stacked it fades from over the cards
@@ -196,19 +198,24 @@ body:has(#wrapped-modal:not([hidden]))
     0 0 0 calc(var(--wrapped-cards-width) + var(--space-lg)) round
       var(--radius-card)
   );
-  transition: clip-path 1.3s cubic-bezier(0.45, 0, 0.2, 1);
+  transition: clip-path 2s cubic-bezier(0.45, 0, 0.2, 1);
+}
+/* All in by 2.5 s, before the settle ends and hands them back their own
+   delays and length */
+#wrapped-modal.is-settling .wrapped-square-card {
+  animation-duration: 0.9s;
 }
 #wrapped-modal.is-settling .wrapped-square-card:nth-child(1) {
-  animation-delay: 0.3s;
+  animation-delay: 0.4s;
 }
 #wrapped-modal.is-settling .wrapped-square-card:nth-child(2) {
-  animation-delay: 0.5s;
+  animation-delay: 0.8s;
 }
 #wrapped-modal.is-settling .wrapped-square-card:nth-child(3) {
-  animation-delay: 0.7s;
+  animation-delay: 1.2s;
 }
 #wrapped-modal.is-settling .wrapped-square-card:nth-child(4) {
-  animation-delay: 0.9s;
+  animation-delay: 1.6s;
 }
 /* The shade: the middle of the globe clear enough to show from the first
    frame, the edges darker under the title */
@@ -224,7 +231,7 @@ body:has(#wrapped-modal:not([hidden]))
     rgba(10, 10, 20, 0.75) 80%
   );
   opacity: 0;
-  transition: opacity 1.6s ease-in;
+  transition: opacity 2s ease-in 1.5s;
 }
 #wrapped-modal.is-intro #wrapped-map-container.is-dark::before {
   opacity: 1;
@@ -249,8 +256,8 @@ body:has(#wrapped-modal:not([hidden]))
   padding: var(--wrapped-gutter);
   pointer-events: none;
   transition:
-    opacity 0.7s ease-in 0.3s,
-    transform 1s ease-in 0.3s;
+    opacity 1s ease-in 2s,
+    transform 1.4s ease-in 2s;
 }
 /* It rises out of the way of the heat coming up under it */
 #wrapped-modal.is-intro
@@ -287,26 +294,26 @@ body:has(#wrapped-modal:not([hidden]))
 #wrapped-cards-column.is-at-end {
   mask-image: none;
 }
-/* The column ended with the map, but its first card did not: it ended a
-   gap and more above the map's edge, over a faded sliver of the second,
-   and the two sides of the dialog read as two heights. So the column
-   reaches one gap past the map, into the dialog's padding, where its fade
-   is, and the first card fills it down to the map's edge: at the top the
-   two end on one line, and the second card starts where the column fades
-   out. As tall as its content, where that is taller. */
+/* The column reaches one gap past the map, into the dialog's padding,
+   where its fade is, so a card is not cut off at the map's edge. The
+   first card is as tall as its content, as the others are, with the
+   second showing below it: filled down to the map's edge it stood the
+   height of the screen, and on a large one more than half of it was
+   empty. */
 #wrapped-cards-column {
   margin-bottom: calc(-1 * var(--space-lg));
 }
-#wrapped-card-stats {
-  min-height: calc(100% - var(--space-lg));
-  box-sizing: border-box;
-}
 /* What says that the column goes on: at the foot of the first card, in
-   its padding, so the card is as tall as it was, and a press takes the
-   column a card on. The figures above it are no longer the last part of
-   the card, and keep the bottom margin of none they had as that. */
+   its padding, and a press takes the column a card on. The figures above
+   it keep the bottom margin of none they had as the last part of the
+   card: with one, the words sank into the column's fade at 1280 by 720.
+   Hidden where the column is at its end, or fits whole, with nothing
+   below to go to, unless focused: a button that hides drops its focus. */
 #wrapped-stats {
   margin-bottom: 0;
+}
+#wrapped-cards-column.is-at-end #wrapped-more-btn:not(:focus) {
+  visibility: hidden;
 }
 #wrapped-more-btn {
   position: absolute;
@@ -1082,10 +1089,7 @@ body:has(#wrapped-modal:not([hidden]))
     mask-image: none;
     margin-bottom: 0;
   }
-  /* The next card shows below it, and the dialog scrolls as a page does */
-  #wrapped-card-stats {
-    min-height: 0;
-  }
+  /* No More below: the dialog scrolls as a page does */
   #wrapped-more-btn {
     display: none;
   }

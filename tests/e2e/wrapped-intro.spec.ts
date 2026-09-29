@@ -204,14 +204,15 @@ test.describe("Wrapped's intro", () => {
   test("plays to its end, and the map settles into its panel beside the cards", async ({
     page,
   }) => {
-    // Six seconds of flight on timers, whatever the frames software WebGL
-    // on a loaded runner draws in them, after the far view is drawn
-    test.setTimeout(60000);
+    // Ten seconds of flight on timers, whatever the frames software WebGL
+    // on a loaded runner draws in them, after the far view is drawn: the
+    // waits are half as long again as for the six it was
+    test.setTimeout(90000);
     const modal = await openWithIntro(page);
     await expect(modal).toHaveClass(/is-intro/);
     // Over once the map has settled in its panel
     await expect(modal).not.toHaveClass(/is-(intro|settling)/, {
-      timeout: 30000,
+      timeout: 45000,
     });
     await expect(page.locator("#wrapped-skip-btn")).toBeHidden();
     const placed = await page.evaluate(() => {
