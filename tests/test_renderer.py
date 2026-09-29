@@ -619,6 +619,85 @@ class TestExportSite:
             "EDDK Cologne Bonn",
         ]
 
+    def test_a_dropped_recording_adds_no_airport_and_no_extent(
+        self, tmp_path, parse_data
+    ):
+        """A phone that recorded the flight of the panel GPS, and started
+        before it somewhere else, is dropped: its start must not widen the
+        map or publish an airport either."""
+        start = 1748736000.0  # 2025-06-01T00:00:00Z
+        # East from EDDF at 97 kt for an hour, a fix every 10 s
+        panel = [
+            TrackPoint(
+                50.0, 8.0 + 0.007 * i, 100.0 if i == 0 else 500.0, start + i * 10
+            )
+            for i in range(361)
+        ]
+        # Started 20 minutes before, 50 km away, then the same flight
+        phone = [
+            TrackPoint(49.5, 7.5, 100.0, start - 1200),
+            TrackPoint(49.75, 7.75, 500.0, start - 600),
+            *panel,
+        ]
+        metadata: list[PathMetadata] = [
+            {
+                "year": 2025,
+                "start_point": [50.0, 8.0, 100.0],
+                "airport_name": "EDDF Frankfurt Main - EDDK Cologne Bonn",
+                "aircraft_registration": "D-EAGJ",
+                "filename": "panel.kml",
+            },
+            {
+                "year": 2025,
+                "start_point": [49.5, 7.5, 100.0],
+                "airport_name": "EDFE Egelsbach - EDDK Cologne Bonn",
+                "filename": "phone.kml",
+            },
+        ]
+        out = tmp_path / "out"
+
+        _export_site([panel, phone], metadata, out / "index.html", out / "data")
+
+        year = parse_data(out / "data" / "2025" / "data.json")
+        assert len(year["path_info"]) == 1
+        assert _map_bounds(out) == [[50.0, 8.0], [50.0, 10.52]]
+        airports = parse_data(out / "data" / "airports.json")["airports"]
+        assert [airport["name"] for airport in airports] == [
+            "EDDF Frankfurt Main",
+            "EDDK Cologne Bonn",
+        ]
+
+    def test_a_skipped_copy_adds_no_airport(self, tmp_path, parse_data):
+        """The same flight under another file name and route name."""
+        path = [
+            TrackPoint(50.0, 8.0, 100.0),
+            TrackPoint(50.5, 8.5, 500.0),
+            TrackPoint(51.0, 9.0, 100.0),
+        ]
+        metadata: list[PathMetadata] = [
+            {
+                "year": 2025,
+                "start_point": [50.0, 8.0, 100.0],
+                "airport_name": "EDDF Frankfurt Main - EDDK Cologne Bonn",
+                "filename": "a.kml",
+            },
+            {
+                "year": 2025,
+                "start_point": [50.0, 8.0, 100.0],
+                "airport_name": "EDFE Egelsbach - EDDK Cologne Bonn",
+                "filename": "copy of a.kml",
+            },
+        ]
+        out = tmp_path / "out"
+
+        _export_site([path, list(path)], metadata, out / "index.html", out / "data")
+
+        airports = parse_data(out / "data" / "airports.json")["airports"]
+        assert [airport["name"] for airport in airports] == [
+            "EDDF Frankfurt Main",
+            "EDDK Cologne Bonn",
+        ]
+
     def test_every_path_is_checked_for_export_once(self, tmp_path):
 
         paths = [

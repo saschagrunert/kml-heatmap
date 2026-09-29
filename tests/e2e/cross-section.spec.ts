@@ -124,4 +124,43 @@ test.describe("Cross-section", () => {
       page.locator("#cross-section .section-btn[aria-label='Draw a new line']"),
     ).toBeFocused();
   });
+
+  test("the link carries the line, and opens the tool on it", async ({
+    page,
+  }) => {
+    const found = await findSegmentFarFromAirports(page);
+    expect(found).not.toBeNull();
+    const [a, b] = await lineAcross(page, found!.coord);
+    await page.locator("#cross-section-btn").click();
+    // The tool is fetched on the first use: a click before it listens is
+    // one on the map
+    await expect(page.locator("#cross-section .section-hint")).toContainText(
+      "two points",
+    );
+    await page.mouse.click(a.x, a.y);
+    await page.mouse.click(b.x, b.y);
+    const plot = page.locator("#cross-section .section-plot");
+    await expect(plot).toHaveAttribute("aria-label", /^Cross-section: /);
+
+    // lat,lng of A, then of B
+    await expect
+      .poll(() => new URL(page.url()).searchParams.get("x"))
+      .toMatch(/^-?[\d.]+(,-?[\d.]+){3}$/);
+    await gotoApp(page, new URL(page.url()).search);
+
+    // Drawn, not waiting for its first point
+    await expect(page.locator("#cross-section")).toBeVisible();
+    await expect(plot).toHaveAttribute("aria-label", /^Cross-section: /);
+    await expect(page.locator(".section-handle")).toHaveCount(2);
+
+    // Closed, the link has no line
+    await page
+      .locator(
+        "#cross-section .section-btn[aria-label='Close the cross-section']",
+      )
+      .click();
+    await expect
+      .poll(() => new URL(page.url()).searchParams.has("x"))
+      .toBe(false);
+  });
 });

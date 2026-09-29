@@ -32,6 +32,7 @@ __all__ = [
     "SpeedWindow",
     "calculate_fallback_groundspeed",
     "extract_segment_speeds",
+    "outlasts_the_window",
 ]
 
 
@@ -104,6 +105,17 @@ def extract_segment_speeds(
     return segment_speeds
 
 
+def outlasts_the_window(segment: SegmentSpeed) -> bool:
+    """Whether a segment lasts longer than ``SPEED_WINDOW_SECONDS``.
+
+    Such a segment is a gap in the recording (a logger paused, a lost fix)
+    or a logger that writes a fix every few minutes. It stays out of the
+    window (see ``SpeedWindow``), where it would outweigh the minute around
+    it.
+    """
+    return segment.time_delta > SPEED_WINDOW_SECONDS
+
+
 class SpeedWindow:
     """Rolling window averages of groundspeed over the valid segments.
 
@@ -111,6 +123,11 @@ class SpeedWindow:
     the aircraft stood still is valid: leaving it out made the window
     average the speed of the moving time only, so a minute of holding
     followed by a minute at 100 kt averaged to 100 kt instead of 50.
+
+    A segment longer than the window stays out (``outlasts_the_window``): a
+    window holds the segments that start in it with all of their time, so
+    a 30-minute pause after flying at 100 kt took the groundspeed of the
+    minute before it down to a few knots.
 
     The segments are sorted by time and their distances and durations kept
     as running totals, so the sums over any window are two subtractions.
@@ -123,7 +140,13 @@ class SpeedWindow:
     def __init__(self, segment_speeds: list[SegmentSpeed]) -> None:
         """Index the valid, timed segments of a path."""
         timed = sorted(
-            (seg for seg in segment_speeds if seg.valid and seg.timestamp is not None),
+            (
+                seg
+                for seg in segment_speeds
+                if seg.valid
+                and seg.timestamp is not None
+                and not outlasts_the_window(seg)
+            ),
             key=lambda seg: seg.timestamp or 0.0,
         )
         self.timestamps = [seg.timestamp for seg in timed if seg.timestamp is not None]

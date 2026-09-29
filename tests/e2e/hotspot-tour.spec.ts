@@ -148,7 +148,7 @@ test.describe("Hotspot tour on a phone", HEAVY, () => {
   test.describe.configure({ timeout: TOUR_TEST_TIMEOUT_MS });
   test.use({ viewport: { width: 390, height: 844 } });
 
-  test("starts from the More sheet, and the bar waits under it", async ({
+  test("starts from the More sheet, and the bar steps aside for it", async ({
     page,
   }) => {
     await holdElevationTiles(page);
@@ -159,12 +159,13 @@ test.describe("Hotspot tour on a phone", HEAVY, () => {
     await page.locator('.sheet-row[data-row="hotspot-tour"]').click();
 
     await tourExpect(page.locator("#hotspot-tour")).toBeVisible();
-    await tourExpect(page.locator("#mobile-bar")).toHaveAttribute("inert", "");
+    // As for a replay: the panel takes the bottom edge
+    await tourExpect(page.locator("#mobile-bar")).toHaveCount(0);
 
     await page.locator("#hotspot-tour-stop-btn").click();
 
     await tourExpect(page.locator("#hotspot-tour")).toBeHidden();
-    await tourExpect(page.locator("#mobile-bar")).not.toHaveAttribute("inert");
+    await tourExpect(page.locator("#mobile-bar")).toBeVisible();
     await tourExpect(page.locator("#mobile-tab-more")).toBeFocused();
   });
 });

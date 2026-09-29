@@ -60,7 +60,7 @@ export function heatLegend(perFlight: number): {
 /**
  * What the two ends of the bar stand for, in words, for its accessible
  * name and the legend's tooltip: the first and the last of `counts`, in
- * the colours they are drawn in. The last is pale cyan, not white: past
+ * the colours they are drawn in. The last is light cyan, not white: past
  * the knee the heat is rolled off (see heatTone), and white stands for
  * far more passes, off the bar.
  */
@@ -68,7 +68,7 @@ export function heatLegendText(counts: readonly number[]): string {
   const first = counts[0]!;
   return (
     `Time spent: blue for about ${first} ${first > 1 ? "passes" : "pass"} of a flight, ` +
-    `pale cyan for about ${counts[counts.length - 1]!}, white for many more`
+    `light cyan for about ${counts[counts.length - 1]!}, white for many more`
   );
 }
 

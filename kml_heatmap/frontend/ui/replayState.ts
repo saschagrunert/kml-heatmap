@@ -2,6 +2,7 @@
  * Replay state data class - groups all replay-related properties.
  */
 import type { Marker, Popup } from "maplibre-gl";
+import type { MapApp } from "../mapApp";
 import type { PathSegment, PopupHost, TrailRun } from "../types";
 import type { GroundedHeight } from "../calculations/lift";
 import type { RibbonPiece } from "../calculations/ribbons";
@@ -69,6 +70,12 @@ export class ReplayState {
    * user has taken the tilt over
    */
   pitchBefore: number | null = null;
+  /**
+   * The tilt the replay of every flight lays the map back to as it closes,
+   * until the map gets there or another move ends the one there; null
+   * otherwise (see restingPitch)
+   */
+  layingBack: number | null = null;
   playing = false;
   currentTime = 0;
   maxTime = 0;
@@ -170,4 +177,14 @@ export class ReplayState {
     this.recenterPanEndsAt = 0;
     this.lastSeekPanTime = 0;
   }
+}
+
+/**
+ * The tilt of the map of `app` as the user left it: the one the replay of
+ * every flight is laying it back to, while it does. What opens right after
+ * that replay closes and keeps the user's view (Wrapped, the hotspot tour,
+ * that replay once more) would keep a tilt from half way there.
+ */
+export function restingPitch(app: Pick<MapApp, "map" | "replayState">): number {
+  return app.replayState.layingBack ?? app.map?.getPitch() ?? 0;
 }

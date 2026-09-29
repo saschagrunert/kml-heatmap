@@ -522,7 +522,10 @@ export function followHeatCloud(app: MapApp): void {
    * The points of what the heatmap shows, when that changed or the view
    * left the part of the map they were cut for. While a replay runs they
    * are the relief level's, of all the map: its camera moves on its own,
-   * and the map does not come to rest (see isReplayCameraMove).
+   * and the map does not come to rest (see isReplayCameraMove). So does
+   * the camera of Wrapped's intro, whose cloud is of all the map at every
+   * zoom (see prepareHeatCloud): cut around a view it leaves at once, its
+   * glow ended in a straight edge across the map.
    */
   const updatePoints = (): void => {
     const at = level();
@@ -533,7 +536,7 @@ export function followHeatCloud(app: MapApp): void {
     }
     const zoom = app.threeDVisible ? map.getZoom() : restZoom;
     const detail = cloudDetail(at, zoom);
-    draw(pointsAt(at, forced, detail, detail >= CULL_FROM_ZOOM));
+    draw(pointsAt(at, forced, detail, detail >= CULL_FROM_ZOOM && !forced));
   };
   followed.set(app, {
     prepare: (zooms) => {

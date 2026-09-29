@@ -158,11 +158,12 @@ export function hasLostContext(map: MapLibreMap): boolean {
 }
 
 /**
- * What the replay's camera passes along with the jumps it makes on every
- * frame of a follow pan and of the chase view (see ReplayCamera). MapLibre
- * ends each jump with `moveend`, and `zoomend` if it zoomed: what the app
- * does once the map comes to rest skips these (isReplayCameraMove) and runs
- * once the camera itself rests, which fires both again untagged.
+ * What the app's scripted cameras pass along with their moves: the replay's
+ * follow pan and chase view (ReplayCamera), the orbit of the replay of all
+ * flights, and the moves of ui/cameraScript.ts (Wrapped's intro, the hotspot
+ * tour). MapLibre ends each jump with `moveend`, and `zoomend` if it zoomed:
+ * what the app does once the map comes to rest skips these (isReplayCameraMove)
+ * and runs once the camera itself rests, which fires both again untagged.
  */
 export const REPLAY_CAMERA_MOVE = { replayCamera: true } as const;
 
@@ -212,6 +213,25 @@ export function isInMarker(target: EventTarget | null | undefined): boolean {
 }
 
 /**
+ * Whether `event` is an Escape for what the page has open: not one a
+ * listener before has taken, nor one in a popup or on a marker of the map,
+ * which close the popup first. `besides` goes on the end of the selectors
+ * of those: `,#id` for one more (a select, whose own list it closes), or
+ * `:not(.class)` for markers whose Escape it is.
+ */
+export function isPageEscape(event: KeyboardEvent, besides = ""): boolean {
+  const target = event.target;
+  return (
+    event.key === "Escape" &&
+    !event.defaultPrevented &&
+    !(
+      target instanceof Element &&
+      target.closest(".maplibregl-popup,.maplibregl-marker" + besides)
+    )
+  );
+}
+
+/**
  * Keep a double click and a double tap on a marker from zooming the map,
  * for every marker there is or will be, and on whatever else `isTarget`
  * finds at the point of the map (a label that opens a popup like its
@@ -235,6 +255,14 @@ export function isInMarker(target: EventTarget | null | undefined): boolean {
  * the `dblclick` by the touch before it: a busy page hands it over seconds
  * late, and with the time it is handed over.
  *
+ * A mouse's double click is told by its first press, for the same pan: a
+ * press on a target makes the `dblclick` after it one on the target too,
+ * and one beside every target makes it the map's, whatever a touch before
+ * had left (a laptop with a touch screen has both). A pen's press counts
+ * as a mouse's, a touch's does not: a touch hands one over as well, after
+ * it has ended and with the `detail` of 1 WebKit gives every tap, and that
+ * one would take the second tap of a double tap off the marker.
+ *
  * Left as it is: a tap followed by a press and a drag, MapLibre's zoom with
  * one finger. Its only switch is `touchZoomRotate`, which is the pinch as
  * well, and a pinch with a finger on a marker has to go on working. The
@@ -247,12 +275,23 @@ export function keepMarkerTapsFromZoom(
   let switchedOff = false;
   /** When the last touch on a target began */
   let touchedAt = -Infinity;
-  /** Whether the last touch was on a target, or within a double tap of one */
+  /**
+   * Whether the last touch was on a target, or within a double tap of one,
+   * or the last first press of a mouse
+   */
   let onTargetLast = false;
   const onTarget = (e: MapMouseEvent | MapTouchEvent): boolean =>
     isOnMarker(e) || isTarget(e.point);
   const onDoubleClick = (e: MapMouseEvent): void => {
     if (onTarget(e) || onTargetLast) e.preventDefault();
+  };
+  /** Whether the last press was a mouse's or a pen's, by its pointer event */
+  let mouse = false;
+  const onPointerDown = (e: PointerEvent): void => {
+    mouse = e.pointerType !== "touch";
+  };
+  const onMouseDown = (e: MapMouseEvent): void => {
+    if (mouse && e.originalEvent.detail < 2) onTargetLast = onTarget(e);
   };
   const onTouchStart = (e: MapTouchEvent): void => {
     const at = e.originalEvent.timeStamp;
@@ -272,12 +311,18 @@ export function keepMarkerTapsFromZoom(
     // the middle of a gesture
     if (e.originalEvent.touches.length === 0) switchBackOn();
   };
+  // Before the target of the press hears of it: the marker's own
+  const container = map.getCanvasContainer();
+  container.addEventListener("pointerdown", onPointerDown, true);
+  map.on("mousedown", onMouseDown);
   map.on("dblclick", onDoubleClick);
   map.on("touchstart", onTouchStart);
   map.on("touchend", onTouchEnd);
   map.on("touchcancel", onTouchEnd);
   return () => {
     switchBackOn();
+    container.removeEventListener("pointerdown", onPointerDown, true);
+    map.off("mousedown", onMouseDown);
     map.off("dblclick", onDoubleClick);
     map.off("touchstart", onTouchStart);
     map.off("touchend", onTouchEnd);

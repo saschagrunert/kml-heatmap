@@ -95,6 +95,7 @@ __all__ = [
     "STAGING_PREFIX",
     "ChunkResult",
     "ExportResult",
+    "ExportSelection",
     "GroundspeedRange",
     "SiteOutput",
     "YearExportResult",
@@ -105,6 +106,7 @@ __all__ = [
     "is_exportable_path",
     "path_content_id",
     "process_year_chunk",
+    "select_exported_paths",
 ]
 
 # A year is not split below this many paths per chunk: a worker process only
@@ -172,6 +174,51 @@ class ExportResult:
     #: The id of every exported path, by its index in the input (see
     #: ``assign_path_ids``), for the link previews
     path_ids: dict[int, int] = field(default_factory=dict)
+
+
+@dataclass
+class ExportSelection:
+    """The paths the export publishes (see ``select_exported_paths``)."""
+
+    #: The paths of every year (see ``_group_paths_by_year``), without the
+    #: ones dropped as the same flight as another
+    paths_by_year: dict[int, list[int]]
+    #: The content of every exportable path (see ``exported_contents``),
+    #: the dropped ones included
+    contents: dict[int, bytes]
+
+    def exported(self) -> list[int]:
+        """The indices of the paths that are exported, in input order."""
+        return sorted(
+            index
+            for indices in self.paths_by_year.values()
+            for index in indices
+            if index in self.contents
+        )
+
+
+def select_exported_paths(
+    all_path_groups: FlightPathGroup,
+    all_path_metadata: list[PathMetadata],
+    exportable: Sequence[bool],
+) -> ExportSelection:
+    """The paths the export publishes, by year.
+
+    Every exportable path with a year (``exportable`` is
+    ``is_exportable_path`` of every path), except a copy of another one
+    (``drop_duplicate_paths``) and a second recording of the same flight
+    (``drop_overlapping_paths``), each left out with a warning. The map
+    extent and the airports are taken from the same paths: a dropped
+    recording must neither widen the map nor add an airport.
+    """
+    paths_by_year = _group_paths_by_year(all_path_metadata, exportable)
+    contents = exported_contents(paths_by_year, all_path_groups, exportable)
+    paths_by_year = drop_duplicate_paths(paths_by_year, contents, all_path_metadata)
+    # The same flight in two recordings of their own, see duplicates
+    paths_by_year = drop_overlapping_paths(
+        paths_by_year, all_path_groups, all_path_metadata, contents
+    )
+    return ExportSelection(paths_by_year, contents)
 
 
 @dataclass
@@ -573,30 +620,32 @@ def export_all_data(
     aircraft_data: Mapping[str, str] | None = None,
     exportable: Sequence[bool] | None = None,
     terrain: TileSource | None = None,
+    selection: ExportSelection | None = None,
 ) -> ExportResult:
     """Write the data files into ``output_dir``.
 
     ``output_dir`` is expected to hold no previous export: the pipeline
     passes the data staging directory of a ``SiteOutput``, which publishes
-    the files. ``exportable`` is ``is_exportable_path`` of every path, when
-    the caller has it already. ``terrain`` is where the ground under the
-    flights comes from (see ``kml_heatmap.terrain``); without it the year
-    files carry no ground and the page takes it from the airfields.
+    the files. ``exportable`` is ``is_exportable_path`` of every path, and
+    ``selection`` the ``select_exported_paths`` of them, when the caller has
+    them already; ``unique_airports`` should come from the paths of that
+    selection. ``terrain`` is where the ground under the flights comes from
+    (see ``kml_heatmap.terrain``); without it the year files carry no ground
+    and the page takes it from the airfields.
     """
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
 
     logger.info("\n  Exporting data to JSON files...")
 
-    if exportable is None:
-        exportable = [is_exportable_path(path) for path in all_path_groups]
-    paths_by_year = _group_paths_by_year(all_path_metadata, exportable)
-    contents = exported_contents(paths_by_year, all_path_groups, exportable)
-    paths_by_year = drop_duplicate_paths(paths_by_year, contents, all_path_metadata)
-    # The same flight in two recordings of their own, see duplicates
-    paths_by_year = drop_overlapping_paths(
-        paths_by_year, all_path_groups, all_path_metadata, contents
-    )
+    if selection is None:
+        if exportable is None:
+            exportable = [is_exportable_path(path) for path in all_path_groups]
+        selection = select_exported_paths(
+            all_path_groups, all_path_metadata, exportable
+        )
+    paths_by_year = selection.paths_by_year
+    contents = selection.contents
     logger.info("\n  Splitting data by year: %s", sorted(paths_by_year))
 
     path_ids = assign_path_ids(paths_by_year, contents)

@@ -41,7 +41,7 @@ PLAYWRIGHT_IMAGE = re.compile(
     r"mcr\.microsoft\.com/playwright:v(\S+?)-[a-z]+(?:@(sha256:[0-9a-f]{64}))?"
 )
 # The documents that quote the image for running the visual tests locally
-PLAYWRIGHT_IMAGE_DOCS = ("CONTRIBUTING.md", "DEVELOPMENT.md")
+PLAYWRIGHT_IMAGE_DOCS = ("CONTRIBUTING.md", "doc/development/testing.md")
 
 
 @functools.cache
@@ -143,17 +143,23 @@ def playwright_image_mismatches() -> list[str]:
                 f"v{match.group(1)}, package-lock.json pins {pinned}"
             )
     # The documented commands are how the snapshots get regenerated, so an
-    # image other than the one CI compares in produces snapshots that fail
+    # image other than the one CI compares in produces snapshots that fail.
+    # A document that is gone, or no longer quotes the image, is reported
+    # too: skipped, a move of the command to another page left it unchecked.
     for name in PLAYWRIGHT_IMAGE_DOCS:
         path = ROOT / name
         if not path.is_file():
+            problems.append(f"{name} is missing")
             continue
+        quoted_images = PLAYWRIGHT_IMAGE_REFERENCE.findall(
+            path.read_text(encoding="utf-8")
+        )
+        if not quoted_images:
+            problems.append(f"{name} quotes no Playwright image")
         problems.extend(
             f"{name} quotes the Playwright image {quoted}, "
             f".github/workflows/test.yml runs {images[0]}"
-            for quoted in PLAYWRIGHT_IMAGE_REFERENCE.findall(
-                path.read_text(encoding="utf-8")
-            )
+            for quoted in quoted_images
             if quoted != images[0]
         )
     return problems
@@ -261,7 +267,8 @@ def main() -> int:
     if image_problems:
         print(
             "The Playwright image in .github/workflows/test.yml (tag and "
-            "digest), the image CONTRIBUTING.md and DEVELOPMENT.md quote and "
+            "digest), the image CONTRIBUTING.md and doc/development/testing.md "
+            "quote and "
             "the @playwright/test version in package-lock.json have to agree.",
             file=sys.stderr,
         )

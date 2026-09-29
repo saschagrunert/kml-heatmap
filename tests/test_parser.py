@@ -277,6 +277,31 @@ class TestParseKmlCoordinates:
         assert len(coords) == 420_000
         assert len(paths) == 1
 
+    def test_comments_inside_a_text_lose_nothing(self, tmp_path):
+        """The text of an element stopped at a comment inside it: the
+        points after it were lost without a word."""
+        kml = (
+            f"{KML_HEADER}<Document><Placemark>"
+            "<name>Aunt<!-- from --> farm - Home <?pi x?>strip</name>"
+            "<LineString><coordinates>8.5,50.0,300 <!-- a gap -->"
+            "9.0,51.0,400 <!-- and another -->9.5,52.0,500</coordinates>"
+            "</LineString></Placemark><Placemark><name>Track</name><gx:Track>"
+            "<when>2025-03-15T10:00:00Z</when><gx:coord>8.5 50.0 <!-- -->300</gx:coord>"
+            "<when>2025-03-15T10:01:00Z</when><gx:coord>9.0 <!-- -->51.0 400</gx:coord>"
+            "</gx:Track></Placemark></Document></kml>"
+        )
+        coords, paths, metadata = parse_kml_coordinates(
+            _write(tmp_path, "comments.kml", kml)
+        )
+        assert [len(path) for path in paths] == [3, 2]
+        assert paths[0][-1] == TrackPoint(52.0, 9.5, 500.0, None)
+        assert [(p.lat, p.lon, p.alt) for p in paths[1]] == [
+            (50.0, 8.5, 300.0),
+            (51.0, 9.0, 400.0),
+        ]
+        assert len(coords) == 5
+        assert metadata[0]["airport_name"] == "Aunt farm - Home strip"
+
     def test_entity_expansion_is_still_rejected(self, tmp_path):
         entities = "".join(
             f'<!ENTITY lol{i} "' + f"&lol{i - 1};" * 10 + '">' for i in range(1, 10)

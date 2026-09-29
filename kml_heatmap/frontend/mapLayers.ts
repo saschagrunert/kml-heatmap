@@ -235,15 +235,15 @@ function addDataLayersTo(map: MapLibreMap): void {
     before,
   );
 
-  // The look of the heatmap (radius, intensity, colours) belongs to the
-  // data manager, which sets it as paint properties. The source merges the
-  // fixes into clusters for the zooms at which they are too many to draw
-  // one by one (see HEATMAP_CLUSTER), adding up the heat of each point, `w`
-  // (see drawHeat in services/heatSource.ts). Isolate draws the selected
-  // flights from a source of their own, so neither is written again for
-  // it. The layers end where they have faded out to the heat lines (see
-  // HEAT_LINES), so their sources are not cut into tiles of every level
-  // beyond that no one sees.
+  // The look of the heatmap (radius, intensity, colours) is in
+  // ui/heatmapPaint.ts, which the data manager sets as paint properties. The
+  // source merges the fixes into clusters for the zooms at which they are too
+  // many to draw one by one (see HEATMAP_CLUSTER), adding up the heat of each
+  // point, `w` (see drawHeat in services/heatSource.ts). Isolate draws the
+  // selected flights from a source of their own, so neither is written again
+  // for it. The layers end where they have faded out to the heat lines (see
+  // HEAT_LINES), so their sources are not cut into tiles of every level beyond
+  // that no one sees.
   for (const id of [MAP_LAYERS.heat, MAP_LAYERS.heatIsolated]) {
     map.addSource(id, {
       type: "geojson",
@@ -267,7 +267,7 @@ function addDataLayersTo(map: MapLibreMap): void {
 
   // What the heatmap hands over to when zoomed in (see HEAT_LINES): the
   // flights as lines with the time spent around them as `heat`, drawn as a
-  // glow and a core. Their look belongs to the data manager, like the
+  // glow and a core. Their look is in ui/heatmapPaint.ts, like the
   // heatmap's. Below `fromZoom` they are fully transparent, and the minimum
   // zoom spares the map their tiles there. The hotter lines are drawn last,
   // so a busy taxiway is not painted over by a flight that crossed it once.

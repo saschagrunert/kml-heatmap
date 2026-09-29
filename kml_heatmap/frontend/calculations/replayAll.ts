@@ -1,22 +1,23 @@
 /**
- * The flights of the replay of all flights (ui/replayAll.ts) as the points
- * its layer draws (ui/replayAllLayer.ts): every flight's curve, uploaded
- * once with the seconds into its flight at each point (flightClock.ts), so
- * a frame only tells the layer the time. The curves and their heights are
- * the ones the ribbons and the heat cloud are cut from (groundedFlights),
- * thinned as the heat cloud thins them (CLOUD_STEP_PX): a year of flights
- * is some 150,000 points, which a phone cannot draw every frame, and a few
- * thousand zoomed out.
+ * The flights of the replay of all flights (ui/replayAll.ts) as the points its
+ * layer draws (ui/replayAllLayer.ts): every flight's curve, uploaded once with
+ * the seconds into its flight at each point (flightClock.ts), so a frame only
+ * tells the layer the time. The curves and their heights are the ones the
+ * ribbons and the heat cloud are cut from (groundedFlights), thinned as the
+ * heat cloud thins them, a little closer (REPLAY_ALL_STEP_PX): a year of
+ * flights is some 150,000 points, which a phone cannot draw every frame, and a
+ * few thousand zoomed out.
  */
 import type { PathSegment } from "../types";
 import {
   DEGREES_TO_RADIANS,
   metresPerPixel,
   planarMetres,
+  TILE_SIZE_PX,
 } from "../utils/geometry";
 import { FEET_TO_METERS } from "../utils/constants";
 import { chainPieces, type FlightClock } from "./flightClock";
-import { mercatorOf } from "./heatCloud";
+import { lngLatOfMercator, mercatorOf } from "./heatCloud";
 import { liftExaggeration } from "./lift";
 import type { SmoothedFlights } from "./smoothing";
 
@@ -164,5 +165,105 @@ export function replayAllPoints(
     duration,
     flights: played.size,
     bounds: total > 0 ? [west, south, east, north] : null,
+  };
+}
+
+/** A camera of the fit of the flights: its centre, `[lng, lat]`, and zoom */
+export interface FitCamera {
+  center: [number, number];
+  zoom: number;
+}
+
+/**
+ * The map a fit is for, north up: its size in pixels, the pixels kept free
+ * along each edge, its tilt and its vertical field of view in degrees
+ */
+export interface FitMap {
+  width: number;
+  height: number;
+  padding: { top: number; right: number; bottom: number; left: number };
+  pitch: number;
+  fov: number;
+}
+
+/** How often the fit measures the flights on the screen and moves */
+const FIT_ROUNDS = 4;
+
+/**
+ * The most a round of the fit zooms in or out, in levels: a flight behind
+ * the camera of a steep tilt has no pixel, and the next round measures
+ * from closer to where they fit
+ */
+const FIT_STEP_ZOOM = 2;
+
+/**
+ * The camera, from `camera` on, that shows the flights `run` as large as
+ * the room of `map` within its padding allows. A fit of their bounds in a
+ * tilted view left them small in the middle of it, the far part of the map
+ * empty: it fits the corners of the bounds, which the tilt spreads, rather
+ * than the flights. Each round measures their points on the screen of the
+ * camera, as MapLibre draws the flat map in Mercator (the camera
+ * looks at the middle of the map from the distance its field of view puts
+ * it at, tilted towards the north, and a point south of the middle comes
+ * nearer and lower on the screen; the globe is taken for the flat map),
+ * moves their middle to the middle of the room and zooms by how much more
+ * room there is. The tilt makes the next measure differ a little, and
+ * FIT_ROUNDS fill the room to a hundredth. No closer in than `maxZoom`.
+ */
+export function fitTilted(
+  run: ReplayAllPoints,
+  camera: FitCamera,
+  map: FitMap,
+  maxZoom: number,
+): FitCamera {
+  const { points, count, origin } = run;
+  const { width, height, padding } = map;
+  const across = width - padding.left - padding.right;
+  const down = height - padding.top - padding.bottom;
+  if (count === 0 || across <= 0 || down <= 0) return camera;
+  const distance = height / 2 / Math.tan((map.fov * DEGREES_TO_RADIANS) / 2);
+  const sin = Math.sin(map.pitch * DEGREES_TO_RADIANS);
+  const cos = Math.cos(map.pitch * DEGREES_TO_RADIANS);
+  // The centre in Mercator units from the origin of the points
+  const [mx, my] = mercatorOf([camera.center[1], camera.center[0]]);
+  let x = mx - origin[0];
+  let y = my - origin[1];
+  let zoom = camera.zoom;
+  for (let round = 0; round < FIT_ROUNDS; round++) {
+    const world = TILE_SIZE_PX * 2 ** zoom;
+    // Left, top, right and bottom, in pixels from the middle of the map
+    let [left, top, right, bottom] = [Infinity, Infinity, -Infinity, -Infinity];
+    for (let k = 0; k < points.length; k += REPLAY_ALL_POINT_FLOATS) {
+      const south = (points[k + 1]! - y) * world;
+      const depth = distance - south * sin;
+      // Behind the camera, or level with it: further out, where it comes
+      // into view
+      if (depth <= 0) top = -Infinity;
+      const scale = distance / depth;
+      const px = (points[k]! - x) * world * scale;
+      const py = south * cos * scale;
+      left = Math.min(left, px);
+      right = Math.max(right, px);
+      top = Math.min(top, py);
+      bottom = Math.max(bottom, py);
+    }
+    const scale = Math.min(across / (right - left), down / (bottom - top));
+    // Their middle, from where it is to the middle of the room
+    const dx = (left + right - across + width) / 2 - padding.left;
+    const dy = (top + bottom - down + height) / 2 - padding.top;
+    const south = (dy * distance) / (distance * cos + dy * sin);
+    if (top > -Infinity) {
+      x += (dx * (distance - south * sin)) / distance / world;
+      y += south / world;
+    }
+    zoom = Math.min(
+      zoom +
+        Math.min(Math.max(Math.log2(scale), -FIT_STEP_ZOOM), FIT_STEP_ZOOM),
+      maxZoom,
+    );
+  }
+  return {
+    center: lngLatOfMercator(x + origin[0], y + origin[1]),
+    zoom,
   };
 }

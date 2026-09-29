@@ -126,6 +126,22 @@ export class LayerGl<U extends string> {
   }
 
   /**
+   * Let go of the points uploaded in `gl`, in a frame: a layer that stays
+   * on the map without points to draw would keep the last ones it drew, in
+   * the buffer and in `uploaded`, for as long as it stays. The buffer is
+   * left empty rather than deleted, for the points of its next draw, and
+   * bound, as `begin` leaves it: MapLibre takes its state up anew after a
+   * custom layer's frame.
+   */
+  empty(gl: WebGL2RenderingContext): void {
+    const resources = this.resources;
+    if (resources?.gl !== gl || !resources.uploaded) return;
+    gl.bindBuffer(gl.ARRAY_BUFFER, resources.points);
+    gl.bufferData(gl.ARRAY_BUFFER, 0, gl.STATIC_DRAW);
+    resources.uploaded = null;
+  }
+
+  /**
    * Let go of the buffers made in `gl`, unless that context is lost, and
    * keep the programs for the layer's return. Not what did not compile:
    * that took the layer off the map (see `failed`), and it comes back only

@@ -335,10 +335,18 @@ describe("hotspot tour", () => {
     tour.start();
     tour.pause();
 
+    map().fire.mockClear();
     tour.next();
     expect(tour.current).toBe(1);
     const flights = map().flyTo.mock.calls.length;
-    await vi.advanceTimersByTimeAsync(TOUR_FLY_MS + TOUR_DWELL_MS);
+    await vi.advanceTimersByTimeAsync(TOUR_FLY_MS - 1);
+    expect(map().fire).not.toHaveBeenCalled();
+    // There: the app follows the view it came to, the relief level and the
+    // cut of the cloud with it, as when it plays
+    await vi.advanceTimersByTimeAsync(1);
+    expect(map().fire).toHaveBeenCalledWith("zoomend");
+    expect(map().fire).toHaveBeenCalledWith("moveend");
+    await vi.advanceTimersByTimeAsync(TOUR_DWELL_MS);
     expect(map().easeTo).not.toHaveBeenCalled();
 
     // Landed by now: resumed, it turns over the place at once
@@ -346,6 +354,17 @@ describe("hotspot tour", () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(map().flyTo.mock.calls.length).toBe(flights);
     expect(last("easeTo")[0]).toMatchObject({ duration: TOUR_DWELL_MS });
+  });
+
+  it("goes back to the tilt the replay of all flights was laying the map back to", () => {
+    // Started half way back from the tilt of that replay
+    map().jumpTo({ pitch: 25 });
+    app.replayState.layingBack = 0;
+
+    tour.start();
+    tour.stop();
+
+    expect(last("flyTo")[0]).toMatchObject({ pitch: 0 });
   });
 
   it("stops with its button or Escape, back where it started", async () => {
@@ -632,17 +651,12 @@ describe("hotspot tour", () => {
     expect(app.store.get("heightBand")).toBe("1000-");
   });
 
-  it("gives the controls back as they were, and the phone's bar", () => {
+  it("gives the controls back as they were", () => {
     (el("isolate-btn") as HTMLButtonElement).disabled = true;
-    const bar = document.createElement("nav");
-    bar.id = "mobile-bar";
-    document.body.append(bar);
 
     tour.start();
-    expect(bar.hasAttribute("inert")).toBe(true);
     tour.stop();
 
-    expect(bar.hasAttribute("inert")).toBe(false);
     expect((el("isolate-btn") as HTMLButtonElement).disabled).toBe(true);
     expect((el("year-select") as HTMLSelectElement).disabled).toBe(false);
   });

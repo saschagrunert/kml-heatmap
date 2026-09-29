@@ -1,11 +1,12 @@
 /**
  * Path Selection - Handles path selection logic
  */
-import type { Map as MapLibreMap, PaddingOptions } from "maplibre-gl";
+import type { Map as MapLibreMap, PaddingOptions, Point } from "maplibre-gl";
 import type { MapApp } from "../mapApp";
 import { segmentsForPathIds } from "../calculations/statistics";
 import { loadFeatures } from "../services/featureLoader";
 import { applyToggleButtonState } from "../utils/buttonState";
+import { AUTO_ZOOM_FOLLOW } from "../utils/constants";
 import { domCache } from "../utils/domCache";
 import { segmentBounds } from "../utils/geometry";
 import { pluralFlights } from "../utils/htmlGenerators";
@@ -39,6 +40,12 @@ const EDGE_REACH_PX = 128;
 
 /** Room kept between the framed flights and the edge or a panel (px) */
 const FRAME_MARGIN_PX = 24;
+
+/**
+ * How much of the map between the panels a flight picked on its own spans
+ * at least, across or down, for the view to stay where it is
+ */
+const SEEN_SPAN = 0.25;
 
 /** Time the view takes to frame the isolated flights (ms) */
 const FRAME_MS = 800;
@@ -170,7 +177,15 @@ export class PathSelection {
       if (!add) this.clearSelection();
       if (add || !alone) this.togglePathSelection(pathId);
     });
-    if (!add && !alone) this.bringIntoView(pathId);
+    if (add || alone) return;
+    // On a phone the statistics sheet or an airport's popup it was picked
+    // from covers the map it is to be seen on, the popup together with the
+    // profile strip that opens under it
+    if (this.app.mobileBar?.isVisible()) {
+      this.app.statsPanelVisible = false;
+      this.app.airportManager.closePopup();
+    }
+    this.bringIntoView(pathId);
   }
 
   /**
@@ -264,7 +279,11 @@ export class PathSelection {
    * they are all the map shows, and one could stay half off the screen or
    * under the chip that says it is selected. The map keeps its bearing.
    * With `unlessInView` the map stays where it is when every point of them
-   * is on it and clear of the panels already.
+   * is on it and clear of the panels already, and they span a quarter of
+   * the map between the panels either way: a circuit round the home field
+   * was a speck in the middle of the heat, and on a phone none at all. No
+   * closer than a replay follows a flight: a few fixes on a field were
+   * framed at the map's deepest zoom.
    */
   private frameSelection(unlessInView = false): void {
     const map = this.app.map;
@@ -290,10 +309,20 @@ export class PathSelection {
           );
         }),
       );
-      if (clear) return;
+      // How far apart the corners of their bounds are on the map
+      const [a, b] = toBounds(bounds).map((corner) => map.project(corner)) as [
+        Point,
+        Point,
+      ];
+      const seen = Math.max(
+        Math.abs(b.x - a.x) / (width - padding.left - padding.right),
+        Math.abs(b.y - a.y) / (height - padding.top - padding.bottom),
+      );
+      if (clear && seen > SEEN_SPAN) return;
     }
     map.fitBounds(toBounds(bounds), {
       padding,
+      maxZoom: AUTO_ZOOM_FOLLOW,
       bearing: map.getBearing(),
       duration: FRAME_MS,
       animate: !prefersReducedMotion(),

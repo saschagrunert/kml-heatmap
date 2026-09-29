@@ -110,12 +110,13 @@ export function followLayerVisibility(app: MapApp): void {
     app.aviationLayer.setVisible(app.aviationVisible);
     app.selectionHighlightLayer.setVisible(highlightsSelection(app));
 
-    // The heatmap is hidden for a replay, so its toggle must not report it
-    // as on; the 3D view's cloud stays through one, faintly, and its toggle
-    // says so. The replay trail is coloured by altitude unless the speed
-    // layer is on, so it needs the altitude scale with neither layer on,
-    // and the altitude toggle says so: it said off over a trail and a
-    // legend in altitude colours.
+    // The heatmap is hidden for a replay, so its toggle must not report it as
+    // on; the heat cloud stays through one, faintly in the 3D view and building
+    // up behind the flights of the replay of all flights, and its toggle says
+    // so. The replay trail is coloured by altitude unless the speed layer is
+    // on, so it needs the altitude scale with neither layer on, and the
+    // altitude toggle says so: it said off over a trail and a legend in
+    // altitude colours.
     const button = domCache.get("heatmap-btn");
     if (button) {
       applyToggleButtonState(

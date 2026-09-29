@@ -139,7 +139,7 @@
 }
 #replay-slider:focus-visible,
 #replay-all-time:focus-visible {
-  outline: 2px solid var(--color-accent-blue);
+  outline: var(--focus-ring);
   outline-offset: 4px;
 }
 #replay-slider::-webkit-slider-thumb,
@@ -192,7 +192,7 @@
   z-index: 1;
 }
 .replay-exit:focus-visible {
-  outline: 2px solid var(--color-accent-blue);
+  outline: var(--focus-ring);
   outline-offset: -2px;
 }
 /* Readout strip for the current position */
@@ -499,7 +499,7 @@ body.profile-open .toast-stack {
   opacity: 0;
 }
 #replay-controls:has(#replay-slider:focus-visible) .profile-plot {
-  outline: 2px solid var(--color-accent-blue);
+  outline: var(--focus-ring);
   outline-offset: 2px;
 }
 /* The toggle on the selection chip, beside its Clear */
@@ -523,7 +523,7 @@ body.profile-open .toast-stack {
   color: var(--color-accent-blue);
 }
 .profile-toggle:focus-visible {
-  outline: 2px solid var(--color-accent-blue);
+  outline: var(--focus-ring);
   outline-offset: 2px;
 }
 @media (hover: hover) {
@@ -663,8 +663,11 @@ body.profile-open .toast-stack {
   font-size: var(--text-xs);
   line-height: 1;
   color: var(--color-text-muted);
-  /* Readable over the density it may stand on */
-  text-shadow: 0 0 3px var(--color-bg-primary);
+  /* Readable over the density it may stand on: one shadow left a line of
+     the heat through a label on a phone */
+  text-shadow:
+    0 0 3px var(--color-bg-primary),
+    0 0 3px var(--color-bg-primary);
 }
 .section-tick {
   position: absolute;
@@ -1127,7 +1130,7 @@ body.cross-section-open .toast-stack {
   cursor: pointer;
 }
 #heat-legend summary:focus-visible {
-  outline: 2px solid var(--color-accent-blue);
+  outline: var(--focus-ring);
   outline-offset: 2px;
 }
 #heat-legend ul {
@@ -1232,8 +1235,8 @@ body.hotspot-tour-active .toast-stack {
     left: calc(50% + var(--stats-rail-w) / 2);
   }
 }
-/* On a phone the panel spans the width above the credit and the bar, which
-   waits under it, inert, until the tour ends */
+/* On a phone the panel spans the width above the credit, where the bar
+   was: the bar steps aside while the tour runs, as for a replay */
 @media (max-width: 767.98px) {
   #hotspot-tour {
     left: calc(var(--edge-gap) + var(--safe-left));
@@ -1242,25 +1245,10 @@ body.hotspot-tour-active .toast-stack {
     width: auto;
     transform: none;
   }
-  body:has(.mobile-bar) #hotspot-tour {
-    bottom: calc(
-      var(--mobile-bar-h) + var(--attribution-h) + var(--space-sm) +
-        var(--safe-bottom)
-    );
-  }
-  body.hotspot-tour-active .mobile-tab {
-    opacity: 0.5;
-  }
   body.hotspot-tour-active .toast-stack {
     bottom: calc(
       var(--attribution-h) + var(--space-sm) + var(--safe-bottom) +
         var(--tour-panel-h, 0px) + var(--space-sm)
-    );
-  }
-  body:has(.mobile-bar).hotspot-tour-active .toast-stack {
-    bottom: calc(
-      var(--mobile-bar-h) + var(--attribution-h) + var(--space-sm) +
-        var(--safe-bottom) + var(--tour-panel-h, 0px) + var(--space-sm)
     );
   }
   body.hotspot-tour-active #github-footer,

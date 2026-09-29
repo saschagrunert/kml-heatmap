@@ -87,6 +87,14 @@ def repo(tmp_path, monkeypatch):
         f"      image: {IMAGE}\n",
         encoding="utf-8",
     )
+    # The documents that quote the image for the visual tests
+    for name in check_locks.PLAYWRIGHT_IMAGE_DOCS:
+        doc = tmp_path / name
+        doc.parent.mkdir(parents=True, exist_ok=True)
+        doc.write_text(
+            f"```sh\npodman run {IMAGE} npx playwright test\n```\n",
+            encoding="utf-8",
+        )
     package = tmp_path / "kml_heatmap"
     package.mkdir()
     (package / "__init__.py").write_text(
@@ -286,22 +294,41 @@ class TestPlaywrightImage:
 
     def test_a_document_quoting_the_same_image_passes(self, repo):
         (repo / "CONTRIBUTING.md").write_text(
-            f"```sh\npodman run {IMAGE} npx playwright test\n```\n",
+            f"Build it first.\n\n```sh\npodman run {IMAGE} npx playwright "
+            "test --project=visual\n```\n",
             encoding="utf-8",
         )
 
         assert check_locks.main() == 0
 
+    @pytest.mark.parametrize("name", check_locks.PLAYWRIGHT_IMAGE_DOCS)
+    def test_a_missing_document_fails(self, repo, capsys, name):
+        # A document moved or renamed left its command unchecked
+        (repo / name).unlink()
+
+        assert check_locks.main() == 1
+
+        assert f"{name} is missing" in capsys.readouterr().err
+
+    @pytest.mark.parametrize("name", check_locks.PLAYWRIGHT_IMAGE_DOCS)
+    def test_a_document_quoting_no_image_fails(self, repo, capsys, name):
+        (repo / name).write_text("See the testing guide.\n", encoding="utf-8")
+
+        assert check_locks.main() == 1
+
+        assert f"{name} quotes no Playwright image" in capsys.readouterr().err
+
     def test_a_document_quoting_another_image_fails(self, repo, capsys):
         stale = f"mcr.microsoft.com/playwright:v{PLAYWRIGHT}-noble"
-        (repo / "DEVELOPMENT.md").write_text(
+        doc = repo / "doc/development/testing.md"
+        doc.write_text(
             f"Run `podman run {stale} npx playwright test`.\n", encoding="utf-8"
         )
 
         assert check_locks.main() == 1
 
         assert (
-            f"DEVELOPMENT.md quotes the Playwright image {stale}, "
+            f"doc/development/testing.md quotes the Playwright image {stale}, "
             f".github/workflows/test.yml runs {IMAGE}"
         ) in capsys.readouterr().err
 

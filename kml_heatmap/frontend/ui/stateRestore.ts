@@ -108,6 +108,8 @@ export function restoreState(app: MapApp): void {
       if (value !== undefined) app.store.set(key, value);
     }
     if (state.heightBand) app.heightBand = state.heightBand;
+    // The tool opens on it once the flights are in (see initialize)
+    if (state.crossSectionLine) app.crossSectionLine = state.crossSectionLine;
     // Altitude and speed colour the same paths, and the toggles never
     // leave both on (setColorLayer); a link written by hand, or with every
     // flag of `v` set, can. Altitude is the one kept, as it needs no

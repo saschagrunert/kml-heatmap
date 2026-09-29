@@ -377,6 +377,25 @@ describe("the heat cloud's layer", () => {
     expect(gl.drawArraysInstanced).toHaveBeenCalledTimes(4 * PASSES);
   });
 
+  it("lets go of the points it drew in the frame after it is given none, on the map or not", () => {
+    layer.onAdd(map);
+    layer.setPoints(points());
+    render();
+    gl.bufferData.mockClear();
+
+    layer.setPoints(null);
+    render();
+
+    expect(gl.bufferData).toHaveBeenCalledExactlyOnceWith(
+      gl.ARRAY_BUFFER,
+      0,
+      gl.STATIC_DRAW,
+    );
+    expect(gl.deleteBuffer).not.toHaveBeenCalled();
+    render();
+    expect(gl.bufferData).toHaveBeenCalledOnce();
+  });
+
   it("builds its vertex shader on MapLibre's prelude for the projection, and a program per projection", () => {
     layer.onAdd(map);
     layer.setPoints(points());

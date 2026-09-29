@@ -12,8 +12,8 @@
  * the same actions as the desktop controls (ui/actions.ts) and mirrors the
  * existing dropdowns instead of holding state of its own.
  *
- * When replay activates the bar steps aside entirely: the replay panel takes
- * the bottom edge, so the two never stack.
+ * When replay activates, or the hotspot tour starts, the bar steps aside
+ * entirely: their panel takes the bottom edge, so the two never stack.
  */
 import type { MapApp } from "../mapApp";
 import type { SheetRow, SheetSwitchRow } from "./mobileSheet";
@@ -103,8 +103,11 @@ export class MobileBar {
   private readonly mql: MediaQueryList;
   private readonly onBreakpoint: (e: MediaQueryListEvent) => void;
   private mounted = false;
-  /** Ends following the replay, which the bar does mounted or not */
-  private unsubscribeReplay: (() => void) | null = null;
+  /**
+   * Ends following the replay and the hotspot tour, which the bar does
+   * mounted or not
+   */
+  private unsubscribeEdge: (() => void) | null = null;
   private openTab: TabId | null = null;
 
   constructor(app: MapApp) {
@@ -141,15 +144,16 @@ export class MobileBar {
   start(): void {
     this.syncBreakpoint(this.mql.matches);
     this.mql.addEventListener("change", this.onBreakpoint);
-    this.unsubscribeReplay ??= this.app.store.subscribe("replayActive", (on) =>
-      this.followReplay(on),
+    this.unsubscribeEdge ??= this.app.store.subscribeKeys(
+      ["replayActive", "tourView"],
+      () => this.followEdge(),
     );
   }
 
   destroy(): void {
     this.mql.removeEventListener("change", this.onBreakpoint);
-    this.unsubscribeReplay?.();
-    this.unsubscribeReplay = null;
+    this.unsubscribeEdge?.();
+    this.unsubscribeEdge = null;
     this.unmount();
   }
 
@@ -158,14 +162,23 @@ export class MobileBar {
   }
 
   /**
-   * Replay owns the bottom edge while it runs. The bar leaves the document
-   * rather than hiding in place: the stylesheet lifts the attribution and
-   * the replay panel off the bar with `body:has(.mobile-bar)`, so a bar
-   * that is merely invisible would still reserve its height.
+   * Whether a replay or the hotspot tour has the bottom edge: the tour
+   * keeps the user's view in the store while it runs (ui/hotspotTour.ts)
    */
-  private followReplay(active: boolean): void {
+  private edgeTaken(): boolean {
+    return this.app.replayActive || !!this.app.tourView;
+  }
+
+  /**
+   * A replay owns the bottom edge while it runs, and so does the hotspot
+   * tour. The bar leaves the document rather than hiding in place: the
+   * stylesheet lifts the attribution and the replay panel off the bar
+   * with `body:has(.mobile-bar)`, so a bar that is merely invisible would
+   * still reserve its height.
+   */
+  private followEdge(): void {
     if (!this.mounted) return;
-    if (active) {
+    if (this.edgeTaken()) {
       this.closeSheet();
       this.root.remove();
     } else if (!document.contains(this.root)) {
@@ -193,7 +206,7 @@ export class MobileBar {
     if (this.mounted) return;
     this.mounted = true;
 
-    if (!this.app.replayActive) insertBeforeMap(this.root);
+    if (!this.edgeTaken()) insertBeforeMap(this.root);
     this.sheet.mount(document.body);
 
     // The floating button groups are what the bar replaces
@@ -399,7 +412,7 @@ export class MobileBar {
         // The name the control has in the columns
         label: "Replay",
         hint: () =>
-          app.canReplay() ? null : "Select one flight with timing data",
+          app.canReplay() ? null : "Pick one flight under Stats, Flights",
         isDisabled: () => !app.canReplay(),
         onSelect: () => {
           runAction(app, "toggleReplay");

@@ -4,10 +4,8 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { followHeightBand } from "../../../../kml_heatmap/frontend/ui/heightBand";
-import {
-  HEIGHT_BAND_STOPS_FT,
-  OPEN_TOP,
-} from "../../../../kml_heatmap/frontend/calculations/heightBand";
+import { OPEN_TOP } from "../../../../kml_heatmap/frontend/calculations/heightBand";
+import { HEIGHT_BAND_STOPS_FT } from "../../../../kml_heatmap/frontend/state/urlState";
 import { icon } from "../../../../kml_heatmap/frontend/utils/icons";
 import { asMapApp, createMockApp, type MockApp } from "../../testHelpers";
 

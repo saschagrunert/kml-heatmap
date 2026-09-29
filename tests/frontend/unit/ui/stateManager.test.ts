@@ -48,6 +48,15 @@ describe("sanitizeSavedState", () => {
     ).toEqual({ selectedPathIds: [0, 2 ** 40 - 1] });
   });
 
+  it("keeps the line of the cross-section as a link writes it, and nothing else", () => {
+    expect(
+      sanitizeSavedState({ crossSectionLine: "51.5,12.1,51.6,12.3" }),
+    ).toEqual({ crossSectionLine: "51.5,12.1,51.6,12.3" });
+    for (const crossSectionLine of ["", "51.5,12.1", "a,b,c,d", 51, null]) {
+      expect(sanitizeSavedState({ crossSectionLine })).toEqual({});
+    }
+  });
+
   it("keeps the heat cloud's band of heights as a link writes it, and nothing else", () => {
     expect(sanitizeSavedState({ heightBand: "500-3000" })).toEqual({
       heightBand: "500-3000",
@@ -55,7 +64,17 @@ describe("sanitizeSavedState", () => {
     expect(sanitizeSavedState({ heightBand: "1000-" })).toEqual({
       heightBand: "1000-",
     });
-    for (const heightBand of ["", "500", "-3000", "a-b", 500, null]) {
+    for (const heightBand of [
+      "",
+      "500",
+      "-3000",
+      "a-b",
+      "5-7",
+      "3000-500",
+      "0-",
+      500,
+      null,
+    ]) {
       expect(sanitizeSavedState({ heightBand })).toEqual({});
     }
   });
@@ -234,6 +253,7 @@ describe("StateManager", () => {
         "flightListVisible",
         "wrappedVisible",
         "heightBand",
+        "crossSectionLine",
       ]);
     });
 
@@ -470,6 +490,18 @@ describe("StateManager", () => {
       expect(params.get("d")).toBe("1");
     });
 
+    it("saves the line of the cross-section, and carries it in the link", () => {
+      mockApp.store.set("crossSectionLine", "51.5,12.1,51.6,12.3");
+
+      stateManager.saveMapState();
+
+      expect(savedState()).toMatchObject({
+        crossSectionLine: "51.5,12.1,51.6,12.3",
+      });
+      const url = String(vi.mocked(history.replaceState).mock.calls[0]![2]);
+      expect(new URLSearchParams(url).get("x")).toBe("51.5,12.1,51.6,12.3");
+    });
+
     it("saves the heat cloud's band of heights, and carries it in the link", () => {
       mockApp.store.set("heightBand", "500-3000");
 
@@ -631,6 +663,7 @@ describe("StateManager", () => {
         wrappedVisible: false,
         isolateSelection: false,
         heightBand: "",
+        crossSectionLine: "",
       });
       // North up, flat and Mercator are the defaults and stay out of the link
       expect(history.replaceState).toHaveBeenCalledWith(

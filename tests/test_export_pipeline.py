@@ -7,7 +7,11 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from kml_heatmap.constants import ALTITUDE_GAIN_HYSTERESIS_FT, METERS_TO_FEET
+from kml_heatmap.constants import (
+    ALTITUDE_GAIN_HYSTERESIS_FT,
+    METERS_TO_FEET,
+    SECONDS_PER_HOUR,
+)
 from kml_heatmap.export_pipeline import (
     _segment_groundspeed,
     altitude_gain_m,
@@ -365,6 +369,41 @@ class TestSegmentGroundspeed:
     def test_measured_standstill_is_not_replaced_by_the_average(self):
         seg = SegmentSpeed(0, 1000.0, 0.0, 0.0, 0.0, 60.0, valid=True)
         assert _segment_groundspeed(seg, SpeedWindow([seg]), 10.0, 600.0) == 0.0
+
+    def test_a_segment_longer_than_the_window_is_its_own_speed(self):
+        """A logger that writes a fix every few minutes: nothing else is in
+        the window around a segment."""
+        seg = SegmentSpeed(0, 1000.0, 0.0, 90.0, 5.0, 300.0, valid=True)
+        window = SpeedWindow([seg])
+        assert len(window) == 0
+        assert _segment_groundspeed(seg, window, 100.0, 600.0) == 90.0
+
+    def test_a_gap_takes_the_speed_before_it(self):
+        """The straight line over a lost fix says little about the speed."""
+        before = SegmentSpeed(0, 940.0, 0.0, 100.0, 3.087, 60.0, valid=True)
+        gap = SegmentSpeed(1, 1000.0, 60.0, 30.0, 1.852, 120.5, valid=True)
+        speed = _segment_groundspeed(gap, SpeedWindow([before, gap]), 5.0, 180.5)
+        assert speed == pytest.approx(100.0, rel=1e-3)
+
+    def test_a_long_gap_leaves_the_speed_before_it_alone(self):
+        """A fix every second at 100 kt, then 30 minutes on the spot."""
+        start = 1748736000.0
+        degrees_per_second = 100 * 1.852 / SECONDS_PER_HOUR / 111.195
+        path = [
+            TrackPoint(50.0 + degrees_per_second * i, 8.0, 500.0, start + i)
+            for i in range(121)
+        ]
+        path.append(path[-1]._replace(ts=start + 120 + 1800))
+        path.append(
+            path[-1]._replace(lat=path[-1].lat + degrees_per_second, ts=start + 1921)
+        )
+
+        _, rows = process_path_segments(path, 1921.0)
+
+        # The minute before the gap flew at 100 kt; the gap stood still
+        # and is not drawn, the second after it flew at 100 kt again
+        assert [row[3] for row in rows[60:120]] == [100.0] * 60
+        assert rows[-1][3] == 100.0
 
 
 class TestProcessPathSegments:

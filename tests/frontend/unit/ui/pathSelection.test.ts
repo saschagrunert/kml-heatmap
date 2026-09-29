@@ -11,6 +11,7 @@ import {
   type MockApp,
 } from "../../testHelpers";
 import { DataManager } from "../../../../kml_heatmap/frontend/ui/dataManager";
+import { AUTO_ZOOM_FOLLOW } from "../../../../kml_heatmap/frontend/utils/constants";
 
 // The data manager is real, so the paths follow the selection the way they
 // do in the app; it loads nothing here, and its heat is never drawn
@@ -511,8 +512,10 @@ describe("PathSelection", () => {
           right: x + w,
           bottom: y + h,
         }) as DOMRect;
-      /** Where the map draws every point of the flights */
+      /** Where the map draws the west end of the flights */
       let drawnAt: { x: number; y: number };
+      /** How wide the map draws a degree of longitude, in pixels */
+      let degreePx: number;
       let profile: HTMLElement;
       /** The bundle, and the two frames the layout takes after it */
       const settled = async (): Promise<void> => {
@@ -539,7 +542,11 @@ describe("PathSelection", () => {
           box(0, 0, 1200, 800),
         );
         drawnAt = { x: 600, y: 300 };
-        map.project.mockImplementation(() => drawnAt);
+        degreePx = 400;
+        map.project.mockImplementation((lngLat) => ({
+          x: drawnAt.x + ((lngLat as [number, number])[0] - 8) * degreePx,
+          y: drawnAt.y,
+        }));
         // The profile of the picked flight, at the bottom of the map
         profile = document.createElement("div");
         profile.id = "flight-profile";
@@ -588,6 +595,41 @@ describe("PathSelection", () => {
         await settled();
 
         expect(mockApp.map!.fitBounds).not.toHaveBeenCalled();
+      });
+
+      it("frames one in view that is too small to be seen there", async () => {
+        // A circuit round the field, a speck in the middle of the heat
+        degreePx = 20;
+
+        pathSelection.selectFlight(2);
+        await settled();
+
+        expect(mockApp.map!.fitBounds).toHaveBeenCalledTimes(1);
+        // A flight of a few fixes on a field is not framed closer than a
+        // replay follows one
+        expect(mockApp.map!.fitBounds.mock.calls[0]![1]).toMatchObject({
+          maxZoom: AUTO_ZOOM_FOLLOW,
+        });
+      });
+
+      it("hands the map on a phone the flight picked from the statistics or an airport", () => {
+        mockApp.statsPanelVisible = true;
+        mockApp.mobileBar = {
+          isVisible: () => true,
+        } as unknown as typeof mockApp.mobileBar;
+
+        pathSelection.selectFlight(2);
+
+        expect(mockApp.statsPanelVisible).toBe(false);
+        expect(mockApp.airportManager.closePopup).toHaveBeenCalledOnce();
+
+        // Not for one added, nor on the desktop, where both stand beside it
+        mockApp.statsPanelVisible = true;
+        pathSelection.selectFlight(3, true);
+        mockApp.mobileBar = null;
+        pathSelection.selectFlight(1);
+        expect(mockApp.statsPanelVisible).toBe(true);
+        expect(mockApp.airportManager.closePopup).toHaveBeenCalledOnce();
       });
 
       it("leaves it alone for a flight added, taken out, or clicked on the map", async () => {

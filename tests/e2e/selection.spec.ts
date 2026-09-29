@@ -84,7 +84,7 @@ test.describe("Path Selection", () => {
     const replayBtn = page.locator("#replay-btn");
     await expect(replayBtn).toHaveAttribute(
       "title",
-      "Select exactly one flight with timing data to replay",
+      "Pick one flight with timing data to replay, under Statistics, Flights",
     );
 
     await selectPathForReplay(page);
@@ -113,7 +113,7 @@ test.describe("Path Selection", () => {
 
     await expect(page.locator("#replay-btn")).toHaveAttribute(
       "title",
-      "Select exactly one flight with timing data to replay",
+      "Pick one flight with timing data to replay, under Statistics, Flights",
     );
     await expect(page.locator("#replay-btn")).toHaveCSS("opacity", "0.5");
   });
@@ -131,7 +131,7 @@ test.describe("Path Selection", () => {
 
     await expect(page.locator("#replay-btn")).toHaveAttribute(
       "title",
-      "Select exactly one flight with timing data to replay",
+      "Pick one flight with timing data to replay, under Statistics, Flights",
     );
   });
 
@@ -174,6 +174,35 @@ test.describe("Path Selection", () => {
       undefined,
       { timeout: 5000 },
     );
+  });
+
+  test("clicking the map over the heat alone keeps the selection", async ({
+    page,
+  }) => {
+    await selectPathForReplay(page);
+    // No flight can be clicked there, so no click is one beside every
+    // flight: the chip's Clear is the way
+    await toggleLayer(page, "altitude");
+    await setZoom(page, 3);
+
+    // A click the map hears of, not one a panel over it takes
+    await page.evaluate(() =>
+      window.mapApp!.map!.once("click", () =>
+        document.body.setAttribute("data-map-clicked", ""),
+      ),
+    );
+    const mapBox = (await page.locator("#map").boundingBox())!;
+    await page.mouse.click(mapBox.x + 10, mapBox.y + mapBox.height - 10);
+    await expect(page.locator("body")).toHaveAttribute("data-map-clicked");
+    // Past the frame the click is handled in
+    await page.evaluate(
+      () =>
+        new Promise((resolve) =>
+          requestAnimationFrame(() => requestAnimationFrame(resolve)),
+        ),
+    );
+
+    expect(await selectedCount(page)).toBe(1);
   });
 
   test("clicking airport marker selects associated paths", async ({ page }) => {

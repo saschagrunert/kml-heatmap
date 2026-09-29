@@ -8,27 +8,32 @@ the day of the flight.
 
 Numeric dates: 2024-03-14, 2024.03.14, 14.03.2024, 14/03/2024, 14-03-2024,
 14_03_2024, 14 03 2024, 14 - 03 - 2024, 3/14/2024, 14.03.24, 2024/3/14,
-2024-3-4, the compact 20240314, the year and month 2024-03, the ISO week
-2024-W11, the German calendar week KW11 2024 and the ordinal date 2024-074.
-With a month name: "14 Mar 2024", "14th March 2024", "the 14th of March
-2024", "14-MAR-2024",
-"14/Mar/2024", "March 14, 2024", "Mar/14/2024", "Mar14_2024", "2024/Mar/14"
-and "March 2024", with a two-digit year "14 Mar 24", "14-MAR-24" and
-"14MAR24", and in German, day first: "14. März 2024", "14.Mrz.2024",
-"14-Okt-2024" and "Mai 2024". And the date of flight of an ICAO flight plan,
-"DOF/240314". A weekday named in full ("Sunday", "Sonntag") gives the day
-away as well (``find_weekday_tokens``).
+2024-3-4, the compact 20240314 (with the time right after it as well,
+202403141430), the year and month 2024-03, the ISO week 2024-W11 and
+2024W11, a calendar week with its year (KW11 2024, Week 11 2024, W11 2024)
+and the ordinal date 2024-074. With a month name: "14 Mar 2024", "14th March
+2024", "the 14th of March 2024", "14-MAR-2024", "14/Mar/2024", "March 14,
+2024", "Mar/14/2024", "Mar14_2024", "2024/Mar/14" and "March 2024", with a
+two-digit year "14 Mar 24", "14-MAR-24" and "14MAR24", and in German, day
+first: "14. März 2024", "14.Mrz.2024", "14-Okt-2024" and "Mai 2024". And the
+date of flight of an ICAO flight plan, "DOF/240314". A weekday named in full
+("Sunday", "Sonntag") gives the day away as well (``find_weekday_tokens``).
 
 Names lose more than that (``strip_dates``): a day and month without the
 year ("16 Aug", "16. Mai", "16.08.", "26.08", "16.8", "16/08", "16-08",
-"16_08") and a calendar week without it ("KW33"), which the year of the
-flight completes, six digits that are a date ("260816"), a month and year
-("03/2026", "03.2026", "2026/03"), a weekday abbreviated next to a date
+"16_08") and a calendar week without it ("KW33", "Week 33"), which the year
+of the flight completes, six digits that are a date ("260816"), a month and
+year ("03/2026", "03.2026", "2026/03"), a weekday abbreviated next to a date
 ("Sat 16 Aug", "Sa., 16.08.2026") and a time of day ("14:30", "1430Z",
 "0930z", "1430L", "1513h" as in a Charterware file name, "14h30", "14.30
-Uhr", "3pm", the time after a date as in 20260816T1430 or 2026-08-16_1430).
-The obfuscator's check reports the times of day in file names
-(``find_time_tokens``) and the weekdays anywhere.
+Uhr", "3pm", "0930Z-1045Z", the time after a date as in 20260816T1430,
+2026-08-16_1430 or 2026-08-16-14-30), with the zone, the fraction or the
+offset after it ("1430 GMT", "1430 Zulu", "09:30 EDT", "1430 local", "0930
+hours", "14:30:00.5Z", "14:30 +02:00", "1430+0200"). The common zones count,
+not every one there is. "14.30" alone stays: it is a decimal as often ("fuel
+14.30"), and only goes with a zone, the local time or the hours ("14.30Z",
+"14.30L", "14.30 hrs"). The obfuscator's check reports the times of day in
+file names (``find_time_tokens``) and the weekdays anywhere.
 
 Where a name could hold a date or something else, it loses the date: a
 decimal such as "fuel 16.8" goes with the dates it looks like. Two numbers
@@ -36,7 +41,9 @@ decimal such as "fuel 16.8" goes with the dates it looks like. Two numbers
 runways: "EDDS 07/25" reads as July 25th and as July 2025 as well, and an
 airport code or a place name before them says nothing about which it is.
 Two numbers with a dot after a word that names a version ("firmware
-12.10") are the version.
+12.10") are the version. Four digits before "hours" go even where they
+count the hours of an engine ("Engine 1500 hours"): they are a time of day
+as often.
 """
 
 import re
@@ -124,6 +131,8 @@ _DAYS_AFTER_JAN_1 = "|".join(f"{day:02d}" for day in range(1, MAX_DAYS_AFTER_JAN
 _DAY = r"(?:0?[1-9]|[12]\d|3[01])"
 _MONTH = r"(?:0?[1-9]|1[0-2])"
 _WEEK = r"(?:0?[1-9]|[1-4]\d|5[0-3])"
+# A time of day of four digits, or six with the seconds: 1430, 143015
+_HHMM = r"(?:[01]\d|2[0-3])[0-5]\d(?:[0-5]\d)?"
 # What stands between the day and the month of a date written with spaces
 _SPACED = r"(?:\s+(?:[./_-]\s*)?|[./_-]\s+)"
 
@@ -183,19 +192,22 @@ def _numeric_patterns(skip_near_jan_first: bool) -> tuple[re.Pattern[str], ...]:
             + r"\d{1,2}(?P<sep>\s+(?:[./_-]\s*)?|[./_-]\s+)\d{1,2}(?P=sep)"
             + r"(?:19|20)\d{2}(?!\d|[.,]\d)"
         ),
-        # 2024-03 (a year and month), 2024-W11 (an ISO week) and 2024-074 (an
-        # ordinal date); January, the first week and the first days pass
+        # 2024-03 (a year and month), 2024-W11 and 2024W11 (an ISO week) and
+        # 2024-074 (an ordinal date); January, the first week and the first
+        # days pass. Without the hyphen only a year of this or the last
+        # century, and no letter before it.
         re.compile(
             r"(?<!\d)\d{4}-" + unless(r"01(?![\d-])") + r"(?:0[1-9]|1[0-2])(?![\d-])"
         ),
         re.compile(
-            r"(?<!\d)\d{4}-W"
+            r"(?:(?<!\d)\d{4}-|(?<![A-Za-z\d])(?:19|20)\d{2})W"
             + unless(r"01(?!\d)")
-            + r"(?:0[1-9]|[1-4]\d|5[0-3])(?:-[1-7])?(?!\d)"
+            + r"(?:0[1-9]|[1-4]\d|5[0-3])(?:-?[1-7])?(?!\d)"
         ),
-        # The German calendar week with its year, "KW33 2026" and "KW 33/2026"
+        # A calendar week with its year, "KW33 2026", "KW 33/2026", "Week 33
+        # 2026" and "W33 2026"
         re.compile(
-            r"(?<![A-Za-z\d])(?i:KW)\s?"
+            r"(?:(?<![A-Za-z\d])(?:(?i:KW)\s?|(?i:week)\s*)|(?<![A-Za-z\d-])W)"
             + unless(r"0?1(?!\d)")
             + rf"{_WEEK}[\s/._-]*(?:19|20)\d{{2}}(?!\d|[.,]\d)"
         ),
@@ -205,11 +217,14 @@ def _numeric_patterns(skip_near_jan_first: bool) -> tuple[re.Pattern[str], ...]:
             + r"(?:00[1-9]|0[1-9]\d|[12]\d\d|3[0-5]\d|36[0-6])(?![\d-])"
         ),
         # 20240314: only years of this and the last century, and a real month
-        # and day, so that a serial number rarely passes as a date
+        # and day, so that a serial number rarely passes as a date. A time of
+        # day may follow right away (202403141430, 20240314143015), which
+        # _TIME_AFTER_DATE takes along.
         re.compile(
             r"(?<!\d)(?:19|20)\d{2}"
-            + unless(rf"01(?:{days})(?!\d)")
-            + r"(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])(?!\d)"
+            + unless(rf"01(?:{days})(?:{_HHMM})?(?!\d)")
+            + r"(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])"
+            + rf"(?=(?:{_HHMM})?(?!\d))"
         ),
     )
 
@@ -328,53 +343,91 @@ _MONTH_YEAR = re.compile(
     r"(?![\w/]|\.\d)|"
     r"(?<![\w./])(?:19|20)\d{2}/(?:0?[1-9]|1[0-2])(?![\w/]|\.\d)"
 )
-# The zones a time of day is given in, UTC and the German local ones
-_ZONE_NAME = r"(?:[Zz]|(?i:utc)|LT|CES?T|MES?Z)"
-# "14:30h" takes its h along, and the T of an ISO time "T14:30" its T
+# The zones a time of day is given in: UTC, UT and GMT, with an offset of up
+# to 14 hours or without ("UTC+2", "GMT-05:00"), Zulu, the local time ("LT",
+# "LCL", "LOC", "local" and "local time"), the common zones of Europe (WET,
+# WEST, CET, CEST, the German MEZ and MESZ, BST, IST, EET, EEST, MSK), of
+# North America (EST, EDT, CST, CDT, MST, MDT, PST, PDT, AKST, AKDT, HST,
+# AST, ADT, NST, NDT), of Australia and New Zealand (AEST, AEDT, ACST, ACDT,
+# AWST, NZST, NZDT) and a few more (IDT, SAST, JST, HKT, SGT). The
+# abbreviations count in capitals only: "est" and "ist" are words.
+_ZONE_NAME = (
+    r"(?:[Zz]|(?i:utc|gmt)(?:[+-](?:1[0-4]|0?\d)(?::?[0-5]\d)?)?|UT|(?i:zulu)"
+    r"|LT|(?i:lcl)|LOC|(?i:local)(?:\s+(?i:time))?|WES?T|CES?T|MES?Z|EES?T|BST"
+    r"|IST|MSK|[ACEMNP][SD]T|AK[SD]T|HST|A[CE][SD]T|AWST|NZ[SD]T|IDT|SAST|JST"
+    r"|HKT|SGT)"
+)
+# A UTC offset right after a time, "+02:00", "+0200" and "+02", and with a
+# space before it only with its minutes, "14:30 +02:00" ("12:00 +10 min" is
+# no offset)
+_OFFSET = (
+    r"(?:[+-](?:[01]\d|2[0-3])(?::?[0-5]\d)?"
+    r"|\s+[+-](?:[01]\d|2[0-3]):?[0-5]\d)"
+)
+# "1430h", "1430hrs", "1430 hrs" and the military "0930 hours"
+_HOURS = r"(?:(?i:h(?:rs|ours)?)|\s+(?i:hrs|hours))"
+# A zone after a time, and the "L" of "1430L"
+_ZONE = rf"(?:\s*{_ZONE_NAME}|L)"
+# "14:30h" and "14:30 hours" take their hours along, "14:30:00.5" and
+# "14:30:00,5" their fraction, "3:15 pm EST" and "14:30+02:00" their zone,
+# and the T of an ISO time "T14:30" its T
 _TIME_OF_DAY = re.compile(
-    r"(?:(?<![A-Za-z\d])T)?(?<![\d:])(?:[01]?\d|2[0-3]):[0-5]\d(?::[0-5]\d)?"
-    rf"(?:\s*(?:{_ZONE_NAME}|[AaPp]\.?[Mm]\.?)(?![A-Za-z])|(?i:h)(?![A-Za-z]))?"
+    r"(?:(?<![A-Za-z\d])T)?(?<![\d:])(?:[01]?\d|2[0-3]):[0-5]\d"
+    r"(?::[0-5]\d)?(?:[.,]\d+)?"
+    r"(?:\s*[AaPp]\.?[Mm]\.?(?![A-Za-z]))?"
+    rf"(?:{_OFFSET}|\s*{_ZONE_NAME}(?![A-Za-z])|{_HOURS}(?![A-Za-z]))?"
     r"(?![\d:])"
 )
-# The French and German forms: "14h30" and "14.30h" (two digits for the
-# hour, "1h30" is a duration), anything with "Uhr" ("14.30 Uhr", "1430 Uhr",
-# "14 Uhr"), and the English "3pm", "3 p.m." and "11.30am" ("3 am" is
-# German for "3 at the", and after a hyphen it is a type or a registration,
-# "Mi-8AM"). An underscore may stand before them, as in a file name
-# ("1_DEHYL_14h30").
+# The French and German forms: "14h30" and "14.30" with the hours or the
+# "L" of the local time ("14.30h", "14.30 hrs", "14.30L"; two digits for
+# the hour, "1h30" and "1.30 hrs" are durations), either with a zone
+# ("14h30Z", "9h30 UTC", "14.30Z", "9.30 CET"), anything with "Uhr" ("14.30
+# Uhr", "1430 Uhr", "14 Uhr"), and the English "3pm", "3 p.m." and "11.30am"
+# ("3 am" is German for "3 at the", and after a hyphen it is a type or a
+# registration, "Mi-8AM"). An underscore may stand before them, as in a
+# file name ("1_DEHYL_14h30").
 _TIME_OF_DAY_WORDS = re.compile(
-    r"(?<![^\W_]|[.:])(?:(?:[01]\d|2[0-3])(?:h[0-5]\d|\.[0-5]\d(?i:h))|"
+    r"(?<![^\W_]|[.:])"
+    rf"(?:(?:[01]?\d|2[0-3])[h.][0-5]\d\s*{_ZONE_NAME}(?![A-Za-z])|"
+    rf"(?:[01]\d|2[0-3])(?:h[0-5]\d|\.[0-5]\d(?:L|{_HOURS})(?![A-Za-z]))|"
     r"(?:[01]?\d|2[0-3])(?:[.:]?[0-5]\d)?\s*Uhr|"
     r"(?<!-)(?:1[0-2]|0?[1-9])(?:\.[0-5]\d)?(?:\s?(?i:p\.?m\.?|a\.m\.)|(?i:am)))"
     r"(?![^\W_])"
 )
-# A calendar week without the year, "KW33" and "KW 33", which the year of
-# the flight completes
-_WEEK_ONLY = re.compile(rf"(?<![A-Za-z\d])(?i:KW)\s?{_WEEK}(?![\w])")
-# A time of day without a colon: "1430Z" (and "1430z"), "1430 UTC", the
-# local "1430L" and "1430 LT", the "1430h" of a Charterware file name and
-# "1430hrs", and the "T1430" an ISO basic timestamp (20260816T1430) leaves
-# once its date is out. Four digits alone are an altitude or a squawk as
-# often, so only these forms. A letter before them makes them a part of a
-# registration ("N1430Z", "N1513H"), and so does a nationality prefix with
-# its hyphen ("RA-1513H", but not "EDDS-1513H"); aircraft types start with a
-# letter as well.
-_HHMM = r"(?:[01]\d|2[0-3])[0-5]\d(?:[0-5]\d)?"
-_ZONE = rf"(?:\s*{_ZONE_NAME}|L)"
-_HOURS = r"(?:(?i:h(?:rs)?)|\s+(?i:hrs))"
+# A calendar week without the year, "KW33", "KW 33" and "Week 33", which the
+# year of the flight completes ("Week 3" of a course goes as well). "W33"
+# alone stays: it is the code of an airport in the US as often.
+_WEEK_ONLY = re.compile(rf"(?<![A-Za-z\d])(?:(?i:KW)\s?|(?i:week)\s*){_WEEK}(?![\w])")
+# A time of day without a colon: "1430Z" (and "1430z"), "1430 UTC", "1430
+# GMT", "1430 EST" and the other zones, the local "1430L", "1430 LT" and
+# "1430 local", the "1430h" of a Charterware file name, "1430hrs" and "0930
+# hours", a UTC offset ahead of UTC ("1430+0200": "1200-1400" is a range),
+# and the "T1430" an ISO basic timestamp (20260816T1430) leaves once its
+# date is out. Four digits alone are an altitude or a squawk as often, so
+# only these forms. A letter before them makes them a part of a registration
+# ("N1430Z", "N1513H"), and so does a nationality prefix with its hyphen
+# ("RA-1513H", but not "EDDS-1513H", nor the second time of a range,
+# "0930Z-1045Z"); aircraft types start with a letter as well. A range goes
+# whole ("1430 LT-1545 LT", "0930Z-1045").
+_BARE_OFFSET = r"\+(?:0\d|1[0-4]):?(?:00|30|45)"
 _COMPACT_TIME = re.compile(
-    r"(?<![A-Za-z\d])(?<!(?<![A-Za-z])[A-Z]-)(?<!(?<![A-Za-z])[A-Z]{2}-)"
-    rf"(?:T{_HHMM}(?:[Zz]|(?i:utc))?|{_HHMM}(?:{_ZONE}|{_HOURS}))"
+    r"(?<![A-Za-z\d])(?<!(?<![A-Za-z\d])[A-Z]-)(?<!(?<![A-Za-z\d])[A-Z]{2}-)"
+    rf"(?:T{_HHMM}(?:[.,]\d+)?(?:[Zz]|(?i:utc)|{_OFFSET})?"
+    rf"|{_HHMM}(?:{_ZONE}|{_HOURS}|{_BARE_OFFSET})"
+    rf"(?:-{_HHMM}(?:{_ZONE}|{_HOURS}|{_BARE_OFFSET})?)?)"
     r"(?![A-Za-z\d])"
 )
 # The time of day right after a date is one in any form: the "T14:30:00Z"
 # of an ISO timestamp, whose T would be left behind otherwise, the "1430" of
-# 20260816-1430 or 2026-08-16_1430 and the "15.13" of "16.08.2026, 15.13",
-# with fractions of a second and a UTC offset
+# 20260816-1430, 2026-08-16_1430 and 202608161430, the "14-30" of
+# 2026-08-16-14-30 and the "15.13" of "16.08.2026, 15.13", with fractions of
+# a second and a UTC offset. Only a date that ends in a digit has a time
+# right after it.
 _TIME_AFTER_DATE = re.compile(
-    rf"(?:[-_]|,?\s+|T)(?:{_HHMM}|"
-    r"(?:[01]?\d|2[0-3])(?P<tsep>[:.])[0-5]\d(?:(?P=tsep)[0-5]\d)?)"
-    rf"(?:\.\d+)?{_HOURS}?(?:{_ZONE}|[+-](?:[01]\d|2[0-3]):?[0-5]\d)?"
+    rf"(?:(?:[-_]|,?\s+|T|(?<=\d))(?:{_HHMM}|"
+    r"(?:[01]?\d|2[0-3])(?P<tsep>[:.])[0-5]\d(?:(?P=tsep)[0-5]\d)?)|"
+    r"(?P<dsep>[-_])(?:[01]\d|2[0-3])(?P=dsep)[0-5]\d(?:(?P=dsep)[0-5]\d)?)"
+    rf"(?:[.,]\d+)?{_HOURS}?(?:{_ZONE}|{_OFFSET})?"
     r"(?![A-Za-z\d:])"
 )
 # A weekday gives the day of a flight away along with its year and the
@@ -660,7 +713,8 @@ def strip_dates(text: str | None) -> str | None:
     Every date shape of ``find_date_tokens`` is taken out, and so are a day
     and month without a year ("16 Aug", "16/08", "16-08", "26.08"), six
     digits that are a date ("260816"), a time of day ("14:30", "1430Z",
-    "1430L", "1430h", "14h30", "14.30 Uhr") and a weekday ("Sunday",
+    "1430L", "1430h", "14h30", "14.30 Uhr", "1430 GMT", "0930 hours") with
+    its zone, fraction and offset, and a weekday ("Sunday",
     "Sonntag", and "Sat" or "Sa." next to a date). The separators the date
     stood between go with it ("EDDS to EDDP - 16 Aug 2026" is "EDDS to
     EDDP"). A name without a single letter left says nothing and is None.

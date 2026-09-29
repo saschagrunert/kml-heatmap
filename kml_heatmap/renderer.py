@@ -25,6 +25,7 @@ from .data_exporter import (
     SiteOutput,
     export_all_data,
     is_exportable_path,
+    select_exported_paths,
 )
 from .exceptions import KMLHeatmapError, KMLParseError
 from .export_writers import exported_airport_names
@@ -461,8 +462,9 @@ def _map_extent(
     """The extent of the exported paths, which the map is fitted to.
 
     Only exported paths count: an excluded path would widen the map and give
-    away where it was. ``exportable`` is ``is_exportable_path`` of every
-    path, when the caller has it. Raises when there is nothing to export.
+    away where it was. ``exportable`` tells for every path whether it is
+    exported (``is_exportable_path`` when the caller passes nothing). Raises
+    when there is nothing to export.
     """
     if exportable is None:
         exportable = [is_exportable_path(path) for path in all_path_groups]
@@ -498,21 +500,23 @@ def _export_site(
     )
     # Once per path, for every stage that only looks at the exported ones
     exportable = [is_exportable_path(path) for path in all_path_groups]
-    extent = _map_extent(all_path_groups, exportable)
+    # The copies and second recordings of a flight are dropped first: the
+    # extent and the airports are those of the paths the site publishes
+    selection = select_exported_paths(all_path_groups, all_path_metadata, exportable)
+    exported_indices = selection.exported()
+    kept = set(exported_indices)
+    extent = _map_extent(
+        all_path_groups, [index in kept for index in range(len(all_path_groups))]
+    )
 
     # Only exported paths contribute airports: a path that gets no id and no
-    # segments (a single point, a recording that never moved) would still
-    # publish its location and name through the airport list
-    exported = [
-        (path, metadata)
-        for path, metadata, is_exported in zip(
-            all_path_groups, all_path_metadata, exportable, strict=True
-        )
-        if is_exported
-    ]
-    logger.info("\nProcessing %d start points...", len(exported))
+    # segments (a single point, a recording that never moved, a dropped
+    # copy) would still publish its location and name through the airport
+    # list
+    logger.info("\nProcessing %d start points...", len(exported_indices))
     unique_airports = deduplicate_airports(
-        [metadata for _, metadata in exported], [path for path, _ in exported]
+        [all_path_metadata[index] for index in exported_indices],
+        [all_path_groups[index] for index in exported_indices],
     )
     logger.info("  Found %d unique airports", len(unique_airports))
 
@@ -532,6 +536,7 @@ def _export_site(
             aircraft_data=aircraft_data,
             exportable=exportable,
             terrain=terrain,
+            selection=selection,
         )
         # The page opens on the latest year, see resolveYearSelection
         render_html(

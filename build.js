@@ -431,8 +431,15 @@ function analyzeBundleComposition(metafile, fileName) {
 // after, in a local build. By distance taken out again, the heat legend
 // made one row and the base map's labels given a dark halo over the heat:
 // 155.51 KB raw and 53.47 KB gzipped before, 155.55 KB raw and 53.44 KB
-// gzipped after, in a local build.
-const BUDGET_APP = { raw: 158 * 1024, gzip: 54.5 * 1024 };
+// gzipped after, in a local build. Raised from 158 KB and 54.5 KB for the
+// fixes of the analysis of 2026-09-29 (the checks of a link's band of
+// heights and line of the cross-section, the latter in the link, the
+// mouse's double click on a marker, the phone's statistics on Escape, the
+// framing of a small flight picked from a list): 156.36 KB raw and 53.79
+// KB gzipped before, 158.01 KB raw and 54.34 KB gzipped after, in a local
+// build, 53.96 KB and 54.53 KB gzipped with the zlib of Node.js 26 that CI
+// runs.
+const BUDGET_APP = { raw: 160 * 1024, gzip: 55 * 1024 };
 // The feature bundle is fetched only when replay is opened, the relief, the
 // heat cloud and the ribbons of a selection of the 3D view are first drawn,
 // the Satellite switch is first on, a single flight is first
@@ -512,8 +519,13 @@ const BUDGET_APP = { raw: 158 * 1024, gzip: 54.5 * 1024 };
 // the replay of all flights, its thousand times and the heat it builds up
 // with the cloud: 137.52 KB raw and 50.31 KB gzipped before, 138.74 KB
 // and 50.62 KB with them as written, 136.82 KB and 50.3 KB tightened, in a
-// local build.
-const BUDGET_FEATURES = { raw: 138 * 1024, gzip: 50.75 * 1024 };
+// local build. Raised from 138 KB and 50.75 KB for the fixes of the
+// analysis of 2026-09-29 and the fit of the replay of all flights to the
+// flights on the tilted map (fitTilted in calculations/replayAll.ts):
+// 137.14 KB raw and 50.37 KB gzipped before, 138.52 KB raw and 50.98 KB
+// gzipped after, in a local build, 50.62 KB and 51.21 KB gzipped with the
+// zlib of Node.js 26 that CI runs.
+const BUDGET_FEATURES = { raw: 139 * 1024, gzip: 51.25 * 1024 };
 
 // The Wrapped bundle is fetched only when the Wrapped dialog or the
 // statistics panel is first opened, and not with replay's code or replay
@@ -532,7 +544,8 @@ const BUDGET_FEATURES = { raw: 138 * 1024, gzip: 50.75 * 1024 };
 // gzipped after, in a local build. Raised from 35 KB and 12 KB for Wrapped's
 // intro, the flight over the heat cloud before the cards with every
 // flight of the year playing underneath (ui/wrappedIntro.ts): 37.07 KB raw
-// and 12.42 KB gzipped after, in a local build.
+// and 12.42 KB gzipped after, in a local build. Since grown to 39.98 KB raw
+// (40,941 B, 19 B under the budget) and 13.6 KB gzipped, in a local build.
 const BUDGET_WRAPPED = { raw: 40 * 1024, gzip: 14 * 1024 };
 
 // The year worker's bundle is fetched by every visit, but next to the first

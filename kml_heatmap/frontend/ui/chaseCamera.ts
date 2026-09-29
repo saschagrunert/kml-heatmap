@@ -19,6 +19,7 @@ import {
   turnOf,
 } from "../utils/geometry";
 import { mapSize, REPLAY_CAMERA_MOVE } from "../utils/mapHelpers";
+import { lngLatOfMercator } from "../calculations/heatCloud";
 import {
   heightAtZoomFt,
   liftMetres,
@@ -127,13 +128,6 @@ function mercator(lng: number, lat: number): [x: number, y: number] {
   return [
     (lng + 180) / 360,
     (1 - Math.log(Math.tan(Math.PI / 4 + (lat * RAD) / 2)) / Math.PI) / 2,
-  ];
-}
-
-function lngLatOf(x: number, y: number): [lng: number, lat: number] {
-  return [
-    x * 360 - 180,
-    (360 / Math.PI) * Math.atan(Math.exp((1 - 2 * y) * Math.PI)) - 90,
   ];
 }
 
@@ -433,7 +427,10 @@ export class ChaseCamera {
     this.follow(this.x, -this.x.value, dt, CHASE_TIME_S, snap);
     this.follow(this.y, -this.y.value, dt, CHASE_TIME_S, snap);
     this.follow(this.z, -this.z.value, dt, CHASE_TIME_S, snap);
-    const [lng, lookLat] = lngLatOf(cx + this.x.value, cy + this.y.value);
+    const [lng, lookLat] = lngLatOfMercator(
+      cx + this.x.value,
+      cy + this.y.value,
+    );
     const elevation = altitude + this.z.value;
 
     // Tilted no further than keeps the camera above the relief behind.
@@ -445,7 +442,7 @@ export class ChaseCamera {
     const ground: [number, number][] = [];
     for (const share of [1 / 3, 2 / 3, 1]) {
       const metres = map.queryTerrainElevation(
-        lngLatOf(
+        lngLatOfMercator(
           cx - share * back * Math.sin(b),
           cy + share * back * Math.cos(b),
         ),
@@ -563,11 +560,14 @@ export class ChaseCamera {
     map.jumpTo(
       map.calculateCameraOptionsFromTo(
         new LngLat(
-          ...lngLatOf(cx - back * Math.sin(b), cy + back * Math.cos(b)),
+          ...lngLatOfMercator(cx - back * Math.sin(b), cy + back * Math.cos(b)),
         ),
         elevation + distance * metresPerPx * Math.cos(p),
         new LngLat(
-          ...lngLatOf(cx + ahead * Math.sin(b), cy - ahead * Math.cos(b)),
+          ...lngLatOfMercator(
+            cx + ahead * Math.sin(b),
+            cy - ahead * Math.cos(b),
+          ),
         ),
         0,
       ),

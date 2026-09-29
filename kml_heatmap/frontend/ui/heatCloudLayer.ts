@@ -44,7 +44,8 @@
  * marks along the tracks, pointing the way they were flown, take over from
  * them whenever they do not run (see CLOUD_MARK_SPACING_PX), so the
  * direction still shows under reduced motion, on a map at rest, in an
- * exported image and in the faint cloud of a replay. And the exposure
+ * exported image and in the cloud of a replay, faint or building up behind
+ * the replay of all flights. And the exposure
  * follows the heat: the busiest cells of the cloud glow no
  * brighter than white, however many flights the filters keep (see
  * cloudExposure). A band of heights above ground can leave out the heat
@@ -77,8 +78,9 @@ export const HEAT_CLOUD_LAYER = "heat-cloud";
  * points reach 18 over a country, and a region's routes run together into
  * a cloud, which its height and its shadow set apart. Closer
  * in a glow that wide over every track of a busy field covered its roads
- * and labels, where the flat heatmap has handed over to thin heat lines
- * (HEAT_LINES): it narrows to a crisp glow along each track, and dims so
+ * and labels, where the flat heatmap narrows its reach and then hands over
+ * to thin heat lines (HEAT_LINES): it narrows to a crisp glow along each
+ * track, and dims so
  * that only the tracks flown over and over glow white, the circuit of the
  * home field among them.
  */
@@ -203,8 +205,9 @@ const CLOUD_EXPOSURE_RANGE = [0.25, 1] as const;
  * to white. The brightest is kept against what the pixel already has, the
  * map, so over ground brighter than the shadow (roads, satellite imagery)
  * none shows: keeping it against the other shadows alone needs a texture
- * of its own (see DEVELOPMENT.md). A stretch casts none on the ground it is on (the taxiing, the
- * run for a take-off), and a full one from the second of these heights
+ * of its own (see doc/development/heat.md). A stretch casts none on the
+ * ground it is on (the taxiing, the run for a take-off), and a full one
+ * from the second of these heights
  * above it, in feet. It is a Gaussian of the distance to the stretch,
  * which the brightest of them keeps as whole as the joins of the glow do,
  * cut at this many blurs, at half the cost of the glow. None is drawn
@@ -863,7 +866,10 @@ export class HeatCloudLayer implements CustomLayerInterface {
     );
   }
 
-  /** Draw the points `cloud` from the next frame on, or none */
+  /**
+   * Draw the points `cloud` from the next frame on, or none: the frame
+   * lets go of the ones it drew before (see LayerGl.empty)
+   */
   setPoints(cloud: CloudPoints | null): void {
     this.cloud = cloud;
     this.usedAt = performance.now();
@@ -903,7 +909,9 @@ export class HeatCloudLayer implements CustomLayerInterface {
     const cloud = this.cloud;
     this.drawn = 0;
     this.resting = false;
-    if (!map || !cloud || cloud.count < 2) return;
+    // Without points, the ones of before go with the last of them (see
+    // setPoints)
+    if (!map || !cloud || cloud.count < 2) return this.objects.empty(gl);
     const style = this.style();
     if (!style || style.opacity <= 0) return;
     const ready = this.objects.begin(gl, options, cloud);
@@ -1007,8 +1015,8 @@ export class HeatCloudLayer implements CustomLayerInterface {
     // glow on a pixel moves it that way, so however many there are it gets
     // no brighter than that, where a quarter of their heat, which it scaled
     // before, still filled the home field to white. The map under the
-    // brightest of it goes the same way (see DEVELOPMENT.md). The shadow's
-    // MAX takes no factors, and it is not drawn dimmed.
+    // brightest of it goes the same way (see doc/development/heat.md). The
+    // shadow's MAX takes no factors, and it is not drawn dimmed.
     const opacity = style.opacity;
     gl.blendColor(opacity, opacity, opacity, opacity);
     gl.blendFuncSeparate(

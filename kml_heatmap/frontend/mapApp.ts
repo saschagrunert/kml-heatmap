@@ -153,9 +153,9 @@ export interface MapConfig {
 const VIEW_KEYS = [...TOGGLE_KEYS, "heightBand"] as const;
 
 /**
- * Padding around the flights when the view is fitted to all of them. The
- * heat's glow reaches about 22 pixels past the outermost fix, and at 30 the
- * edge of the map cut it off at the farthest airport.
+ * Padding around the flights when the view is fitted to all of them. The heat's
+ * glow reaches about 18 pixels (HEATMAP_RADIUS_PX) past the outermost fix, and
+ * at 30 the edge of the map cut it off at the farthest airport.
  */
 const START_VIEW_PADDING = 48;
 
@@ -471,6 +471,10 @@ export class MapApp {
     this.isInitializing = false;
     this.syncResetButton();
 
+    // The line of a cross-section the link or the last visit had, which
+    // the tool opens on (ui/crossSection.ts)
+    if (this.crossSectionLine) this.toggleCrossSection();
+
     // Restore wrapped panel state if it was open
     const state = this.savedState;
     if (state && state.wrappedVisible) {
@@ -479,13 +483,12 @@ export class MapApp {
         void this.loadWrapped()
           .then((manager) => {
             // The bundle may arrive after the app was torn down
-            if (this.destroyed) return;
-            manager?.showWrapped();
-            // Opened or not, the restore is done: saves stop writing the
-            // flag it had (see StateManager.panelVisible)
-            delete state.wrappedVisible;
+            if (!this.destroyed) manager?.showWrapped();
           })
-          .catch(logError);
+          .catch(logError)
+          // Opened or not, even failed, the restore is done: saves stop
+          // writing the flag it had (see StateManager.panelVisible)
+          .finally(() => delete state.wrappedVisible);
       }, WRAPPED_RESTORE_DELAY_MS);
     }
 
@@ -1146,9 +1149,15 @@ export class MapApp {
       this.layerManager.onPathClick(hit, e.lngLat);
       return;
     }
-    // A click on the empty map: the values a tap left go with the selection
+    // A click on the empty map: the values a tap left go with the selection.
+    // Only where the flights can be clicked, in a colour layer: over the
+    // heat alone a click on a flight is one on the empty map, and the
+    // selection is cleared with the chip's Clear instead.
     this.layerManager.closeSegmentPopup();
-    if (this.selectedPathIds.size > 0) {
+    if (
+      this.selectedPathIds.size > 0 &&
+      (this.altitudeVisible || this.airspeedVisible)
+    ) {
       this.pathSelection.clearSelection();
     }
   }

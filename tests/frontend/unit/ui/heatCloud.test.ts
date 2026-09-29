@@ -55,6 +55,7 @@ import {
 } from "../../../../kml_heatmap/frontend/calculations/groundProfile";
 import { setBaseStyle } from "../../../../kml_heatmap/frontend/mapLayers";
 import { REPLAY_CAMERA_MOVE } from "../../../../kml_heatmap/frontend/utils/mapHelpers";
+import { CULL_FROM_ZOOM } from "../../../../kml_heatmap/frontend/utils/viewBox";
 import {
   FEET_TO_METERS,
   MAP_LAYERS,
@@ -946,6 +947,17 @@ describe("the heat cloud", () => {
       expect(drawn()).toBeNull();
     });
 
+    it("is of the whole map close in as well, where the intro's camera flies without coming to rest", async () => {
+      map().setZoom(11.3);
+      await follow();
+      app.forcedHeatCloud = true;
+
+      // Cut around a view it would leave at once, the glow ended in a
+      // straight edge across the map
+      expect(cuts.last[1]).toBeGreaterThanOrEqual(CULL_FROM_ZOOM);
+      expect(cuts.last[2]).toBeNull();
+    });
+
     it("hands Wrapped's map over to the heatmap as its intro ends, fading out over it rather than leaving the map without heat", async () => {
       vi.useFakeTimers();
       const now = vi.spyOn(performance, "now").mockReturnValue(1000);
@@ -1181,7 +1193,7 @@ describe("the heat cloud", () => {
       expect(cuts.count).toBe(2);
     });
 
-    it("is cut for the zoom's own level closer in than the last relief level, around the view the map came to rest at", async () => {
+    it("is cut for the zoom's own level closer in than the last relief level, of all the map, as the map comes to rest", async () => {
       await follow();
       app.forcedHeatCloud = true;
       // The overview, where the map comes to rest untagged
@@ -1189,7 +1201,8 @@ describe("the heat cloud", () => {
       map().emit("zoomend");
       const [level, detail, box] = cuts.last;
       expect([level, detail]).toEqual([RELIEF_MAX_LEVEL, 13]);
-      expect(box).not.toBeNull();
+      // Not around the view, which the intro's camera leaves at once
+      expect(box).toBeNull();
       expect(latitudesOf(drawn())).toEqual([47, 48, 49]);
       expect(style()!.liftM).toBeCloseTo(liftM(RELIEF_MAX_LEVEL), 9);
 

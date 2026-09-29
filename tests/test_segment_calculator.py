@@ -18,6 +18,7 @@ from kml_heatmap.segment_calculator import (
     SpeedWindow,
     calculate_fallback_groundspeed,
     extract_segment_speeds,
+    outlasts_the_window,
 )
 from kml_heatmap.types import TrackPoint
 from tests.conftest import parse_kml_coordinates
@@ -187,6 +188,32 @@ class TestSpeedWindow:
         window = SpeedWindow([SegmentSpeed(0, 1000.0, None, 0.0, 0.0, 60.0, True)])
         assert window.groundspeed(1000.0) == 0.0
 
+    def test_a_long_gap_leaves_the_minute_before_it_alone(self):
+        """A fix every second at 100 kt, then 30 minutes without one: the
+        gap entered every window it started in with all of its time."""
+        km_per_second = 100 * 1.852 / SECONDS_PER_HOUR
+        segments = [
+            SegmentSpeed(i, 1000.0 + i, None, 100.0, km_per_second, 1.0, True)
+            for i in range(120)
+        ]
+        gap = SegmentSpeed(120, 1120.0, None, 0.0, 0.0, 1800.0, True)
+        after = SegmentSpeed(121, 2920.0, None, 100.0, km_per_second, 1.0, True)
+        window = SpeedWindow([*segments, gap, after])
+
+        assert outlasts_the_window(gap)
+        assert not outlasts_the_window(segments[0])
+        assert len(window) == 121
+        for timestamp in (1060.0, 1090.0, 1119.0, 1120.0):
+            assert window.groundspeed(timestamp) == pytest.approx(100.0)
+        assert window.groundspeed(2920.0) == pytest.approx(100.0)
+
+    def test_a_segment_as_long_as_the_window_stays_in_it(self):
+        segment = SegmentSpeed(
+            0, 1000.0, None, 1.0, 1.0, float(SPEED_WINDOW_SECONDS), True
+        )
+        assert not outlasts_the_window(segment)
+        assert len(SpeedWindow([segment])) == 1
+
 
 def _windowed_groundspeed_before_prefix_sums(current, timed):
     """The window as it was computed before: a fresh sum over every window.
@@ -224,7 +251,11 @@ def test_running_totals_match_summing_every_window(name):
         segments = extract_segment_speeds(path, None)
         window = SpeedWindow(segments)
         timed = sorted(
-            (s for s in segments if s.valid and s.timestamp is not None),
+            (
+                s
+                for s in segments
+                if s.valid and s.timestamp is not None and not outlasts_the_window(s)
+            ),
             key=lambda s: s.timestamp or 0.0,
         )
         for seg in segments:

@@ -26,8 +26,11 @@ import {
 } from "../../../../kml_heatmap/frontend/utils/constants";
 import { HEAT_CLOUD_LAYER } from "../../../../kml_heatmap/frontend/ui/heatCloudLayer";
 import { REPLAY_PANEL_HEIGHT_VAR } from "../../../../kml_heatmap/frontend/ui/replayManager";
+import { restingPitch } from "../../../../kml_heatmap/frontend/ui/replayState";
 import { heldGroundedFlights } from "../../../../kml_heatmap/frontend/calculations/groundProfile";
 import { REPLAY_CAMERA_MOVE } from "../../../../kml_heatmap/frontend/utils/mapHelpers";
+import { fitTilted } from "../../../../kml_heatmap/frontend/calculations/replayAll";
+import { MAP_MAX_ZOOM } from "../../../../kml_heatmap/frontend/utils/constants";
 import {
   LIFT_MAX_ZOOM,
   liftExaggeration,
@@ -42,8 +45,12 @@ import {
 } from "../../testHelpers";
 
 const toast = vi.hoisted(() => ({ showToast: vi.fn() }));
-/** Every cut of the curves, counted, and the relief level of the last */
-const cuts = vi.hoisted(() => ({ count: 0, level: null as number | null }));
+/** Every cut of the curves, counted, and the zoom and relief levels of the last */
+const cuts = vi.hoisted(() => ({
+  count: 0,
+  detail: null as number | null,
+  level: null as number | null,
+}));
 vi.mock(
   "../../../../kml_heatmap/frontend/calculations/replayAll",
   async (original) => {
@@ -55,6 +62,7 @@ vi.mock(
       ...module,
       replayAllPoints: (...args: Parameters<typeof module.replayAllPoints>) => {
         cuts.count++;
+        cuts.detail = args[4];
         cuts.level = args[5];
         return module.replayAllPoints(...args);
       },
@@ -208,7 +216,7 @@ describe("the replay of all flights", () => {
       void player.start();
 
       expect(player.flights).toBe(1);
-      expect(player.bounds![1]).toBe(47);
+      expect(player.run!.bounds![1]).toBe(47);
     });
 
     it("plays the isolated selection alone", () => {
@@ -221,7 +229,7 @@ describe("the replay of all flights", () => {
       void player.start();
 
       expect(player.flights).toBe(1);
-      expect(player.bounds![1]).toBe(48);
+      expect(player.run!.bounds![1]).toBe(48);
     });
 
     it("plays the flights it is given, whatever the filters", () => {
@@ -428,6 +436,35 @@ describe("the replay of all flights", () => {
       expect(drawn.mock.calls[2]![0]).toBe(drawn.mock.calls[0]![0]);
     });
 
+    it("cuts the curves as for a map further out, once a zoom under way ends", () => {
+      map().setZoom(8.6);
+      void player.start();
+      expect(cuts.detail).toBe(8);
+
+      // A tilt shows them smaller: a whole level of it
+      player.thinOut(0.96);
+      expect(cuts.detail).toBe(7);
+      map().setZoom(10.2);
+      map().emit("zoomend");
+      expect(cuts.detail).toBe(9);
+
+      // Not while a zoom goes on, where it ends
+      map().isZooming.mockReturnValue(true);
+      player.thinOut(2.2);
+      expect(cuts.detail).toBe(9);
+      map().isZooming.mockReturnValue(false);
+      map().emit("zoomend");
+      expect(cuts.detail).toBe(8);
+
+      // None closer in, and none left for the next run
+      player.thinOut(-1);
+      expect(cuts.detail).toBe(10);
+      player.thinOut(3);
+      player.stop();
+      void player.start();
+      expect(cuts.detail).toBe(10);
+    });
+
     it("cuts the curves ahead for the zoom a camera on its way sets out for, and draws them as it comes near", () => {
       // A camera setting off from far out for zoom 9
       map().setZoom(1);
@@ -631,24 +668,81 @@ describe("the replay of all flights", () => {
       expect(onMap()).toBe(true);
     });
 
-    it("fits the camera to the flights, north up", () => {
+    /** The camera the replay moved the map to as it opened */
+    const fitted = () =>
+      map().easeTo.mock.calls.find(([options]) => "zoom" in options)?.[0];
+
+    it("fits the camera to the flights, north up, from the fit of their bounds", () => {
       map().jumpTo({ bearing: 40 });
 
       controls.show();
 
-      expect(map().fitBounds).toHaveBeenCalledWith(
+      expect(map().cameraForBounds).toHaveBeenCalledWith(
         [
           [11, 47],
           [expect.closeTo(11.04, 6), 49],
         ],
         expect.objectContaining({ bearing: 0 }),
       );
+      // A map of no size has no room to fit them into any closer
+      expect(fitted()).toMatchObject({
+        center: [expect.closeTo(11.02, 6), 48],
+        bearing: 0,
+      });
+    });
+
+    it("fits the flights themselves on the tilted map, clear of the panel under them", () => {
+      const width = 1200;
+      const height = 800;
+      vi.spyOn(map().getContainer(), "getBoundingClientRect").mockReturnValue(
+        DOMRect.fromRect({ width, height }),
+      );
+      vi.spyOn(
+        HTMLElement.prototype,
+        "getBoundingClientRect",
+      ).mockImplementation(function (this: HTMLElement) {
+        return this.id === "replay-all-controls"
+          ? DOMRect.fromRect({ y: 700, width: 600, height: 60 })
+          : DOMRect.fromRect();
+      });
+      // Where the fit of the bounds of the flights puts it (the fake's
+      // cameraForBounds keeps the zoom)
+      map().jumpTo({ zoom: 7 });
+
+      controls.show();
+
+      // Measured from the fit of the bounds, with a margin at every edge
+      // and above the panel (see calculations/replayAll.test.ts for how
+      // they fill it)
+      const run = controls.player.run!;
+      const expected = fitTilted(
+        run,
+        { center: [11.02, 48], zoom: 7 },
+        {
+          width,
+          height,
+          padding: { top: 24, right: 24, bottom: 800 - 700 + 24, left: 24 },
+          pitch: 50,
+          fov: map().getVerticalFieldOfView(),
+        },
+        MAP_MAX_ZOOM,
+      );
+      const camera = fitted() as typeof expected;
+      expect(camera.zoom).toBeCloseTo(expected.zoom, 6);
+      expect(camera.zoom).not.toBeCloseTo(7, 1);
+      expect(camera.center[0]).toBeCloseTo(expected.center[0], 6);
+      expect(camera.center[1]).toBeCloseTo(expected.center[1], 6);
+      // The curves are cut as for the fit of the flat map, which the tilt
+      // shows the flights as large as: fewer points to draw every frame
+      const levels = Math.round(camera.zoom - 7);
+      expect(levels).toBeGreaterThan(0);
+      expect(cuts.detail).toBe(Math.floor(camera.zoom) - levels);
     });
 
     it("tilts a flat map as the 3D view does, so the heights show, and lays it flat again as it closes", () => {
       controls.show();
 
-      expect(map().fitBounds.mock.lastCall?.[1]).toMatchObject({ pitch: 50 });
+      expect(fitted()).toMatchObject({ pitch: 50 });
       expect(map().getPitch()).toBe(50);
 
       controls.close();
@@ -661,9 +755,10 @@ describe("the replay of all flights", () => {
       map().jumpTo({ pitch: 30 });
 
       controls.show();
+      expect(fitted()).toMatchObject({ pitch: 30 });
+      map().easeTo.mockClear();
       controls.close();
 
-      expect(map().fitBounds.mock.lastCall?.[1]).toMatchObject({ pitch: 30 });
       expect(map().easeTo).not.toHaveBeenCalled();
       expect(map().getPitch()).toBe(30);
     });
@@ -696,6 +791,7 @@ describe("the replay of all flights", () => {
       controls.show();
       app.threeDVisible = true;
       app.threeDVisible = false;
+      map().easeTo.mockClear();
       controls.close();
       expect(map().easeTo).not.toHaveBeenCalled();
       expect(map().getPitch()).toBe(50);
@@ -733,9 +829,27 @@ describe("the replay of all flights", () => {
       expect(app.replayState.pitchBefore).toBe(5);
       controls.close();
       expect(app.replayState.pitchBefore).toBeNull();
+      // Laid back
+      map().emit("moveend");
 
       map().jumpTo({ pitch: 30 });
       controls.show();
+      expect(app.replayState.pitchBefore).toBeNull();
+    });
+
+    it("forgets the tilt it laid the map back to once it is there", () => {
+      controls.show();
+      controls.close();
+      expect(restingPitch(asMapApp(app))).toBe(0);
+      map().emit("moveend");
+      // Tilted by hand since, and opened again while the map still moves
+      map().jumpTo({ pitch: 30 });
+      map().isMoving.mockReturnValue(true);
+
+      map().easeTo.mockClear();
+      controls.show();
+
+      expect(fitted()).toMatchObject({ pitch: 30 });
       expect(app.replayState.pitchBefore).toBeNull();
     });
 

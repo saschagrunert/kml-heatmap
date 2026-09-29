@@ -3,19 +3,18 @@
  * worker (services/yearWorker.ts).
  *
  * The heatmap draws a point per fix, 135,000 of them for all years of the
- * sample flights (116,000 with those of one pixel merged, see
- * mergedPoints). Handed to MapLibre as objects, a feature each, they cost
- * the main thread about 120 ms on a desktop (in Chrome: 70 ms for
- * MapLibre's own copy of them and 45 ms for the structured clone to its
- * worker) and three to four times that with the CPU slowed down as for a
- * phone, on every change of the year, the aircraft or the weighing, on top
- * of the objects themselves and the exposure (see DEVELOPMENT.md). A source
- * that is given a URL instead is loaded, parsed and cut into tiles by
- * MapLibre's worker alone (two fixes of scripts/vendor.js see to that:
- * without them MapLibre fetches a Blob URL on the main thread, and sends
- * back what it parsed). So the page packs the heat into one column of
- * numbers (heatColumns), the worker works out how it is drawn and writes
- * the text into a Blob, and the page gives the source a URL of that Blob.
+ * sample flights (116,000 with those of one pixel merged, see mergedPoints).
+ * Handed to MapLibre as objects, a feature each, they cost the main thread about 120 ms on a desktop (in Chrome: 70 ms for MapLibre's own
+ * copy of them and 45 ms for the structured clone to its worker) and three to
+ * four times that with the CPU slowed down as for a phone, on every change of
+ * the year, the aircraft or the weighing, on top of the objects themselves and
+ * the exposure (see doc/development/heat.md). A source that is given a URL
+ * instead is loaded, parsed and cut into tiles by MapLibre's worker alone (two
+ * fixes of scripts/vendor.js see to that: without them MapLibre fetches a Blob
+ * URL on the main thread, and sends back what it parsed). So the page packs the
+ * heat into one column of numbers (heatColumns), the worker works out how it is
+ * drawn and writes the text into a Blob, and the page gives the source a URL of
+ * that Blob.
  *
  * The text is the one JSON.stringify writes for the same features, so the
  * map is given exactly what it was before. The heat lines the heatmap

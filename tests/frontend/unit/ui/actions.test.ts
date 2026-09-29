@@ -1,10 +1,12 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
   DEFERRED_WHILE_INITIALIZING,
+  STILL_LOADING_MESSAGE,
   bindActions,
   runAction,
   type ActionName,
 } from "../../../../kml_heatmap/frontend/ui/actions";
+import * as toast from "../../../../kml_heatmap/frontend/utils/toast";
 import { createMockApp, asMapApp, type MockApp } from "../../testHelpers";
 
 const loggerMock = vi.hoisted(() => ({ logError: vi.fn(), logDebug: vi.fn() }));
@@ -299,6 +301,20 @@ describe("runAction", () => {
     expect(app.pathSelection.toggleIsolateSelection).not.toHaveBeenCalled();
     expect(app.loadWrapped).not.toHaveBeenCalled();
     expect(app.uiToggles.toggleHeatmap).toHaveBeenCalledTimes(1);
+  });
+
+  it("says the flights are still loading for a control that waits for them, but a filter's", () => {
+    const showToast = vi.spyOn(toast, "showToast");
+    app.isInitializing = true;
+
+    runAction(asMapApp(app), "toggleReplayAll");
+    expect(showToast).toHaveBeenCalledExactlyOnceWith(STILL_LOADING_MESSAGE);
+
+    // Applied once the load is over (applyPendingFilterChanges)
+    runAction(asMapApp(app), "filterByYear");
+    runAction(asMapApp(app), "filterByAircraft");
+    expect(showToast).toHaveBeenCalledOnce();
+    showToast.mockRestore();
   });
 
   it("says so for an action it does not know", () => {

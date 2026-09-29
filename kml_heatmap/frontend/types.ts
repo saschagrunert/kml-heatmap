@@ -373,6 +373,8 @@ export interface AppState extends Partial<ToggleFlags> {
   pitch?: number;
   /** The heat cloud's band of heights (StoreState.heightBand); absent: all */
   heightBand?: string;
+  /** The cross-section's line (StoreState.crossSectionLine); absent: none */
+  crossSectionLine?: string;
 }
 
 /**

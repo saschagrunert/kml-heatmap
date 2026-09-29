@@ -1,0 +1,604 @@
+# Map features
+
+What the page shows and how it is used: the heat and the other layers, the
+controls, the filters, the links that share a view, and what the generator works
+out on its own.
+
+## Heat and layers
+
+The Layers group holds the heatmap first, then what is drawn over or instead of
+it.
+
+### Heatmap
+
+The Heatmap switch shows where the time was spent: every logged position counts
+for the seconds until the next one, so a flight logged every 2 seconds weighs as
+much as one logged every 5. Its brightness follows what it draws: the busiest
+routes and circuits of a year, of one aircraft or of an isolated flight come out
+alike, and a logbook of many years does not wash out to white. The busiest
+places are rolled off before they are coloured, so a home field flown hundreds
+of times keeps its circuit, final and runway apart in the lightest colours
+rather than burning out into one white shape, while a route flown once to a few
+times gets the most steps of blue. Over a region the heat narrows to the tracks
+rather than a haze, and while it is drawn the base map's place and region names
+step back a little on a dark outline, so they stay legible without breaking it
+up. The wide grey band along country borders is drawn faintly, so it does not
+read as a flight. It stays on over a few towns around a field, its tracks a
+little wider there so they stay lines, and zoomed in from `z` 12 to 13.75 (the
+`z` of a [shared link](#shareable-urls)) it hands over to heat lines: the tracks
+themselves, coloured and widened by the time spent on each 40 m of them, so the
+taxiways and circuits of a busy airport stay apart.
+
+Its legend is one short row, "Time spent", less on the left and more on the
+right; pointing at it says how many passes of a flight the two ends stand for
+(about 1 and 64, as the brightness follows the flights drawn), and so does a
+screen reader.
+
+In the 3D view the heat is a cloud in the air instead: every flight glows where
+it flew, at its height as the 3D view draws it, along the same curve as its
+ribbon, and brighter the more time was spent there; from `z` 10.5 in the glow
+narrows to a crisp line along each track, so the roads and place names stay
+readable, and close in it follows the taxiways and the corners of a circuit as
+the heat lines do. A route flown once is a faint blue, the circuits and the
+climbs out of a busy field glow white, and a ridge in front of a flight hides
+its glow. Where so many flights overlap that more than a hundredth of the cloud
+would glow past white, the whole cloud is drawn darker; it is never drawn
+brighter, and its busiest places are rolled off as the heatmap's are. It fades
+with the distance from the camera, into a haze towards the horizon of a tilted
+map, and the tracks nearest the camera stay narrow.
+
+A faint copy of the glow on the ground under the flights shows how high they
+were, and pulses run along every track the way it was flown, for 8 seconds after
+the map was last used and not at all with reduced motion. Whenever they do not
+run (with reduced motion, on a map at rest, in an exported image and during a
+replay), faint chevrons along the tracks point the way they were flown instead,
+at the same places for every flight along a track, and only where most of the
+time there was flown one way: a runway or a circuit flown both ways, or a route
+flown out and back, shows none. They fade out from `z` 10 to `z` 8.5, where the
+routes of a region run together.
+
+The cloud follows the same switch, filters and Isolate as the heatmap, and steps
+back under the Aviation layer and the lines of a selection as it does, but not
+under the ribbons of a colour layer, which are drawn in front of it; during a
+replay it stays at a quarter of its strength and without its pulses, so the
+chase view flies through the flights of before, and the Heatmap switch shows as
+on. Hovering and clicking still go to the flights, and resting the pointer on
+the cloud tells what it is made of as well (see
+[Heat cloud readout](#heat-cloud-readout) below). Should the browser not run its
+shaders, the flat heatmap stays until the browser gives the map a new WebGL
+context.
+
+### Altitude and Groundspeed
+
+The Altitude switch colours the paths by elevation, on a scale that runs purple
+through magenta to orange, and the Groundspeed switch colours them by
+groundspeed, on a scale that runs blue through green to yellow. The two scales
+share no hue, so a map or an exported image says which of them is drawn without
+its legend; both brighten from end to end, so they survive being printed in
+grey. Both colour layers draw 32 steps of their scale, one line per run of a
+path in the same step, and draw every recorded point, joined by a smooth curve
+through the fixes. The colours are spread by rank rather than evenly over the
+values: every stretch of a scale colours as much of the flying as any other, so
+the climb-out, the cruise and the taxiing each get colours of their own, and the
+middle of the legend names the median. The altitude scale runs from the lowest
+to the highest altitude drawn; the speed scale spans the middle nine tenths of
+the speeds drawn (from the 5th to the 95th percentile), and the slower and
+faster ones take the colours of its ends, which the legend marks with ≤ and ≥.
+Each label of the legend gives the value in both units, feet or knots over
+metres or km/h, and the two legends are as wide, so the box keeps its width as
+one takes the other's place. A selection and a replay are coloured on their own
+flights. Hovering a path shows the exact value.
+
+### Airports
+
+The Airports switch shows the airport markers with their ICAO codes above them.
+The codes are placed together with the place names of the base map, so they
+never cover one another, nor the dot of another airport; where a code above its
+dot has no room, the home base and then the busier airport keep theirs, and the
+others come back as you zoom in. They are left out below `z` 5, and on a map
+tilted past about 55 degrees the airports more than twice as far from the camera
+as the middle of the map are hidden, markers and codes, where they would crowd
+into a strip along the horizon. Below `z` 3 the markers are hidden too, a clump
+of dots on the heat.
+
+### Aviation
+
+The Aviation switch overlays airspaces, airports, navaids, and reporting points
+from open flightmaps, where it has coverage. It is drawn from `z` 7 to 14; its
+charts end at `z` 12, and further in than two levels of upscaling they would
+only blur the base map. The start view is further out than `z` 7, so its label
+says the charts show once zoomed in.
+
+## Controls
+
+### Statistics
+
+View statistics (distance, altitude, landings, airports, flight time). Flight
+time runs from the first to the last recorded point that moved at the exported
+precision (about 1 m), so standing perfectly still before and after is not
+counted, while GPS noise on the ground still is.
+
+The panel's Flights tab lists every flight of the year and aircraft filter with
+its route, aircraft, year, flight time, distance, highest altitude and full-stop
+landings (a year, never a date); the landings cell names the touch-and-goes as
+well when the pointer rests on it, and flights without timestamps have no
+landings. The rows start in the order of the flight files; a column header sorts
+by it, up, down and back. The search keeps the flights whose airports (code or
+name), registration or type match every word typed. A click on a row selects
+that flight alone, and Ctrl or Shift adds it to the selection or takes it out;
+during a replay the selection stays as it is. A flight picked alone, here or
+from an airport's popup, is brought into view clear of the panels and of its
+altitude profile, unless all of it is in view already, the map was moved
+meanwhile, or the hotspot tour or Wrapped has it; a flight in view that spans
+less than a quarter of the map between the panels either way, such as a circuit
+round the home field, is framed as well, no closer than a replay follows a
+flight. A click on a flight on the map leaves the map where it is. The arrow
+keys move between the two tabs. On a phone the same tabs are inside the
+statistics sheet, which Escape closes as well as its tab (not an Escape for a
+popup, a marker, the readout of the heat cloud or the search of the flights); a
+flight picked alone there, or from an airport's popup, closes the sheet and the
+popup, which stood over the map it is shown on.
+
+### Export image
+
+Save the current map view as a JPG image.
+
+### Copy link
+
+Copy the current URL to the clipboard. On a phone, where there is a native share
+dialog, the More sheet's row says **Share link** and opens that instead.
+
+### Wrapped
+
+View the year-in-review summary; Escape closes it. Opened from its button, it
+starts with the map filling the dialog and the title of the year over the globe,
+and, in an intro of about ten seconds, a flight down towards your home base, two
+zoom levels closer than the overview, so the routes of the year show around it,
+over the heat cloud of the year (every flight the year and aircraft filters
+keep, at full strength, whatever the Heatmap switch, Isolate or a colour layer
+say), while the flights of the summary play underneath at 300x, as in Replay all
+(at their height in the heat) but drawn larger; then the cloud fades into the
+heatmap, back on the map's own projection, and it settles on the overview as the
+cards come in one after another and the map draws back into its panel beside
+them (below 1024 px wide, where the cards are stacked, it fades from over them
+instead); Skip, or a press, wheel or key on the map, goes straight to the
+summary, and the flight does not play while the system asks for reduced motion.
+
+Beside the map the cards scroll in a column of their own, each as tall as its
+content, and **More below** at the foot of the first takes the column to the
+next card while there is more below. Resting the pointer on a destination flies
+the map there, and leaving the list flies it back. For a year it names the new
+airspace, the square kilometres its flights passed over and no flight of an
+earlier year did, once the page holds the earlier years (after the view of all
+years or each earlier year was shown); it does not load them itself.
+
+### Replay
+
+Animate one flight with adjustable speed (1x to 500x, default 50x) and an
+auto-zoom button that follows the airplane; Escape closes it. The whole track is
+drawn dimmed and the flown part paints over it in the colours of the active
+scale. Replay needs exactly one selected flight with timing data; a toast
+explains why it is unavailable otherwise, and with nothing selected the Flights
+tab of the statistics opens to pick one from. A flight is picked on the map only
+where it is drawn, with Altitude or Groundspeed on.
+
+The chase button (the target next to auto-zoom) watches the flight from a chase
+plane: the camera sits behind and above the airplane, tilted to 70 degrees at
+about `z` 15.5, and turns with it, lagging a little into each turn. The airplane
+stands upright, a little below the middle of the map above the replay panel. In
+the 3D view the camera looks at the airplane at its height and tilts down
+steeper rather than fly into a ridge behind it. Switching it on slows a replay
+faster than 10x down to 10x, and switching it off brings back the speed from
+before, unless another one was chosen while it chased. Dragging, zooming or
+turning the map holds the chase until you let go, and the chase keeps the zoom
+(`z` 12 to 17) and tilt (45 to 75 degrees) you left it at. On the globe it zooms
+out no further than `z` 13, where the globe is still drawn flat. Switching it
+off gives back your zoom, turn and tilt over the airplane, and closing the
+replay gives back the whole view from before; the link and the saved session
+keep that view, not the chase camera. It stays off while the system asks for
+reduced motion, and a toast says why.
+
+### Replay all
+
+Play every flight the filters and Isolate keep at once, each from its own first
+fix, at 100x to 1000x (default 200x): each flight is a bright head with a trail
+that fades behind it (over at most 25 minutes of flight), at its height as in
+the 3D view, on the flat map as well. Behind the heads the heat builds up as far
+as they have flown, in the heatmap's colours, and ends as the whole heat of the
+flights; it is the heat cloud's glow at the height of the flights, with its
+shadow on the ground, and none is drawn while the Heatmap switch is off.
+
+The clock reads the time into every flight ("0:42 into every flight"), never a
+date or an hour, and the slider beside it moves along the same clock: drag it
+(the replay holds while you drag and plays on as you let go), click it to jump,
+backwards as well, or use the arrow keys for a minute at a time and Home and End
+for either end. A flight without times takes its length at its groundspeed, and
+one with neither sits out.
+
+The map fits the flights north up, as large as the map allows clear of the
+controls and the panel, and a flat map is tilted as the 3D view tilts it, so the
+heights show, and laid flat again as it ends unless you tilted it yourself or
+turned the 3D view on meanwhile (the link and the saved session keep the tilt
+from before); the orbit button turns it slowly round them until you move the
+map, and stays off while the system asks for reduced motion, and a toast says
+why. The filters, the selection, the layers and Wrapped are held while it plays,
+as during a replay, and come back as they were; their titles say to end the
+replay to change them. Escape or the close button ends it. On a phone it is in
+the More sheet, and its panel is laid out like the replay's: the clock on a line
+of its own, the close button in the corner and the controls in one row, the
+slider between play and the speed.
+
+### Hotspot tour
+
+Fly over the busiest places of what the heatmap shows, in the 3D view with the
+heat cloud: up to five places, where the heat of the flights the filters and
+Isolate keep is strongest (weighed as the heatmap is, and the neighbouring cells
+of a place taken together, at least 8 km apart). Each is named after its airport
+("Home field EDAQ Halle-Oppin" for the home base), or by its distance and
+direction from the nearest one ("18 km south-east of EDAQ Halle-Oppin"), and
+captioned with the time spent there ("4 h 58 min") and its share of the view's
+time; never a date or an hour. The cloud shows every height while it runs, and
+the band of heights, which gives up its place in the Map group meanwhile, comes
+back as it ends. The camera flies to each place, tilted, and turns slowly over
+it for a few seconds before it moves on.
+
+Pause, the previous and the next place and Stop are in its panel, and the
+caption is read out as it changes. Played to the end, stopped or ended with
+Escape, it flies back to the view it started from and turns the 3D view and the
+heatmap back to what they were; a press, a wheel or a key on the map ends it
+where it is instead, in the 3D view, for you to look round from there. While the
+system asks for reduced motion it cuts to each place and waits for the next or
+previous button. The filters, the selection, Replay, Replay all, Wrapped and the
+Cross-section are held while it runs (an open cross-section closes as it
+starts), and it does not start during a replay. On a phone it is in the More
+sheet, and its panel takes the bottom edge while the bar of tabs steps aside, as
+for a replay. Next and the previous place while it is paused fly there and wait,
+and the relief and the cloud follow the view they arrive at.
+
+### Altitude profile
+
+With exactly one flight selected, a strip at the bottom of the map draws its
+altitude over time (over the distance flown for a flight without times), with
+the ground filled in underneath, and the highest altitude, the lowest height
+above the ground en route and the time spent below 1,000 ft above it en route
+("5 min", "1 h 12 min", never a clock that reads as hours); en route leaves out
+2 km around each airfield. Pointing at the chart reads out the values there and
+marks the place on the map, and pointing at the flight on the map moves the
+chart's cursor. A click or a drag on it (a tap on a phone) opens the replay
+paused at that moment; during a replay the chart is its timeline, and during the
+replay of all flights it is put away. The button with the mountain on the
+selection chip puts it away and brings it back, and the browser remembers which.
+
+### Cross-section
+
+Draw a line on the map and see, side on, where the time was spent within a
+corridor either side of it: the distance along the line across, the height up,
+as a density image in the heatmap's colours and weighed like it (the seconds
+each stretch of a flight took, at most two minutes). Click or tap its two ends,
+or drag it; from the keyboard, "Set A at the map centre" and then B place them
+where the middle of the map is, so move the map between the two. Escape takes
+back a point being placed, or the line being redrawn, and otherwise closes it.
+The ends (A and B) can be dragged afterwards, or moved with the arrow keys once
+focused (Shift for bigger steps), and the ruler button draws a new line.
+
+The corridor is drawn on the map while it is open. It is 250 m, 500 m, 1, 2 or 5
+km either side, picked for the zoom as the line is drawn (about 40 px on the
+screen, 500 m over a traffic circuit) and then from its list. Heights are above
+the ground under each fix (AGL; above the field for a flight without terrain) or
+above sea level (MSL), which draws the ground under the flights beneath them;
+the chart reaches up to where all but half a per cent of the time was spent, and
+says how much was higher up. It counts the flights of the year and aircraft
+filters, and while flights are selected only those, so a click on a flight shows
+it alone. The line is in the link and the saved session (see
+[Shareable URLs](#shareable-urls)), and the tool opens on it as the page does.
+
+The figures give the time, the number of flights and the band of height the most
+time in the air was spent in; pointing at the chart (or a finger on it) reads
+out the distance, the band of height and the time of the cells there, and marks
+the place on the line on the map. The chart's summary is its accessible name and
+is announced as the line comes to rest; no date or time of day is shown. It
+takes the place of the altitude profile at the bottom of the map while it is
+open, and replay, Replay all, Wrapped and the hotspot tour close it. On a phone
+it is in the More sheet.
+
+### North up
+
+The map turns and tilts (up to 85 degrees, with a sky above the horizon) by
+gesture: drag with the right mouse button or with Ctrl held, twist or drag with
+two fingers, or hold Shift with the arrow keys once the map has focus. The
+needle on this button points north, and a click turns the map back north up and
+flat. On a phone the compass floats at the top right of the map while the map is
+turned or tilted, and the globe switch is in the Layers sheet. Replay keeps the
+orientation you chose and points the airplane along its track on screen; Wrapped
+shows its overview north up and flat and gives your view back when it closes.
+While the map is already north up and flat the button is dimmed and does
+nothing.
+
+### Globe
+
+Draw the map as a globe instead of in Mercator. From `z` 13 in the two look the
+same, which is MapLibre's doing. Airport markers on the far side are hidden, and
+a popup closes once the globe has turned its place away. The space around the
+globe is the page background; no atmosphere is drawn.
+
+### 3D
+
+Lift the flights to their altitude, as ribbons about as wide as the lines at
+every zoom that follow their climbs and descents in 20 ft steps close in (in
+steps of no more than a pixel further out) and stand on the ground each flight
+flew over: the build samples it under every logged position from an elevation
+model (see [Elevation data](output.md#elevation-data)) and shifts it to meet the
+altitudes the flight recorded taxiing at the field it left and at the one it
+landed on, so a flight taxis on the map at both ends even where the model and
+the recorder disagree by tens of feet, and crosses a ridge at its true height
+above it. A flight whose ground is not known (a build with `--no-terrain` or
+without the tiles) stands on a line from the one field to the other instead, and
+an altitude glitch of the recorder takes no flight up with either.
+
+Heights are exaggerated, and the relief under them as much, so a flight still
+shows its shape on a map of half of Europe: 10 times at `z` 8 and further out, 7
+at `z` 9, 4 at `z` 10 and twice from `z` 11 in.
+
+Switching it on leaves the Heatmap, Altitude and Groundspeed layers as they are
+(the heatmap is lifted as a cloud, the colour layers as ribbons), colours the
+paths by altitude only when all three are off, where nothing would be lifted,
+and tilts a flatter map to 50 degrees. Tilting the flat map does not turn it on;
+the first time in a visit that you tilt it past 30 degrees yourself, a hint
+offers the 3D view with a **3D** button (not while a replay or Wrapped runs, nor
+once 3D was on). From `z` 18 in, where the camera is lower than a traffic
+circuit, the flights are drawn flat again. Replay lifts its airplane and its
+trail with them. The heatmap turns into a cloud of the flights at their heights
+(see [Heatmap](#heatmap) above), on the relief and on the globe alike, and lies
+flat from `z` 18 in with the flights.
+
+At every zoom the map draws the relief under the flights, shaded faintly (dark
+slopes, a little light on the others) over the satellite imagery when it is on
+and under the labels and the flights, and each flight stands on it at its height
+above the ground it flew over. Further out the map draws the relief from coarser
+elevation tiles, and the ground under the flights is smoothed as much, so a
+level flight stays level over the ridges to within about a pixel; the
+exaggeration stops at 10 times since further out the Alps stood as a wall and a
+flight over them sawed up and down. While a zoom goes on, and in the distance of
+a tilted map, the map draws parts of the relief from the elevation tiles of
+another level, and each flight stands on the ground of the level drawn under it,
+so it stays level over the ridges there too. The exaggeration of the relief and
+the flights changes as a zoom ends in another level, not during it, for both at
+once, and the flights stay in sight. The relief comes from the same elevation
+tiles as the ground (see [Elevation data](output.md#elevation-data)), which the
+browser fetches from AWS while it is drawn. The globe only shades it: the relief
+itself is left out there, and each flight stands on the line between its fields.
+
+As the relief comes or goes, and as a zoom ends in another exaggeration while
+the map still draws flights cut at `z` 7 or further out or at `z` 12 or further
+in (after a zoom across more than one level from there, or another zoom before
+those flights were drawn anew), the flights are hidden until they are drawn on
+the new ground, for 3 seconds at most (a playing replay's trail, drawn anew in
+every frame, is not waited for). Tilted past 45 degrees, the map leaves out the
+place names of its far distance, which stood along the horizon over the fog.
+
+### Height AGL
+
+In the 3D view, while it draws the heat as a cloud, a slider with two thumbs
+under the 3D switch shows only the heat between two heights above the ground, so
+the circuits and the climbs out of a field can be told from the cruise above
+them: from the ground, 100, 200, 300, 500, 700 and 1,000 ft up to 10,000 ft, the
+top past that for no limit. The heat just outside the band fades out rather than
+stopping at its edge, over 15% of the edge's height (at least 50 ft), in the
+glow and in its shadow on the ground alike; the exposure stays that of the whole
+cloud, so a band is as bright as it is in the whole of it. The heights are the
+ones the flights are lifted by: above the relief under them (as coarse as the
+zoom draws it), or above the line between their fields where the ground is not
+known, so every flight has them, and a circuit reads the same over a field at
+1,500 ft as over one at the sea. Each thumb is a slider of its own for the
+keyboard (the arrow keys, Page Up and Page Down, Home and End) and reads out its
+height. Every height on a first visit; kept in the link and the saved session,
+and put back to every height by Reset view. Wrapped, whose intro flies over the
+cloud, always shows every height. On a phone it floats over the top of the map,
+beside the compass; while the statistics are open it is hidden there, and in the
+icon column beside them on a tablet.
+
+### Heat cloud readout
+
+In the 3D view, resting the pointer on the heat cloud, or tapping it on a phone,
+shows a small box beside it with what the cloud there is made of: the time spent
+within a round radius about as wide as the glow (from 100 m to 50 km, by zoom),
+the number of flights that came that close, and the 400 ft band of height above
+the ground most of it was in, for example "About 42 min within 1 km" over "17
+flights · mostly 800 to 1,200 ft AGL". It is counted as the cloud counts it (the
+seconds between the logged positions, at most two minutes each; a track without
+times at a cruise), and never from the brightness, which the cloud scales to its
+busiest places; it follows the filters, Isolate and the Height AGL band (heat
+the band fades out counts as much as it is drawn), and says no date or time of
+day.
+
+There is none over the sky of a steeply tilted map, or beside the globe. In a
+tilted view it counts every flight the line of sight through the pointer passes
+near, at whatever height the cloud draws it, since the glow under the pointer
+adds all of them up. Over a flight's ribbon its values show as well, and the box
+goes beside them rather than over them, and clear of the panels over the map
+where there is room; a tap on a flight selects it and shows both. Markers,
+airport codes and dragging come first, and Escape puts the box away until the
+pointer moves on, before it closes anything else. A click or a tap on the cloud
+is read out to screen readers, unless it selected a flight or cleared the
+selection, which is read out instead; a hover is not. The flat heatmap has no
+readout: its code comes with the 3D view, not with the first visit.
+
+### Satellite
+
+Draw the ground from satellite imagery (Sentinel-2 cloudless 2024 by EOX, see
+[Satellite imagery](output.md#satellite-imagery)) instead of the dark map: over
+its land and water, under its roads, borders and place names, the flights, the
+heatmap and the Aviation overlay, which works over it too. The imagery is
+darkened and made paler so the heat, the colour layers and the labels made for
+the dark map still read. It is sharp to about `z` 14 and stretched further in,
+where the roads and the Aviation layer show the airfields better. In the 3D view
+it lies on the relief under the shading. Off on a first visit; kept in the link
+and the saved session. The browser fetches the tiles from EOX only while it is
+on, and the map credits them only then, in an exported image too. Should its
+code fail to load, the switch turns back off and says so. On a phone it is in
+the Layers sheet.
+
+### Reset view
+
+Go back to what a first visit shows: the newest year and all aircraft, the
+heatmap and airports on and the other layers, 3D, the globe and the satellite
+imagery off, the heat cloud at every height, nothing selected, the statistics
+closed, and the map flat and north up over all the flights. The saved session
+and the link follow. While there is nothing to reset, on a first visit and after
+a reset until the page or the map changes, it is dimmed and a press does
+nothing. On a phone it is in the More sheet; during a replay it is disabled like
+the filters.
+
+### Across the controls
+
+- A map attribution, on the map at every width; it steps aside only while a
+  sheet or the statistics panel covers the map it credits. It wraps when the
+  relief, the satellite imagery or the aviation layer add their credits; on a
+  phone it shows two lines, and a tap on it shows the rest. There are no zoom
+  buttons: use the scroll wheel, pinch, double click, or the keyboard once the
+  map has focus
+- A toggle that is off is drawn at full strength without the blue accent; only a
+  control that cannot act right now (Replay without one timed flight selected,
+  Isolate without a selection, North up and Reset view with nothing to reset,
+  and what a replay disables, whose title then says to end the replay, the
+  replay of all flights or the hotspot tour to change it) is dimmed. While
+  Replay, Replay all or the hotspot tour runs, its control is drawn pressed with
+  a filled stop square. A control that needs the flights says so with a toast
+  while the first year still loads, rather than ignoring the click; a filter
+  changed meanwhile is applied once it has loaded
+- An error stays on screen until it is dismissed or put right (a later load of
+  flights, of Replay's or Wrapped's code or of the satellite imagery, or the map
+  drawing after all); a failed load offers Retry, which a running replay
+  ignores. When the first year cannot be loaded the map says what failed and
+  offers Retry there, with no toast beside it; the year dropdown keeps showing
+  that year (or another one picked meanwhile that failed as well), which Retry
+  loads again, the colour legends are hidden while there are no flights, and
+  Reset view is available. The loading indicator shows from the start, while the
+  list of years loads, and the year dropdown names the year the page opens on
+  from the first paint
+- The toasts stand where the colour legend is on a phone, and over it beside the
+  statistics or in a window narrower than 940 px: the legend steps aside there
+  while one shows
+- The controls come before the map in the tab order, and the "Skip to map" link
+  at the start of the page goes past them to the map and its airport markers
+- Below 768 px the two control columns are replaced by a bottom bar with five
+  tabs. Layers, Filter and More open a sheet; Stats and Wrapped open their panel
+  directly. A sheet closes with its close button, a tap beside it, or a drag
+  down on its top edge (the grabber and the title) past a third of its height or
+  a quick flick; a shorter drag lets it spring back, and under reduced motion it
+  closes or returns at once. Escape closes an open sheet, and Tab stays inside
+  it. The Layers sheet takes half the height, so the map above it shows what a
+  switch did, and scrolls. Replay, Replay all and the hotspot tour take over the
+  bottom edge and the bar steps aside until they end. The colour legend steps
+  aside while a popup is open on the map, which it would cover
+
+## Filtering
+
+- **Year filter** - View flights from specific years or all years combined
+- **Aircraft filter** - Filter by aircraft registration to see flights per
+  aircraft
+- **Path selection** - Click paths to highlight and view detailed statistics. A
+  chip at the top of the map says how many flights are selected and clears them
+  again; on a phone, while the statistics sheet is open, it moves into the
+  sheet's header without its count. With neither colour layer on, the selected
+  flights are drawn as thin light lines over the heatmap, which steps back while
+  they show, at every zoom level, and the lines are fainter the more flights are
+  selected; in the 3D view they are lifted to their height with the heat cloud
+- **Airport selection** - Click an airport marker to select all flights that
+  visited it; click the map beside every flight to clear the selection, with
+  Altitude or Groundspeed on, where the flights can be clicked (over the heat
+  alone a click on a flight would be one beside them, and the chip's Clear
+  clears it). The airport popup shows how the flights of the filter used its
+  runways ("RWY 29 · 65%, RWY 11 · 35%") and lists those flights (route,
+  aircraft and year), each a button that selects that one flight (the rows are
+  marked as selected once the selection is not all of them, and a lone flight
+  always), so a single flight and Replay are reachable from the keyboard: Tab to
+  a marker, Enter opens the popup and moves focus into it, Escape closes it and
+  returns focus to the marker
+- **Isolate** - Show only the selected paths, and the heat of those flights
+  alone, hiding all other paths
+
+## Shareable URLs
+
+Map state is encoded in the URL for easy sharing. Copy the URL from your
+browser's address bar or use the copy-link button:
+
+- Specific year or all years (`?y=2025` or `?y=all`)
+- Aircraft filter (`?a=D-EAGJ`)
+- Selected paths (`?p=8vndgpro,1bspfs7g&sv=4`). A path id is derived from the
+  flight's coordinates and altitudes, so a link keeps selecting the same flights
+  after the site is regenerated with other flights added or removed; a flight
+  that is no longer there is dropped from the selection. `sv` is the version of
+  the id scheme. Version 4 writes the ids in base 36; version 3 links, which
+  wrote the same ids in decimal (`?p=695806902132,104044549516&sv=3`), still
+  work. Links written before version 3, when ids were positions in the export,
+  lose their selection instead of selecting different flights
+- Layer visibility (9 flags: heatmap, altitude, speed, airports, aviation,
+  stats, wrapped, an unused legacy slot, isolateSelection). The 8th slot
+  belonged to a control-visibility toggle that no longer exists; it is always
+  written as `0` and not read, and kept so shared links still read their isolate
+  flag from the 9th. The shorter strings of the releases before the isolate flag
+  (6 to 8 flags) are no longer read; such a link opens with the layers of a
+  first visit. The slots and parameters of every toggle are listed in
+  `kml_heatmap/frontend/state/toggles.ts`
+  - Example: `?v=100100000`
+- Map position (`?lat=51.5&lng=13.4&z=10`). A centre without `z` opens at
+  zoom 10. `z` counts in 256 pixel tiles, as links always did, which is one more
+  than MapLibre's own zoom for the same view; links shared before the switch to
+  MapLibre therefore still show the same area
+- Orientation (`?b=-40.5&t=35`): `b` is the bearing, the degrees the top of the
+  map is turned clockwise from north (any number, wrapped into -180 to 180), and
+  `t` the tilt in degrees (held between 0 and 85). Both are written to a tenth
+  of a degree and left out while the map is north up and flat
+- Globe (`?g=1`), left out for Mercator. A link without `b`, `t` and `g`, which
+  is every link from before the map could turn, opens north up, flat and in
+  Mercator
+- 3D view (`?d=1`), left out while the flights are drawn flat
+- The heights above ground the heat cloud of the 3D view shows (`?h=500-3000`,
+  or `?h=1000-` without a top), in feet at the stops of the Height AGL slider;
+  left out for every height, and read as every height when it names other
+  heights
+- Satellite imagery (`?s=1`), left out while the ground is the dark map. It is a
+  parameter of its own, like `g` and `d`, so the nine flags of `v` and every
+  older link stay as they were
+- The Flights tab of the statistics panel (`?l=1`), left out while the panel
+  shows its figures
+- Debug logging in the browser console (`?debug=true`)
+- The line of the cross-section (`?x=51.55,11.9,51.6,12.3`), the latitude and
+  longitude of its start and then of its end, left out while the tool is closed;
+  a link with it opens the tool on that line
+- The heat counted by distance (`?r=1`) is gone; an old link's `r` is ignored
+
+Example URLs:
+
+```text
+?y=all                                   # Show all years
+?y=2025&v=010000000                      # 2025 with the altitude layer only
+?y=2025&a=D-EAGJ&lat=51.5&lng=13.4&z=10  # Complete state
+?y=all&lat=48&lng=8&z=4&g=1&b=-30&t=50   # All years on a turned, tilted globe
+?y=2025&z=9&t=60&d=1                     # 2025 in 3D
+?y=2025&z=9&t=60&d=1&h=0-1500            # 2025 in 3D, up to 1,500 ft AGL
+```
+
+URL parameters take precedence over localStorage, allowing shared links to
+override saved preferences.
+
+## Smart features
+
+- **Mid-flight detection** - A recording started in the air adds no departure
+  airport, and an arrival is only added where the track ends in a landing
+- **Airport deduplication** - Merges the entries of one ICAO code, and names
+  without a code that lie within 1.5 km of a marker; two different ICAO codes
+  stay separate however close they are. A code known to OurAirports places the
+  marker at the airport's own coordinates, so every flight to it lands on the
+  same marker
+- **Airport names** - Standardized from the ICAO code ("EDDS Stuttgart"); a
+  single-word name without a code is not shown or counted as an airport
+- **Parallel processing** - Fast parsing and export of multiple files
+- **State persistence** - Saves to localStorage and syncs with URL for shareable
+  links
+- **Year-based organization** - Extracts and organizes flights by year
+- **Per-aircraft statistics** - Tracks flight time and distance per aircraft
+  registration
+- **Aircraft model lookup** - Resolves full aircraft model names from
+  `aircraft.json`

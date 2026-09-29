@@ -193,7 +193,7 @@ describe("MapApp controls and map", () => {
 
       expect(btn.getAttribute("aria-disabled")).toBe("true");
       expect(btn.title).toBe(
-        "Select exactly one flight with timing data to replay",
+        "Pick one flight with timing data to replay, under Statistics, Flights",
       );
 
       app.selectedPathIds.add(1);
@@ -374,6 +374,76 @@ describe("MapApp controls and map", () => {
       app.store.set("statsPanelVisible", false);
 
       expect(document.activeElement).toBe(heatmapBtn);
+    });
+
+    it("closes on Escape where it is a sheet of the phone", async () => {
+      await initializeApp(app);
+      const escape = (): boolean =>
+        document.dispatchEvent(
+          new KeyboardEvent("keydown", {
+            key: "Escape",
+            bubbles: true,
+            cancelable: true,
+          }),
+        );
+      app.store.set("statsPanelVisible", true);
+      // On the desktop the rail has its collapse control, and stays
+      expect(escape()).toBe(true);
+      expect(app.statsPanelVisible).toBe(true);
+
+      const bar = app.mobileBar;
+      app.mobileBar = {
+        isVisible: () => true,
+        destroy: () => {},
+      } as unknown as MapApp["mobileBar"];
+      // Not under Wrapped, whose dialog takes it
+      app.store.set("wrappedVisible", true);
+      expect(escape()).toBe(true);
+      expect(app.statsPanelVisible).toBe(true);
+      app.store.set("wrappedVisible", false);
+
+      expect(escape()).toBe(false);
+      expect(app.statsPanelVisible).toBe(false);
+      app.mobileBar = bar;
+    });
+
+    it("leaves an Escape for a popup, a marker, the search of the flights or one taken before to them", async () => {
+      await initializeApp(app);
+      const bar = app.mobileBar;
+      app.mobileBar = {
+        isVisible: () => true,
+        destroy: () => {},
+      } as unknown as MapApp["mobileBar"];
+      app.store.set("statsPanelVisible", true);
+      const escapeIn = (html: string): void => {
+        const holder = document.createElement("div");
+        holder.innerHTML = html;
+        document.body.append(holder);
+        holder.querySelector("[data-target]")!.dispatchEvent(
+          new KeyboardEvent("keydown", {
+            key: "Escape",
+            bubbles: true,
+            cancelable: true,
+          }),
+        );
+        holder.remove();
+      };
+
+      escapeIn(
+        '<div class="maplibregl-popup"><button data-target></button></div>',
+      );
+      escapeIn('<div class="maplibregl-marker" data-target></div>');
+      escapeIn('<input type="search" data-target>');
+      // The readout of the cloud takes its Escape first
+      const taken = (event: Event): void => event.preventDefault();
+      document.addEventListener("keydown", taken, true);
+      escapeIn("<button data-target></button>");
+      document.removeEventListener("keydown", taken, true);
+      expect(app.statsPanelVisible).toBe(true);
+
+      escapeIn("<button data-target></button>");
+      expect(app.statsPanelVisible).toBe(false);
+      app.mobileBar = bar;
     });
 
     it("restores an open rail from the saved state", async () => {
@@ -928,6 +998,29 @@ describe("MapApp controls and map", () => {
       expect(m.toggleCrossSection).toHaveBeenCalledTimes(1);
     });
 
+    it("opens the cross-section on the line of a link once the flights are in", async () => {
+      mockStateManagerInstance.loadState.mockReturnValue({
+        crossSectionLine: "51.5,12.1,51.6,12.3",
+      });
+      m.toggleCrossSection.mockClear();
+
+      await initializeApp(app);
+
+      expect(app.crossSectionLine).toBe("51.5,12.1,51.6,12.3");
+      await vi.waitFor(() =>
+        expect(m.toggleCrossSection).toHaveBeenCalledWith(app),
+      );
+    });
+
+    it("leaves the cross-section closed without a line", async () => {
+      m.toggleCrossSection.mockClear();
+
+      await initializeApp(app);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(m.toggleCrossSection).not.toHaveBeenCalled();
+    });
+
     it("drops a Cross-section click the app went before", async () => {
       await initializeApp(app);
       m.toggleCrossSection.mockClear();
@@ -1117,9 +1210,10 @@ describe("MapApp controls and map", () => {
       canvas.remove();
     });
 
-    it("clears the selection on map click outside replay", async () => {
+    it("clears the selection on map click outside replay, in a colour layer", async () => {
       await initializeApp(app);
       app.selectedPathIds.add(1);
+      app.altitudeVisible = true;
 
       mockMap(app).emit("click", click);
 
@@ -1127,6 +1221,23 @@ describe("MapApp controls and map", () => {
         click.point,
       );
       expect(mockPathSelectionInstance.clearSelection).toHaveBeenCalledTimes(1);
+
+      app.altitudeVisible = false;
+      app.airspeedVisible = true;
+      mockMap(app).emit("click", click);
+      expect(mockPathSelectionInstance.clearSelection).toHaveBeenCalledTimes(2);
+    });
+
+    it("keeps the selection on a click over the heat alone, where no flight can be clicked", async () => {
+      await initializeApp(app);
+      app.selectedPathIds.add(1);
+
+      mockMap(app).emit("click", click);
+
+      expect(mockPathSelectionInstance.clearSelection).not.toHaveBeenCalled();
+      // What a click on the map closes, it still closes
+      expect(mockAirportManagerInstance.closePopup).toHaveBeenCalledOnce();
+      expect(mockLayerManagerInstance.closeSegmentPopup).toHaveBeenCalledOnce();
     });
 
     it("hands a click on an airport's label to its airport, as on the marker", async () => {
@@ -1172,6 +1283,7 @@ describe("MapApp controls and map", () => {
     it("leaves the popup of an airport a double tap carried off its marker", async () => {
       await initializeApp(app);
       app.selectedPathIds.add(1);
+      app.altitudeVisible = true;
       const marker = document.createElement("div");
       marker.className = "maplibregl-marker";
       mockMap(app).emit("click", {

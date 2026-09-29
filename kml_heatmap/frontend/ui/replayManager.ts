@@ -8,7 +8,7 @@ import { domCache } from "../utils/domCache";
 import { announceInRegion, announceStatus, showToast } from "../utils/toast";
 import { formatTime } from "../utils/formatters";
 import { applyToggleButtonState } from "../utils/buttonState";
-import { holdControls } from "./heldControls";
+import { focusModeControl, holdControls } from "./heldControls";
 import { setControlIcon } from "../utils/icons";
 import { AUTO_ZOOM_FOLLOW, MAP_SOURCES } from "../utils/constants";
 import {
@@ -21,6 +21,7 @@ import type { SmoothedFlights } from "../calculations/smoothing";
 import { groundProfilesFt } from "../calculations/groundProfile";
 import { appendCurve } from "../calculations/curves";
 import {
+  isPageEscape,
   toBounds,
   toLngLat,
   toLngLatAfter,
@@ -41,7 +42,7 @@ import {
   ReplayRenderer,
   appendTrailSegment,
 } from "./replayRenderer";
-import type { ReplayState } from "./replayState";
+import { restingPitch, type ReplayState } from "./replayState";
 import type { SavedCamera } from "./chaseCamera";
 import type { PathSegment } from "../types";
 import {
@@ -192,14 +193,11 @@ export class ReplayManager {
     document.addEventListener(
       "keydown",
       (event) => {
-        if (event.key !== "Escape" || !app.replayActive) return;
         // The replay of every flight has an Escape of its own
-        if (app.replayState.all) return;
-        if (event.defaultPrevented) return;
-        const target = event.target;
         if (
-          target instanceof Element &&
-          target.closest("#replay-speed, .maplibregl-popup, .maplibregl-marker")
+          !app.replayActive ||
+          app.replayState.all ||
+          !isPageEscape(event, ",#replay-speed")
         ) {
           return;
         }
@@ -293,6 +291,13 @@ export class ReplayManager {
     if (this.app.tourView) return;
 
     if (!this.canReplay()) {
+      // Paths are picked on the map only in a colour layer: with nothing
+      // selected, the list of the flights to pick one from opens with it
+      const app = this.app;
+      if (app.selectedPathIds.size === 0) {
+        // The list first, so the panel opens on it
+        app.statsPanelVisible = app.flightListVisible = true;
+      }
       showToast(REPLAY_PRECONDITION_MESSAGE, "info");
       return;
     }
@@ -342,7 +347,7 @@ export class ReplayManager {
 
     document.body.classList.add("replay-active");
     this.release?.();
-    this.release = holdControls(REPLAY_DISABLED_CONTROL_IDS);
+    this.release = holdControls(REPLAY_DISABLED_CONTROL_IDS, "the replay");
     this.followLayers();
   }
 
@@ -525,10 +530,7 @@ export class ReplayManager {
    * replay button does.
    */
   private restoreFocusAfterReplay(): void {
-    const target = this.app.mobileBar?.isVisible()
-      ? document.getElementById("mobile-tab-more")
-      : domCache.get("replay-btn");
-    target?.focus();
+    focusModeControl(this.app, "replay-btn");
   }
 
   private updateChaseButton(): void {
@@ -775,6 +777,8 @@ export class ReplayManager {
     this.app.map.easeTo({
       center: toLngLat(startCoords),
       ...(this.state.autoZoom ? { zoom: AUTO_ZOOM_FOLLOW } : {}),
+      // A lay-back it cuts short goes on to where it was going
+      pitch: restingPitch(this.app),
       duration: AUTO_ZOOM_PAN_MS,
       animate: !prefersReducedMotion(),
     });

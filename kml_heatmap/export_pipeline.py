@@ -13,6 +13,7 @@ from .segment_calculator import (
     SpeedWindow,
     calculate_fallback_groundspeed,
     extract_segment_speeds,
+    outlasts_the_window,
 )
 from .segment_codec import ALTITUDE_STEP
 from .types import COORDINATE_DECIMALS
@@ -160,13 +161,18 @@ def _segment_groundspeed(
 ) -> float | None:
     """The groundspeed of a single segment in knots, None when unknown.
 
-    The rolling window average where the segment is timed, the path's
-    average speed otherwise.
+    The rolling window average where the segment is timed. A segment longer
+    than the window is not in it (see ``outlasts_the_window``): where the
+    window around its start is empty, as with a logger that writes a fix
+    every few minutes, it has its own speed. The path's average speed
+    otherwise.
     """
     if segment.timestamp is not None:
         groundspeed_knots = window.groundspeed(segment.timestamp)
         if groundspeed_knots is not None:
             return groundspeed_knots
+    if segment.speed is not None and outlasts_the_window(segment):
+        return segment.speed
     return calculate_fallback_groundspeed(
         segment.distance, path_distance_km, path_duration_seconds
     )

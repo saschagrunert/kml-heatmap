@@ -18,6 +18,7 @@
  * (see replayAllTime) and at the height of the flights, unless the
  * Heatmap switch is off.
  */
+import type { LngLat } from "maplibre-gl";
 import type { MapApp } from "../mapApp";
 import type { KMLDataset } from "../types";
 import { datasetIndex } from "../calculations/datasetIndex";
@@ -28,17 +29,19 @@ import {
 } from "../calculations/groundProfile";
 import { isLiftedAt, liftExaggeration } from "../calculations/lift";
 import {
+  fitTilted,
   replayAllPoints,
   type ReplayAllPoints,
 } from "../calculations/replayAll";
-import { FEET_TO_METERS, MAP_LAYERS } from "../utils/constants";
+import { FEET_TO_METERS, MAP_LAYERS, MAP_MAX_ZOOM } from "../utils/constants";
 import { applyToggleButtonState } from "../utils/buttonState";
-import { holdControls } from "./heldControls";
+import { focusModeControl, holdControls } from "./heldControls";
 import { domCache } from "../utils/domCache";
 import { setControlIcon } from "../utils/icons";
 import { logError } from "../utils/logger";
 import {
   hasLostContext,
+  isPageEscape,
   REPLAY_CAMERA_MOVE,
   whenContextRestored,
 } from "../utils/mapHelpers";
@@ -51,6 +54,8 @@ import {
   type ReplayAllStyle,
 } from "./replayAllLayer";
 import { REPLAY_PANEL_HEIGHT_VAR } from "./replayManager";
+import { restingPitch } from "./replayState";
+import { mapChromePadding } from "./pathSelection";
 
 /** The speeds the panel offers, in seconds of flight per second */
 const REPLAY_ALL_SPEEDS = [100, 200, 300, 500, 1000] as const;
@@ -164,6 +169,8 @@ export class ReplayAllPlayer {
    * has ended, not while it goes on
    */
   private lifted = true;
+  /** Zoom levels further out than the map's the curves are cut for */
+  private levelsOut = 0;
 
   constructor(app: MapApp) {
     this.app = app;
@@ -213,9 +220,12 @@ export class ReplayAllPlayer {
     return this.points?.flights ?? 0;
   }
 
-  /** West, south, east and north of the flights in degrees, or null */
-  get bounds(): [number, number, number, number] | null {
-    return this.points?.bounds ?? null;
+  /**
+   * The points of the run, as its layer draws them, with the bounds of the
+   * flights, or null
+   */
+  get run(): ReplayAllPoints | null {
+    return this.points;
   }
 
   /**
@@ -233,6 +243,7 @@ export class ReplayAllPlayer {
     this.speed = run.speed ?? REPLAY_ALL_SPEED;
     this.scale = run.scale ?? 1;
     this.zoomAhead = run.zoom ?? null;
+    this.levelsOut = 0;
     this.aheadDrawn = this.nearAhead();
     this.lifted = isLiftedAt(map.getZoom());
     this.time = 0;
@@ -281,6 +292,19 @@ export class ReplayAllPlayer {
     });
     this.resume();
     return ended;
+  }
+
+  /**
+   * Cut the curves as for a map `levels` zoom levels further out than the
+   * map, to the nearest whole level, from the end of the zoom under way or
+   * now. A tilted map shows them smaller than a flat one at its zoom, and
+   * fitted to them it comes about a level closer (see fitTilted): cut for
+   * its zoom, they were twice the points, each taken up by the shaders
+   * twice a frame, and in software WebGL a frame took a third longer.
+   */
+  thinOut(levels: number): void {
+    this.levelsOut = Math.max(Math.round(levels), 0);
+    if (!this.app.map?.isZooming()) this.cut();
   }
 
   /** Let the clock run, from the start again once every trail has faded */
@@ -461,15 +485,19 @@ export class ReplayAllPlayer {
   /**
    * The curves cut for the view: on the ground of the 3D view and the
    * relief level they are lifted as (see level), as the heat cloud's, and
-   * thinned for the map zoom `zoom`. Those cut last are kept, and handed
-   * out again as long as nothing they were cut for changed.
+   * thinned for the map zoom `zoom`, less the levels out (see thinOut).
+   * Those cut last are kept, and handed out again as long as nothing they
+   * were cut for changed.
    */
   private pointsFor(zoom: number): ReplayAllPoints | null {
     const app = this.app;
     const data = app.currentData;
     const keep = this.keep;
     if (!data || !keep) return null;
-    const detail = Math.min(Math.max(Math.floor(zoom), 0), MAX_DETAIL);
+    const detail = Math.min(
+      Math.max(Math.floor(zoom) - this.levelsOut, 0),
+      MAX_DETAIL,
+    );
     const level = this.level();
     const key = `${app.terrainActive}/${level}/${detail}`;
     let points = this.cuts.get(key);
@@ -565,7 +593,8 @@ export const REPLAY_ALL_ORBIT_REDUCED_MOTION_MESSAGE =
  * (REPLAY_DISABLED_CONTROL_IDS in ui/replayManager.ts): the filters, the
  * selection and Wrapped would change or take the map under it. The colour
  * layers too, which colour the trail of one flight and nothing here, and
- * the Heatmap switch: the heat is not the replay's to count.
+ * the Heatmap switch, which says as the replay opens whether the heat
+ * builds up behind the flights.
  */
 const HELD_CONTROL_IDS = [
   "heatmap-btn",
@@ -604,8 +633,8 @@ const TILT_MIN_PITCH = 20;
  */
 const TILT_BY_HAND_DEG = 5;
 
-/** Pixels kept free around the flights by the fit, the panel below them */
-const FIT_PADDING = { top: 40, right: 40, bottom: 110, left: 40 };
+/** Pixels kept free between the flights and the panel below them */
+const FIT_MARGIN_PX = 24;
 
 /**
  * The seconds of flight a step of the slider moves the clock by, with the
@@ -649,11 +678,6 @@ export class ReplayAllControls {
   /** The clock as last written, so a frame writes it only when it changes */
   private shown = "";
   private stopWatchingUser: (() => void) | null = null;
-  /**
-   * The tilt the close lays the map back to (ReplayState.pitchBefore),
-   * which a replay opened again before the map is there starts from
-   */
-  private layingBack: number | null = null;
   /** Gives the held controls back as they were (see holdControls) */
   private release: (() => void) | null = null;
 
@@ -666,18 +690,7 @@ export class ReplayAllControls {
     document.addEventListener(
       "keydown",
       (event) => {
-        if (!this.open || event.key !== "Escape" || event.defaultPrevented) {
-          return;
-        }
-        const target = event.target;
-        if (
-          target instanceof Element &&
-          target.closest(
-            "#replay-all-speed, .maplibregl-popup, .maplibregl-marker",
-          )
-        ) {
-          return;
-        }
+        if (!this.open || !isPageEscape(event, ",#replay-all-speed")) return;
         event.preventDefault();
         this.close();
       },
@@ -733,7 +746,7 @@ export class ReplayAllControls {
     app.replayState.all = true;
     app.replayActive = true;
     this.release?.();
-    this.release = holdControls(HELD_CONTROL_IDS);
+    this.release = holdControls(HELD_CONTROL_IDS, "the replay of all flights");
     document.body.classList.add("replay-all-active");
     panel.hidden = false;
     this.shown = "";
@@ -754,27 +767,17 @@ export class ReplayAllControls {
     // The flights fly at their height, which a map seen from straight
     // above does not show: a flatter one is tilted as the 3D view tilts
     // it, and laid back as the replay closes
-    const pitch =
-      this.layingBack !== null && map.isMoving()
-        ? this.layingBack
-        : map.getPitch();
-    this.layingBack = null;
+    const pitch = restingPitch(app);
     const before = pitch < TILT_MIN_PITCH ? pitch : null;
     app.replayState.pitchBefore = before;
-    const bounds = this.player.bounds;
-    if (bounds) {
-      map.fitBounds(
-        [
-          [bounds[0], bounds[1]],
-          [bounds[2], bounds[3]],
-        ],
-        {
-          padding: FIT_PADDING,
-          bearing: 0,
-          pitch: before === null ? pitch : TILT_PITCH,
-          animate: !prefersReducedMotion(),
-        },
-      );
+    const fit = this.fit(before === null ? pitch : TILT_PITCH, panel);
+    if (fit) {
+      const { flat, ...camera } = fit;
+      map.easeTo({
+        ...camera,
+        animate: !prefersReducedMotion(),
+      });
+      this.player.thinOut(camera.zoom - flat);
     }
     // A camera the user moves is theirs: the orbit stops turning it, and
     // a tilt of theirs stays as they leave it, as does the 3D view's
@@ -829,17 +832,64 @@ export class ReplayAllControls {
     // The layers come back as they were, and the phone's bar with them
     this.app.replayActive = false;
     // As flat as it was, unless the user or the 3D view took the tilt over
-    const pitch = this.app.replayState.pitchBefore;
-    this.app.replayState.pitchBefore = null;
-    if (pitch !== null) {
-      this.layingBack = pitch;
-      this.app.map?.easeTo({ pitch });
+    const state = this.app.replayState;
+    const pitch = state.pitchBefore;
+    const map = this.app.map;
+    state.pitchBefore = null;
+    if (pitch !== null && map) {
+      map.easeTo({ pitch });
+      // Until the map gets there: a tilt the user gives it later is theirs
+      // (see restingPitch). Registered after the ease, whose start ends the
+      // move before it.
+      state.layingBack = pitch;
+      map.once("moveend", () => {
+        state.layingBack = null;
+      });
     }
-    const target = this.app.mobileBar?.isVisible()
-      ? document.getElementById("mobile-tab-more")
-      : button;
-    target?.focus();
+    focusModeControl(this.app, REPLAY_ALL_BUTTON_ID);
     announceStatus("Replay of all flights closed");
+  }
+
+  /**
+   * Where the camera shows the flights of the run as large as the map
+   * allows, north up and tilted by `pitch`: clear of the panels along its
+   * edges (mapChromePadding) and of the replay's own, `panel`, below them.
+   * The fit of their bounds is where it starts from (see fitTilted), and
+   * its zoom, `flat`, the one of a flat map.
+   */
+  private fit(pitch: number, panel: HTMLElement) {
+    const map = this.app.map!;
+    const run = this.player.run;
+    const bounds = run?.bounds;
+    if (!run || !bounds) return null;
+    const box = map.getContainer().getBoundingClientRect();
+    const padding = mapChromePadding(map);
+    padding.bottom = Math.max(
+      padding.bottom,
+      box.bottom - panel.getBoundingClientRect().top + FIT_MARGIN_PX,
+    );
+    const start = map.cameraForBounds(
+      [
+        [bounds[0], bounds[1]],
+        [bounds[2], bounds[3]],
+      ],
+      { padding, bearing: 0 },
+    );
+    if (!start) return null;
+    const { lng, lat } = start.center as LngLat;
+    const camera = fitTilted(
+      run,
+      { center: [lng, lat], zoom: start.zoom! },
+      {
+        width: box.width,
+        height: box.height,
+        padding,
+        pitch,
+        fov: map.getVerticalFieldOfView(),
+      },
+      MAP_MAX_ZOOM,
+    );
+    return { ...camera, bearing: 0, pitch, flat: start.zoom! };
   }
 
   private setOrbit(on: boolean): void {

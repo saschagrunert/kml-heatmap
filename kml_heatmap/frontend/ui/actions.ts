@@ -7,6 +7,10 @@
 import type { MapApp } from "../mapApp";
 import type { ToggleAction, ToggleKey } from "../state/toggles";
 import { logError } from "../utils/logger";
+import { showToast } from "../utils/toast";
+
+/** Said for a control that waits for the first load (runAction) */
+export const STILL_LOADING_MESSAGE = "Still loading the flights";
 
 /**
  * Actions that need loaded data. They are ignored while the app is still
@@ -102,10 +106,11 @@ export type ActionName = keyof ReturnType<typeof actionHandlers>;
 
 /**
  * Run an action by name, the way a click on its control does. Data-dependent
- * actions are ignored while `app.isInitializing` is true: the phone's bar
- * called the app directly and skipped this, and a Reset view during the
- * first load switched the year under the load that was still running.
- * Returns whether the action ran.
+ * actions are ignored while `app.isInitializing` is true, with a word that
+ * the flights are still loading: the phone's bar called the app directly
+ * and skipped this, and a Reset view during the first load switched the
+ * year under the load that was still running. Returns whether the action
+ * ran.
  */
 export function runAction(app: MapApp, action: ActionName, e?: Event): boolean {
   // Built for the one call: a click is rare enough, and nothing has to
@@ -115,6 +120,9 @@ export function runAction(app: MapApp, action: ActionName, e?: Event): boolean {
   const fn = handlers[action];
   if (!fn) return false;
   if (app.isInitializing && DEFERRED_WHILE_INITIALIZING.has(action)) {
+    // The controls look ready and a click would do nothing without a word.
+    // Not for a filter, whose change is applied once the load is over.
+    if (!action.startsWith("filter")) showToast(STILL_LOADING_MESSAGE);
     return false;
   }
   fn(e);

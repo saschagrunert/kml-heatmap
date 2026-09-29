@@ -170,7 +170,7 @@
             class="btn-surface control-btn"
             data-action="toggleReplay"
             data-icon="play"
-            title="Select exactly one flight with timing data to replay"
+            title="Pick one flight with timing data to replay, under Statistics, Flights"
             aria-label="Replay selected flight path"
             aria-disabled="true"
             aria-pressed="false"
@@ -335,8 +335,8 @@
             class="btn-surface control-btn"
             data-action="toggleAltitude"
             data-icon="altitude"
-            title="Toggle altitude color visualization"
-            aria-label="Toggle altitude color visualization"
+            title="Altitude: colour the paths by height"
+            aria-label="Altitude: colour the paths by height"
             aria-pressed="false"
           >
             <span class="control-label">Altitude</span>
@@ -350,8 +350,8 @@
             data-action="toggleAirspeed"
             data-icon="speed"
             disabled
-            title="Groundspeed: color paths by speed over the ground"
-            aria-label="Groundspeed: color paths by speed over the ground"
+            title="Groundspeed: colour the paths by speed over the ground"
+            aria-label="Groundspeed: colour the paths by speed over the ground"
             aria-pressed="false"
           >
             <span class="control-label">Groundspeed</span>
@@ -364,8 +364,8 @@
             class="btn-surface control-btn"
             data-action="toggleAviation"
             data-icon="aviation"
-            title="Toggle aviation data overlay"
-            aria-label="Toggle aviation data overlay"
+            title="Aviation: airspaces and navaids of open flightmaps, once zoomed in"
+            aria-label="Aviation: airspaces and navaids of open flightmaps, once zoomed in"
             aria-pressed="false"
           >
             <span class="control-label">Aviation</span>
@@ -532,7 +532,7 @@
       class="color-legend"
       hidden
       role="region"
-      aria-label="Altitude color scale legend"
+      aria-label="Altitude colour scale legend"
     >
       <div class="legend-title" data-icon="altitude">Altitude</div>
       <div
@@ -556,7 +556,7 @@
       class="color-legend"
       hidden
       role="region"
-      aria-label="Groundspeed color scale legend"
+      aria-label="Groundspeed colour scale legend"
     >
       <div class="legend-title" data-icon="speed">Groundspeed</div>
       <div
@@ -588,7 +588,7 @@
       class="color-legend"
       hidden
       role="region"
-      aria-label="Heat color scale legend"
+      aria-label="Heat colour scale legend"
     >
       <div class="labels">
         <span class="legend-title" data-icon="heatmap">Time spent</span>
@@ -596,7 +596,7 @@
         <span
           class="gradient-bar"
           role="img"
-          aria-label="Time spent: blue for about 1 pass of a flight, pale cyan for about 64, white for many more"
+          aria-label="Time spent: blue for about 1 pass of a flight, light cyan for about 64, white for many more"
         ></span>
         <span aria-hidden="true">More</span>
       </div>
@@ -640,7 +640,7 @@
          of the map, like the controls: after it, its Retry was 55 presses
          of Tab away, past every airport marker. -->
     <div id="map-empty" hidden>
-      <p>The flights could not be loaded.</p>
+      <p>Could not load the flights</p>
       <button
         type="button"
         id="map-empty-retry"

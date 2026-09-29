@@ -102,10 +102,10 @@ describe("heatLegend", () => {
 describe("heatLegendText", () => {
   it("says which way the time grows and what the ends stand for", () => {
     expect(heatLegendText([1, 4, 16, 64])).toBe(
-      "Time spent: blue for about 1 pass of a flight, pale cyan for about 64, white for many more",
+      "Time spent: blue for about 1 pass of a flight, light cyan for about 64, white for many more",
     );
     expect(heatLegendText([4, 16, 64, 256])).toBe(
-      "Time spent: blue for about 4 passes of a flight, pale cyan for about 256, white for many more",
+      "Time spent: blue for about 4 passes of a flight, light cyan for about 256, white for many more",
     );
   });
 });

@@ -11,6 +11,7 @@ import {
   isBehindGlobe,
   isMapStill,
   isOnMarker,
+  isPageEscape,
   keepMarkerTapsFromZoom,
   MAP_STILL_TIMEOUT_MS,
   mapSize,
@@ -449,6 +450,43 @@ describe("mapHelpers", () => {
     });
   });
 
+  describe("isPageEscape", () => {
+    it("leaves an Escape to a popup, a marker, what else it is told of, and whoever took it", () => {
+      document.body.innerHTML =
+        '<div class="maplibregl-popup"><button id="in-popup"></button></div>' +
+        '<div class="maplibregl-marker" id="marker"></div>' +
+        '<div class="maplibregl-marker end" id="end"></div>' +
+        '<select id="speed"></select><button id="plain"></button>';
+      const escape = (id: string, key = "Escape"): KeyboardEvent => {
+        let seen!: KeyboardEvent;
+        const target = document.getElementById(id)!;
+        target.addEventListener("keydown", (e) => (seen = e), { once: true });
+        target.dispatchEvent(
+          new KeyboardEvent("keydown", {
+            key,
+            bubbles: true,
+            cancelable: true,
+          }),
+        );
+        return seen;
+      };
+
+      expect(isPageEscape(escape("plain"))).toBe(true);
+      expect(isPageEscape(escape("plain", "Enter"))).toBe(false);
+      expect(isPageEscape(escape("in-popup"))).toBe(false);
+      expect(isPageEscape(escape("marker"))).toBe(false);
+      expect(isPageEscape(escape("speed"))).toBe(true);
+      expect(isPageEscape(escape("speed"), ",#speed")).toBe(false);
+      // Markers whose Escape it is
+      expect(isPageEscape(escape("end"), ":not(.end)")).toBe(true);
+      expect(isPageEscape(escape("marker"), ":not(.end)")).toBe(false);
+      const taken = escape("plain");
+      taken.preventDefault();
+      expect(isPageEscape(taken)).toBe(false);
+      document.body.innerHTML = "";
+    });
+  });
+
   describe("createActivationFilter", () => {
     /** A click as the browser reports it, at a time in milliseconds */
     function click(detail: number, timeStamp: number): MouseEvent {
@@ -590,6 +628,96 @@ describe("mapHelpers", () => {
       expect(preventDefault).toHaveBeenCalledOnce();
     });
 
+    /** A press of `pointerType` on `target`, and the mousedown it hands on */
+    function press(
+      map: MapLibreMap & MockMap,
+      target: Element,
+      pointerType: string,
+      detail: number,
+    ): void {
+      target.dispatchEvent(
+        Object.assign(new Event("pointerdown", { bubbles: true }), {
+          pointerType,
+        }),
+      );
+      const originalEvent = Object.assign(
+        new Event("mousedown", { bubbles: true }),
+        { detail },
+      );
+      target.dispatchEvent(originalEvent);
+      map.emit("mousedown", { originalEvent });
+    }
+
+    it("keeps the second click of a mouse's double click off the map from zooming", () => {
+      const { map, onCanvas } = mapWithMarker();
+      keepMarkerTapsFromZoom(map);
+      const marker = map.getCanvasContainer().querySelector("button")!;
+      const preventDefault = vi.fn();
+
+      // The popup of the first click panned the marker from under the second
+      press(map, marker, "mouse", 1);
+      press(map, map.getCanvas(), "mouse", 2);
+      map.emit("dblclick", { ...onCanvas("dblclick"), preventDefault });
+      expect(preventDefault).toHaveBeenCalledOnce();
+
+      // A double click of its own on the map zooms
+      press(map, map.getCanvas(), "mouse", 1);
+      press(map, map.getCanvas(), "mouse", 2);
+      map.emit("dblclick", { ...onCanvas("dblclick"), preventDefault });
+      expect(preventDefault).toHaveBeenCalledOnce();
+    });
+
+    it("lets a mouse's double click zoom after a touch on a marker", () => {
+      const { map, onMarker, onCanvas } = mapWithMarker();
+      keepMarkerTapsFromZoom(map);
+      map.emit("touchstart", onMarker("touchstart"));
+      map.emit("touchend", onMarker("touchend"));
+      const preventDefault = vi.fn();
+
+      press(map, map.getCanvas(), "mouse", 1);
+      press(map, map.getCanvas(), "mouse", 2);
+      map.emit("dblclick", { ...onCanvas("dblclick"), preventDefault });
+
+      expect(preventDefault).not.toHaveBeenCalled();
+    });
+
+    it("goes by a pen's press as by a mouse's", () => {
+      const { map, onCanvas } = mapWithMarker();
+      keepMarkerTapsFromZoom(map);
+      const marker = map.getCanvasContainer().querySelector("button")!;
+      const preventDefault = vi.fn();
+      // A mouse's click on a marker, then a pen's double click on the map
+      press(map, marker, "mouse", 1);
+      press(map, map.getCanvas(), "pen", 1);
+      press(map, map.getCanvas(), "pen", 2);
+      map.emit("dblclick", { ...onCanvas("dblclick"), preventDefault });
+      expect(preventDefault).not.toHaveBeenCalled();
+
+      // And a pen's double click whose popup panned the marker away
+      press(map, marker, "pen", 1);
+      press(map, map.getCanvas(), "pen", 2);
+      map.emit("dblclick", { ...onCanvas("dblclick"), preventDefault });
+      expect(preventDefault).toHaveBeenCalledOnce();
+    });
+
+    it("goes by the touch, not the mousedown a tap hands over after it", () => {
+      const { map, onMarker, onCanvas } = mapWithMarker();
+      keepMarkerTapsFromZoom(map);
+      const marker = map.getCanvasContainer().querySelector("button")!;
+      map.emit("touchstart", onMarker("touchstart"));
+      map.emit("touchend", onMarker("touchend"));
+      press(map, marker, "touch", 1);
+      // The second tap, off the marker, with the detail WebKit gives a tap
+      map.emit("touchstart", onCanvas("touchstart"));
+      map.emit("touchend", onCanvas("touchend"));
+      press(map, map.getCanvas(), "touch", 1);
+      const preventDefault = vi.fn();
+
+      map.emit("dblclick", { ...onCanvas("dblclick"), preventDefault });
+
+      expect(preventDefault).toHaveBeenCalledOnce();
+    });
+
     it("leaves a zoom that was switched off by someone else off", () => {
       const { map, onMarker } = mapWithMarker();
       map.doubleClickZoom.disable();
@@ -610,6 +738,7 @@ describe("mapHelpers", () => {
 
       expect(map.doubleClickZoom.isEnabled()).toBe(true);
       for (const type of [
+        "mousedown",
         "dblclick",
         "touchstart",
         "touchend",

@@ -26,20 +26,26 @@ test.describe("Replay", () => {
     const replayBtn = page.locator("#replay-btn");
     await expect(replayBtn).toHaveAttribute(
       "title",
-      "Select exactly one flight with timing data to replay",
+      "Pick one flight with timing data to replay, under Statistics, Flights",
     );
 
     // The button is actionable even when replay is unavailable
     await replayBtn.click({ force: true });
 
     await expect(page.locator(".toast-notification")).toHaveText(
-      "Select exactly one flight with timing data to replay",
+      "Pick one flight with timing data to replay, under Statistics, Flights",
     );
     // Screen readers hear it through the persistent status region
     await expect(page.locator("#toast-status")).toHaveText(
-      "Select exactly one flight with timing data to replay",
+      "Pick one flight with timing data to replay, under Statistics, Flights",
     );
     await expect(page.locator("#replay-controls")).toBeHidden();
+    // With nothing selected, the list to pick a flight from opens with it
+    await expect(page.locator("#stats-rail")).toBeVisible();
+    await expect(page.locator("#flights-tab")).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
   });
 
   test("toggleReplay activates replay mode", async ({ page }) => {

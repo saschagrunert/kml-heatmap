@@ -11,9 +11,9 @@
  * the profile of a single selected flight, which the app fetches as one
  * is first selected, the cross-section, which its control fetches, and the
  * hotspot tour with the camera moves it shares with Wrapped's intro.
- * Wrapped has a bundle of its own (wrapped.ts), and never fetches this
- * one: not even for the airspace new in a year, which it counts with the
- * app's code (DataManager.newAreaKm2).
+ * Wrapped has a bundle of its own (wrapped.ts) and fetches this one only
+ * for its intro's camera moves and heat cloud; it counts the airspace new
+ * in a year with the app's code (DataManager.newAreaKm2).
  *
  * The app is imported for the bundler's sake. esbuild puts every module in
  * a chunk by the set of entry points that reach it, so with three of them a

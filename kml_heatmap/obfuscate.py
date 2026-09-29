@@ -64,13 +64,22 @@ __all__ = [
 # An optional namespace prefix of an element name ("kml:when")
 _PREFIX = r"(?:[\w.-]+:)?"
 
-# gx:Track/TimeStamp <when> and TimeSpan <begin>/<end>, plain or in CDATA
+# gx:Track/TimeStamp <when> and TimeSpan <begin>/<end>, plain or in CDATA,
+# and with a comment or a processing instruction inside, which the parser
+# drops as well
 TIMESTAMP_PATTERN = re.compile(
     r"(<(" + _PREFIX + r"(?:when|begin|end))\b[^>]*>)"
-    r"((?:<!\[CDATA\[.*?\]\]>|[^<])*)(</\2\s*>)"
+    r"((?:<!\[CDATA\[.*?\]\]>|<!--(?s:.*?)-->|<\?(?s:.*?)\?>|[^<])*)(</\2\s*>)"
 )
 CDATA_PATTERN = re.compile(r"^\s*<!\[CDATA\[(.*?)\]\]>\s*$", re.DOTALL)
-FRACTION_PATTERN = re.compile(r"\.\d+")
+# Comments and processing instructions, which the parser drops
+COMMENT_PATTERN = re.compile(r"<!--.*?-->|<\?.*?\?>", re.DOTALL)
+# The declaration a document starts with, the one processing instruction
+# every KML file has
+XML_DECLARATION_PATTERN = re.compile(r"\A\ufeff?\s*<\?xml\b.*?\?>", re.DOTALL)
+# ISO 8601 writes a fraction of a second with a dot or a comma, and Python
+# reads both ("09:12:00,5Z")
+FRACTION_PATTERN = re.compile(r"[.,](\d+)")
 UTC_OFFSET_PATTERN = re.compile(r"[+-]\d{2}:?\d{2}$")
 # Valid KML timestamps without a time: xsd:date and xsd:gYearMonth
 DATE_ONLY_PATTERN = re.compile(r"(\d{4})-\d{2}-\d{2}(Z|[+-]\d{2}:\d{2})?")
@@ -131,10 +140,12 @@ PLACEMARK_PATTERN = re.compile(r"<(" + _PREFIX + r"Placemark)\b.*?</\1\s*>", re.
 def _timestamp_text(raw: str) -> str:
     """The timestamp of a <when> element in the form the rewrite emits.
 
-    A CDATA section is unwrapped, a space between date and time becomes the
-    "T" and a lowercase "z" the "Z"; anything else is left as it is.
+    A comment or a processing instruction is dropped and a CDATA section
+    unwrapped, a space between date and time becomes the "T" and a
+    lowercase "z" the "Z"; anything else is left as it is.
     """
-    text = raw.strip()
+    has_markup = "<!--" in raw or "<?" in raw
+    text = COMMENT_PATTERN.sub("", raw).strip() if has_markup else raw.strip()
     cdata = CDATA_PATTERN.match(text)
     if cdata:
         text = cdata.group(1).strip()
@@ -155,9 +166,13 @@ def _parse_full_timestamp(ts_str: str) -> datetime | None:
 
 
 def _extract_frac(ts_str: str) -> str:
-    """Extract the fractional seconds portion (e.g. '.5848380') from a timestamp."""
+    """The fraction of a second of a timestamp ('.5848380'), '' without one.
+
+    With a dot, the way the rewrite writes it, also when the timestamp had
+    a comma: dropping that fraction changed the intervals of the flight.
+    """
     match = FRACTION_PATTERN.search(ts_str)
-    return match.group(0) if match else ""
+    return f".{match.group(1)}" if match else ""
 
 
 def _format_timestamp(dt: datetime, frac: str = "") -> str:
@@ -668,6 +683,21 @@ def _epoch_is_obfuscated(value: str) -> bool:
     return near_jan_first(dt.month, dt.day) and dt.time() == time()
 
 
+def _with_markup_dropped(content: str) -> str:
+    """The content, and after it again without comments and PIs.
+
+    A reader, the parser among them, sees the text of an element without
+    them: "16<!-- -->.08.2026" reads as 16.08.2026, which the patterns only
+    find once the comment is out. The content itself stays, since a comment
+    holds dates as well. A document whose only processing instruction is
+    the XML declaration is scanned once.
+    """
+    body = XML_DECLARATION_PATTERN.sub("", content, count=1)
+    if "<!--" not in body and "<?" not in body:
+        return content
+    return content + "\n" + COMMENT_PATTERN.sub("", body)
+
+
 def _with_unescaped(content: str) -> str:
     if "&#" in content:
         # A parser reads "2024&#45;03&#45;14" as a date as well
@@ -798,7 +828,7 @@ def check_kml_obfuscated(filepath: Path) -> list[str]:
     # different exporter may have put anywhere.
     # Coordinates cannot hold a date the parser would accept, and skipping
     # them saves most of the time the patterns take on a track
-    without_coordinates = COORDINATES_PATTERN.sub("", content)
+    without_coordinates = _with_markup_dropped(COORDINATES_PATTERN.sub("", content))
     stray_dates = _find_stray_dates(without_coordinates)
     # A Unix time on January 1st fails for its time of day
     epochs = set(_find_stray_epochs(_with_unescaped(without_coordinates)))

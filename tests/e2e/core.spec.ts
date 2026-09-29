@@ -215,7 +215,7 @@ test.describe("Core", () => {
     ).toBe(false);
     await expect(replayBtn).toHaveAttribute(
       "title",
-      "Select exactly one flight with timing data to replay",
+      "Pick one flight with timing data to replay, under Statistics, Flights",
     );
     // Announced as unavailable, but still in the tab order
     await expect(replayBtn).toHaveAttribute("aria-disabled", "true");

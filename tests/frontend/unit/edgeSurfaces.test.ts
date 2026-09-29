@@ -9,18 +9,16 @@ import { resolve } from "node:path";
  * and the same strip at the opposite edge with it: the top of the map
  * showed the page background as high as the tab bar. Only a screenshot of
  * a phone-sized page shows it, which the visual snapshots take; this pins
- * the surfaces to the token, and the token below opaque.
+ * the surfaces to the token, and the token below opaque. The statistics
+ * sheet is opaque: at 0.99 the labels of the map showed through it, and
+ * its rounded top corners keep Chrome from taking it for such an edge.
  */
 
 /** The phone layout's breakpoint in styles.css */
 const PHONE = "(max-width: 767.98px)";
 
 /** The surfaces that span the whole width of the map on a phone */
-const EDGE_SURFACES = [
-  ".mobile-bar",
-  ".mobile-sheet",
-  "#stats-rail:not([hidden])",
-];
+const EDGE_SURFACES = [".mobile-bar", ".mobile-sheet"];
 
 describe("the surfaces across the map's edges on a phone", () => {
   let style: HTMLStyleElement;
@@ -82,6 +80,17 @@ describe("the surfaces across the map's edges on a phone", () => {
         }
       }
     }
+  });
+
+  it("draws the statistics sheet opaque, with the rounded corners that let it", () => {
+    const [sheet, ...others] = rulesFor("#stats-rail:not([hidden])", PHONE);
+    expect(others).toEqual([]);
+    expect(sheet!.style.getPropertyValue("background-color")).toBe(
+      "var(--color-bg-secondary)",
+    );
+    expect(sheet!.style.getPropertyValue("border-radius")).toBe(
+      "var(--radius-sheet) var(--radius-sheet) 0 0",
+    );
   });
 
   it("keeps that colour short of opaque, and the secondary surface", () => {

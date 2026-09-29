@@ -157,9 +157,16 @@
 /* The page's own chrome goes as the dialog comes in, before its fade: the
    heat legend and the stats rail, whose display lingers through a fade of
    their own (see styles.css), and the phone's bar and compass showed
-   through the first frames of the intro */
+   through the first frames of the intro, and the GitHub button through
+   the backdrop */
 body:has(#wrapped-modal:not([hidden]))
-  :is(.color-legend, .mobile-bar, #stats-rail, #compass-float-btn) {
+  :is(
+    .color-legend,
+    .mobile-bar,
+    #stats-rail,
+    #compass-float-btn,
+    #github-footer
+  ) {
   visibility: hidden;
 }
 
@@ -341,7 +348,7 @@ body:has(#wrapped-modal:not([hidden]))
   }
 }
 #wrapped-more-btn:focus-visible {
-  outline: 2px solid var(--color-accent-blue);
+  outline: var(--focus-ring);
   outline-offset: 2px;
   border-radius: var(--radius-control);
 }
@@ -622,7 +629,7 @@ body:has(#wrapped-modal:not([hidden]))
 }
 #wrapped-header .close-btn:focus-visible,
 #wrapped-skip-btn:focus-visible {
-  outline: 2px solid var(--color-accent-blue);
+  outline: var(--focus-ring);
   outline-offset: 2px;
   color: var(--color-text);
 }
@@ -1072,6 +1079,16 @@ body:has(#wrapped-modal:not([hidden]))
     }
     #wrapped-cards-column.is-at-end {
       --wrapped-bottom-fade: 0px;
+    }
+  }
+  /* Stacked, the dialog scrolls as one column, and a card scrolled up
+     under its head was cut off square there too */
+  @media (max-width: 1023.98px) {
+    #wrapped-content {
+      mask-image: linear-gradient(transparent, #000 var(--wrapped-top-fade));
+      animation: wrapped-top-fade linear both;
+      animation-timeline: scroll(self);
+      animation-range: 0 var(--space-lg);
     }
   }
 }
@@ -1726,7 +1743,7 @@ body:has(#wrapped-modal:not([hidden]))
 #stats-rail-tabs button:focus-visible,
 .kh-flights-search:focus-visible,
 .kh-flights button:focus-visible {
-  outline: 2px solid var(--color-accent-blue);
+  outline: var(--focus-ring);
   outline-offset: -2px;
 }
 #flight-list-panel:not([hidden]) {
