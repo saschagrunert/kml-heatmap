@@ -248,7 +248,7 @@ describe("createYearDecoder", () => {
       flatCurves(segments),
       segments,
       () => true,
-      heatWeight(false),
+      heatWeight,
       (seconds) => seconds,
     ];
 

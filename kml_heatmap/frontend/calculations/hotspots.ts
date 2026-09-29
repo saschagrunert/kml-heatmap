@@ -3,19 +3,17 @@
  * strongest, which the hotspot tour flies to (ui/hotspotTour.ts).
  *
  * The heat is weighed as the heatmap, its lines and the heat cloud weigh
- * it (heatWeight, by the By distance switch): each segment's seconds, or
- * by distance the seconds of its length at ROUTE_SPEED_MS, half at either
- * end, added up in cells of a coarse grid about a kilometre wide. The cell
- * with the most heat around it seeds a hotspot, which takes in every cell
- * near it (HOTSPOT_RADIUS_M), so a field, its circuit and its holding
- * points are one place rather than three; the next seed is the next such
- * cell that is far enough from every hotspot kept (HOTSPOT_APART_M), and
- * so is the middle of its place. A place is
- * named after the nearest airport of the site, or by its distance and
- * direction from it.
+ * it (heatWeight): each segment's seconds, half at either end, added up
+ * in cells of a coarse grid about a kilometre wide. The cell with the most
+ * heat around it seeds a hotspot, which takes in every cell near it
+ * (HOTSPOT_RADIUS_M), so a field, its circuit and its holding points are
+ * one place rather than three; the next seed is the next such cell that is
+ * far enough from every hotspot kept (HOTSPOT_APART_M), and so is the
+ * middle of its place. A place is named after the nearest airport of the
+ * site, or by its distance and direction from it.
  *
- * Only totals leave this module: the time spent at a place, or by distance
- * the distance flown there, and their share of the view's, never when.
+ * Only totals leave this module: the time spent at a place and its share
+ * of the view's, never when.
  */
 import type { Airport, PathSegment } from "../types";
 import {
@@ -28,8 +26,7 @@ import {
   type Coordinate,
 } from "../utils/geometry";
 import { formatDuration } from "../utils/duration";
-import { formatNumber } from "../utils/formatters";
-import { heatWeight, ROUTE_SPEED_MS, type SegmentWeight } from "./heatLines";
+import { heatWeight, type SegmentWeight } from "./heatLines";
 
 /** Edge of a cell of the grid the heat is added up in, in metres */
 const HOTSPOT_CELL_M = 1000;
@@ -63,10 +60,7 @@ const NEAR_AIRPORT_KM = 80;
 export interface Hotspot {
   /** `[lat, lng]`, the middle of its heat */
   center: Coordinate;
-  /**
-   * Its heat, as weighed: the seconds spent there, or by distance those of
-   * the distance flown there at ROUTE_SPEED_MS
-   */
+  /** Its heat, as weighed: the seconds spent there */
   seconds: number;
   /** Its share of the heat of the whole view, 0 to 1 */
   share: number;
@@ -123,7 +117,7 @@ function cellOf([lat, lng]: Readonly<Coordinate>): [number, number] {
 export function findHotspots(
   segments: readonly PathSegment[],
   keep: (pathId: number) => boolean,
-  weigh: SegmentWeight = heatWeight(false),
+  weigh: SegmentWeight = heatWeight,
 ): Hotspot[] {
   const cells = new Map<number, Cell>();
   let total = 0;
@@ -278,25 +272,13 @@ export function hotspotName(
   return `${Math.round(nearestKm)} km ${direction} of ${nearest.name}`;
 }
 
-/** A distance flown as "1,250 km", "4.5 km" or "800 m" */
-export function formatHotspotDistance(metres: number): string {
-  const hundreds = Math.round(metres / 100);
-  if (hundreds < 10) return `${Math.max(1, hundreds) * 100} m`;
-  if (hundreds < 100) return `${(hundreds / 10).toString()} km`;
-  return `${formatNumber(metres / 1000)} km`;
-}
-
 /**
  * What the caption of a hotspot says below its name: "32 h, 22% of the
  * time", or "40 min, under 1% of the time" (a total in the page's words,
- * formatDuration, never a time of day); with `route` (By distance,
- * whose heat is the distance flown at ROUTE_SPEED_MS) "1,250 km flown, 8%
- * of the distance"
+ * formatDuration, never a time of day)
  */
-export function hotspotDetail(hotspot: Hotspot, route = false): string {
+export function hotspotDetail(hotspot: Hotspot): string {
   const percent = Math.round(hotspot.share * 100);
   const share = percent >= 1 ? `${percent}%` : "under 1%";
-  return route
-    ? `${formatHotspotDistance(hotspot.seconds * ROUTE_SPEED_MS)} flown, ${share} of the distance`
-    : `${formatDuration(hotspot.seconds)}, ${share} of the time`;
+  return `${formatDuration(hotspot.seconds)}, ${share} of the time`;
 }

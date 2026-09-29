@@ -809,9 +809,9 @@ body {
   padding: var(--space-md);
   z-index: var(--z-legend);
   font-size: var(--text-sm);
-  /* One width for the heat, altitude and speed legends, so the box does
-     not jump as one takes another's place: the widest, the speeds with
-     their km/h, fits it with room to spare */
+  /* One width for the altitude and speed legends, so the box does not
+     jump as one takes the other's place: the widest, the speeds with their
+     km/h, fits it with room to spare. The heat's is a row of its own. */
   min-width: 216px;
   box-shadow: var(--shadow-panel);
   box-sizing: border-box;
@@ -873,21 +873,27 @@ body {
 .color-legend .labels > :last-child {
   text-align: end;
 }
-/* The heat legend (ui/heatLegend.ts) draws its bar so that each label
-   stands under the colour of its count, in the middle of its quarter */
+/* The heat legend (ui/heatLegend.ts) is one short row, its title, "Less",
+   a slim bar and "More", which takes little of a phone's map; it is as
+   wide as that row rather than as the other legends */
+#heat-legend {
+  min-width: 0;
+}
+#heat-legend .labels {
+  display: flex;
+  align-items: center;
+}
+#heat-legend .legend-title {
+  margin: 0;
+}
 #heat-legend .gradient-bar {
-  height: var(--space-md);
+  width: 6em;
+  height: var(--space-sm);
+  margin: 0;
 }
 /* As faint as the heat when it steps back for what is drawn over it */
 #heat-legend.is-dimmed .gradient-bar {
   opacity: var(--heatmap-dimmed-opacity);
-}
-#heat-legend .labels {
-  grid-template-columns: repeat(4, 1fr);
-  gap: 0;
-}
-#heat-legend .labels > * {
-  text-align: center;
 }
 
 /* ==========================================================================

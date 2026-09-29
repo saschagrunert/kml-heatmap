@@ -3,7 +3,7 @@ import {
   heatLineFeatures,
   heatLinesAlong,
   heatWeight,
-  ROUTE_SPEED_MS,
+  CRUISE_SPEED_MS,
   segmentSeconds,
 } from "../../../../kml_heatmap/frontend/calculations/heatLines";
 import {
@@ -333,7 +333,9 @@ describe("heatLineFeatures along the curve", () => {
 describe("heatLinesAlong", () => {
   it("draws the lines of heatLineFeatures along the curves it is handed", () => {
     const segments = [...flight(1), ...flight(2, { lng: 8.001, count: 4 })];
-    const weigh = heatWeight(true);
+    // Half the heat of the heatmap's, as a weighing of a test
+    const weigh = (segment: PathSegment, next: PathSegment | undefined) =>
+      heatWeight(segment, next) / 2;
     const tone = (seconds: number): number => seconds / 2;
     // The year decoder is handed the curves the page keeps, and works out
     // none of its own
@@ -389,10 +391,9 @@ describe("heatLineFeatures smoothing", () => {
 describe("heatWeight", () => {
   const [first, second] = flight(1, { count: 2, stepM: 235, stepS: 5 });
 
-  it("counts the seconds spent by time, as the heat lines always did", () => {
-    const byTime = heatWeight(false);
-    expect(byTime(first!, second)).toBe(segmentSeconds(first!, second));
-    expect(byTime(first!, second)).toBeCloseTo(5);
+  it("counts the seconds spent, as the heat lines always did", () => {
+    expect(heatWeight(first!, second)).toBe(segmentSeconds(first!, second));
+    expect(heatWeight(first!, second)).toBeCloseTo(5);
   });
 
   it("counts a track without times or speeds as flown at cruise speed", () => {
@@ -404,20 +405,13 @@ describe("heatWeight", () => {
       ],
     });
     expect(segmentSeconds(planned, undefined)).toBe(0);
-    expect(heatWeight(false)(planned, undefined)).toBeCloseTo(
-      514 / ROUTE_SPEED_MS,
+    expect(heatWeight(planned, undefined)).toBeCloseTo(
+      514 / CRUISE_SPEED_MS,
       1,
     );
   });
 
-  it("counts every flight the same per kilometre by distance", () => {
-    const slow = flight(2, { count: 1, stepM: 235, stepS: 60 })[0]!;
-    const byRoute = heatWeight(true);
-    expect(byRoute(slow, undefined)).toBeCloseTo(byRoute(first!, second), 6);
-    expect(byRoute(first!, second)).toBeCloseTo(235 / ROUTE_SPEED_MS, 1);
-  });
-
-  it("adds no more for a leg kilometres long than the time mode does", () => {
+  it("adds no more for a leg kilometres long than a long stand does", () => {
     const leg = createSegment({
       groundspeed_knots: 0,
       coords: [
@@ -425,18 +419,12 @@ describe("heatWeight", () => {
         [50 + 20000 * DEG_PER_M, 8],
       ],
     });
-    const most = heatWeight(false)(
+    const most = heatWeight(
       createSegment({ time: 0, groundspeed_knots: 1 }),
       createSegment({ time: 590 }),
     );
     expect(most).toBe(120);
-    expect(heatWeight(false)(leg, undefined)).toBe(most);
-    expect(heatWeight(true)(leg, undefined)).toBe(most);
-  });
-
-  it("is the same function for the same switch", () => {
-    expect(heatWeight(true)).toBe(heatWeight(true));
-    expect(heatWeight(true)).not.toBe(heatWeight(false));
+    expect(heatWeight(leg, undefined)).toBe(most);
   });
 
   it("draws no line of segments of no heat", () => {
@@ -445,7 +433,7 @@ describe("heatWeight", () => {
     for (const segment of taxi) segment.groundspeed_knots = 10;
     const segments = [...taxi, ...air];
     const at = ([lat, lng]: [number, number]): string => [lng, lat].join();
-    const drawn = (weigh = heatWeight(false)): Set<string> =>
+    const drawn = (weigh = heatWeight): Set<string> =>
       new Set(
         heatLineFeatures(segments, all, weigh).features.flatMap((line) =>
           line.geometry.coordinates.map((point) => point.join()),
@@ -454,17 +442,10 @@ describe("heatWeight", () => {
 
     expect(drawn().has(at(taxi[0]!.coords[0]))).toBe(true);
     const airborne = drawn((segment, next) =>
-      segment.groundspeed_knots < 30 ? 0 : heatWeight(false)(segment, next),
+      segment.groundspeed_knots < 30 ? 0 : heatWeight(segment, next),
     );
     expect(airborne.has(at(taxi[0]!.coords[0]))).toBe(false);
     expect(airborne.has(at(taxi[4]!.coords[1]))).toBe(false);
     expect(airborne.has(at(air[0]!.coords[0]))).toBe(true);
-  });
-
-  it("weighs the heat lines", () => {
-    const taxi = flight(1, { count: 5, stepM: 20, stepS: 60 });
-    const byTime = heatLineFeatures(taxi, all);
-    const byRoute = heatLineFeatures(taxi, all, heatWeight(true));
-    expect(heatAt(byRoute, 50, 8)).toBeLessThan(heatAt(byTime, 50, 8) / 8);
   });
 });

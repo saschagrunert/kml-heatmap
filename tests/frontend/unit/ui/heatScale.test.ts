@@ -71,11 +71,10 @@ function cruises(flights: number) {
 
 /** The heat the lines give those, weighed by time and scaled by `exposure` */
 function heatOfLines(flights: number, exposure: number): Set<number> {
-  const weigh = heatWeight(false);
   const { features } = heatLineFeatures(
     cruises(flights),
     () => true,
-    (segment, next) => weigh(segment, next) * exposure,
+    (segment, next) => heatWeight(segment, next) * exposure,
   );
   return new Set(features.map((feature) => feature.properties.heat));
 }
@@ -88,25 +87,20 @@ describe("heat scale", () => {
     expect(HEAT_FLIGHT_DENSITY).toBe(0.015);
   });
 
-  it("is about the density a lone cruise's ridge is drawn at, by time or by distance, at every reach", () => {
+  it("is about the density a lone cruise's ridge is drawn at, at every reach", () => {
     // MapLibre's kernel of a point is GAUSS_COEF * exp(-4.5 * (d / radius)^2)
     // times weight times intensity, at the reference zoom 12 and further
     // out, where the reach is wider and the intensity less. The ridge
     // ripples between the fixes, so its mean between two of them in the
     // middle of the track.
     const GAUSS_COEF = 0.3989422804014327;
-    for (const [zoom, route] of [
-      [12, false],
-      [12, true],
-      [10, false],
-      [8.5, false],
-    ] as const) {
+    for (const zoom of [12, 11.5, 11, 10, 8.5]) {
       const metresPerPx =
         (40075016.686 * Math.cos(LAT * DEGREES_TO_RADIANS)) / (512 * 2 ** zoom);
       const { points, weights } = heatmapPoints(
         cruises(1),
         () => true,
-        heatWeight(route),
+        heatWeight,
       );
       let ridge = 0;
       const samples = 20;
@@ -122,7 +116,7 @@ describe("heat scale", () => {
             samples;
         });
       }
-      const at = `${zoom} ${route}`;
+      const at = `${zoom}`;
       expect(ridge / HEAT_FLIGHT_DENSITY, at).toBeGreaterThan(0.9);
       expect(ridge / HEAT_FLIGHT_DENSITY, at).toBeLessThan(1.2);
     }

@@ -1,6 +1,6 @@
 /**
- * The heat legend: its labels and bar worked out from the scale of the
- * heat, with the markup of map_template.html. When it shows is up to
+ * The heat legend: its bar and the words of its ends worked out from the
+ * scale of the heat, with the markup of map_template.html. When it shows is up to
  * followLayerVisibility (layerVisibility.test.ts).
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
@@ -8,8 +8,8 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   followHeatLegend,
-  HEAT_LEGEND_TITLES,
   heatLegend,
+  heatLegendText,
 } from "../../../../kml_heatmap/frontend/ui/heatLegend";
 import { HEAT_FLIGHT_DENSITY } from "../../../../kml_heatmap/frontend/calculations/heatExposure";
 import { HEATMAP_GRADIENT } from "../../../../kml_heatmap/frontend/ui/heatmapPaint";
@@ -99,16 +99,31 @@ describe("heatLegend", () => {
   });
 });
 
+describe("heatLegendText", () => {
+  it("says which way the time grows and what the ends stand for", () => {
+    expect(heatLegendText([1, 4, 16, 64])).toBe(
+      "Time spent: blue for about 1 pass of a flight, pale cyan for about 64, white for many more",
+    );
+    expect(heatLegendText([4, 16, 64, 256])).toBe(
+      "Time spent: blue for about 4 passes of a flight, pale cyan for about 256, white for many more",
+    );
+  });
+});
+
 describe("followHeatLegend", () => {
   let app: MockApp;
   let legend: HTMLElement;
 
-  const labels = (): string[] =>
-    [...legend.querySelectorAll(".labels > *")].map(
-      (label) => label.textContent ?? "",
-    );
-  const bar = (): string =>
-    legend.querySelector<HTMLElement>(".gradient-bar")!.style.backgroundImage;
+  const bar = (): HTMLElement =>
+    legend.querySelector<HTMLElement>(".gradient-bar")!;
+  /** What the bar is named, and the legend's tooltip with it */
+  const said = (): string => {
+    const row = legend.querySelector<HTMLElement>(".labels")!;
+    expect(row.title).toBe(bar().getAttribute("aria-label"));
+    // Not the region's, which would be read out as its description
+    expect(legend.hasAttribute("title")).toBe(false);
+    return row.title;
+  };
 
   beforeEach(() => {
     legend = heatLegendOfPage();
@@ -120,11 +135,28 @@ describe("followHeatLegend", () => {
     legend.remove();
   });
 
-  it("draws the bar under the labels the page has, those of the heatmap", () => {
-    expect(labels()).toEqual(["≈1 pass", "4", "16", "64"]);
+  it("is one row: its title, less, the bar and more", () => {
+    const row = [...legend.querySelector(".labels")!.children];
+    expect(row.map((part) => part.textContent.trim())).toEqual([
+      "Time spent",
+      "Less",
+      "",
+      "More",
+    ]);
+    expect(row[2]).toBe(bar());
+    expect(bar().getAttribute("role")).toBe("img");
+    // The page names the bar as the heatmap is drawn unscaled
+    expect(bar().getAttribute("aria-label")).toBe(
+      heatLegendText([1, 4, 16, 64]),
+    );
+  });
+
+  it("draws the bar of the heatmap and names its ends", () => {
     followHeatLegend(asMapApp(app));
-    expect(labels()).toEqual(["≈1 pass", "4", "16", "64"]);
-    expect(bar()).toBe(styled(heatLegend(HEAT_FLIGHT_DENSITY).gradient));
+    expect(bar().style.backgroundImage).toBe(
+      styled(heatLegend(HEAT_FLIGHT_DENSITY).gradient),
+    );
+    expect(said()).toBe(heatLegendText([1, 4, 16, 64]));
   });
 
   it("follows the cloud's scale while the cloud is drawn", () => {
@@ -133,46 +165,38 @@ describe("followHeatLegend", () => {
       app.heatCloud = true;
       app.store.set("heatCloudScale", 0.5);
     });
-    expect(labels()).toEqual(["≈2 passes", "8", "32", "128"]);
-    expect(bar()).toBe(styled(heatLegend(HEAT_FLIGHT_DENSITY / 2).gradient));
+    expect(said()).toBe(heatLegendText([2, 8, 32, 128]));
+    expect(bar().style.backgroundImage).toBe(
+      styled(heatLegend(HEAT_FLIGHT_DENSITY / 2).gradient),
+    );
     app.store.set("heatCloudScale", 0.25);
-    expect(labels()).toEqual(["≈4 passes", "16", "64", "256"]);
+    expect(said()).toBe(heatLegendText([4, 16, 64, 256]));
 
     app.heatCloud = false;
-    expect(labels()).toEqual(["≈1 pass", "4", "16", "64"]);
+    expect(said()).toBe(heatLegendText([1, 4, 16, 64]));
   });
 
   it("follows the exposure of the flat heatmap, but not in the cloud's place", () => {
     followHeatLegend(asMapApp(app));
     // A logbook of many years, drawn at a quarter
     app.heatmapExposure = 0.25;
-    expect(labels()).toEqual(["≈4 passes", "16", "64", "256"]);
-    expect(bar()).toBe(styled(heatLegend(HEAT_FLIGHT_DENSITY / 4).gradient));
+    expect(said()).toBe(heatLegendText([4, 16, 64, 256]));
+    expect(bar().style.backgroundImage).toBe(
+      styled(heatLegend(HEAT_FLIGHT_DENSITY / 4).gradient),
+    );
     // A lone flight, drawn at twice its heat: one flight's colour is
-    // brighter, and the labels start at one all the same
+    // brighter, and the bar starts at one all the same
     app.heatmapExposure = 2;
-    expect(labels()).toEqual(["≈1 pass", "4", "16", "64"]);
-    expect(bar()).toBe(styled(heatLegend(HEAT_FLIGHT_DENSITY * 2).gradient));
+    expect(said()).toBe(heatLegendText([1, 4, 16, 64]));
+    expect(bar().style.backgroundImage).toBe(
+      styled(heatLegend(HEAT_FLIGHT_DENSITY * 2).gradient),
+    );
 
     app.store.batch(() => {
       app.heatCloud = true;
       app.store.set("heatCloudScale", 0.5);
     });
-    expect(labels()).toEqual(["≈2 passes", "8", "32", "128"]);
-  });
-
-  it("says what the heat counts: the distance flown with By distance on", () => {
-    const title = (): string =>
-      legend.querySelector("#heat-legend-what")!.textContent ?? "";
-    followHeatLegend(asMapApp(app));
-    expect(title()).toBe(HEAT_LEGEND_TITLES.time);
-    expect(title()).toBe("Time spent");
-    app.routeWeighting = true;
-    expect(title()).toBe("Distance flown");
-    // The labels hold: a flight's worth is a pass, of any flight
-    expect(labels()).toEqual(["≈1 pass", "4", "16", "64"]);
-    app.routeWeighting = false;
-    expect(title()).toBe("Time spent");
+    expect(said()).toBe(heatLegendText([2, 8, 32, 128]));
   });
 
   it("says what the cloud shows while the cloud draws the heat", () => {

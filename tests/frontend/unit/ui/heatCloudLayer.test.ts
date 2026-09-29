@@ -1002,6 +1002,8 @@ describe("the heat cloud's layer", () => {
     const pulses = (): number => uniform("u_flowMix")[1]!;
 
     beforeEach(() => {
+      // Where they are drawn in full (see CLOUD_MARK_ZOOMS)
+      (map.getZoom as Mock).mockReturnValue(9);
       layer.onAdd(map);
       layer.setPoints(points());
     });
@@ -1231,11 +1233,11 @@ describe("markStrength", () => {
 
   it("fades in from a view of a region to one of its routes", () => {
     expect(markStrength(0, 5)).toBe(0);
-    expect(markStrength(0, 6.5)).toBe(0);
-    const between = markStrength(0, 7.25);
+    expect(markStrength(0, 7.5)).toBe(0);
+    const between = markStrength(0, 8.25);
     expect(between).toBeGreaterThan(0);
     expect(between).toBeLessThan(1);
-    expect(markStrength(0, 8)).toBe(1);
+    expect(markStrength(0, 9)).toBe(1);
     expect(markStrength(0, 17)).toBe(1);
   });
 });

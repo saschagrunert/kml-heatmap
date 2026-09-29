@@ -510,7 +510,7 @@ describe("withDataLayers", () => {
     ]);
   });
 
-  it("fades the new style's labels while the heat is drawn, and none of the app's", () => {
+  it("steps the new style's labels back while the heat is drawn, and none of the app's", () => {
     const next: StyleSpecification = {
       version: 8,
       sources: { places: { type: "geojson", data: "places" } },
@@ -526,7 +526,19 @@ describe("withDataLayers", () => {
           id: "own-opacity",
           type: "symbol",
           source: "places",
-          paint: { "text-opacity": 0.3 },
+          paint: {
+            "text-opacity": 0.3,
+            "text-halo-color": "#111",
+            "text-halo-width": [
+              "interpolate",
+              ["linear"],
+              ["zoom"],
+              4,
+              0.5,
+              8,
+              1,
+            ],
+          },
         },
       ],
     };
@@ -551,9 +563,18 @@ describe("withDataLayers", () => {
     const paint = (id: string): unknown =>
       style.layers.find((layer) => layer.id === id)!.paint;
 
+    const shown = ["global-state", HEAT_SHOWN_STATE];
+    // A little fainter, on a wider and darker halo than the style's none
     expect(paint("place-labels")).toEqual({
       "text-color": "#fff",
-      "text-opacity": ["case", ["global-state", HEAT_SHOWN_STATE], 0.5, 1],
+      "text-opacity": ["case", shown, 0.78, 1],
+      "text-halo-color": [
+        "case",
+        shown,
+        "rgba(14, 14, 14, 0.9)",
+        "rgba(0, 0, 0, 0)",
+      ],
+      "text-halo-width": ["case", shown, 1.6, 0],
     });
     // Valid for MapLibre, as the style of the map is not validated
     expect(
@@ -563,13 +584,50 @@ describe("withDataLayers", () => {
         layers: style.layers.filter((layer) => layer.id === "place-labels"),
       }),
     ).toEqual([]);
-    // An opacity of the style's own stays, the style it came in is left as
-    // it was, and the airport labels and the stand-ins of their dots are
-    // the app's
-    expect(paint("own-opacity")).toEqual({ "text-opacity": 0.3 });
+    // An opacity of the style's own stays, and so does a halo that follows
+    // the zoom, which a `case` cannot hold; the style it came in is left
+    // as it was, and the airport labels and the stand-ins of their dots
+    // are the app's
+    expect(paint("own-opacity")).toEqual(next.layers[2]!.paint);
     expect(next.layers[1]!.paint).toEqual({ "text-color": "#fff" });
     expect(paint(MAP_LAYERS.airportLabels)).toBeUndefined();
     expect(paint(MAP_LAYERS.airportDots)).toBeUndefined();
+  });
+
+  it("draws the base style's band along the borders faintly, and its line as it is", () => {
+    const next: StyleSpecification = {
+      version: 8,
+      sources: { borders: { type: "geojson", data: "borders" } },
+      layers: [
+        {
+          id: "boundary_country_outline",
+          type: "line",
+          source: "borders",
+          paint: {
+            "line-color": "#2C353C",
+            "line-opacity": 0.5,
+            "line-width": 8,
+          },
+        },
+        {
+          id: "boundary_country_inner",
+          type: "line",
+          source: "borders",
+          paint: { "line-opacity": 1 },
+        },
+      ],
+    };
+
+    const style = withDataLayers(previous, next);
+    const paint = (id: string): unknown =>
+      style.layers.find((layer) => layer.id === id)!.paint;
+
+    expect(paint("boundary_country_outline")).toEqual({
+      "line-color": "#2C353C",
+      "line-opacity": 0.2,
+      "line-width": 8,
+    });
+    expect(paint("boundary_country_inner")).toEqual({ "line-opacity": 1 });
   });
 
   it("keeps the sky of a tilted map, which the base style does not have", () => {

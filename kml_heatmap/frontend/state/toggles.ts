@@ -69,23 +69,6 @@ export const TOGGLES = [
     sheet: { group: "layers", id: "heatmap" },
   },
   {
-    // How the heat is counted, for the heatmap, its lines, the cloud of the
-    // 3D view and the cross-section alike (heatWeight in
-    // calculations/heatLines.ts): every flight the same per kilometre,
-    // where I have been, rather than by the time spent, where I spend time.
-    // It changes the heat rather than adding a layer, so it sits in the
-    // Heat group with the heatmap, and the sheet names what it counts.
-    key: "routeWeighting",
-    initial: false,
-    url: { param: "r" },
-    action: "toggleByDistance",
-    button: "by-distance-btn",
-    icon: "distance",
-    label: "By distance",
-    pressed: true,
-    sheet: { group: "layers", id: "by-distance", label: "Heat by distance" },
-  },
-  {
     key: "airportsVisible",
     initial: true,
     url: { slot: 3 },

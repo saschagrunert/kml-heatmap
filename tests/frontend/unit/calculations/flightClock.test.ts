@@ -14,10 +14,7 @@ import {
   groundedFlights,
   releaseGroundProfiles,
 } from "../../../../kml_heatmap/frontend/calculations/groundProfile";
-import {
-  heatWeight,
-  segmentSeconds,
-} from "../../../../kml_heatmap/frontend/calculations/heatLines";
+import { segmentSeconds } from "../../../../kml_heatmap/frontend/calculations/heatLines";
 import { planarMetres } from "../../../../kml_heatmap/frontend/utils/geometry";
 import {
   smoothFlights,
@@ -285,27 +282,29 @@ describe("chainPieces", () => {
     const clock = flightClockOf(segments);
     const flights = groundedFlights(segments, true, 8);
     const bySeconds = chainPieces(segments, flights, 0, segments.length, clock);
-    const byRoute = heatWeight(true);
+    // Half the time of each segment, as a weighing of a test
+    const halved = (segment: PathSegment, next: PathSegment | undefined) =>
+      segmentSeconds(segment, next) / 2;
 
-    const routes = chainPieces(
+    const halves = chainPieces(
       segments,
       flights,
       0,
       segments.length,
       clock,
-      byRoute,
+      halved,
     );
 
-    expect(routes.seconds).not.toEqual(bySeconds.seconds);
-    expect(routes.lengths).toBe(bySeconds.lengths);
-    expect(routes.times).toBe(bySeconds.times);
+    expect(halves.seconds).not.toEqual(bySeconds.seconds);
+    expect(halves.lengths).toBe(bySeconds.lengths);
+    expect(halves.times).toBe(bySeconds.times);
     // Both kept for the clock, and let go of for another
     expect(chainPieces(segments, flights, 0, segments.length, clock)).toBe(
       bySeconds,
     );
     expect(
-      chainPieces(segments, flights, 0, segments.length, clock, byRoute),
-    ).toBe(routes);
+      chainPieces(segments, flights, 0, segments.length, clock, halved),
+    ).toBe(halves);
     const other = flightClock(segments);
     const retimed = chainPieces(
       segments,
@@ -313,9 +312,9 @@ describe("chainPieces", () => {
       0,
       segments.length,
       other,
-      byRoute,
+      halved,
     );
-    expect(retimed).not.toBe(routes);
-    expect(retimed.seconds).toEqual(routes.seconds);
+    expect(retimed).not.toBe(halves);
+    expect(retimed.seconds).toEqual(halves.seconds);
   });
 });

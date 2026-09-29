@@ -277,8 +277,6 @@ export async function closeMobileSheet(page: Page): Promise<void> {
 /** The desktop button and the sheet row that drive the same layer */
 const LAYER_CONTROLS = {
   heatmap: { buttonId: "heatmap-btn", rowId: "heatmap" },
-  // How the heat is counted
-  byDistance: { buttonId: "by-distance-btn", rowId: "by-distance" },
   airports: { buttonId: "airports-btn", rowId: "airports" },
   altitude: { buttonId: "altitude-btn", rowId: "altitude" },
   airspeed: { buttonId: "airspeed-btn", rowId: "speed" },

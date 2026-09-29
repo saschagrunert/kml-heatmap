@@ -133,7 +133,6 @@ const CLOUD_KEYS: readonly (keyof StoreState)[] = [
   "altitudeVisible",
   "airspeedVisible",
   "aviationVisible",
-  "routeWeighting",
 ];
 
 /**
@@ -156,10 +155,10 @@ function onReliefIn(app: MapApp, forced: boolean): boolean {
 
 /**
  * What the points of the cloud were made of, as a key: the dataset, the
- * filter, the isolated selection, the ground they stand on and how their
- * heat is weighed (heatWeight), in the 3D view's cloud or in Wrapped's
- * (`forced`); the zoom level they are cut for is kept apart (see
- * CLOUD_LEVELS_KEPT). Another key forgets the exposures as well.
+ * filter, the isolated selection and the ground they stand on, in the 3D
+ * view's cloud or in Wrapped's (`forced`); the zoom level they are cut for
+ * is kept apart (see CLOUD_LEVELS_KEPT). Another key forgets the exposures
+ * as well.
  */
 function pointsKey(app: MapApp, forced: boolean): unknown[] {
   const isolated = isolatesIn(app, forced)
@@ -171,7 +170,6 @@ function pointsKey(app: MapApp, forced: boolean): unknown[] {
     app.selectedAircraft,
     isolated,
     onReliefIn(app, forced),
-    app.routeWeighting,
   ];
 }
 
@@ -562,7 +560,7 @@ export function followHeatCloud(app: MapApp): void {
       detail,
       box,
       exposure,
-      heatWeight(app.routeWeighting),
+      heatWeight,
       (busiest) => gain * cloudExposure(busiest * gain),
     );
   };

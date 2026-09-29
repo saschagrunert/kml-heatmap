@@ -347,7 +347,6 @@ describe("MobileBar", () => {
       expect(sheetTitle()).toBe("Layers");
       expect(sheetRows()).toEqual([
         "heatmap",
-        "by-distance",
         "airports",
         "altitude",
         "speed",

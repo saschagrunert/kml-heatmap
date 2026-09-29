@@ -1,9 +1,8 @@
 /**
  * The readout of the heat cloud: what the cloud under the pointer is made
- * of, as time spent (or distance flown, by distance), flights and heights
- * (see ui/cloudReadout.ts). A custom layer has no features the map could
- * look under the pointer for, so the readout is worked out from the
- * segments themselves.
+ * of, as time spent, flights and heights (see ui/cloudReadout.ts). A custom
+ * layer has no features the map could look under the pointer for, so the
+ * readout is worked out from the segments themselves.
  *
  * "Under the pointer" is the line of sight through it. The cloud is drawn
  * at the heights of the flights and adds up every glow on a pixel (see
@@ -18,12 +17,12 @@
  * its own height. Looking straight down, every height has the same place.
  *
  * The time is the cloud's: the heat of each segment in seconds, weighed as
- * the heatmap, its lines and the cloud weigh it (heatWeight: by time or by
- * distance), of the part of the segment within the radius. The segments
- * near a place are found in a grid of cells twice the radius
- * (segmentGrid), made the first time a radius is asked for and kept with
- * the dataset, those of the last few radii. The readout makes it ahead of
- * the pointer, where the map comes to rest (see readoutKept).
+ * the heatmap, its lines and the cloud weigh it (heatWeight), of the part
+ * of the segment within the radius. The segments near a place are found in
+ * a grid of cells twice the radius (segmentGrid), made the first time a
+ * radius is asked for and kept with the dataset, those of the last few
+ * radii. The readout makes it ahead of the pointer, where the map comes to
+ * rest (see readoutKept).
  */
 import type { PathSegment } from "../types";
 import {
@@ -35,7 +34,7 @@ import {
 import { formatDuration } from "../utils/duration";
 import { formatNumber } from "../utils/formatters";
 import { pluralFlights } from "../utils/htmlGenerators";
-import { ROUTE_SPEED_MS, heatWeight, type SegmentWeight } from "./heatLines";
+import { heatWeight, type SegmentWeight } from "./heatLines";
 import { groundProfilesFt } from "./groundProfile";
 
 /** Metres of a degree of latitude, on the sphere of the map */
@@ -183,7 +182,7 @@ export interface ReadoutData {
 
 /** What is kept for a dataset: its seconds, heights and grids */
 interface Kept {
-  /** By how they are weighed (heatWeight gives one function per switches) */
+  /** By how they are weighed (heatWeight, or one a test asks for) */
   seconds: Map<SegmentWeight, Float32Array>;
   /** By the relief level of their ground, -1 for the line of the fields */
   heights: Map<number, { heightsFt: Float32Array; topFt: number }>;
@@ -214,7 +213,7 @@ export function readoutData(
   segments: readonly PathSegment[],
   sampled: boolean,
   level: number,
-  weigh: SegmentWeight = heatWeight(false),
+  weigh: SegmentWeight = heatWeight,
 ): ReadoutData {
   const entry = keptFor(segments);
   let seconds = entry.seconds.get(weigh);
@@ -509,35 +508,21 @@ export function formatTimeSpent(seconds: number): string {
 }
 
 /**
- * "Under 100 m", "About 800 m", "About 4.2 km" (to 100 m) or, from ten
- * kilometres, "About 42 km"
+ * What a readout says, in two parts: the time within the radius, and the
+ * flights and the heights ("17 flights · mostly 800 to 1,200 ft AGL").
+ * "Mostly" is for a band that holds at least half of it, "most often" for
+ * one that only holds more than any other.
  */
-export function formatDistanceFlown(metres: number): string {
-  const tenths = Math.round(metres / 100);
-  if (tenths < 1) return "Under 100 m";
-  if (tenths < 10) return `About ${tenths * 100} m`;
-  if (tenths >= 100) return `About ${formatNumber(metres / 1000)} km`;
-  return `About ${formatNumber(tenths / 10, tenths % 10 ? 1 : 0)} km`;
-}
-
-/**
- * What a readout says, in two parts: the time within the radius, or with
- * `route` (By distance, whose heat is the distance flown at
- * ROUTE_SPEED_MS) the distance flown within it, and the flights and the
- * heights ("17 flights · mostly 800 to 1,200 ft AGL"). "Mostly" is for a
- * band that holds at least half of it, "most often" for one that only
- * holds more than any other.
- */
-export function readoutText(
-  { radiusM, seconds, flights, band }: CloudReadout,
-  route = false,
-): { time: string; detail: string } {
+export function readoutText({
+  radiusM,
+  seconds,
+  flights,
+  band,
+}: CloudReadout): { time: string; detail: string } {
   const radius =
     radiusM < 1000 ? `${radiusM} m` : `${formatNumber(radiusM / 1000)} km`;
   return {
-    time: route
-      ? `${formatDistanceFlown(seconds * ROUTE_SPEED_MS)} flown within ${radius}`
-      : `${formatTimeSpent(seconds)} within ${radius}`,
+    time: `${formatTimeSpent(seconds)} within ${radius}`,
     detail:
       `${pluralFlights(flights)} · ${band.share < 0.5 ? "most often" : "mostly"} ` +
       `${formatNumber(band.fromFt)} to ${formatNumber(band.toFt)} ft AGL`,

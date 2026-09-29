@@ -113,9 +113,8 @@ function clockedFrames() {
 
 /** Held while every flight replays */
 const HELD = [
-  "heatmap-btn",
   // The heat is not the replay's to count again
-  "by-distance-btn",
+  "heatmap-btn",
   "altitude-btn",
   "airspeed-btn",
   "year-select",

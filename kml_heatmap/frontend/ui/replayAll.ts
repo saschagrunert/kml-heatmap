@@ -534,12 +534,11 @@ export const REPLAY_ALL_ORBIT_REDUCED_MOTION_MESSAGE =
  * Controls held while every flight replays, as for the replay of one
  * (REPLAY_DISABLED_CONTROL_IDS in ui/replayManager.ts): the filters, the
  * selection and Wrapped would change or take the map under it. The colour
- * layers too, which colour the trail of one flight and nothing here, and By
- * distance with the Heatmap switch: the heat is not the replay's to count.
+ * layers too, which colour the trail of one flight and nothing here, and
+ * the Heatmap switch: the heat is not the replay's to count.
  */
 const HELD_CONTROL_IDS = [
   "heatmap-btn",
-  "by-distance-btn",
   "altitude-btn",
   "airspeed-btn",
   "airports-btn",

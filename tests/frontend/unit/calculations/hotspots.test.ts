@@ -7,7 +7,6 @@ import { describe, it, expect } from "vitest";
 import {
   compassPoint,
   findHotspots,
-  formatHotspotDistance,
   hotspotDetail,
   hotspotName,
   HOTSPOT_APART_M,
@@ -20,7 +19,7 @@ import type {
 } from "../../../../kml_heatmap/frontend/types";
 import {
   heatWeight,
-  ROUTE_SPEED_MS,
+  type SegmentWeight,
 } from "../../../../kml_heatmap/frontend/calculations/heatLines";
 import { planarMetres } from "../../../../kml_heatmap/frontend/utils/geometry";
 import { segmentOf } from "../../testHelpers";
@@ -34,7 +33,7 @@ const HOME: [number, number] = [51.55, 12.05];
 /**
  * A flight of `path_id` that spends `minutes` circling tightly round
  * `[lat, lng]`, a fix a minute, `radiusKm` out from it. Its last segment
- * has no time to its end, and counts as flown at ROUTE_SPEED_MS: a few
+ * has no time to its end, and counts as flown at CRUISE_SPEED_MS: a few
  * seconds.
  */
 function stay(
@@ -207,7 +206,7 @@ describe("findHotspots", () => {
     expect(sliver).toHaveLength(1);
   });
 
-  it("weighs the heat as the heatmap's switches do", () => {
+  it("weighs the heat as it is asked to", () => {
     // An hour standing at home, creeping round at a walking pace, and
     // half an hour's cruise away over 90 km
     const ground = stay(1, HOME, 61, 0.02).map((segment) => ({
@@ -229,8 +228,10 @@ describe("findHotspots", () => {
 
     // By time the stand at home is the busiest place
     expect(nearHome(findHotspots(segments, all)[0]!)).toBe(true);
-    // By distance counts the way flown, which the stand has little of
-    const routes = findHotspots(segments, all, heatWeight(true));
+    // A weighing that leaves the ground out finds the cruise instead
+    const airborne: SegmentWeight = (segment, next) =>
+      segment.groundspeed_knots < 30 ? 0 : heatWeight(segment, next);
+    const routes = findHotspots(segments, all, airborne);
     expect(nearHome(routes[0]!)).toBe(false);
     expect(routes.some(nearHome)).toBe(false);
   });
@@ -320,24 +321,5 @@ describe("the time of a place", () => {
     expect(hotspotDetail(hotspot(40 * 60, 0.004))).toBe(
       "40 min, under 1% of the time",
     );
-  });
-
-  it("says the distance flown there by distance, never a time", () => {
-    const hotspot = (metres: number, share: number): Hotspot => ({
-      center: HOME,
-      seconds: metres / ROUTE_SPEED_MS,
-      share,
-      radiusM: 0,
-    });
-
-    expect(hotspotDetail(hotspot(1_250_000, 0.08), true)).toBe(
-      "1,250 km flown, 8% of the distance",
-    );
-    expect(hotspotDetail(hotspot(4_460, 0.004), true)).toBe(
-      "4.5 km flown, under 1% of the distance",
-    );
-    expect(formatHotspotDistance(820)).toBe("800 m");
-    expect(formatHotspotDistance(20)).toBe("100 m");
-    expect(formatHotspotDistance(9_960)).toBe("10 km");
   });
 });

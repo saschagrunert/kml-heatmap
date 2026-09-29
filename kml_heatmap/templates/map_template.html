@@ -255,8 +255,7 @@
       </div>
     </div>
 
-    <!-- Right control column: which flights are drawn, their heat and the
-         layers over it -->
+    <!-- Right control column: which flights are drawn and which layers -->
     <div id="right-buttons" class="control-column is-at-end">
       <div
         class="control-group"
@@ -297,15 +296,12 @@
         </div>
       </div>
 
-      <!-- The heat, and how it is counted (calculations/heatLines.ts
-           heatWeight). By distance changes the heat rather than adding a
-           layer; the 3D view's cloud and the cross-section follow it. -->
       <div
         class="control-group"
         role="group"
-        aria-labelledby="heat-group-title"
+        aria-labelledby="layers-group-title"
       >
-        <h2 class="control-group-title" id="heat-group-title">Heat</h2>
+        <h2 class="control-group-title" id="layers-group-title">Layers</h2>
         <div class="control-row">
           <button
             id="heatmap-btn"
@@ -319,27 +315,6 @@
             <span class="control-label">Heatmap</span>
           </button>
         </div>
-        <div class="control-row">
-          <button
-            id="by-distance-btn"
-            class="btn-surface control-btn"
-            data-action="toggleByDistance"
-            data-icon="distance"
-            title="By distance: count the heat by the distance flown, every flight the same per kilometre (where I have been), not by the time spent (where I spend time)"
-            aria-label="By distance: count the heat by the distance flown, not by the time spent"
-            aria-pressed="false"
-          >
-            <span class="control-label">By distance</span>
-          </button>
-        </div>
-      </div>
-
-      <div
-        class="control-group"
-        role="group"
-        aria-labelledby="layers-group-title"
-      >
-        <h2 class="control-group-title" id="layers-group-title">Layers</h2>
         <div class="control-row">
           <button
             id="airports-btn"
@@ -603,11 +578,11 @@
       </div>
     </div>
     <!-- The colours of the heat, of the heatmap and of the 3D view's cloud,
-         with how many passes' worth of time spent (of distance flown, By
-         distance on) each stands for. The labels are those of the heatmap
-         as it is drawn; ui/heatLegend.ts follows the exposure
-         (ui/heatScale.ts), draws the bar under them and shows what the
-         cloud means while it draws the heat. -->
+         in one row: less time spent on the left, more on the right. How
+         many passes of a flight the two ends stand for is in the bar's
+         name and the tooltip, which ui/heatLegend.ts keeps in step with
+         the exposure (ui/heatScale.ts) as it draws the bar; it also shows
+         what the cloud means while it draws the heat. -->
     <div
       id="heat-legend"
       class="color-legend"
@@ -615,16 +590,15 @@
       role="region"
       aria-label="Heat color scale legend"
     >
-      <div class="legend-title" data-icon="heatmap">
-        <span id="heat-legend-what">Time spent</span>
-      </div>
-      <div
-        class="gradient-bar"
-        role="img"
-        aria-label="Heat gradient from dark blue, the least, to white, the most"
-      ></div>
       <div class="labels">
-        <span>≈1 pass</span><span>4</span><span>16</span><span>64</span>
+        <span class="legend-title" data-icon="heatmap">Time spent</span>
+        <span aria-hidden="true">Less</span>
+        <span
+          class="gradient-bar"
+          role="img"
+          aria-label="Time spent: blue for about 1 pass of a flight, pale cyan for about 64, white for many more"
+        ></span>
+        <span aria-hidden="true">More</span>
       </div>
       <details id="heat-cloud-about" hidden>
         <summary>What the cloud shows</summary>

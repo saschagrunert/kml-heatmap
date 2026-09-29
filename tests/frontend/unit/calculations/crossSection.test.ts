@@ -17,7 +17,6 @@ import {
   windowSeconds,
   type SectionRequest,
 } from "../../../../kml_heatmap/frontend/calculations/crossSection";
-import { ROUTE_SPEED_MS } from "../../../../kml_heatmap/frontend/calculations/heatLines";
 import type { PathSegment } from "../../../../kml_heatmap/frontend/types";
 import type { Coordinate } from "../../../../kml_heatmap/frontend/utils/geometry";
 
@@ -79,7 +78,6 @@ function request(
     end: END,
     halfWidthM: 500,
     reference: "agl",
-    route: false,
     columns: 100,
     rows: 50,
     ...overrides,
@@ -244,17 +242,6 @@ describe("crossSection", () => {
     // Every segment adds its capped two minutes, five of them inside
     expect(slow.totalSeconds).toBeGreaterThan(4 * 120);
     expect(slow.totalSeconds).toBeLessThan(5 * 120);
-  });
-
-  it("weighs like the heatmap: by length with By distance", () => {
-    // By time, 222 m every 10 s over the 1,000 m of the corridor
-    const byTime = crossSection(request(crossing()));
-    expect(byTime.route).toBe(false);
-    // By length, at the speed By distance counts every flight at
-    const byRoute = crossSection(request(crossing(), { route: true }));
-    expect(byRoute.route).toBe(true);
-    expect(byRoute.totalSeconds * ROUTE_SPEED_MS).toBeCloseTo(1000, -1);
-    expect(byRoute.totalSeconds).toBeLessThan(byTime.totalSeconds);
   });
 
   it("counts the flights the filter keeps only", () => {

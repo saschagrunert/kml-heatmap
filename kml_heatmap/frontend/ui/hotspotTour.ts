@@ -4,10 +4,9 @@
  *
  * It finds the places where the heat the map shows is strongest
  * (calculations/hotspots.ts: the filters and Isolate count, and the heat
- * is weighed by the By distance switch, as for the heatmap),
- * turns the 3D view and the heatmap on, and flies to each in turn,
- * tilted, turning slowly over it while a caption names the place and the
- * time spent there, or by distance the distance flown there. Pause, the
+ * is weighed as for the heatmap), turns the 3D view and the heatmap on,
+ * and flies to each in turn, tilted, turning slowly over it while a
+ * caption names the place and the time spent there. Pause, the
  * previous and the next place and Stop are in its panel; Escape stops it
  * too. The 3D view is turned on as the switch of the store, not by its
  * control, which turns the altitude colours on for a map without a layer
@@ -50,7 +49,6 @@ import {
   hotspotName,
   type Hotspot,
 } from "../calculations/hotspots";
-import { heatWeight } from "../calculations/heatLines";
 import { findHomeBase } from "../features/airports";
 import { siteData } from "../state/siteData";
 import { applyToggleButtonState } from "../utils/buttonState";
@@ -127,7 +125,6 @@ const HELD_CONTROL_IDS = [
   "compass-float-btn",
   "year-select",
   "aircraft-select",
-  "by-distance-btn",
   "isolate-btn",
   "selection-clear-btn",
   "reset-view-btn",
@@ -210,20 +207,16 @@ function tourStops(app: MapApp, map: MapLibreMap): TourStop[] {
   const airports = siteData.airports ?? [];
   const { width, height } = mapSize(map);
   const bearing = map.getBearing();
-  const route = app.routeWeighting;
-  const weigh = heatWeight(route);
-  return findHotspots(data.path_segments, keep, weigh).map(
-    (hotspot, index) => ({
-      name: hotspotName(hotspot.center, airports, home),
-      detail: hotspotDetail(hotspot, route),
-      camera: {
-        center: hotspot.center,
-        zoom: tourZoom(hotspot, width, height),
-        pitch: TOUR_PITCH,
-        bearing: bearing + index * TOUR_TURN_DEG,
-      },
-    }),
-  );
+  return findHotspots(data.path_segments, keep).map((hotspot, index) => ({
+    name: hotspotName(hotspot.center, airports, home),
+    detail: hotspotDetail(hotspot),
+    camera: {
+      center: hotspot.center,
+      zoom: tourZoom(hotspot, width, height),
+      pitch: TOUR_PITCH,
+      bearing: bearing + index * TOUR_TURN_DEG,
+    },
+  }));
 }
 
 /** An icon-only button of the panel */
