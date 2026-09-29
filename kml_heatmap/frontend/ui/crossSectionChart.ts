@@ -26,15 +26,11 @@ import {
   type CrossSection,
   type LineFrame,
 } from "../calculations/crossSection";
+import { formatDuration } from "../utils/duration";
 import { formatNumber } from "../utils/formatters";
 import { toLngLat } from "../utils/mapHelpers";
 import { element, shape } from "./crossSectionElements";
-import {
-  formatAmount,
-  formatKm,
-  heightUnit,
-  sectionSummary,
-} from "./crossSectionText";
+import { formatKm, heightUnit, sectionSummary } from "./crossSectionText";
 
 /**
  * Cells of the density image along the line and up: about one per pixel of
@@ -223,10 +219,7 @@ export function createChart(
 
     const unit = heightUnit(shown);
     const figures: [string, string][] = [
-      [
-        shown.route ? "Distance" : "Time",
-        formatAmount(shown, shown.totalSeconds),
-      ],
+      ["Time", formatDuration(shown.totalSeconds)],
       [
         app.selectedPathIds.size ? "Selected flights" : "Flights",
         formatNumber(shown.flights),
@@ -239,7 +232,7 @@ export function createChart(
       ]);
     }
     if (shown.aboveSeconds >= 30) {
-      figures.push(["Higher", formatAmount(shown, shown.aboveSeconds)]);
+      figures.push(["Higher", formatDuration(shown.aboveSeconds)]);
     }
     stats.replaceChildren();
     for (const [label, value] of figures) {
@@ -311,7 +304,7 @@ export function createChart(
     readout.textContent = [
       formatKm(along),
       `${tens(low)} to ${tens(high)} ${heightUnit(section)}`,
-      seconds > 0 ? formatAmount(section, seconds) : "no flights here",
+      seconds > 0 ? formatDuration(seconds) : "no flights here",
     ].join(" · ");
     const chartX = (x * VIEW_W).toFixed(1);
     hover.setAttribute("x1", chartX);

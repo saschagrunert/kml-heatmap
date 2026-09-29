@@ -34,7 +34,7 @@ import {
 } from "../utils/geometry";
 import { FEET_TO_METERS } from "../utils/constants";
 import { overlaps, type Box } from "../utils/viewBox";
-import { heatWeight, ROUTE_SPEED_MS, type SegmentWeight } from "./heatLines";
+import { heatWeight, CRUISE_SPEED_MS, type SegmentWeight } from "./heatLines";
 import { liftExaggeration } from "./lift";
 import { chainPieces, flightClockOf } from "./flightClock";
 import { markStretches } from "./cloudCells";
@@ -421,7 +421,7 @@ export function cloudPoints(
   detail = level,
   box: Box | null = null,
   busiest?: number,
-  weigh: SegmentWeight = heatWeight(false),
+  weigh: SegmentWeight = heatWeight,
   scaleOf?: (busiest: number) => number,
 ): CloudPoints {
   const exaggeration = liftExaggeration(level);
@@ -644,7 +644,7 @@ export function cloudPoints(
       : 0;
   // The marks of the stretches written, in cells of the level cut for, and
   // the roll-off of their heat: the flights' worth drawn of a second in a
-  // cell, a cruise crossing it taking its width at ROUTE_SPEED_MS
+  // cell, a cruise crossing it taking its width at CRUISE_SPEED_MS
   const markCell = CLOUD_CELL_PX / worldPx;
   markStretches(
     values,
@@ -653,7 +653,7 @@ export function cloudPoints(
     MARKS_FLOAT,
     markCell,
     scaleOf
-      ? (scaleOf(most) * ROUTE_SPEED_MS) / (markCell * EARTH_CIRCUMFERENCE_M)
+      ? (scaleOf(most) * CRUISE_SPEED_MS) / (markCell * EARTH_CIRCUMFERENCE_M)
       : 0,
   );
   const origin: [number, number] =

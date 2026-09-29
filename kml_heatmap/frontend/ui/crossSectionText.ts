@@ -4,14 +4,12 @@
  * The figures above the chart, its readout, the labels of its axis and of
  * the corridor's widths, and the summary a screen reader hears
  * (`sectionSummary`, which is also the chart's accessible name) all say a
- * section's heat the same way: as time spent, or with the heatmap's By
- * distance switch on as the distance flown (`formatAmount`), and its
+ * section's heat the same way: as time spent (formatDuration), and its
  * heights in the unit the section was worked out in (`heightUnit`). The
  * tool (ui/crossSection.ts) and its chart (ui/crossSectionChart.ts) both
  * take their words from here, so the two never disagree.
  */
 import type { CrossSection } from "../calculations/crossSection";
-import { ROUTE_SPEED_MS } from "../calculations/heatLines";
 import { formatDuration } from "../utils/duration";
 import { formatNumber } from "../utils/formatters";
 
@@ -26,16 +24,6 @@ export function formatKm(metres: number): string {
   return `${formatNumber(km, km < 10 ? 1 : 0)} km`;
 }
 
-/**
- * The heat of `seconds` of a section as its figures say it: the time
- * spent, or by distance the distance flown (lengths at ROUTE_SPEED_MS)
- */
-export function formatAmount(section: CrossSection, seconds: number): string {
-  return section.route
-    ? formatKm(seconds * ROUTE_SPEED_MS)
-    : formatDuration(seconds);
-}
-
 /** The unit of the heights of a section */
 export function heightUnit(section: CrossSection): string {
   if (section.reference === "msl") return "ft MSL";
@@ -44,8 +32,7 @@ export function heightUnit(section: CrossSection): string {
 
 /**
  * What the chart says, for a screen reader: the line, the corridor, the
- * time (the distance flown, By distance on), the flights and where most
- * of it was
+ * time, the flights and where most of it was
  */
 export function sectionSummary(
   section: CrossSection,
@@ -59,6 +46,5 @@ export function sectionSummary(
   const busiest = section.busiest
     ? `, most of it in the air between ${formatNumber(section.busiest[0])} and ${formatNumber(section.busiest[1])} ${heightUnit(section)}`
     : "";
-  const amount = formatAmount(section, section.totalSeconds);
-  return `Cross-section: ${amount} ${section.route ? "flown by" : "from"} ${flights} ${where}${busiest}`;
+  return `Cross-section: ${formatDuration(section.totalSeconds)} from ${flights} ${where}${busiest}`;
 }

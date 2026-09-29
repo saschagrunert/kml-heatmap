@@ -7,6 +7,7 @@
 import type {
   ExpressionSpecification,
   FillExtrusionLayerSpecification,
+  LayerSpecification,
   Map as MapLibreMap,
   StyleSpecification,
 } from "maplibre-gl";
@@ -428,15 +429,63 @@ function addDataLayersTo(map: MapLibreMap): void {
 
 /**
  * The global state of the map (MapLibre's `global-state`) that says the
- * heat is drawn at full strength, and how far the base map's labels step
- * back while it is: its region and place names lie over the heat, and at
- * full strength they broke it up into pieces, the names of the regions
- * most of all. Only the text and its halo fade; with the heat off, or
- * stepping back itself for what is drawn over it, the labels are as the
- * base style has them (see followLayerVisibility).
+ * heat is drawn at full strength, and how the base map's labels step back
+ * while it is: its region and place names lie over the heat, and at full
+ * strength they broke it up into pieces, the names of the regions most of
+ * all. Faded to half they read as smudged over the glow, so they fade less
+ * and stand on a wider, darker halo of the base map's own colour instead,
+ * which keeps the heat around them whole. With the heat off, or stepping
+ * back itself for what is drawn over it, the labels are as the base style
+ * has them (see followLayerVisibility).
  */
 export const HEAT_SHOWN_STATE = "heatShown";
-const HEAT_LABEL_OPACITY = 0.5;
+const HEAT_LABEL_OPACITY = 0.78;
+const HEAT_LABEL_HALO = { color: "rgba(14, 14, 14, 0.9)", width: 1.6 } as const;
+
+/**
+ * The wide grey band CARTO draws along a country's border (8 px at half
+ * strength) read as one more flight track over the heat, and with the heat
+ * off or a colour layer on as well; the thin line of the border itself
+ * (`boundary_country_inner`) is left as it is
+ */
+const BORDER_BAND_LAYER = "boundary_country_outline";
+const BORDER_BAND_OPACITY = 0.2;
+
+/** `value` while the heat is drawn at full strength, `otherwise` if not */
+function whileHeatShown(
+  value: string | number,
+  otherwise: string | number,
+): ExpressionSpecification {
+  return ["case", ["global-state", HEAT_SHOWN_STATE], value, otherwise];
+}
+
+/**
+ * A label layer of a base style as it is drawn over the heat (see
+ * HEAT_SHOWN_STATE). Only a paint the style leaves out or gives as one
+ * value is changed: one that follows the zoom cannot go inside a `case`.
+ */
+function labelOverHeat(layer: LayerSpecification): LayerSpecification {
+  if (layer.type !== "symbol") return layer;
+  const paint = { ...layer.paint };
+  const plain = (value: unknown): value is string | number | undefined =>
+    value === undefined || typeof value !== "object";
+  if (paint["text-opacity"] === undefined) {
+    paint["text-opacity"] = whileHeatShown(HEAT_LABEL_OPACITY, 1);
+  }
+  const color = paint["text-halo-color"];
+  const width = paint["text-halo-width"];
+  if (plain(color) && plain(width)) {
+    paint["text-halo-color"] = whileHeatShown(
+      HEAT_LABEL_HALO.color,
+      color ?? "rgba(0, 0, 0, 0)",
+    );
+    paint["text-halo-width"] = whileHeatShown(
+      HEAT_LABEL_HALO.width,
+      width ?? 0,
+    );
+  }
+  return { ...layer, paint };
+}
 
 /**
  * A base style with the app's sources and layers of the style before it:
@@ -449,9 +498,10 @@ const HEAT_LABEL_OPACITY = 0.5;
  * before the base style arrived would otherwise turn back into Mercator;
  * and so does the relief of the 3D view (ui/terrain.ts), which would
  * otherwise go while the flights stay cut for it. The labels of the new
- * style (its symbol layers without an opacity of their own) fade while the
- * heat is drawn (HEAT_SHOWN_STATE); the app's own symbol layers are not
- * among them, so the airport codes stay as they are.
+ * style (its symbol layers) step back while the heat is drawn
+ * (labelOverHeat); the app's own symbol layers are not among them, so the
+ * airport codes stay as they are. Its band along the borders is drawn
+ * fainter (BORDER_BAND_LAYER).
  *
  * `diffed` leaves the data of the GeoJSON sources out, for a style the map
  * applies as the difference to the one before (see setBaseStyle).
@@ -478,20 +528,12 @@ export function withDataLayers(
   const below = own.filter((layer) => layer.type !== "symbol");
   const labels = next.layers.findIndex((layer) => layer.type === "symbol");
   const layers = next.layers.map((layer) =>
-    layer.type === "symbol" && layer.paint?.["text-opacity"] === undefined
+    layer.id === BORDER_BAND_LAYER && layer.type === "line"
       ? {
           ...layer,
-          paint: {
-            ...layer.paint,
-            "text-opacity": [
-              "case",
-              ["global-state", HEAT_SHOWN_STATE],
-              HEAT_LABEL_OPACITY,
-              1,
-            ] as ExpressionSpecification,
-          },
+          paint: { ...layer.paint, "line-opacity": BORDER_BAND_OPACITY },
         }
-      : layer,
+      : labelOverHeat(layer),
   );
   layers.splice(labels < 0 ? layers.length : labels, 0, ...below);
   layers.push(...onTop);

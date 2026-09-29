@@ -730,7 +730,7 @@ style layer draws a glow at a height: `heatmap` lies on the ground,
 kilobytes for one layer.
 
 `calculations/heatCloud.ts` makes the data, once per dataset, filter,
-isolated selection, weighing (the By distance switch), zoom level and
+isolated selection, zoom level and
 relief on or off, and from `CULL_FROM_ZOOM` in (`z` 9) for the part of the map around the view, as the
 ribbons are (`viewBox`) but a whole view to each side of it rather than a
 quarter (`CLOUD_VIEW_SPARE`: a pan of a view, or a zoom out of one and a
@@ -772,8 +772,8 @@ x and y in Mercator units from an origin in the middle of them (so 32-bit
 floats hold them to a fraction of a pixel), the ground under the point and
 the height above it in feet, and the seconds spent on the stretch to the
 next point: those of each segment as the heatmap and its lines count them
-(`heatWeight` in `calculations/heatLines.ts`: the time spent, or the length
-at 100 kt for By distance; steps of no heat are neither merged nor written;
+(`heatWeight` in `calculations/heatLines.ts`: the time spent; steps of no
+heat are neither merged nor written;
 counting fixes, as the heatmap once did, left a cruise logged at an uneven
 pace in beads), spread over the stretches of the curve along it by their length (`chainPieces`, kept per
 curve, clock and weighing), and the time into its flight the point was flown
@@ -894,10 +894,7 @@ The exposure (`cloudExposure`) scales the heat so the busiest cells, at
 the gain of the zoom, glow no hotter than `CLOUD_WHITE_HEAT` (white), down
 to a quarter and never above 1, eased over a fraction of a second as the
 level or the zoom changes; the two years of the sample data never reach
-it. Weighed by distance, a stretch carries its length at the reference
-cruise (`ROUTE_SPEED_MS` is `CLOUD_REFERENCE_SPEED_MS`), so the heat of a
-cell is how many flights passed it and the exposure darkens only where
-some sixty did. Past the exposure, the heat of each stretch is rolled off
+it. Past the exposure, the heat of each stretch is rolled off
 as the flat heatmap's is (`heatTone`, see below) by the heat of the cells
 of `CLOUD_CELL_PX` of the level cut for that it passes, which
 `markStretches` adds up for the marks anyway: `cloudPoints` asks
@@ -941,8 +938,9 @@ frame, so the two cross-fade as the pulses fade in and out and the cloud
 always shows one of them; the shadow pass draws none. In the frame
 `withMapStill` takes the layer draws the marks and no pulse, without
 touching its fade. The band of heights fades the marks as it fades the glow
-under them. They fade in from map zoom 6.5 to 8 (`CLOUD_MARK_ZOOMS`),
-further out the routes of a region run together. A mark is a chevron
+under them. They fade in from map zoom 7.5 to 9 (`CLOUD_MARK_ZOOMS`),
+further out the routes of a region run together: from 6.5 to 8 they
+scattered over a region's routes as noise. A mark is a chevron
 pointing ahead along a track where it crosses a line of a lattice on the
 ground, in Mercator units from the origin of the points. The vertex shader
 finds the lattice of a stretch once for all its pixels (`markLattice`,
@@ -955,7 +953,8 @@ track that turns across that halfway fades its marks out towards the turn
 from both sides, where the lattices of both stretches drew a mark each, a
 pair of them close together (the snapshot of the cloud showed one). The
 lines are a power of two of Mercator units apart, the one nearest
-`CLOUD_MARK_SPACING_PX` (64 CSS px) along the stretch on the screen, and
+`CLOUD_MARK_SPACING_PX` (96 CSS px, 64 before crowded a busy field) along
+the stretch on the screen, and
 every second one, blended as that goes from one power to the next, so the
 marks keep their spacing on the screen at every zoom and depth and do not
 jump. Every flight along a track finds the same lines, so where a route is
@@ -965,8 +964,8 @@ That is one row where the flights are within a stroke of each other: flights
 a little apart, side by side or at heights that a tilted map close to the
 camera sets apart on the screen, glow as one track and still draw a row of
 marks each. The stroke adds a part of the stretch's heat (`CLOUD_MARK_ADD`),
-a band as wide around it takes a part of the glow away (`CLOUD_MARK_CUT`),
-so a mark shows on a faint track as a brighter chevron and on a white one as
+a band as wide around it takes a part of the glow away (`CLOUD_MARK_CUT`,
+0.4: at 0.8 the dark outlines cut the glow into pieces), so a mark shows on a faint track as a brighter chevron and on a white one as
 a darker outline; a mark whose arms would be under 2 to 4 CSS px
 (`CLOUD_MARK_LEAST`, the far distance of a tilted map) fades out, and a
 pixel further across the track than the arms reach keeps its glow without
@@ -979,8 +978,8 @@ the next. Where flights overlap in both directions, a runway or a circuit
 used both ways, a route flown out and back, marks both ways at the same
 places would be noise, so `markStretches` (`calculations/cloudCells.ts`)
 adds up the directions of the stretches written in cells of `CLOUD_CELL_PX`
-(16 px of the level the points are cut for) weighed by their heat as the
-By distance switch weighs it (their sum S and the sum T of their
+(16 px of the level the points are cut for) weighed by their heat (their
+sum S and the sum T of their
 outer products), each at two places a cell along it, so a stretch merged
 along a straight run counts in every cell it passes and not only where it
 starts; a stretch draws its marks by its agreement with the cells it passes,
@@ -1124,10 +1123,13 @@ Opening the replay took about 45 ms more for cutting the cloud's points.
 **The look of the flat heatmap:**
 
 `ui/heatmapPaint.ts` holds the paint of the heatmap and of the heat lines
-it hands over to. A point reaches 22 px out to map zoom 9 and narrows to
+it hands over to. A point reaches 18 px out to map zoom 9 and narrows to
 13 px at 10 (`HEATMAP_RADIUS_PX`): at the reach of before, the routes of a
 region, a few kilometres apart, merged into one blue fog from 8 to 10 and
-the home field's circuits into one blot. It keeps its reach while the
+the home field's circuits into one blot. Out to 9 it reached 22 px, the
+reference reach, and a route flown once was a band of even blue as wide as
+a busy corridor; at 18 px, with the faintest colours fainter (see below),
+a single route is a slimmer, softer line and the corridors stand out. It keeps its reach while the
 clusters are drawn (`HEATMAP_CLUSTER`, up to 9): scaled up towards the
 next level they lie up to 12 px apart, and narrowing from 7 on turned a
 lone track into a string of beads from 8.5 to 9. The ridge of a track is
@@ -1139,10 +1141,17 @@ changes no exposure; it is worked out by the year worker, in
 `calculations/heatExposure.ts` with that reference reach (see "The heat
 sources and the year worker" below).
 
-With the narrower reach a track falls apart into beads a level earlier,
-and so the heat lines take over a level earlier (`HEAT_LINES`: they fade
-in from map zoom 10 to 10.75, `z` 11 to 11.75, and the heatmap fades out
-from there to 11.5). Their heat is scaled by the heatmap's exposure and
+Further in the fixes of a track draw apart on the screen, 20 px at 12,
+and the reach widens again, to 16 px at 11 and 24 at 12, so a track stays
+a line (under half the reach of 10 on the ground). The heat lines take
+over from there (`HEAT_LINES`: they fade in from map zoom 11 to 11.75, `z`
+12 to 12.75, and the heatmap fades out from there to 12.75), and the wide
+glow of its last level lies round them as a halo. They took over a level
+and a quarter earlier before, from 10, which left a map of the towns
+around a field in thin lines where its heat was still wanted. The glow of
+the lines is widest and strongest where they take over (10 px at 0.3 at
+12, settling to 0.18 by 16), so the map does not drop from the heatmap's
+halo to hairlines. Their heat is scaled by the heatmap's exposure and
 rolled off as its heat is (`heatLineTone`), so the hand-over keeps the
 colours.
 
@@ -1169,21 +1178,26 @@ they are, and a point contributes no less than
 MapLibre drops it: the points of the busiest cells, rolled off to a
 fiftieth, are lifted to that, and in `data/` the heat of the cells rolled
 off to under a fifth comes out 2.8 times as rolled off at 9, 1.7 at 9.5,
-1.3 at 10 and 1.1 from 10.5 in, where the heat lines take over.
+1.3 at 10 and 1.1 from 10.5 in, on to where the heat lines take over.
 
 The low end of the ramp (`HEATMAP_GRADIENT`) has the most steps of
 lightness, since most of the map is a route flown once to a few times: a
 stop of its own at two flights, and over the dark base map a quarter of a
 flight, one, two and four each about half as light again as the one
 before, four well over twice as light as one where it was not quite twice.
-The faintest stop is at 0.4 rather than leaflet.heat's 0.25, which left a
-leg flown once close to the base map. A quarter of a flight is the ramp's
+The two faintest stops are at 0.22 and 0.5: at 0.4 and 0.58 a route
+flown once was drawn in nearly the blue of a busy one, a band of even
+colour with crisp edges, and the corridors did not stand out from it. The
+heat lines take the colours of the stops and not their opacity, so they
+keep theirs. A quarter of a flight is the ramp's
 first texel (a density of 0.004), below which MapLibre's ramp has no
 colours of its own.
 
 The base map's labels, above the heat, broke it up where they lay over it,
 the names of the regions most of all. `withDataLayers` gives the symbol
-layers of the base style an opacity of 0.5 while the global state
+layers of the base style an opacity of 0.78 and a halo of the base map's
+colour 1.6 px wide at 0.9 (`labelOverHeat`, only where the style gives
+the halo as a single value) while the global state
 `heatShown` (`HEAT_SHOWN_STATE`) is set, which `followLayerVisibility` sets
 while the heat is drawn at full strength (the Heatmap switch on, the flat
 heatmap or the cloud, no replay, and no colour layer, aviation chart or
@@ -1191,10 +1205,16 @@ selection's lines over it, `dimsHeatmap`), and again on every
 `style.load`: a style built anew (a base style whose difference failed,
 or after a lost WebGL context) starts from a state of its own. With the
 heat off or stepping back, the labels are as the base style has them.
+Faded to half on their thin halo the names read as smudged over the glow;
+the darker halo keeps them legible and cuts only a thin outline out of the
+heat. The wide grey band CARTO draws along a country's border
+(`boundary_country_outline`, 8 px at 0.5) read as one more flight track,
+over the heat and without it, and is drawn at 0.2; the thin line of the
+border itself is left alone.
 
 **The heat sources and the year worker:**
 
-A change of the year, the aircraft, By distance or an isolated selection
+A change of the year, the aircraft or an isolated selection
 gives the heatmap new points, one per fix the filter keeps
 (`heatmapPoints` in `ui/dataManager.ts`): 135,000 for all years of
 `data/`. Handed to its GeoJSON source as a feature each, they held up the
@@ -1244,10 +1264,10 @@ are free of them.
 
 On the built site (Chrome 154, a switch between years already loaded, the
 median of three, the main thread traced until the map is idle), the longest
-task of a switch to all years went from 161 to 21 ms, of By distance from
-154 to 9 ms and of an aircraft from 63 to 12 ms; with the CPU slowed down
-four times from 572 to 63, 551 to 33 and 195 to 35 ms. Zoomed in to map
-zoom 9.5, where the page still works out the heat lines (70 to 90 ms), from
+task of a switch to all years went from 161 to 21 ms and of an aircraft
+from 63 to 12 ms; with the CPU slowed down four times from 572 to 63 and
+195 to 35 ms. Zoomed in to map
+zoom 9.5, where the page then still worked out the heat lines (70 to 90 ms), from
 326 to 105 and 312 to 84 ms, slowed down from 1,174 to 313 and 1,082 to 310
 ms. All of the main thread's work for a switch to all years went from 216
 to 82 ms, 679 to 221 ms slowed down. The heat sources, the isolated
@@ -1258,11 +1278,15 @@ same in ten switches of year, aircraft, weighing and isolation.
 
 The heat legend (`#heat-legend` in the template, `ui/heatLegend.ts`, in the
 first visit's bundle) says what the colours of the flat heatmap, its heat
-lines and the cloud stand for: about how many flights' worth of heat, the
-heat one flight leaves over a place as a lone cruise at 100 kt does. That
-is the time spent there ("Time spent"), or with By distance on the length
-counted at that speed ("Distance flown", a flight's worth being one pass of
-any flight). It is a `.color-legend`, so it stands where the altitude and
+lines and the cloud stand for, in one short row: "Time spent", "Less", a
+slim bar and "More". Four labels under the bar, "≈1 pass, 4, 16, 64", were
+hard to read (a pass of what, and which way the time grew) and took a box
+of 228 by 80 px of a phone's map; the row takes about 275 by 40. The
+numbers are in the bar's accessible name and the legend's tooltip
+(`heatLegendText`): about how many flights' worth of heat the two ends
+stand for, the heat one flight leaves over a place as a lone cruise at
+100 kt does, the time spent there, a flight's worth being one pass of any
+flight. It is a `.color-legend`, so it stands where the altitude and
 groundspeed legends do and follows their rules beside the rail, the replay panel, the
 profile strip, the phone's bar and Wrapped. `followLayerVisibility` shows it
 while the heat is the colour the map shows (the Heatmap switch on, no
@@ -1304,24 +1328,23 @@ overlap adds up, so n flights' worth is drawn at n times it.
 The heatmap and the cloud count the heat whatever the pace of the fixes.
 The lines add it up in 40 m cells, which a lone pass logged every few
 seconds leaves the time between two fixes in, so a log of a fix a second
-reads there as about a quarter of a flight. The legend's first label says
-"≈" for that and for the latitude, which widens or narrows a kernel of
-fixed pixels on the ground.
+reads there as about a quarter of a flight. The legend says "about" for
+that and for the latitude, which widens or narrows a kernel of fixed
+pixels on the ground.
 
-`followHeatLegend` labels the legend anew as the store keys that change
-the scale or what is counted do: `heatCloud`, `heatCloudScale`,
-`heatmapExposure` and `routeWeighting`.
+`followHeatLegend` draws the bar and words its ends anew as the store keys
+that change the scale do: `heatCloud`, `heatCloudScale` and
+`heatmapExposure`.
 
-The labels are four steps of four apart, the step of the ramp's colours:
-the first is the power of two nearest the flights' worth of the ramp's
-colour of one flight, at least one, so the flat heatmap unscaled and its
-lines read "≈1 pass, 4, 16, 64", a logbook drawn at a quarter "≈4
-passes, 16, 64, 256" and the cloud closer in, drawn at half, "≈2 passes,
-8, 32, 128". Each label sits in the middle of its quarter of the bar, and
-the bar is drawn on a scale of those steps from the ramp's own colours
-(`heatLegend`), shifted so that the colour under a label is the one its
-count is drawn in: the labels stay round numbers and the ramp moves under
-them. Past the knee a colour stands for the heat rolled off to it
+The bar spans four steps of four, the step of the ramp's colours: the
+first is the power of two nearest the flights' worth of the ramp's colour
+of one flight, at least one, so the flat heatmap unscaled and its lines
+span about 1 to 64 passes, a logbook drawn at a quarter 4 to 256 and the
+cloud closer in, drawn at half, 2 to 128. Each count has the middle of its
+quarter of the bar, and the bar is drawn on a scale of those steps from
+the ramp's own colours (`heatLegend`), shifted so that the colour there is
+the one its count is drawn in: the counts stay round numbers and the ramp
+moves under them. Past the knee a colour stands for the heat rolled off to it
 (`heatUntone`): unscaled, the light cyan of a density of 0.25 is about 20
 passes, a little right of the 16, the bar ends at 128 short of the pale
 cyan of about 200, and white is thousands, off the bar.
@@ -1329,8 +1352,7 @@ cyan of about 200, and white is thousands, off the bar.
 **The readout of the heat cloud:**
 
 Pointing at the cloud (a resting mouse, or a tap) shows a box beside the
-pointer with the time spent around the place (with By distance, the
-distance flown there), the flights that were there and the 400 ft band of
+pointer with the time spent around the place, the flights that were there and the 400 ft band of
 height above the ground most of it was in. `ui/cloudReadout.ts` (feature bundle, started by `followHeatCloud`)
 listens to the map's pointer events only while the 3D view draws the cloud
 (`threeDVisible` and `heatCloud`, the Heatmap switch on, no replay, not in
@@ -1369,20 +1391,18 @@ is the maths:
   21 CSS px out to `z` 9.5, narrowing with `CLOUD_STOPS` to 7.5 px from 13
   in), so the box can say "within 1 km".
 - The time is the cloud's: the heat of each segment in seconds as
-  `heatWeight` weighs it for the By distance switch (by time at most
-  120 s, a track without times at a cruise; by distance its length at
-  `ROUTE_SPEED_MS`), times the part of it within the circle
+  `heatWeight` weighs it (at most 120 s, a track without times at a
+  cruise, `CRUISE_SPEED_MS`), times the part of it within the circle
   (`insideFraction`), times the part of it the band of heights draws
   (`heightBandEdgesFt`, the fade of the cloud's shaders, at the height of
-  the segment). With By distance the box says the distance flown, the
-  seconds at `ROUTE_SPEED_MS`. A segment of no heat counts for nothing, as
+  the segment). A segment of no heat counts for nothing, as
   the cloud draws nothing of it, and a place with none has no readout. The flights are the path ids with any heat within,
   of those the cloud draws (filters, Isolate, band of heights). The
   heights are above the ground the cloud stands on (`groundProfilesFt` at
   the relief level: the sampled ground on the relief, the line between the
   fields on the globe), added up in 100 ft bins; the box names the run of
   four with the most of it, "mostly" from half of it on. The exposure never
-  enters it: the box speaks of time or distance, not of heat. A change of
+  enters it: the box speaks of time, not of heat. A change of
   the switches tells a resting pointer anew.
 - The segments near a place come from a grid made per dataset for each
   radius (`segmentGrid`, a `WeakMap` on `path_segments`, let go with the
@@ -1393,7 +1413,7 @@ is the maths:
   kept: the finer the grid, the more cells a segment is in, and for
   130,000 segments the one of 100 m took 13 MB and the one of 1 km
   2.3 MB. The seconds and the heights are kept alike, the
-  seconds per weighing (`heatWeight` gives one function per switches), the
+  seconds per weighing (`heatWeight`, or one a test asks for), the
   heights per relief level. On 100,000 synthetic segments around one
   field, the grid took 12 to 16 ms to make and a readout 0.5 ms at 500 m
   and 1.6 ms at 5 km (Node, desktop CPU); the 49 `unproject` calls of a
@@ -1458,8 +1478,7 @@ imagery or a single selection does not fetch: in 2D it would be fetched on
 every first visit, or add about 3 KB gzipped to a first visit that has no
 room left. The flat map's heat lines already show where the time was spent
 from `z` 12 in. The feature bundle grew by 8.2 KB raw and 3.3 KB gzipped;
-the first visit by a few bytes, the export of `ROUTE_SPEED_MS`: otherwise
-the readout imports only what the shared chunk exports already (each new
+the first visit by a few bytes: the readout imports only what the shared chunk exports already (each new
 import from it adds to its export list). `cloud-readout.spec.ts` turns
 the altitude colours on and enters the 3D view by its button near the
 home field (the button leaves the heatmap alone, which it draws as the

@@ -412,29 +412,6 @@ describe("the heat cloud", () => {
     expect(setPoints.mock.calls.length).toBe(calls + 2);
   });
 
-  it("weighs its heat by the heatmap's switches", async () => {
-    app.threeDVisible = true;
-    await follow();
-    const heatOf = (): number[] => {
-      const points = drawn()!;
-      return Array.from(
-        { length: points.count },
-        (_, k) => points.points[(k + 1) * CLOUD_POINT_FLOATS + 4]!,
-      );
-    };
-    const byTime = heatOf();
-    const exposure = drawn()!.busiest;
-
-    app.routeWeighting = true;
-    const byRoute = heatOf();
-    expect(byRoute).not.toEqual(byTime);
-    // Exposed anew, not by the heat of the other weighing
-    expect(drawn()!.busiest).not.toBe(exposure);
-
-    app.routeWeighting = false;
-    expect(heatOf()).toEqual(byTime);
-  });
-
   it("keeps the points of the last few relief levels, for as long as what they are of stays", async () => {
     app.threeDVisible = true;
     app.reliefLevel = 5;

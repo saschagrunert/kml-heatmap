@@ -77,35 +77,28 @@ export type SegmentWeight = (
 ) => number;
 
 /**
- * The speed a stretch is counted at where its length is what counts, in
- * metres per second: a cruise at 100 kt, the one the heat cloud's glow is
- * calibrated for (see CLOUD_REFERENCE_SPEED_MS in ui/heatCloudLayer.ts)
+ * The speed a stretch without times or speeds is counted at, in metres per
+ * second: a cruise at 100 kt, the one the heat cloud's glow is calibrated
+ * for (see CLOUD_REFERENCE_SPEED_MS in ui/heatCloudLayer.ts)
  */
-export const ROUTE_SPEED_MS = 51.4;
-
-/** The functions of heatWeight, by its switch */
-const weighings: SegmentWeight[] = [];
+export const CRUISE_SPEED_MS = 51.4;
 
 /**
  * The heat of a segment, as the heatmap, its lines and the heat cloud all
- * count it. By time, the seconds spent on it (segmentSeconds); a track
- * without times or speeds counts as flown at ROUTE_SPEED_MS rather than not
- * at all. By `route`, its length at that speed: every flight counts the
- * same per kilometre, so a route flown once stands beside the circuits and
- * the apron instead of under them. Either way no segment adds more than
- * MAX_SEGMENT_S: the heatmap puts it on one point and the lines on its
- * ends, so a leg of a planned route kilometres long would otherwise glow
- * at its corners. The same switch gives the same function, so it tells
- * whether heat was weighed alike.
+ * count it: the seconds spent on it (segmentSeconds). A track without
+ * times or speeds counts as flown at CRUISE_SPEED_MS rather than not at
+ * all, and no segment adds more than MAX_SEGMENT_S: the heatmap puts it on
+ * one point and the lines on its ends, so a leg of a planned route
+ * kilometres long would otherwise glow at its corners.
  */
-export function heatWeight(route: boolean): SegmentWeight {
-  return (weighings[+route] ??= (segment, next) => {
-    const cruise = Math.min(
-      (segmentDistance(segment) * 1000) / ROUTE_SPEED_MS,
-      MAX_SEGMENT_S,
-    );
-    return route ? cruise : segmentSeconds(segment, next) || cruise;
-  });
+export function heatWeight(
+  segment: PathSegment,
+  next: PathSegment | undefined,
+): number {
+  return (
+    segmentSeconds(segment, next) ||
+    Math.min((segmentDistance(segment) * 1000) / CRUISE_SPEED_MS, MAX_SEGMENT_S)
+  );
 }
 
 /** The cells of the grid: a row per `HEAT_CELL_M` of latitude */
@@ -219,7 +212,7 @@ function smoothAlongFlights(
 export function heatLineFeatures(
   segments: readonly PathSegment[],
   keep: (pathId: number) => boolean,
-  weigh: SegmentWeight = heatWeight(false),
+  weigh: SegmentWeight = heatWeight,
   tone: (seconds: number) => number = (seconds) => seconds,
 ): GeoJSON.FeatureCollection<GeoJSON.LineString, { heat: number }> {
   return heatLinesAlong(flatCurves(segments), segments, keep, weigh, tone);

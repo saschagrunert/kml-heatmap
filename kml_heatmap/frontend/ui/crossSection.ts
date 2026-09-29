@@ -5,10 +5,9 @@
  * a tilted 3D view. This tool draws a line on the map (two clicks or taps,
  * or a drag; the map centre by keyboard) and shows, side on, where time was
  * spent within a corridor either side of it: distance along the line
- * across, height up, as a density image weighed like the heatmap, by its
- * By distance switch (calculations/crossSection.ts), which makes its
- * figures distances rather than times. Heights are above the ground under
- * each fix by default, or above sea level with the terrain under the flights
+ * across, height up, as a density image weighed like the heatmap
+ * (calculations/crossSection.ts). Heights are above the ground under each
+ * fix by default, or above sea level with the terrain under the flights
  * drawn beneath them. The corridor is drawn on the map for as long as the
  * tool is open, and its two ends can be dragged, or moved with the arrow
  * keys, afterwards.
@@ -335,7 +334,6 @@ function createTool(app: MapApp): Tool {
             end: line[1],
             halfWidthM: halfWidth,
             reference,
-            route: app.routeWeighting,
             columns: COLUMNS,
             rows: ROWS,
           })
@@ -750,14 +748,8 @@ function createTool(app: MapApp): Tool {
 
   const store = app.store;
   store.subscribeKeys(
-    // The flights it counts, and how the heatmap weighs them
-    [
-      "currentData",
-      "selectedYear",
-      "selectedAircraft",
-      "selectedPathIds",
-      "routeWeighting",
-    ],
+    // The flights it counts
+    ["currentData", "selectedYear", "selectedAircraft", "selectedPathIds"],
     () => {
       if (phase !== "shown") return;
       compute();

@@ -25,8 +25,9 @@ import {
 import { levelGroundFt } from "../../../../kml_heatmap/frontend/calculations/groundProfile";
 import {
   heatWeight,
-  ROUTE_SPEED_MS,
+  CRUISE_SPEED_MS,
   segmentSeconds,
+  type SegmentWeight,
 } from "../../../../kml_heatmap/frontend/calculations/heatLines";
 import {
   HEAT_KNEE,
@@ -41,6 +42,13 @@ import {
   type Coordinate,
 } from "../../../../kml_heatmap/frontend/utils/geometry";
 import type { PathSegment } from "../../../../kml_heatmap/frontend/types";
+
+/**
+ * A weighing of the tests: each segment by its length, at a cruise, as
+ * the heat of a track without times is counted, and at most two minutes
+ */
+const byLength: SegmentWeight = (segment) =>
+  Math.min((segmentDistance(segment) * 1000) / CRUISE_SPEED_MS, 120);
 
 /** A point of the cloud, read back from its floats */
 interface Point {
@@ -370,7 +378,7 @@ describe("cloudPoints", () => {
     }));
     const points = pointsOf(cloudOf(segments, everything, [0, 0], 11));
     const cruise = segments.reduce(
-      (sum, segment) => sum + heatWeight(false)(segment, undefined),
+      (sum, segment) => sum + heatWeight(segment, undefined),
       0,
     );
     expect(cruise).toBeGreaterThan(1);
@@ -428,7 +436,7 @@ describe("cloudPoints", () => {
     for (const heat of bend) expect(heat).toBeLessThan(20);
   });
 
-  it("weighs a stretch as it is asked to: by length by distance", () => {
+  it("weighs a stretch as it is asked to, by its time or by its length", () => {
     /** The same stretch flown a segment every `seconds`, at that speed */
     const flown = (path: number, seconds: number): PathSegment[] =>
       flight(path, line(3), undefined, seconds).map((segment) => ({
@@ -448,7 +456,7 @@ describe("cloudPoints", () => {
           11,
           null,
           undefined,
-          heatWeight(route),
+          route ? byLength : heatWeight,
         ),
       ).reduce((sum, point) => sum + point.heat, 0);
     const [fast, slow] = [flown(1, 5), flown(2, 60)];
@@ -905,7 +913,7 @@ describe("the time of the cloud's points", () => {
     const flights = smoothFlights(segments, (i) => segments[i]!.altitude_ft, {
       groundOf: () => 0,
     });
-    const cloud = (weigh = heatWeight(false)): Point[] =>
+    const cloud = (weigh = heatWeight): Point[] =>
       pointsOf(
         cloudPoints(
           segments,
@@ -919,7 +927,7 @@ describe("the time of the cloud's points", () => {
         ),
       );
     const timed = cloud();
-    const byRoute = cloud(heatWeight(true));
+    const byRoute = cloud(byLength);
     expect(byRoute.map((p) => p.heat)).not.toEqual(timed.map((p) => p.heat));
     expect(byRoute.map((p) => p.time)).toEqual(timed.map((p) => p.time));
   });
@@ -942,7 +950,7 @@ describe("the time of the cloud's points", () => {
         null,
         undefined,
         (segment, next) =>
-          segment.groundspeed_knots < 30 ? 0 : heatWeight(false)(segment, next),
+          segment.groundspeed_knots < 30 ? 0 : heatWeight(segment, next),
       ),
     );
 
@@ -1063,7 +1071,7 @@ describe("the busiest heat of the cloud", () => {
     expect(rolled.busiest).toBe(plain.busiest);
     // Forty cruises over the same cells, drawn as they are, are forty
     // flights' worth there, rolled off to what heatTone gives forty
-    expect(plain.busiest * ROUTE_SPEED_MS).toBeGreaterThan(HEAT_KNEE);
+    expect(plain.busiest * CRUISE_SPEED_MS).toBeGreaterThan(HEAT_KNEE);
     expect(heatOf(rolled) / heatOf(plain)).toBeCloseTo(heatTone(40) / 40, 2);
     // A lone cruise, under the knee, keeps its heat
     const one = cruise(1);
@@ -1089,10 +1097,7 @@ describe("the busiest heat of the cloud", () => {
 });
 
 describe("the marks of the cloud's points", () => {
-  const marksOf = (
-    segments: PathSegment[],
-    weigh = heatWeight(false),
-  ): number[] => {
+  const marksOf = (segments: PathSegment[], weigh = heatWeight): number[] => {
     const flights = smoothFlights(segments, (i) => segments[i]!.altitude_ft, {
       groundOf: () => 0,
     });
@@ -1132,15 +1137,15 @@ describe("the marks of the cloud's points", () => {
       ...segment,
       groundspeed_knots: 10,
     }));
-    const count = (weigh: ReturnType<typeof heatWeight>): number[] =>
+    const count = (weigh: SegmentWeight): number[] =>
       marksOf([...out, ...back], weigh);
-    const timed = count(heatWeight(false));
+    const timed = count(heatWeight);
     // The slow way back is most of the time along the track: its marks
     // show, and not those of the way out
     expect(timed[0]).toBe(0);
     expect(timed.at(-1)).toBe(1);
     // Counted by the kilometre both ways are as much, and neither shows
-    const routes = count(heatWeight(true));
+    const routes = count(byLength);
     expect(routes).toEqual(new Array(routes.length).fill(0));
   });
 });

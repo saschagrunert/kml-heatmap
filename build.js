@@ -428,7 +428,10 @@ function analyzeBundleComposition(metafile, fileName) {
 // Raised from 156 KB and 54 KB for the roll-off of the heat, the heatmap's
 // narrower reach and the base map's labels dimmed under the heat: 155.58
 // KB raw and 53.66 KB gzipped before, 156.51 KB raw and 53.94 KB gzipped
-// after, in a local build.
+// after, in a local build. By distance taken out again, the heat legend
+// made one row and the base map's labels given a dark halo over the heat:
+// 155.51 KB raw and 53.47 KB gzipped before, 155.55 KB raw and 53.44 KB
+// gzipped after, in a local build.
 const BUDGET_APP = { raw: 158 * 1024, gzip: 54.5 * 1024 };
 // The feature bundle is fetched only when replay is opened, the relief, the
 // heat cloud and the ribbons of a selection of the 3D view are first drawn,

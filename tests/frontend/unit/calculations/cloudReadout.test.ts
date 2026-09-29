@@ -5,7 +5,6 @@
  */
 import { describe, it, expect, afterEach } from "vitest";
 import {
-  formatDistanceFlown,
   formatTimeSpent,
   insideFraction,
   makeSegmentGrid,
@@ -32,7 +31,7 @@ import {
   parseHeightBand,
 } from "../../../../kml_heatmap/frontend/calculations/heightBand";
 import {
-  ROUTE_SPEED_MS,
+  CRUISE_SPEED_MS,
   heatWeight,
   type SegmentWeight,
 } from "../../../../kml_heatmap/frontend/calculations/heatLines";
@@ -425,7 +424,7 @@ describe("readoutAt", () => {
     }));
     const segments = [...taxi, ...flight(2)];
     const airborne: SegmentWeight = (segment, next) =>
-      segment.groundspeed_knots < 30 ? 0 : heatWeight(false)(segment, next);
+      segment.groundspeed_knots < 30 ? 0 : heatWeight(segment, next);
     expect(
       readoutAt(
         readoutData(taxi, false, 10, airborne),
@@ -469,31 +468,25 @@ describe("readoutAt", () => {
       R,
       everyone,
     )!;
-    expect(readout.seconds).toBeCloseTo((2 * R) / ROUTE_SPEED_MS, 0);
+    expect(readout.seconds).toBeCloseTo((2 * R) / CRUISE_SPEED_MS, 0);
   });
 
-  it("counts the distance flown by distance, at the speed it is weighed at", () => {
-    // 100 s over the kilometre across the place at the logged times; by
-    // distance, the same kilometre at ROUTE_SPEED_MS
+  it("counts the heat as it is asked to weigh it", () => {
+    // 100 s over the kilometre across the place at the logged times, or
+    // half that weighed at half
     const segments = flight(1, { step: 100 });
-    const byTime = readoutAt(
-      readoutData(segments, false, 10),
-      segmentGrid(segments, R),
-      down([LAT, LNG]),
-      R,
-      everyone,
-    )!;
-    expect(byTime.seconds).toBeGreaterThan(100);
-    const byRoute = readoutAt(
-      readoutData(segments, false, 10, heatWeight(true)),
-      segmentGrid(segments, R),
-      down([LAT, LNG]),
-      R,
-      everyone,
-    )!;
-    expect(byRoute.seconds * ROUTE_SPEED_MS).toBeCloseTo(2 * R, -1);
-    expect(readoutText(byRoute, true).time).toBe(
-      "About 1 km flown within 500 m",
+    const at = (weigh?: SegmentWeight) =>
+      readoutAt(
+        readoutData(segments, false, 10, weigh),
+        segmentGrid(segments, R),
+        down([LAT, LNG]),
+        R,
+        everyone,
+      )!.seconds;
+    expect(at()).toBeGreaterThan(100);
+    expect(at((segment, next) => heatWeight(segment, next) / 2)).toBeCloseTo(
+      at() / 2,
+      6,
     );
   });
 });
@@ -649,23 +642,6 @@ describe("the words of a readout", () => {
     ).toEqual({
       time: "About 42 min within 500 m",
       detail: "1 flight · most often 0 to 400 ft AGL",
-    });
-  });
-
-  it("says the distance flown to 100 m, to the kilometre from ten", () => {
-    expect(formatDistanceFlown(30)).toBe("Under 100 m");
-    expect(formatDistanceFlown(780)).toBe("About 800 m");
-    expect(formatDistanceFlown(980)).toBe("About 1 km");
-    expect(formatDistanceFlown(4230)).toBe("About 4.2 km");
-    expect(formatDistanceFlown(42400)).toBe("About 42 km");
-  });
-
-  it("says the distance flown by distance, and the flights and the band alike", () => {
-    expect(
-      readoutText({ ...readout, seconds: 5000 / ROUTE_SPEED_MS }, true),
-    ).toEqual({
-      time: "About 5 km flown within 1 km",
-      detail: "17 flights · mostly 800 to 1,200 ft AGL",
     });
   });
 

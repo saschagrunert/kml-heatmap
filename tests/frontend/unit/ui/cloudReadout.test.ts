@@ -215,19 +215,6 @@ describe("the readout of the heat cloud", () => {
     expect(shown()).toBeNull();
   });
 
-  it("counts what the cloud draws by distance, and says the distance flown", async () => {
-    enter3D();
-    move(0, 0);
-    await nextFrame();
-    expect(shown()).toMatch(/^About \d+ min within 1 km/);
-
-    app.routeWeighting = true;
-    // The resting pointer is told anew, by the distance flown
-    expect(shown()).toBeNull();
-    await nextFrame();
-    expect(shown()).toMatch(/^About [\d.]+ km flown within 1 km2 flights · /);
-  });
-
   it("stands clear of the values of a flight", async () => {
     enter3D();
     // The flights under the middle of the map
@@ -473,7 +460,7 @@ describe("the readout of the heat cloud", () => {
     };
     /** Whether what a readout of `radiusM` is worked out from is kept */
     const kept = (radiusM: number): boolean =>
-      readoutKept(DATA.path_segments, true, 0, heatWeight(false), radiusM);
+      readoutKept(DATA.path_segments, true, 0, heatWeight, radiusM);
 
     beforeEach(() => {
       idle = [];

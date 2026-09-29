@@ -7,11 +7,10 @@
  * 1 km" over "17 flights · mostly 800 to 1,200 ft AGL". It says what the
  * cloud there is made of: the flights the cloud draws (the filters,
  * Isolate) at the heights it draws them (the band of ui/heightBand.ts),
- * weighed as it weighs them (By distance), along the line of sight
- * through the pointer (see calculations/cloudReadout.ts). It speaks of
- * time, or by distance of the distance flown ("About 12 km flown within
- * 1 km"), never of the brightness, which the exposure of the cloud scales,
- * and of no date or hour.
+ * along the line of sight through the pointer (see
+ * calculations/cloudReadout.ts). It speaks of time, never of the
+ * brightness, which the exposure of the cloud scales, and of no date or
+ * hour.
  *
  * With a colour layer on, the 3D view draws the flights as ribbons, which
  * run all over a busy field: over a ribbon the values of its
@@ -133,7 +132,6 @@ const READOUT_KEYS: readonly (keyof StoreState)[] = [
   "isolateSelection",
   "terrainActive",
   "reliefLevel",
-  "routeWeighting",
   "tourView",
 ];
 
@@ -308,7 +306,7 @@ export function followCloudReadout(app: MapApp): void {
       box.append(document.createElement("b"), document.createElement("div"));
       container.append(box);
     }
-    const { time, detail } = readoutText(readout, app.routeWeighting);
+    const { time, detail } = readoutText(readout);
     box.firstChild!.textContent = time;
     box.lastChild!.textContent = detail;
     box.hidden = false;
@@ -336,18 +334,13 @@ export function followCloudReadout(app: MapApp): void {
       segments,
       app.terrainActive,
       app.reliefLevel,
-      heatWeight(app.routeWeighting),
+      heatWeight,
       radiusM,
     );
 
   /** The seconds and heights of the dataset `segments` (see readoutData) */
   const dataOf = (segments: readonly PathSegment[]): ReadoutData =>
-    readoutData(
-      segments,
-      app.terrainActive,
-      app.reliefLevel,
-      heatWeight(app.routeWeighting),
-    );
+    readoutData(segments, app.terrainActive, app.reliefLevel);
 
   /** Whether prepare's task is on its way */
   let preparing = false;
@@ -556,7 +549,7 @@ export function followCloudReadout(app: MapApp): void {
     tapped = finger ? e.lngLat : null;
     show(readout, e.point, finger);
     if (selectionChanges !== changesAtPress) return;
-    const { time, detail } = readoutText(readout, app.routeWeighting);
+    const { time, detail } = readoutText(readout);
     announceStatus(`${time}: ${detail.replace(" · ", ", ")}`);
   };
 
@@ -621,7 +614,6 @@ export function followCloudReadout(app: MapApp): void {
       app.terrainActive,
       app.reliefLevel,
       app.heightBand,
-      app.routeWeighting,
     ];
     // A selection that is not isolated changes nothing the readout says:
     // the click that clears one keeps the readout it showed

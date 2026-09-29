@@ -71,13 +71,12 @@ export const CHASE_REDUCED_MOTION_MESSAGE =
  * with no way to pause, and the end of the replay zoomed the overview to
  * the single flight. Isolate and the selection chip's clear button would
  * change the selection the replay is playing (PathSelection ignores them
- * then as well), and so would Reset view (MapApp.resetView). By distance
- * goes with the Heatmap switch: the replay hides the heat, and the 3D
- * view's faint cloud behind it is not the replay's to count again.
+ * then as well), and so would Reset view (MapApp.resetView). The Heatmap
+ * switch as well: the replay hides the heat, and the 3D view's faint cloud
+ * behind it is not the replay's to count again.
  */
 const REPLAY_DISABLED_CONTROL_IDS = [
   "heatmap-btn",
-  "by-distance-btn",
   "airports-btn",
   "aviation-btn",
   "wrapped-btn",

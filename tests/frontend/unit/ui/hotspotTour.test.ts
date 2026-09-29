@@ -89,7 +89,6 @@ const HELD = [
   "heatmap-btn",
   "three-d-btn",
   "year-select",
-  "by-distance-btn",
   "isolate-btn",
   "replay-all-btn",
   "wrapped-btn",
@@ -479,17 +478,6 @@ describe("hotspot tour", () => {
     tour.start();
     expect(tour.length).toBe(1);
     expect(text("hotspot-tour-name")).toBe("Home field EDAQ Halle-Oppin");
-  });
-
-  it("weighs the places as the heatmap does, and says the distance flown by distance", () => {
-    app.store.set("routeWeighting", true);
-
-    tour.start();
-
-    expect(text("hotspot-tour-name")).toBe("Home field EDAQ Halle-Oppin");
-    expect(text("hotspot-tour-detail")).toMatch(
-      /^\d+(\.\d)? k?m flown, \d+% of the distance$/,
-    );
   });
 
   it("closes the cross-section, whose line is on the map it flies over", () => {

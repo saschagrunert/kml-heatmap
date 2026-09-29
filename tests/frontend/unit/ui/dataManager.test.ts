@@ -9,7 +9,6 @@ import {
   heatWeight,
   segmentSeconds,
 } from "../../../../kml_heatmap/frontend/calculations/heatLines";
-import { segmentDistance } from "../../../../kml_heatmap/frontend/calculations/statistics";
 import {
   exposedHeat,
   heatColumns,
@@ -1160,7 +1159,7 @@ describe("DataManager", () => {
         const { points, weights } = heatmapPoints(
           data.path_segments,
           keep,
-          heatWeight(false),
+          heatWeight,
         );
         return heatExposure(heatColumns(points, weights));
       };
@@ -1235,7 +1234,7 @@ describe("DataManager", () => {
 
       const [points, weights] = decoder.drawHeat.mock.calls[0]!;
       expect(points).toEqual(
-        heatmapPoints(data.path_segments, () => true, heatWeight(false)).points,
+        heatmapPoints(data.path_segments, () => true, heatWeight).points,
       );
       const url = heatSource().setData.mock.calls[0]![0] as string;
       expect(url).toMatch(/^blob:/);
@@ -1542,7 +1541,7 @@ describe("DataManager", () => {
     });
   });
 
-  describe("the heat's switches", () => {
+  describe("the heat's exposure", () => {
     const publish = (data: KMLDataset): void => {
       mockApp.currentData = data;
     };
@@ -1587,7 +1586,7 @@ describe("DataManager", () => {
       const { points, weights } = heatmapPoints(
         data.path_segments,
         () => true,
-        heatWeight(false),
+        heatWeight,
       );
       const exposure = heatExposure(heatColumns(points, weights));
       expect(exposure).not.toBe(1);
@@ -1610,54 +1609,14 @@ describe("DataManager", () => {
         unscaled.features.map((line) => line.properties.heat),
       );
       // Rolled off as the heatmap's heat
-      const weigh = heatWeight(false);
       expect(lines).toEqual(
         heatLineFeatures(
           data.path_segments,
           () => true,
-          (segment, next) => weigh(segment, next) * exposure,
+          (segment, next) => heatWeight(segment, next) * exposure,
           heatLineTone,
         ),
       );
-    });
-
-    it("counts every flight the same per kilometre by distance", async () => {
-      publish(departure());
-      await answered();
-      const byTime = heatOfPoints();
-
-      mockApp.routeWeighting = true;
-      await answered();
-
-      const byRoute = heatOfPoints();
-      expect(heatSource().setData).toHaveBeenCalledTimes(2);
-      // Each point's heat is its segment's length, whatever the time spent
-      const lengths = departure().path_segments.map(
-        (segment) => segmentDistance(segment) * 1000,
-      );
-      for (let i = 1; i < lengths.length; i++) {
-        expect(byRoute[i]! / byRoute[0]!).toBeCloseTo(
-          lengths[i]! / lengths[0]!,
-        );
-      }
-      // The taxi out counted by its minute, now by its length
-      expect(byRoute[0]! / byRoute[1]!).toBeLessThan(byTime[0]! / byTime[1]!);
-    });
-
-    it("weighs an isolated selection anew with the switch", async () => {
-      publish(departure());
-      mockApp.store.batch(() => {
-        mockApp.selectedPathIds = new Set([1]);
-        mockApp.isolateSelection = true;
-      });
-      await answered();
-      expect(isolatedSource().setData).toHaveBeenCalledOnce();
-
-      mockApp.routeWeighting = true;
-      await answered();
-
-      expect(isolatedSource().setData).toHaveBeenCalledTimes(2);
-      expect(drawnHeatPoints()).toHaveLength(3);
     });
   });
 
@@ -1944,7 +1903,7 @@ describe("DataManager", () => {
       for (let zoom = 0; zoom <= HEATMAP_CLUSTER.maxZoom + 1; zoom += 0.25) {
         const contribution = weightAt(zoom, {}) * intensityAt(zoom);
         // Exactly at each level, and between two where the reach is the same
-        if (zoom % 1 === 0 || zoom < HEATMAP_RADIUS_PX[0][0]) {
+        if (zoom % 1 === 0 || zoom < HEATMAP_RADIUS_PX[0]![0]) {
           expect(contribution).toBeCloseTo(HEATMAP_LEAST_CONTRIBUTION, 12);
         }
         expect(contribution / HEATMAP_LEAST_CONTRIBUTION).toBeCloseTo(1, 1);
@@ -2033,14 +1992,14 @@ describe("DataManager", () => {
       expect(alphas[alphas.length - 1]).toBe(1);
     });
 
-    it("draws its faintest heat light enough to keep a rare leg off the base map", () => {
+    it("draws its faintest heat soft, and a flight's worth at half strength", () => {
       const visible = colorStops()
         .map((stop) => stop[4]!)
         .filter((alpha) => alpha > 0);
-      // leaflet.heat's minOpacity was 0.25, which left a leg flown once
-      // close to the dark base map
-      expect(Math.min(...visible)).toBe(0.4);
-      expect(visible[0]).toBe(0.4);
+      // At 0.4 and 0.58 a route flown once was a band of even blue with
+      // crisp edges, as strong as a busy corridor
+      expect(Math.min(...visible)).toBe(0.22);
+      expect(visible.slice(0, 2)).toEqual([0.22, 0.5]);
     });
 
     it("gives the low end of the ramp more steps of lightness than the top", () => {
@@ -2148,7 +2107,7 @@ describe("DataManager", () => {
       createSegment({ path_id: 1, coords: [mid, end], time: 8 }),
       createSegment({ path_id: 2, coords: [other, otherEnd] }),
     ];
-    const byTime = heatWeight(false);
+    const byTime = heatWeight;
 
     it("lists every start point once, with the time until the next fix", () => {
       const { points, weights } = heatmapPoints(segments, () => true, byTime);

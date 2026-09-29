@@ -3,13 +3,11 @@
  * was spent within a corridor either side of it, by the distance along the
  * line and the height, as ui/crossSection.ts draws it.
  *
- * The time is the heatmap's, weighed by the same switch (heatWeight in
- * heatLines.ts): the seconds each segment took, at most two minutes, or by
- * distance its length at a cruise speed. It is shared out over the part of
- * a segment inside the corridor in proportion to its length there. A
- * circuit flown every week stands out against a route flown once, as it
- * does on the map, unless By distance counts every flight the same per
- * kilometre.
+ * The time is the heatmap's, weighed alike (heatWeight in heatLines.ts):
+ * the seconds each segment took, at most two minutes. It is shared out over
+ * the part of a segment inside the corridor in proportion to its length
+ * there. A circuit flown every week stands out against a route flown once,
+ * as it does on the map.
  *
  * The line is measured on a plane through its start: metres east scaled by
  * the cosine of its middle latitude, and metres north. Over the few dozen
@@ -203,8 +201,6 @@ export interface SectionRequest {
   end: Coordinate;
   halfWidthM: number;
   reference: HeightReference;
-  /** Whether the heat is weighed by distance, as its switch (heatWeight) */
-  route: boolean;
   /** Cells of the grid along the line and up */
   columns: number;
   rows: number;
@@ -215,11 +211,6 @@ export interface CrossSection {
   lengthM: number;
   halfWidthM: number;
   reference: HeightReference;
-  /**
-   * Whether the seconds are lengths at ROUTE_SPEED_MS (By distance) rather
-   * than the time spent
-   */
-  route: boolean;
   columns: number;
   rows: number;
   /** The heights at the bottom and the top of the grid, in feet */
@@ -314,7 +305,6 @@ function corridorPieces(request: SectionRequest): {
   frame: LineFrame;
 } {
   const { segments, keep, halfWidthM, reference } = request;
-  const weigh = heatWeight(request.route);
   const frame = lineFrame(request.start, request.end);
   const { lengthM } = frame;
   // The corridor's box in degrees, to pass over most segments unmeasured
@@ -352,7 +342,7 @@ function corridorPieces(request: SectionRequest): {
     const span = clipToCorridor(a, b, lengthM, halfWidthM);
     if (!span) continue;
     const next = segments[i + 1];
-    const seconds = weigh(segment, next) * (span[1] - span[0]);
+    const seconds = heatWeight(segment, next) * (span[1] - span[0]);
     if (!(seconds > 0)) continue;
 
     // The altitude and the ground of a segment are those of its end; its
@@ -504,7 +494,6 @@ export function crossSection(request: SectionRequest): CrossSection {
     lengthM,
     halfWidthM,
     reference,
-    route: request.route,
     columns,
     rows,
     bottomFt,

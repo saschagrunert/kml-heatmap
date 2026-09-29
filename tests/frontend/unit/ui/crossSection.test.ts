@@ -18,7 +18,6 @@ import {
 } from "../../../../kml_heatmap/frontend/ui/crossSectionCorridor";
 import { densityReference } from "../../../../kml_heatmap/frontend/ui/crossSectionChart";
 import {
-  formatAmount,
   heightUnit,
   sectionSummary,
 } from "../../../../kml_heatmap/frontend/ui/crossSectionText";
@@ -685,7 +684,7 @@ describe("cross-section", () => {
       expect(summary()).toContain("from 1 selected flight within");
     });
 
-    it("weighs like the heatmap, again as its switch changes", async () => {
+    it("weighs like the heatmap, and reads the time out", async () => {
       const { app, canvas } = await setup({
         currentData: createDataset([{ id: 1 }], crossing(1)),
       });
@@ -693,13 +692,6 @@ describe("cross-section", () => {
       drawLine(canvas);
       expect(summary()).toMatch(/^Cross-section: \d+ (s|min) from 1 flight/);
       expect(part(".profile-stats").textContent).toMatch(/^Time \d+ (s|min)/);
-
-      // By distance, the distance flown in the corridor: the 1 km across it
-      app.routeWeighting = true;
-      expect(summary()).toMatch(
-        /^Cross-section: 1\.0 km flown by 1 flight within 500 m/,
-      );
-      expect(part(".profile-stats").textContent).toMatch(/^Distance 1\.0 km/);
       const plot = part(".section-plot");
       vi.spyOn(plot, "getBoundingClientRect").mockReturnValue({
         left: 0,
@@ -711,7 +703,7 @@ describe("cross-section", () => {
         pointer("pointermove", { clientX: 100, clientY: 64 - 0.82 * 64 }),
       );
       expect(part(".profile-readout").textContent).toMatch(
-        /^2\.5 km · [\d,]+ to [\d,]+ ft AGL · [\d.]+ km$/,
+        /^2\.5 km · [\d,]+ to [\d,]+ ft AGL · \d+ (s|min)$/,
       );
     });
 
@@ -1014,7 +1006,6 @@ describe("the figures", () => {
     lengthM: 12_300,
     halfWidthM: 1000,
     reference: "agl",
-    route: false,
     columns: 2,
     rows: 2,
     bottomFt: 0,
@@ -1033,10 +1024,12 @@ describe("the figures", () => {
   it("says the time as the page says a length of time", () => {
     // Seconds, minutes, hours and minutes, and whole hours from ten of them
     // (utils/duration.ts): "485 min" was eight hours
-    expect(formatAmount(section(), 30)).toBe("30 s");
-    expect(formatAmount(section(), 42 * 60)).toBe("42 min");
-    expect(formatAmount(section(), 485 * 60)).toBe("8 h 5 min");
-    expect(formatAmount(section(), 10 * 3600)).toBe("10 h");
+    const said = (totalSeconds: number): string =>
+      sectionSummary(section({ totalSeconds }), 0).split(" from ")[0]!;
+    expect(said(30)).toBe("Cross-section: 30 s");
+    expect(said(42 * 60)).toBe("Cross-section: 42 min");
+    expect(said(485 * 60)).toBe("Cross-section: 8 h 5 min");
+    expect(said(10 * 3600)).toBe("Cross-section: 10 h");
   });
 
   it("names the heights' unit", () => {
@@ -1045,18 +1038,9 @@ describe("the figures", () => {
     expect(heightUnit(section({ reference: "msl" }))).toBe("ft MSL");
   });
 
-  it("says the distance flown by distance", () => {
-    expect(formatAmount(section(), 90)).toBe("2 min");
-    expect(formatAmount(section({ route: true }), 90)).toBe("4.6 km");
-    expect(formatAmount(section({ route: true }), 3600)).toBe("185 km");
-  });
-
   it("sums the chart up", () => {
     expect(sectionSummary(section(), 0)).toBe(
       "Cross-section: 1 h from 3 flights within 1 km of a 12 km line",
-    );
-    expect(sectionSummary(section({ route: true }), 0)).toBe(
-      "Cross-section: 185 km flown by 3 flights within 1 km of a 12 km line",
     );
   });
 

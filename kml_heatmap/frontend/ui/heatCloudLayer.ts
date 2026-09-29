@@ -74,7 +74,7 @@ export const HEAT_CLOUD_LAYER = "heat-cloud";
  * pixels (the standard deviation of the Gaussian), and how much of its heat
  * it glows with (see CLOUD_REFERENCE_SPEED_MS), between the stops linearly.
  * Out to 9.5 (the app's 10.5) the glow reaches 21 px, as the heatmap's
- * points reach 22 over a country, and a region's routes run together into
+ * points reach 18 over a country, and a region's routes run together into
  * a cloud, which its height and its shadow set apart. Closer
  * in a glow that wide over every track of a busy field covered its roads
  * and labels, where the flat heatmap has handed over to thin heat lines
@@ -277,9 +277,9 @@ const CLOUD_FLOW_WAKE = ["touchstart", "move"] as const;
  * takes a part away around it, so it shows on a faint track and on a white
  * one alike.
  */
-const CLOUD_MARK_SPACING_PX = 64;
+const CLOUD_MARK_SPACING_PX = 96;
 const CLOUD_MARK_ADD = 1.2;
-const CLOUD_MARK_CUT = 0.8;
+const CLOUD_MARK_CUT = 0.4;
 
 /**
  * The size of a mark, how far its arms reach to either side of the track,
@@ -297,7 +297,7 @@ const CLOUD_MARK_STROKE = [0.3, 0.6, 1.5] as const;
  * The map zooms over which the marks fade in: further out the tracks of a
  * region run together, and marks there would only add noise
  */
-const CLOUD_MARK_ZOOMS = [6.5, 8] as const;
+const CLOUD_MARK_ZOOMS = [7.5, 9] as const;
 
 /**
  * How strongly the marks are drawn at the map zoom `zoom` while the pulses

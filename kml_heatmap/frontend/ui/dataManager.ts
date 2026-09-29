@@ -41,7 +41,7 @@ import {
 
 /**
  * The points of a heat source with the heat of each, and the flights its
- * heat lines are of, weighed alike
+ * heat lines are of
  */
 export interface Heat {
   points: readonly Coordinate[];
@@ -49,7 +49,6 @@ export interface Heat {
   weights: readonly number[];
   segments: PathSegment[];
   keep: (pathId: number) => boolean;
-  weigh: SegmentWeight;
   /**
    * How the heatmap draws the heat, its exposure and the weights scaled by
    * it and rolled off, and the content of its source: worked out by the
@@ -80,7 +79,6 @@ const DRAWN_KEYS: readonly (keyof StoreState)[] = [
   "selectedAircraft",
   "selectedPathIds",
   "isolateSelection",
-  "routeWeighting",
 ];
 
 /** What the indicator says: "Loading 2026 flights (1.1 MB)…" */
@@ -122,7 +120,6 @@ export class DataManager {
     year: string;
     aircraft: string;
     isolate: boolean;
-    weigh: SegmentWeight;
   } | null = null;
   /** The heat layer has its paint; it is created without one */
   private heatmapPainted = false;
@@ -397,15 +394,14 @@ export class DataManager {
    * aircraft that flew every path of the year, leaves the heat source's
    * points as they are, and the same points are not sent again. The
    * coordinates are the dataset's own arrays, never copies, so comparing
-   * them one by one by identity is both exact and cheap; weighed alike,
-   * the same points carry the same heat.
+   * them one by one by identity is both exact and cheap, and the same
+   * points carry the same heat.
    */
   private setHeatmapPoints(heat: Heat, isolated: Heat | null): void {
     const held = this.heat;
     const points = heat.points;
     if (
-      held?.weigh !== heat.weigh ||
-      held.points.length !== points.length ||
+      held?.points.length !== points.length ||
       !held.points.every((point, index) => point === points[index])
     ) {
       this.heat = heat;
@@ -573,14 +569,14 @@ export class DataManager {
     // Worked out and written by the code of the year worker as well (see
     // heatLineFeatures), along the curves the colour lines keep; only the
     // lines asked for last are written to the source
-    const { segments, keep, weigh } = heat;
+    const { segments, keep } = heat;
     this.askWorker(
       (decoder) =>
         decoder.linesSource(
           flatCurves(segments),
           segments,
           keep,
-          (segment, next) => weigh(segment, next) * drawn.exposure,
+          (segment, next) => heatWeight(segment, next) * drawn.exposure,
           heatLineTone,
         ),
       (content) =>
@@ -721,17 +717,10 @@ export class DataManager {
       this.updateLayers();
       return;
     }
-    // The heatmap is also weighed anew by its switch, which leaves the
-    // colour layers as they are
-    if (drawn.isolate || isolateSelection || drawn.weigh !== this.weigh()) {
+    if (drawn.isolate || isolateSelection) {
       this.drawHeatmap(currentData);
     }
     this.app.layerManager.updateSelectionStyles();
-  }
-
-  /** How the switch weighs the heat, see heatWeight */
-  private weigh(): SegmentWeight {
-    return heatWeight(this.app.routeWeighting);
   }
 
   /**
@@ -761,25 +750,17 @@ export class DataManager {
 
   /**
    * Give the heatmap the points of what the filter and isolation keep. The
-   * heat of the filter is worked out again only for another dataset, filter
-   * or weighing: a change of the selection or of isolation keeps it.
+   * heat of the filter is worked out again only for another dataset or
+   * filter: a change of the selection or of isolation keeps it.
    */
   private drawHeatmap(data: KMLDataset): void {
     const { selectedYear: year, selectedAircraft: aircraft } = this.app;
-    const weigh = this.weigh();
     const drawn = this.drawn;
     const same =
       drawn?.data === data &&
       drawn.year === year &&
-      drawn.aircraft === aircraft &&
-      drawn.weigh === weigh;
-    this.drawn = {
-      data,
-      year,
-      aircraft,
-      isolate: this.app.isolateSelection,
-      weigh,
-    };
+      drawn.aircraft === aircraft;
+    this.drawn = { data, year, aircraft, isolate: this.app.isolateSelection };
 
     const selected = this.app.selectedPathIds;
     // What the year/aircraft filter keeps: a year filter over that year's
@@ -790,11 +771,11 @@ export class DataManager {
       ? () => true
       : (pathId: number): boolean => view.pathIds.has(pathId);
     const heat =
-      same && this.heat ? this.heat : heatOf(segments, segments, keep, weigh);
+      same && this.heat ? this.heat : heatOf(segments, segments, keep);
     this.setHeatmapPoints(
       heat,
       this.app.isolateSelection && selected.size > 0
-        ? this.isolatedHeat(data, keep, weigh)
+        ? this.isolatedHeat(data, keep)
         : null,
     );
   }
@@ -802,13 +783,11 @@ export class DataManager {
   /**
    * The heat of the selected paths the filter keeps, exactly what the
    * colour layers draw of an isolated selection, worked out from their
-   * segments alone; the one of before for the same selection, weighed
-   * alike
+   * segments alone; the one of before for the same selection
    */
   private isolatedHeat(
     data: KMLDataset,
     keep: (pathId: number) => boolean,
-    weigh: SegmentWeight,
   ): Heat {
     const ids = new Set(this.app.selectedPathIds);
     const filter = this.app.selectedYear + "/" + this.app.selectedAircraft;
@@ -816,7 +795,6 @@ export class DataManager {
     if (
       held?.data === data &&
       held.filter === filter &&
-      held.heat.weigh === weigh &&
       held.ids.size === ids.size &&
       [...ids].every((id) => held.ids.has(id))
     ) {
@@ -825,12 +803,7 @@ export class DataManager {
     const isolated = (pathId: number): boolean =>
       ids.has(pathId) && keep(pathId);
     const segments = data.path_segments;
-    const heat = heatOf(
-      segmentsForPathIds(segments, ids),
-      segments,
-      isolated,
-      weigh,
-    );
+    const heat = heatOf(segmentsForPathIds(segments, ids), segments, isolated);
     this.isolatedFor = { data, filter, ids, heat };
     return heat;
   }
@@ -846,10 +819,9 @@ function heatOf(
   pointSegments: PathSegment[],
   segments: PathSegment[],
   keep: (pathId: number) => boolean,
-  weigh: SegmentWeight,
 ): Heat {
-  const { points, weights } = heatmapPoints(pointSegments, keep, weigh);
-  return { points, weights, segments, keep, weigh, drawn: null };
+  const { points, weights } = heatmapPoints(pointSegments, keep, heatWeight);
+  return { points, weights, segments, keep, drawn: null };
 }
 
 /**

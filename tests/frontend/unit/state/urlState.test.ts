@@ -511,7 +511,6 @@ describe("URL state management", () => {
      */
     const LINK_OF_TOGGLE: Record<ToggleKey, string> = {
       heatmapVisible: "v=000100000",
-      routeWeighting: "r=1",
       airportsVisible: "v=100000000",
       altitudeVisible: "v=110100000",
       airspeedVisible: "v=101100000",
@@ -607,6 +606,12 @@ describe("URL state management", () => {
             wrappedVisible: false,
             isolateSelection: false,
           },
+        ],
+        [
+          // The heat counted by distance, which is gone: its flag is left
+          // alone, and the link opens as it would without it
+          "y=2024&r=1",
+          { selectedYear: "2024" },
         ],
       ];
       for (const [link, state] of links) {

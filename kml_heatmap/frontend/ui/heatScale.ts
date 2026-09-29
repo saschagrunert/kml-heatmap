@@ -8,8 +8,7 @@
  * legend follows, see followHeatLegend).
  *
  * A flight's worth is the heat one flight leaves over a place, as a lone
- * cruise at 100 kt does: the time it spends there, or with By distance on
- * (routeWeighting) its length, counted at that speed (heatWeight in
+ * cruise at 100 kt does: the time it spends there (heatWeight in
  * calculations/heatLines.ts). The heat of flights that overlap adds up in
  * all three ways the heat is drawn, so n flights' worth is drawn at n
  * times the density of one, up to the knee all three roll it off from

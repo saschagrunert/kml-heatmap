@@ -177,7 +177,7 @@ export const MAP_LAYERS = {
  * along a track the clusters are about `radius` apart at a whole zoom and
  * just under twice that before the next level takes over, where the map
  * still draws the tiles of the level below, scaled up. At 6 that is 6 to
- * 12 px, well inside the 22 px a point reaches, and a lone track stays an
+ * 12 px, well inside the 18 px a point reaches, and a lone track stays an
  * even line. At 12 it already shows as a string of beads, and at the reach
  * of a point the tracks fall apart into blobs.
  *
@@ -195,24 +195,28 @@ export const MAP_LAYERS = {
 export const HEATMAP_CLUSTER = { radius: 6, maxZoom: 8 } as const;
 
 /**
- * Where the heatmap hands over to the heat lines. A point reaches 13 px
- * from zoom 10 in (see HEATMAP_RADIUS_PX) and the fixes of a track are
- * about 235 m apart, which is 10 px at zoom 11 and 40 px at zoom 13: from
- * 11 on a track falls apart into beads, and further in into scattered
- * dots. The heat lines draw the flights as lines instead,
- * coloured by the time spent around them (see calculations/heatLines.ts),
- * so the busy places still read as the hot ones while each circuit and taxi
- * route stays a line of its own.
+ * Where the heatmap hands over to the heat lines. The fixes of a track are
+ * about 235 m apart, which is 10 px at zoom 11, 20 px at zoom 12 and 40 px
+ * at zoom 13: however far a point reaches (see HEATMAP_RADIUS_PX), a track
+ * falls apart into beads from about 12 on, and further in into scattered
+ * dots. The heat lines draw the flights as lines instead, coloured by the
+ * time spent around them (see calculations/heatLines.ts), so the busy
+ * places still read as the hot ones while each circuit and taxi route
+ * stays a line of its own.
  *
  * The lines fade in between `fromZoom` and `midZoom`, and only then does the
  * heatmap fade out, until `fullZoom`. Both at once looked muddy: a heatmap
  * at half opacity turns its white into grey and its blues into teal, and
- * that haze lay beside lines too faint yet to carry the colour. Map units.
+ * that haze lay beside lines too faint yet to carry the colour. The heatmap
+ * handed over a level earlier, from 10 to 11.5, and a map of a few towns
+ * showed thin lines where a heatmap was still wanted; fading out from
+ * 11.75, its widened glow lies round the lines as a halo on the way out.
+ * Map units.
  */
 export const HEAT_LINES = {
-  fromZoom: 10,
-  midZoom: 10.75,
-  fullZoom: 11.5,
+  fromZoom: 11,
+  midZoom: 11.75,
+  fullZoom: 12.75,
 } as const;
 
 /**

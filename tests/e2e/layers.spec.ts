@@ -23,9 +23,6 @@ import {
   setZoom,
 } from "./map";
 
-/** The Heat group of the right column, addressed by its own heading */
-const HEAT_GROUP =
-  '#right-buttons .control-group[aria-labelledby="heat-group-title"]';
 /** The Layers group of the right column, addressed by its own heading */
 const LAYERS_GROUP =
   '#right-buttons .control-group[aria-labelledby="layers-group-title"]';
@@ -174,12 +171,13 @@ test.describe("Layers", () => {
       "The Layers sheet drives this below the breakpoint; see mobile.spec.ts",
     );
     // Addressed through the named group rather than a position: the button
-    // has to be the one under the Heat heading, carrying its own icon, with
-    // the switch of how the heat is counted beside it
-    const btn = page.locator(`${HEAT_GROUP} #heatmap-btn`);
+    // has to be the first under the Layers heading, carrying its own icon
+    const btn = page.locator(`${LAYERS_GROUP} #heatmap-btn`);
     await expect(btn.locator("svg.icon")).toHaveCount(1);
-    await expect(page.locator("#heat-group-title")).toHaveText("Heat");
-    await expect(page.locator(`${HEAT_GROUP} #by-distance-btn`)).toBeVisible();
+    await expect(
+      page.locator(`${LAYERS_GROUP} .control-row`).first().locator("button"),
+    ).toHaveId("heatmap-btn");
+    await expect(page.locator("#by-distance-btn")).toHaveCount(0);
 
     await btn.click();
     await expectToggle(btn, false);
@@ -188,26 +186,19 @@ test.describe("Layers", () => {
     await expectToggle(btn, true);
   });
 
-  test("By distance weighs the heatmap anew and goes into the link", async ({
+  test("a link of the heat counted by distance opens with the heat by time", async ({
     page,
   }) => {
     /** How many points the heat source holds, as handed to the map */
     const heatPoints = (): Promise<number> => sourcePoints(page, "heat");
-    const param = (name: string): Promise<string | null> =>
-      Promise.resolve(new URL(page.url()).searchParams.get(name));
     const heat = (): Promise<number> => sourceHeat(page, "heat");
     await expect.poll(heatPoints).toBeGreaterThan(0);
     const all = await heatPoints();
     const byTime = await heat();
 
-    // Every flight the same per kilometre: the same points, weighed anew
-    await toggleLayer(page, "byDistance");
-    await expect.poll(() => param("r")).toBe("1");
-    await expect.poll(heat).not.toBeCloseTo(byTime, 3);
-    expect(await heatPoints()).toBe(all);
-
-    await toggleLayer(page, "byDistance");
-    await expect.poll(() => param("r")).toBeNull();
+    // The switch is gone, and its flag in the links shared so far with it
+    await gotoApp(page, "/?r=1");
+    await expect.poll(heatPoints).toBe(all);
     await expect.poll(heat).toBeCloseTo(byTime, 3);
   });
 
@@ -218,28 +209,30 @@ test.describe("Layers", () => {
     // stands above the bar, as the colour legends do
     const legend = page.locator("#heat-legend");
     await expect(legend).toBeVisible();
-    const title = legend.locator("#heat-legend-what");
-    await expect(title).toHaveText("Time spent");
-    // The heatmap as it is drawn under the exposure of the site's flights:
-    // about so many passes' worth of time, each label four times the one
-    // before
-    const labels = legend.locator(".labels > *");
-    await expect(labels).toHaveText([
-      /^≈\d+ pass(es)?$/,
-      /^\d+$/,
-      /^\d+$/,
-      /^\d+$/,
+    // One row: which way the time grows, on either side of the bar
+    await expect(legend.locator(".labels > *")).toHaveText([
+      "Time spent",
+      "Less",
+      "",
+      "More",
     ]);
-    const counts = (await labels.allTextContents()).map((text) =>
-      Number(text.replace(/\D/g, "")),
-    );
-    expect(counts.slice(1)).toEqual(counts.slice(0, 3).map((n) => n * 4));
-    // With By distance on, the heat counts the distance flown
-    await toggleLayer(page, "byDistance");
-    await expect(title).toHaveText("Distance flown");
-    await toggleLayer(page, "byDistance");
-    await expect(title).toHaveText("Time spent");
+    // What the ends stand for, under the exposure of the site's flights:
+    // about so many passes' worth of time, the last 64 times the first
+    const said =
+      /^Time spent: blue for about (\d+) pass(es)? of a flight, pale cyan for about (\d+), white for many more$/;
     const bar = legend.locator(".gradient-bar");
+    await expect(bar).toHaveAttribute("aria-label", said);
+    const [, first, , last] = said.exec(
+      (await bar.getAttribute("aria-label"))!,
+    )!;
+    expect(Number(last)).toBe(Number(first) * 64);
+    await expect(legend.locator(".labels")).toHaveAttribute(
+      "title",
+      (await bar.getAttribute("aria-label"))!,
+    );
+    // Small beside the map: one line of text high
+    const box = (await legend.boundingBox())!;
+    expect(box.height).toBeLessThan(56);
     await expect(bar).toHaveAttribute("role", "img");
     await expect(bar).toHaveCSS("background-image", /linear-gradient/);
     // What the cloud shows is said in the 3D view only

@@ -34,24 +34,29 @@ import {
  */
 
 /**
- * Reach of one point in pixels by map zoom, `[zoom, px]`, between the two
- * linearly. leaflet.heat's radius plus its blur was 25, and 22 is kept for
- * a map of a country, where the routes are to run together into a web.
- * Closer in that reach was a haze: from zoom 8 to 10 the routes of a
- * region, a few kilometres apart, merged into one blue fog around the home
- * field, and its circuits into one blot. So it narrows over a region, to
- * under two thirds at the zoom the heat lines take over from (see
- * HEAT_LINES). Not while the clusters are drawn, up to the level after
- * their last: scaled up towards it they lie up to twice their radius
- * apart, and under a narrower reach a lone track fell apart into beads
- * (see HEATMAP_CLUSTER).
+ * Reach of one point in pixels by map zoom, `[zoom, px]`, between two stops
+ * linearly. leaflet.heat's radius plus its blur was 25, and 22 (the
+ * reference reach) drew a route flown once over a country as a band as
+ * wide and as even as a busy corridor; 18 keeps the routes a web and lets
+ * the corridors stand out. Closer in the reach of before was a haze: from
+ * zoom 8 to 10 the routes of a region, a few kilometres apart, merged into
+ * one blue fog around the home field, and its circuits into one blot. So
+ * it narrows over a region, to 13 px at 10. Not while the clusters are
+ * drawn, up to the level after their last: scaled up towards it they lie
+ * up to twice their radius apart, and under a narrower reach a lone track
+ * fell apart into beads (see HEATMAP_CLUSTER).
+ *
+ * Further in the fixes of a track draw apart on the screen (see
+ * HEAT_LINES), and the reach widens again as the heatmap is kept on for
+ * the towns around a field: 13 px left a track beaded from 11.5 on, 16 px
+ * at 11 and 24 at 12 keep it a line until the heat lines take over. On the
+ * ground that is still narrower than at 10, under half of it at 12.
  */
-export const HEATMAP_RADIUS_PX: readonly [
-  readonly [number, number],
-  readonly [number, number],
-] = [
-  [HEATMAP_CLUSTER.maxZoom + 1, HEATMAP_REFERENCE_RADIUS_PX],
+export const HEATMAP_RADIUS_PX: readonly (readonly [number, number])[] = [
+  [HEATMAP_CLUSTER.maxZoom + 1, 18],
   [10, 13],
+  [11, 16],
+  [12, 24],
 ];
 /** Opacity of the layer when no colour layer is drawn over it */
 export const HEATMAP_OPACITY = 1;
@@ -82,15 +87,17 @@ export const HEATMAP_OPACITY = 1;
  * the dark base map a quarter of a flight, one, two and four come out each
  * about half as light again as the one before, four flights' worth well
  * over twice as light as one where it was not quite twice, so a leg flown
- * five times stands out from one flown once. The faintest stop, a quarter
- * of a flight, is light enough to keep a rare leg off the base map; the
- * colours in between are MapLibre's own blend of the stops either side.
+ * five times stands out from one flown once. The two faintest stops are
+ * the most transparent, so a route flown once is a soft line rather than a
+ * band of even blue with crisp edges, and still off the base map; the heat
+ * lines take the colours of the stops and not their opacity. The colours
+ * in between are MapLibre's own blend of the stops either side.
  */
 export const HEATMAP_GRADIENT: readonly (readonly [number, string, number])[] =
   [
     [0, "10, 40, 140", 0],
-    [0.004, "30, 80, 210", 0.4],
-    [HEAT_FLIGHT_DENSITY, "30, 105, 230", 0.58],
+    [0.004, "30, 80, 210", 0.22],
+    [HEAT_FLIGHT_DENSITY, "30, 105, 230", 0.5],
     [0.03, "40, 150, 250", 0.72],
     [0.06, "60, 195, 255", 0.85],
     [0.25, "120, 225, 255", 0.9],
@@ -133,12 +140,17 @@ export function heatLineTone(seconds: number): number {
 /**
  * The lines are drawn as a wide blurred glow and a thin core over it, both
  * in the colour of their heat; the core is fainter where less time was
- * spent. Widths in pixels by map zoom, opacities at full strength.
+ * spent. Widths in pixels by map zoom, opacities at full strength. The
+ * glow is at its widest and strongest where the lines take over: it keeps
+ * some of the weight of the heatmap's halo fading out over them, where
+ * the thin cores alone dropped the map from a glow to hairlines, and it
+ * settles to `closeIn` by zoom 16.
  */
 const HEAT_LINE_GLOW = {
-  opacity: 0.18,
-  width: [12, 5, 16, 12],
-  blur: [12, 4, 16, 9],
+  opacity: 0.3,
+  closeIn: [16, 0.18],
+  width: [12, 10, 16, 12],
+  blur: [12, 8, 16, 9],
 } as const;
 const HEAT_LINE_CORE = {
   /** Opacity by heat: `[seconds, opacity]` */
@@ -205,9 +217,12 @@ const HEATMAP_STOPS = Array.from(
 
 /** The reach of a point at `zoom`, see HEATMAP_RADIUS_PX */
 export function heatmapRadiusPx(zoom: number): number {
-  const [[z0, r0], [z1, r1]] = HEATMAP_RADIUS_PX;
-  const t = Math.min(Math.max((zoom - z0) / (z1 - z0), 0), 1);
-  return r0 + (r1 - r0) * t;
+  const next = HEATMAP_RADIUS_PX.findIndex(([stop]) => stop > zoom);
+  if (next === 0) return HEATMAP_RADIUS_PX[0]![1];
+  if (next < 0) return HEATMAP_RADIUS_PX[HEATMAP_RADIUS_PX.length - 1]![1];
+  const [z0, r0] = HEATMAP_RADIUS_PX[next - 1]!;
+  const [z1, r1] = HEATMAP_RADIUS_PX[next]!;
+  return r0 + ((r1 - r0) * (zoom - z0)) / (z1 - z0);
 }
 
 /**
@@ -268,9 +283,8 @@ export const HEATMAP_LEAST_POINT_CONTRIBUTION = 0.001;
  *
  * Where the fixes are drawn as they are, a fix weighs its heat, which is
  * less than 1 for one a second or less on (a logger that writes every
- * second, a taxi counted by its length with By distance on), and less
- * again under an exposure below 1. Under the 0.0006 such a point would
- * drop out, and a track of them with it, so it keeps
+ * second), and less again under an exposure below 1. Under the 0.0006 such
+ * a point would drop out, and a track of them with it, so it keeps
  * HEATMAP_LEAST_POINT_CONTRIBUTION down to the zoom from which the
  * intensity stays.
  */
@@ -321,9 +335,13 @@ export function fadeOutToLines(opacity: number): ExpressionSpecification {
   ];
 }
 
-/** Opacity by zoom of the heat lines: nothing, then `opacity` */
+/**
+ * Opacity by zoom of the heat lines: nothing, then `opacity`, and then the
+ * opacity of `closeIn`, `[zoom, opacity]`, at its zoom
+ */
 function fadeInLines(
   opacity: number | ExpressionSpecification,
+  closeIn: readonly number[] = [],
 ): ExpressionSpecification {
   return [
     "interpolate",
@@ -333,7 +351,8 @@ function fadeInLines(
     0,
     HEAT_LINES.midZoom,
     opacity,
-  ];
+    ...closeIn,
+  ] as ExpressionSpecification;
 }
 
 /** A width or blur that grows with the zoom, `[zoom, px, zoom, px]` */
@@ -387,7 +406,10 @@ export function heatLineOpacities(strength: number): {
   core: ExpressionSpecification;
 } {
   return {
-    glow: fadeInLines(HEAT_LINE_GLOW.opacity * strength),
+    glow: fadeInLines(HEAT_LINE_GLOW.opacity * strength, [
+      HEAT_LINE_GLOW.closeIn[0],
+      HEAT_LINE_GLOW.closeIn[1] * strength,
+    ]),
     core: fadeInLines([
       "interpolate",
       ["linear"],
