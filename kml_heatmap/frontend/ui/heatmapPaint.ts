@@ -144,13 +144,16 @@ export function heatLineTone(seconds: number): number {
  * glow is at its widest and strongest where the lines take over: it keeps
  * some of the weight of the heatmap's halo fading out over them, where
  * the thin cores alone dropped the map from a glow to hairlines, and it
- * settles to `closeIn` by zoom 16.
+ * settles to `closeIn` by zoom 16. Before 12 it grows with the map, as
+ * wide on the ground at 11 as at 12: there it fades in over the heatmap
+ * still drawn whole, and 10 px of it from 11 on cost frames for a glow
+ * the heatmap covers.
  */
 const HEAT_LINE_GLOW = {
   opacity: 0.3,
   closeIn: [16, 0.18],
-  width: [12, 10, 16, 12],
-  blur: [12, 8, 16, 9],
+  width: [11, 5, 12, 10, 16, 12],
+  blur: [11, 4, 12, 8, 16, 9],
 } as const;
 const HEAT_LINE_CORE = {
   /** Opacity by heat: `[seconds, opacity]` */
@@ -252,6 +255,14 @@ export const HEATMAP_LEAST_CONTRIBUTION = intensityAt(HEATMAP_FIXES_FROM_ZOOM);
  * heatmapWeight)
  */
 export const HEATMAP_LEAST_POINT_CONTRIBUTION = 0.001;
+/**
+ * The heat MapLibre's cut of a kernel takes out of a point, weight times
+ * intensity, whatever its weight: 1.3 times the least that is drawn at all
+ * (1 / 255 / 16 over the Gaussian's peak, 0.000614), which drew the fixes
+ * of the apron merged (see heatmapWeight) closest to how they were drawn
+ * one by one
+ */
+const HEATMAP_CUT_CONTRIBUTION = 0.0008;
 
 /**
  * Weight of a drawn point by zoom: its heat, `w` (see drawHeat in
@@ -287,21 +298,45 @@ export const HEATMAP_LEAST_POINT_CONTRIBUTION = 0.001;
  * a point would drop out, and a track of them with it, so it keeps
  * HEATMAP_LEAST_POINT_CONTRIBUTION down to the zoom from which the
  * intensity stays.
+ *
+ * A point of the source may be several fixes of one pixel, `n` of them
+ * (see mergedPoints in services/heatSource.ts), and is drawn as they were.
+ * Each of them would have been lifted to the floor on its own, so the
+ * floor of such a point is `n` times as high. And MapLibre cuts every
+ * kernel off where it falls under 1 / 255 / 16, which takes about as much
+ * out of a light point as out of a heavy one, HEATMAP_CUT_CONTRIBUTION:
+ * one point where there were `n` loses that once instead of `n` times, so
+ * it weighs as much less for every fix beyond the first. Without the two
+ * the apron, hundreds of light fixes on top of one another, lost its white
+ * or burned out into a blot.
  */
 function heatmapWeight(): ExpressionSpecification {
+  const fixes: ExpressionSpecification = ["coalesce", ["get", "n"], 1];
   return [
     "interpolate",
     ["exponential", 0.5],
     ["zoom"],
     ...HEATMAP_STOPS.flatMap((zoom) => [
       zoom,
-      [
-        "max",
-        ["get", "w"],
-        (zoom < HEATMAP_FIXES_FROM_ZOOM
-          ? HEATMAP_LEAST_CONTRIBUTION
-          : HEATMAP_LEAST_POINT_CONTRIBUTION) / intensityAt(zoom),
-      ],
+      zoom < HEATMAP_FIXES_FROM_ZOOM
+        ? ["max", ["get", "w"], HEATMAP_LEAST_CONTRIBUTION / intensityAt(zoom)]
+        : [
+            "-",
+            [
+              "max",
+              ["get", "w"],
+              [
+                "*",
+                fixes,
+                HEATMAP_LEAST_POINT_CONTRIBUTION / intensityAt(zoom),
+              ],
+            ],
+            [
+              "*",
+              ["-", fixes, 1],
+              HEATMAP_CUT_CONTRIBUTION / intensityAt(zoom),
+            ],
+          ],
     ]),
   ] as ExpressionSpecification;
 }

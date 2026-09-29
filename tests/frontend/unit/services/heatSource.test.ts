@@ -2,9 +2,11 @@ import { describe, it, expect } from "vitest";
 import {
   drawHeat,
   flatLines,
+  HEAT_MERGE_ZOOM,
   linesSource,
   type HeatLines,
 } from "../../../../kml_heatmap/frontend/services/heatSource";
+import { HEAT_LINES } from "../../../../kml_heatmap/frontend/utils/constants";
 import {
   exposedHeat,
   heatColumns,
@@ -63,6 +65,43 @@ describe("drawHeat", () => {
     expect(await drawHeat(new Float64Array(0)).source.text()).toBe(
       '{"type":"FeatureCollection","features":[]}',
     );
+  });
+
+  it("merges the fixes of one pixel of the heatmap's last zoom into one point of their heat, where they weigh", async () => {
+    // A pixel at 12.75 is about 7 m at 51.5 degrees north; the first three
+    // lie within a metre of each other, the last 20 m away
+    const points: [number, number][] = [
+      [51.500001, 12.000001],
+      [51.500003, 12.000005],
+      [51.500005, 12.000002],
+      [51.5002, 12.0001],
+    ];
+    const weights = [1, 2, 5, 3];
+    const heat = heatColumns(points, weights);
+
+    const { features: drawn } = JSON.parse(
+      await drawHeat(heat).source.text(),
+    ) as GeoJSON.FeatureCollection<GeoJSON.Point, { w: number; n?: number }>;
+
+    const exposed = exposedHeat(heat).weights;
+    expect(drawn).toHaveLength(2);
+    const [merged, lone] = drawn as [(typeof drawn)[0], (typeof drawn)[0]];
+    const sum = exposed[0]! + exposed[1]! + exposed[2]!;
+    expect(merged.properties.w).toBeCloseTo(sum, 12);
+    expect(merged.properties.n).toBe(3);
+    const mean = (axis: 0 | 1): number =>
+      (points[0]![axis] * exposed[0]! +
+        points[1]![axis] * exposed[1]! +
+        points[2]![axis] * exposed[2]!) /
+      sum;
+    expect(merged.geometry.coordinates[0]).toBeCloseTo(mean(1), 9);
+    expect(merged.geometry.coordinates[1]).toBeCloseTo(mean(0), 9);
+    // A point of one fix is written as it was, without a count
+    expect(lone).toEqual(features([points[3]!], [exposed[3]!]).features[0]);
+  });
+
+  it("merges in the pixels of the last zoom the heatmap is drawn at", () => {
+    expect(HEAT_MERGE_ZOOM).toBe(HEAT_LINES.fullZoom);
   });
 });
 

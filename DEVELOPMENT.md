@@ -1195,6 +1195,35 @@ halo to hairlines. Their heat is scaled by the heatmap's exposure and
 rolled off as its heat is (`heatLineTone`), so the hand-over keeps the
 colours.
 
+Kept on that long, the heatmap made the hand-over the dearest stretch of
+the map, and zooming in through it stuttered. Nothing is worked out anew
+on a zoom; MapLibre draws every point into the heatmap's texture every
+frame, and at the home field hundreds of circuits and the apron put
+thousands of fixes on top of one another. On a phone's screen (390 by 844
+at 3x, timed per layer with `EXT_disjoint_timer_query_webgl2` on a Radeon
+RX 9070 XT) a frame took 1.5 ms of the GPU at `z` 11.5 and 1.8 to 2.1 ms
+at 12 against 0.6 and 1.1 ms before, the heatmap's texture alone 0.7 to 0.8 ms
+and the lines' glow, 10 px from 11 on, 0.4 to 0.65 ms. So the year worker
+merges the fixes of one pixel at the heatmap's last zoom into one point of
+their heat (`mergedPoints` in `services/heatSource.ts`): at `z` 12 the
+home field is drawn from 26,000 points instead of 43,000 and the texture
+takes 0.3 ms. The weight of such a point (`n` fixes) keeps the floors of
+its fixes, and since MapLibre's cut of a kernel now takes its share once
+instead of `n` times, the point weighs that much less for every fix beyond
+the first (`heatmapWeight`), so the apron keeps most of its white. Merged
+or not, the flights of the current year differ in 0.1 % of the pixels of a
+screenshot on a desktop and 0.3 % on a phone, those of all years in 0.2
+and 0.8 %, around the apron. What is left is the spot where aircraft
+stood, at `z` 10 to 11 with all years: hundreds of light fixes, each cut
+down to a small hard-edged kernel, piled up into a white spot there that
+one merged point, drawn with a whole soft kernel, leaves light cyan; a
+smaller cut brings the white back but lights up everything around it. The
+heat layers end at `fullZoom`, so their sources are not cut into tiles
+from 12.75 on, and the glow grows with the map from 5 px at 11 to 10 px at
+12, where it takes over, instead of lying 10 px wide under a heatmap still
+drawn whole. With both, a frame on the phone takes 0.8 ms at 11.5 and 1.2
+to 1.5 ms at 12.
+
 The heat of flights adds up and the ramp ends in white, so a home field
 flown for years, hundreds of times the heat of its busiest routes, burned
 out into a flat white racetrack with a hard edge from `z` 9 to 11, its
