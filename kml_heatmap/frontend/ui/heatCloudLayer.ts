@@ -353,6 +353,14 @@ export interface HeatCloudStyle {
    * the replay of all flights (see flightClock); all of it without
    */
   until?: number | undefined;
+  /**
+   * How much of its glow is drawn, 1 unless it fades out (see
+   * CLOUD_HANDOVER_MS in ui/heatCloud.ts): its heat is scaled by it, so
+   * the map under it comes back as it goes. A lower `opacity` moves what
+   * it glows over towards that much of white, which darkened the heatmap
+   * under a cloud faded by it to red.
+   */
+  fade?: number | undefined;
 }
 
 /**
@@ -986,9 +994,10 @@ export class HeatCloudLayer implements CustomLayerInterface {
 
     gl.uniform4f(u.u_band, ...style.band);
     gl.uniform1f(u.u_until, style.until ?? 1e30);
+    const fade = style.fade ?? 1;
     gl.uniform1f(
       u.u_gain,
-      (look.gain * this.exposure * CLOUD_REFERENCE_SPEED_MS * ratio) /
+      (fade * look.gain * this.exposure * CLOUD_REFERENCE_SPEED_MS * ratio) /
         metresPerPixel,
     );
     gl.bindVertexArray(ready.vao);
@@ -1062,13 +1071,15 @@ export class HeatCloudLayer implements CustomLayerInterface {
     gl.depthMask(true);
     this.frames++;
     this.drawn = cloud.count - 1;
-    // The next frame while the pulses run or fade, or the exposure moves,
-    // every one the screen shows so they move smoothly; none at all once
-    // they rest, for the map or for reduced motion
+    // The next frame while the pulses run or fade, the exposure moves or
+    // the cloud fades out, every one the screen shows so they move
+    // smoothly; none at all once they rest, for the map or for reduced
+    // motion
     this.resting = style.flow && !awake && !this.flow;
     if (
       awake ||
       this.flow > 0 ||
+      fade < 1 ||
       Math.abs(this.exposure - exposure) > exposure / 100
     ) {
       map.triggerRepaint();

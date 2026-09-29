@@ -194,6 +194,12 @@ describe("Wrapped's intro", () => {
     expect(modal().classList.contains("is-settling")).toBe(true);
     expect(skipButton().hidden).toBe(true);
     expect(map().resize.mock.calls.length).toBe(measured);
+    // Onto the flat heatmap and the projection of before as it sets off,
+    // which the camera settles in: the overview a skip shows, and a
+    // heatmap MapLibre draws anew at every zoom of a flight to a
+    // destination
+    expect(mockApp.store.get("forcedHeatCloud")).toBe(false);
+    expect(mockApp.store.get("globeVisible")).toBe(false);
 
     // Where it is measured in its panel and fitted to it once there
     await vi.advanceTimersByTimeAsync(INTRO_SETTLE_MS);
@@ -206,9 +212,10 @@ describe("Wrapped's intro", () => {
       animate: false,
     });
     expect(map().padding).toEqual(NO_PADDING);
-    // The cloud and the globe stay while the dialog is open
-    expect(mockApp.store.get("forcedHeatCloud")).toBe(true);
-    expect(mockApp.store.get("globeVisible")).toBe(true);
+    // Beside the cards the flat heatmap on the projection of before, as
+    // after a skip: the cloud and the globe were the intro's
+    expect(mockApp.store.get("forcedHeatCloud")).toBe(false);
+    expect(mockApp.store.get("globeVisible")).toBe(false);
 
     // Nothing more moves the camera
     await vi.runAllTimersAsync();
@@ -470,7 +477,7 @@ describe("Wrapped's intro", () => {
       );
     });
 
-    it("ends where it was going at a press on the map, with the globe and the cloud kept", async () => {
+    it("ends where it was going at a press on the map, on the flat heatmap and the projection of before", async () => {
       await openWithIntro();
       await vi.advanceTimersByTimeAsync(INTRO_FLY_MS + INTRO_TURN_MS);
       const measured = map().resize.mock.calls.length;
@@ -481,8 +488,8 @@ describe("Wrapped's intro", () => {
       expect(map().padding).toEqual(NO_PADDING);
       expect(map().resize.mock.calls.length).toBe(measured + 1);
       expect(lastMove("fitBounds")![1]).toMatchObject({ animate: false });
-      expect(mockApp.store.get("globeVisible")).toBe(true);
-      expect(mockApp.store.get("forcedHeatCloud")).toBe(true);
+      expect(mockApp.store.get("globeVisible")).toBe(false);
+      expect(mockApp.store.get("forcedHeatCloud")).toBe(false);
 
       // And only once
       await vi.runAllTimersAsync();

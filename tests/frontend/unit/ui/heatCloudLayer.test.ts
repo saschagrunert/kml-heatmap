@@ -1176,6 +1176,22 @@ describe("the heat cloud's layer", () => {
       expect(uniform("u_gain")[0]! / target).toBeCloseTo(1, 1);
       expect(asks()).toBe(0);
     });
+
+    it("scales the heat by the fade, and asks for every frame while it fades", () => {
+      motion.reduced = true;
+      style = { ...STYLE, liftM: 0 };
+      layer.onAdd(map);
+      layer.setPoints(points());
+      for (let k = 0; k < 100; k++) {
+        now += 16;
+        render();
+      }
+      const full = uniform("u_gain")[0]!;
+      expect(asks()).toBe(0);
+      style = { ...STYLE, liftM: 0, fade: 0.25 };
+      expect(asks()).toBe(1);
+      expect(uniform("u_gain")[0]! / full).toBeCloseTo(0.25, 9);
+    });
   });
 });
 
