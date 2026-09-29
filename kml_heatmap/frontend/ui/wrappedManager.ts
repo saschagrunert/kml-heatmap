@@ -181,9 +181,9 @@ export class WrappedManager {
     domCache
       .get("wrapped-skip-btn")
       ?.addEventListener("click", () => this.intro?.skip(), { signal });
-    // A card on: the next to the top of the column. The first fills the
-    // column (wrapped.css), or is taller where its figures need it, so a
-    // page down could stop short of the next.
+    // A card on: the next to the top of the column. The first is taller
+    // than the column where its figures need it, so a page down could stop
+    // short of the next.
     const more = domCache.get("wrapped-more-btn");
     more?.addEventListener(
       "click",

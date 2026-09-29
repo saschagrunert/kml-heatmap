@@ -13,10 +13,13 @@
  * year shows around home. Then it settles on the overview Wrapped has
  * always shown, the flights stop, and the cards come in one after another
  * as the map draws back into its panel beside them, or, stacked, fades
- * from over them (see settle). About six seconds. Skip, or a touch of the
- * map, ends it at once with Wrapped as it opens without it: not under
- * reduced motion, nor when the heat cloud's code does not arrive in time
- * (INTRO_WAIT_MS).
+ * from over them (see settle). About ten seconds, paced so that each step
+ * can be taken in: the title stays for two seconds of the flight before it
+ * lifts (wrapped.css), and the cards come in slowly enough to read. It was
+ * six, where the title was gone within a second of the globe showing.
+ * Skip, or a touch of the map, ends it at once with Wrapped as it opens
+ * without it: not under reduced motion, nor when the heat cloud's code
+ * does not arrive in time (INTRO_WAIT_MS).
  *
  * The cloud is drawn without switching the 3D view on (forcedHeatCloud),
  * over the globe; both stay while Wrapped is open after the intro and go
@@ -79,12 +82,15 @@ const FAR = { zoom: 1.2, west: 50, south: 15 };
 const HOME = { above: 2, most: 9, pitch: 45, bearing: -15 };
 
 /** How far the camera turns once over the home base, in degrees */
-const TURN_DEG = 12;
+const TURN_DEG = 18;
 
-/** The steps of the intro, in milliseconds */
-export const INTRO_FLY_MS = 2800;
-export const INTRO_TURN_MS = 1200;
-export const INTRO_SETTLE_MS = 2000;
+/**
+ * The steps of the intro, in milliseconds. The settle outlasts the cards
+ * coming in, all in by 2.5 s (wrapped.css).
+ */
+export const INTRO_FLY_MS = 4200;
+export const INTRO_TURN_MS = 2400;
+export const INTRO_SETTLE_MS = 3000;
 
 /**
  * Longest the intro waits for the heat cloud's code once the map is in the
