@@ -69,6 +69,57 @@ test.describe("Replay all flights", () => {
     expect(await page.evaluate(() => window.mapApp!.replayActive)).toBe(false);
   });
 
+  test("scrubs the clock with its slider, and builds the heat up behind the flights", async ({
+    page,
+  }) => {
+    await page.locator("#replay-all-btn").click();
+    const slider = page.locator("#replay-all-time");
+    await expect(slider).toBeVisible({ timeout: 10000 });
+    await expect(slider).toHaveAttribute(
+      "aria-label",
+      "Time into every flight",
+    );
+    await expect(slider).toHaveAttribute("aria-valuetext", CLOCK);
+    await expect(page.locator("#replay-all-speed option")).toHaveText([
+      "100x",
+      "200x",
+      "300x",
+      "500x",
+      "1000x",
+    ]);
+    // The heat is the cloud's, drawn up to the clock on the flat map too
+    const until = (): Promise<number | undefined> =>
+      page.evaluate(() => {
+        const layer = window.mapApp!.map!.getLayer("heat-cloud") as
+          | { implementation?: { style: () => { until?: number } | null } }
+          | undefined;
+        return layer?.implementation?.style()?.until;
+      });
+    await expect.poll(until, { timeout: 10000 }).toBeGreaterThan(0);
+
+    await page.locator("#replay-all-play-btn").click();
+    await slider.focus();
+    await page.keyboard.press("End");
+    const clock = page.locator("#replay-all-clock");
+    const end = await clock.textContent();
+    await expect(slider).toHaveAttribute("aria-valuetext", end!);
+    const atEnd = (await until())!;
+    await expect.poll(async () => (await drawn(page))?.time).toBe(atEnd);
+
+    // Backwards, a minute a press, the layer and the heat with it
+    await page.keyboard.press("ArrowLeft");
+    await expect.poll(until).toBeLessThan(atEnd);
+    await page.keyboard.press("Home");
+    await expect(clock).toHaveText("0:00 into every flight");
+    await expect.poll(until).toBe(0);
+    await expect.poll(async () => (await drawn(page))?.time).toBe(0);
+
+    await page.locator("#replay-all-close-btn").click();
+    expect(
+      await page.evaluate(() => !!window.mapApp!.map!.getLayer("heat-cloud")),
+    ).toBe(false);
+  });
+
   test("closes on Escape and hands focus back to its control", async ({
     page,
   }) => {
@@ -113,6 +164,17 @@ test.describe("Replay all flights on a phone", () => {
       timeout: 10000,
     });
     await expect(page.locator("#mobile-bar")).toHaveCount(0);
+    // The slider shares the row of the controls under the clock
+    const slider = (await page.locator("#replay-all-time").boundingBox())!;
+    const speed = (await page.locator("#replay-all-speed").boundingBox())!;
+    expect(slider.width).toBeGreaterThan(80);
+    expect(
+      Math.abs(slider.y + slider.height / 2 - speed.y - speed.height / 2),
+    ).toBeLessThan(2);
+    // Pushed to the right edge, the orbit stays clear of the close above it
+    const orbit = (await page.locator("#replay-all-orbit-btn").boundingBox())!;
+    const close = (await page.locator("#replay-all-close-btn").boundingBox())!;
+    expect(orbit.y).toBeGreaterThanOrEqual(close.y + close.height - 0.5);
 
     await page.locator("#replay-all-close-btn").click();
 

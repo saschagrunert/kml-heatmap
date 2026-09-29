@@ -12,7 +12,12 @@
  * colour layer, which are drawn in front of it (dimsHeatCloud). While a
  * replay runs it stays, faintly and without its pulses, its marks showing
  * the way flown instead, so the chase camera flies through the flights of
- * before. The flat heatmap steps aside for it (heatCloud in the store, see
+ * before. The replay of all flights draws it at full strength instead, as
+ * far as its clock has come into every flight (replayAllTime), so the heat
+ * builds up behind the flights and ends as the whole of it; on the flat
+ * map as well, flat on the ground, where it stands in for the heatmap,
+ * whose colours it glows in, until the replay closes. The flat heatmap
+ * steps aside for it (heatCloud in the store, see
  * ui/layerVisibility.ts) from the moment the cloud's layer is on the map
  * until the 3D view is turned off,
  * or, where the cloud's shaders do not work, until the map has a new WebGL
@@ -38,8 +43,8 @@
  * would dim it.
  *
  * In the 3D view the band of heights of its control (ui/heightBand.ts)
- * leaves out the heat below and above it. Wrapped, which has no such
- * control, shows all of it.
+ * leaves out the heat below and above it. Wrapped and the flat map, which
+ * have no such control, show all of it.
  */
 import type { MapApp } from "../mapApp";
 import type { StoreState } from "../state/store";
@@ -91,16 +96,19 @@ import {
 } from "./heatCloudLayer";
 import { followHeightBand } from "./heightBand";
 import { followCloudReadout } from "./cloudReadout";
+import { replayAllTime } from "./replayAll";
+import { REPLAY_ALL_LAYER } from "./replayAllLayer";
 
 /**
  * The layer the cloud is drawn below: the first of the ribbons, above every
  * layer of the app that lies on the ground (the selection's lines, the
  * replay's route and trail) and below the flights in the air and the
- * labels. On the relief MapLibre draws the layers on the ground into a
- * texture of it, and the relief once more for every run of them another
- * layer breaks: between the heatmaps and the heat lines the cloud cut them
- * in two, and every frame of the 3D view drew the relief twice, even with
- * the Heatmap switch off.
+ * labels; or the replay of all flights right under them, whose trails are
+ * drawn over the heat. On the relief MapLibre draws the layers on the
+ * ground into a texture of it, and the relief once more for every run of
+ * them another layer breaks: between the heatmaps and the heat lines the
+ * cloud cut them in two, and every frame of the 3D view drew the relief
+ * twice, even with the Heatmap switch off.
  */
 const CLOUD_BEFORE = MAP_LAYERS.pathsAltitudeRibbons;
 
@@ -338,10 +346,12 @@ export function followHeatCloud(app: MapApp): void {
   let restZoom = map.getZoom();
   /** The relief level the cloud is cut for and lifted as */
   const level = (): number => (app.threeDVisible ? app.reliefLevel : atRest);
+  /** Whether the replay of all flights draws the heat up to its clock */
+  const growing = (): boolean => app.replayActive && app.replayState.all;
 
   /** Whether the layer is on the map */
   const wanted = (): boolean =>
-    (app.threeDVisible || app.forcedHeatCloud) && !broken;
+    (app.threeDVisible || app.forcedHeatCloud || growing()) && !broken;
   /** Whether it draws: Wrapped's whatever the Heatmap switch says */
   const shown = (): boolean =>
     wanted() && (app.forcedHeatCloud || app.heatmapVisible);
@@ -355,12 +365,17 @@ export function followHeatCloud(app: MapApp): void {
     const metres = exaggeration * FEET_TO_METERS;
     return {
       groundM: onReliefIn(app, app.forcedHeatCloud) ? metres : 0,
-      liftM: lifted ? metres : 0,
+      // Flat on the flat map, as the replay's trails are
+      liftM: lifted && (app.threeDVisible || app.forcedHeatCloud) ? metres : 0,
       opacity,
       flow: !app.replayActive,
-      // Wrapped shows the whole year, without the control of the band
+      until: growing() ? (replayAllTime(app) ?? 0) : undefined,
+      // Wrapped shows the whole year, and the flat map (the replay of all
+      // flights) every height: neither shows the control of the band
       band: heightBandEdgesFt(
-        app.wrappedVisible ? FULL_BAND : parseHeightBand(app.heightBand),
+        app.wrappedVisible || !app.threeDVisible
+          ? FULL_BAND
+          : parseHeightBand(app.heightBand),
       ),
     };
   };
@@ -560,7 +575,9 @@ export function followHeatCloud(app: MapApp): void {
       if (on) map.removeLayer(HEAT_CLOUD_LAYER);
       return;
     }
-    const before = map.getLayer(CLOUD_BEFORE) ? CLOUD_BEFORE : undefined;
+    const before = [REPLAY_ALL_LAYER, CLOUD_BEFORE].find((id) =>
+      map.getLayer(id),
+    );
     if (!on) {
       map.addLayer(layer, before);
       return;
@@ -597,13 +614,14 @@ export function followHeatCloud(app: MapApp): void {
     }
     // Wrapped's at full strength: the dialog hides what the heatmap steps
     // back for
-    opacity = app.forcedHeatCloud
-      ? 1
-      : app.replayActive
-        ? CLOUD_REPLAY_OPACITY
-        : dimsHeatCloud(app)
-          ? dimmedHeatmapOpacity()
-          : 1;
+    opacity =
+      app.forcedHeatCloud || growing()
+        ? 1
+        : app.replayActive
+          ? CLOUD_REPLAY_OPACITY
+          : dimsHeatCloud(app)
+            ? dimmedHeatmapOpacity()
+            : 1;
     if (!map.isZooming()) lifted = isLiftedAt(map.getZoom());
     if (shown()) updatePoints();
     release();

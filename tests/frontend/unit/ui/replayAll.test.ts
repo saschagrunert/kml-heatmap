@@ -12,6 +12,7 @@ import {
   ReplayAllControls,
   ReplayAllPlayer,
   replayAllClock,
+  replayAllTime,
   toggleReplayAll,
 } from "../../../../kml_heatmap/frontend/ui/replayAll";
 import {
@@ -265,6 +266,38 @@ describe("the replay of all flights", () => {
       expect(frames.pending()).toBe(0);
     });
 
+    it("fades the trails over no more than 25 minutes of flight at a thousand times", () => {
+      void player.start({ speed: 1000 });
+      frames.run();
+
+      frames.run(100, 30);
+
+      expect(player.playing).toBe(false);
+      expect(player.time).toBeCloseTo(player.duration + 1500, 6);
+    });
+
+    it("jumps to a time into every flight, backwards as well, and draws from there", () => {
+      void player.start({ speed: 100 });
+      frames.run();
+      frames.run(100, 5);
+      map().triggerRepaint.mockClear();
+
+      player.seek(80);
+      expect(player.time).toBe(80);
+      expect(map().triggerRepaint).toHaveBeenCalled();
+      player.seek(20);
+      expect(player.time).toBe(20);
+      // Not past the landing of the last, nor before the start
+      player.seek(1e6);
+      expect(player.time).toBe(player.duration);
+      player.seek(-5);
+      expect(player.time).toBe(0);
+
+      // Playing on from there
+      frames.run(100);
+      expect(player.time).toBeCloseTo(10, 6);
+    });
+
     it("starts again from the beginning once it has played to the end", () => {
       void player.start({ speed: 500 });
       frames.run(100, 50);
@@ -340,24 +373,24 @@ describe("the replay of all flights", () => {
       expect(frames.pending()).toBe(0);
     });
 
-    it("goes back below the ribbons, next to the heat cloud, where a new style left it", () => {
+    it("goes back right below the ribbons, over the heat cloud, where a new style left it", () => {
       void player.start();
       const ribbons = MAP_LAYERS.pathsAltitudeRibbons;
       const order = (): string[] => map().getLayersOrder();
 
-      // The heat cloud puts itself right below the ribbons, and may stay
-      map().addLayer({ id: HEAT_CLOUD_LAYER, type: "custom" }, ribbons);
+      // The heat cloud puts itself right below the replay
+      map().addLayer(
+        { id: HEAT_CLOUD_LAYER, type: "custom" },
+        REPLAY_ALL_LAYER,
+      );
       map().emit("styledata");
       expect(map().moveLayer).not.toHaveBeenCalled();
 
       map().moveLayer(REPLAY_ALL_LAYER);
       map().emit("styledata");
 
-      expect(order().indexOf(REPLAY_ALL_LAYER)).toBeLessThan(
-        order().indexOf(ribbons),
-      );
-      expect(order().indexOf(REPLAY_ALL_LAYER)).toBeGreaterThan(
-        order().indexOf(ribbons) - 3,
+      expect(order().indexOf(REPLAY_ALL_LAYER)).toBe(
+        order().indexOf(ribbons) - 1,
       );
     });
 
@@ -586,12 +619,92 @@ describe("the replay of all flights", () => {
         "200",
         "300",
         "500",
+        "1000",
       ]);
 
       speed.value = "500";
       speed.dispatchEvent(new Event("change"));
 
       expect(controls.player.speed).toBe(500);
+    });
+
+    it("moves its slider with the clock, which it reads out as the time into every flight", () => {
+      controls.show();
+      const slider = document.getElementById(
+        "replay-all-time",
+      ) as HTMLInputElement;
+      expect(slider.type).toBe("range");
+      expect(slider.getAttribute("aria-label")).toBe("Time into every flight");
+      // To the landing of the last, some 105 s in, in steps of a minute
+      expect(slider.max).toBe("120");
+      expect(slider.step).toBe("60");
+      expect(slider.getAttribute("aria-valuetext")).toBe(
+        "0:00 into every flight",
+      );
+
+      frames.run();
+      frames.run(100, 4);
+
+      // 80 s of flight at 200 times
+      expect(Number(slider.value)).toBeCloseTo(80, 6);
+      expect(slider.getAttribute("aria-valuetext")).toBe(
+        "0:01 into every flight",
+      );
+    });
+
+    it("jumps to where its slider is moved, and plays on from there", () => {
+      controls.show();
+      const slider = document.getElementById(
+        "replay-all-time",
+      ) as HTMLInputElement;
+      frames.run();
+
+      slider.value = "60";
+      slider.dispatchEvent(new Event("input"));
+
+      expect(controls.player.time).toBe(60);
+      expect(controls.player.playing).toBe(true);
+      expect(clock()).toBe("0:01 into every flight");
+      // No further than the last landing
+      slider.value = "120";
+      slider.dispatchEvent(new Event("input"));
+      expect(controls.player.time).toBe(controls.player.duration);
+      slider.value = "0";
+      slider.dispatchEvent(new Event("input"));
+      expect(controls.player.time).toBe(0);
+    });
+
+    it("holds the clock while its slider is dragged, and plays on as it is let go", () => {
+      controls.show();
+      const slider = document.getElementById(
+        "replay-all-time",
+      ) as HTMLInputElement;
+
+      slider.dispatchEvent(new Event("pointerdown"));
+      expect(controls.player.playing).toBe(false);
+      slider.value = "60";
+      slider.dispatchEvent(new Event("input"));
+      frames.run(100, 3);
+      expect(controls.player.time).toBe(60);
+
+      window.dispatchEvent(new Event("pointerup"));
+      expect(controls.player.playing).toBe(true);
+
+      // A paused replay stays paused
+      controls.player.pause();
+      slider.dispatchEvent(new Event("pointerdown"));
+      window.dispatchEvent(new Event("pointerup"));
+      expect(controls.player.playing).toBe(false);
+    });
+
+    it("tells the heat its clock only while it is open", () => {
+      expect(replayAllTime(asMapApp(app))).toBeNull();
+      toggleReplayAll(asMapApp(app));
+      expect(replayAllTime(asMapApp(app))).toBe(0);
+
+      toggleReplayAll(asMapApp(app));
+
+      expect(replayAllTime(asMapApp(app))).toBeNull();
     });
 
     it("turns the orbit on and off, and a camera the user moves turns it off", () => {

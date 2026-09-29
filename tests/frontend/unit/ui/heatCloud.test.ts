@@ -26,6 +26,11 @@ import {
   type HeatCloudStyle,
 } from "../../../../kml_heatmap/frontend/ui/heatCloudLayer";
 import {
+  ReplayAllPlayer,
+  toggleReplayAll,
+} from "../../../../kml_heatmap/frontend/ui/replayAll";
+import { REPLAY_ALL_LAYER } from "../../../../kml_heatmap/frontend/ui/replayAllLayer";
+import {
   CLOUD_POINT_FLOATS,
   mercatorOf,
   type CloudPoints,
@@ -775,6 +780,101 @@ describe("the heat cloud", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  describe("under the replay of all flights", () => {
+    /** Move the replay's clock by its slider */
+    const seek = (seconds: number): void => {
+      const slider = document.getElementById(
+        "replay-all-time",
+      ) as HTMLInputElement;
+      slider.value = String(seconds);
+      slider.dispatchEvent(new Event("input"));
+    };
+
+    beforeEach(() => {
+      // Its clock runs by hand
+      vi.stubGlobal("requestAnimationFrame", vi.fn());
+      vi.stubGlobal("cancelAnimationFrame", vi.fn());
+    });
+
+    afterEach(() => {
+      if (app.replayActive) toggleReplayAll(asMapApp(app));
+      document.getElementById("replay-all-controls")?.remove();
+      vi.unstubAllGlobals();
+    });
+
+    it("builds the heat up on the flat map as far as the clock has come, flat and at full strength, under the trails", async () => {
+      await follow();
+      toggleReplayAll(asMapApp(app));
+
+      expect(map().getLayer(HEAT_CLOUD_LAYER)).toBeDefined();
+      expect(app.store.get("heatCloud")).toBe(true);
+      expect(latitudesOf(drawn())).toEqual([47, 48, 49]);
+      expect(style()).toMatchObject({
+        groundM: 0,
+        liftM: 0,
+        opacity: 1,
+        flow: false,
+        until: 0,
+      });
+      const layers = order();
+      expect(layers.indexOf(HEAT_CLOUD_LAYER)).toBe(
+        layers.indexOf(REPLAY_ALL_LAYER) - 1,
+      );
+      seek(15);
+      expect(style()!.until).toBe(15);
+      seek(5);
+      expect(style()!.until).toBe(5);
+
+      toggleReplayAll(asMapApp(app));
+      expect(map().getLayer(HEAT_CLOUD_LAYER)).toBeUndefined();
+      expect(app.store.get("heatCloud")).toBe(false);
+    });
+
+    it("builds it up at full strength in the 3D view, where another replay leaves it faint", async () => {
+      app.threeDVisible = true;
+      await follow();
+      expect(style()!.until).toBeUndefined();
+
+      toggleReplayAll(asMapApp(app));
+      seek(10);
+
+      expect(style()).toMatchObject({ opacity: 1, flow: false, until: 10 });
+      expect(style()!.liftM).toBeGreaterThan(0);
+      toggleReplayAll(asMapApp(app));
+      expect(style()).toMatchObject({ opacity: 1, flow: true });
+      expect(style()!.until).toBeUndefined();
+    });
+
+    it("draws every height on the flat map, where the band's control is not shown, and the band in the 3D view", async () => {
+      app.heightBand = "500-3000";
+      await follow();
+      toggleReplayAll(asMapApp(app));
+
+      expect(style()!.band).toEqual(heightBandEdgesFt(FULL_BAND));
+      app.threeDVisible = true;
+      expect(style()!.band).toEqual(
+        heightBandEdgesFt(parseHeightBand("500-3000")),
+      );
+    });
+
+    it("draws no heat while the Heatmap switch is off", async () => {
+      app.heatmapVisible = false;
+      await follow();
+      toggleReplayAll(asMapApp(app));
+
+      expect(style()).toBeNull();
+    });
+
+    it("draws all of the heat under Wrapped's intro, which plays a player of its own", async () => {
+      await follow();
+      app.forcedHeatCloud = true;
+      void new ReplayAllPlayer(asMapApp(app)).start();
+
+      expect(style()).toMatchObject({ opacity: 1, flow: true });
+      expect(style()!.until).toBeUndefined();
+    });
   });
 
   describe("forced on with the 3D view off, as Wrapped's intro does", () => {

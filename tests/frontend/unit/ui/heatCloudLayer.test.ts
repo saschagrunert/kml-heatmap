@@ -626,6 +626,29 @@ describe("the heat cloud's layer", () => {
     expect(perDraw("u_flowMix")[0]![1]).toBe(0);
   });
 
+  it("draws the heat up to the clock of the replay of all flights, and all of it without", () => {
+    layer.onAdd(map);
+    layer.setPoints(points());
+    render();
+    expect(perDraw("u_until")).toEqual([[1e30], [1e30]]);
+
+    style = { ...STYLE, until: 7 };
+    render();
+
+    expect(perDraw("u_until")).toEqual([[7], [7]]);
+    const vertex = vertexSource();
+    // A stretch not begun is left out, one under way cut where the clock
+    // is, with no join to the next at the cut, and its heat and ends those
+    // of the part flown
+    expect(vertex).toContain("a_heat.y >= u_until");
+    expect(vertex).toContain(
+      "float flown = a_out.y > u_until ? (u_until - a_heat.y) / (a_out.y - a_heat.y) : 1.0;",
+    );
+    expect(vertex).toContain("vec4 b = mix(a, project(a_end), flown);");
+    expect(vertex).toContain("vec2 kept = vec2(0.0, flown);");
+    expect(vertex).toContain("if (a_out.x > 0.0 && flown >= 1.0) {");
+  });
+
   it("draws the heat of the band of heights the app asks for, in the glow and its shadow alike", () => {
     style = { ...STYLE, band: [425, 500, 3000, 3450] };
     layer.onAdd(map);
