@@ -20,11 +20,18 @@ import {
   type ReplayAllLayer,
 } from "../../../../kml_heatmap/frontend/ui/replayAllLayer";
 import * as motion from "../../../../kml_heatmap/frontend/utils/motion";
-import { MAP_LAYERS } from "../../../../kml_heatmap/frontend/utils/constants";
+import {
+  FEET_TO_METERS,
+  MAP_LAYERS,
+} from "../../../../kml_heatmap/frontend/utils/constants";
 import { HEAT_CLOUD_LAYER } from "../../../../kml_heatmap/frontend/ui/heatCloudLayer";
 import { REPLAY_PANEL_HEIGHT_VAR } from "../../../../kml_heatmap/frontend/ui/replayManager";
 import { heldGroundedFlights } from "../../../../kml_heatmap/frontend/calculations/groundProfile";
 import { REPLAY_CAMERA_MOVE } from "../../../../kml_heatmap/frontend/utils/mapHelpers";
+import {
+  LIFT_MAX_ZOOM,
+  liftExaggeration,
+} from "../../../../kml_heatmap/frontend/calculations/lift";
 import type { PathSegment } from "../../../../kml_heatmap/frontend/types";
 import {
   asMapApp,
@@ -35,8 +42,8 @@ import {
 } from "../../testHelpers";
 
 const toast = vi.hoisted(() => ({ showToast: vi.fn() }));
-/** Every cut of the curves, counted */
-const cuts = vi.hoisted(() => ({ count: 0 }));
+/** Every cut of the curves, counted, and the relief level of the last */
+const cuts = vi.hoisted(() => ({ count: 0, level: null as number | null }));
 vi.mock(
   "../../../../kml_heatmap/frontend/calculations/replayAll",
   async (original) => {
@@ -48,6 +55,7 @@ vi.mock(
       ...module,
       replayAllPoints: (...args: Parameters<typeof module.replayAllPoints>) => {
         cuts.count++;
+        cuts.level = args[5];
         return module.replayAllPoints(...args);
       },
     };
@@ -473,24 +481,83 @@ describe("the replay of all flights", () => {
       expect(drawn).toHaveBeenCalledOnce();
     });
 
-    it("draws at the heights of the 3D view, and flat without it", () => {
-      void player.start();
+    it("draws the flights at their height without the 3D view too, on the relief only where it is drawn", async () => {
       const style = (): { groundM: number; liftM: number } =>
         (
           layer() as unknown as {
             style: () => { groundM: number; liftM: number };
           }
         ).style();
+      /** Metres a foot is lifted by at the relief level `level` */
+      const liftM = (level: number): number =>
+        liftExaggeration(level) * FEET_TO_METERS;
+      // The heat cloud follows where the map comes to rest from here on
+      await app.mapReady;
+      map().setZoom(9.4);
+      map().emit("zoomend");
+      void player.start();
 
-      expect(style()).toMatchObject({ groundM: 0, liftM: 0 });
+      // Flat ground, lifted as the heat cloud is: at the level of the zoom
+      // the map came to rest at, not at those of a scripted camera
+      expect(style()).toEqual(
+        expect.objectContaining({ groundM: 0, liftM: liftM(9) }),
+      );
+      map().setZoom(2);
+      map().emit("zoomend", REPLAY_CAMERA_MOVE);
+      expect(style().liftM).toBe(liftM(9));
+      // From where the 3D view draws them flat too, handed over as the
+      // cloud and the ribbons are, once the zoom has ended
+      map().setZoom(LIFT_MAX_ZOOM);
+      expect(style().liftM).toBe(liftM(9));
+      map().emit("zoomend", REPLAY_CAMERA_MOVE);
+      expect(style().liftM).toBe(0);
 
+      map().setZoom(9.4);
+      map().emit("zoomend", REPLAY_CAMERA_MOVE);
       app.store.batch(() => {
         app.threeDVisible = true;
         app.terrainActive = true;
+        app.reliefLevel = 8;
       });
+      expect(style()).toEqual(
+        expect.objectContaining({ groundM: liftM(8), liftM: liftM(8) }),
+      );
+      // The relief's own exaggeration, which it switches as a zoom ends
+      map().terrain = { source: "terrain", exaggeration: 3 };
+      expect(style().liftM).toBeCloseTo(3 * FEET_TO_METERS, 9);
+    });
 
-      expect(style().groundM).toBeGreaterThan(0);
-      expect(style().liftM).toBeGreaterThan(0);
+    it("thins the curves for the height of the level they are lifted as, on the flat map as well", async () => {
+      await app.mapReady;
+      map().setZoom(9.4);
+      map().emit("zoomend");
+
+      void player.start();
+
+      expect(cuts.level).toBe(9);
+      app.store.batch(() => {
+        app.threeDVisible = true;
+        app.reliefLevel = 6;
+      });
+      expect(cuts.level).toBe(6);
+    });
+
+    it("cuts the curves for the level the heat cloud takes as a zoom ends, from its first run on", async () => {
+      // Started in the task the player was made in, before the cloud it
+      // follows has the map ready
+      app = createMockApp({
+        signal: lifetime.signal,
+        currentData: DATA,
+        selectedYear: "all",
+      });
+      void new ReplayAllPlayer(asMapApp(app)).start();
+      await app.mapReady;
+      expect(cuts.level).toBe(0);
+
+      map().setZoom(9.4);
+      map().emit("zoomend");
+
+      expect(cuts.level).toBe(9);
     });
 
     it("turns the camera slowly round the flights while it plays, when asked", () => {
@@ -576,6 +643,100 @@ describe("the replay of all flights", () => {
         ],
         expect.objectContaining({ bearing: 0 }),
       );
+    });
+
+    it("tilts a flat map as the 3D view does, so the heights show, and lays it flat again as it closes", () => {
+      controls.show();
+
+      expect(map().fitBounds.mock.lastCall?.[1]).toMatchObject({ pitch: 50 });
+      expect(map().getPitch()).toBe(50);
+
+      controls.close();
+
+      expect(map().easeTo).toHaveBeenLastCalledWith({ pitch: 0 });
+      expect(map().getPitch()).toBe(0);
+    });
+
+    it("keeps a map tilted enough already as it is, and leaves it so", () => {
+      map().jumpTo({ pitch: 30 });
+
+      controls.show();
+      controls.close();
+
+      expect(map().fitBounds.mock.lastCall?.[1]).toMatchObject({ pitch: 30 });
+      expect(map().easeTo).not.toHaveBeenCalled();
+      expect(map().getPitch()).toBe(30);
+    });
+
+    it("leaves the tilt the user gave the map meanwhile, and the 3D view's", () => {
+      const byHand = { originalEvent: new MouseEvent("mousemove") };
+      map().jumpTo({ pitch: 5 });
+      controls.show();
+      // Its own moves are not the user's, nor is a turn by a right drag
+      // that strays a little up or down
+      map().emit("pitchstart", {});
+      map().jumpTo({ pitch: 20 });
+      map().emit("pitchend", {});
+      map().emit("pitchstart", byHand);
+      map().jumpTo({ pitch: 24 });
+      map().emit("pitchend", byHand);
+      controls.close();
+      expect(map().easeTo).toHaveBeenLastCalledWith({ pitch: 5 });
+
+      controls.show();
+      map().emit("pitchstart", byHand);
+      map().jumpTo({ pitch: 70 });
+      map().emit("pitchend", byHand);
+      map().easeTo.mockClear();
+      controls.close();
+      expect(map().easeTo).not.toHaveBeenCalled();
+      expect(map().getPitch()).toBe(70);
+
+      map().jumpTo({ pitch: 0 });
+      controls.show();
+      app.threeDVisible = true;
+      app.threeDVisible = false;
+      controls.close();
+      expect(map().easeTo).not.toHaveBeenCalled();
+      expect(map().getPitch()).toBe(50);
+    });
+
+    it("lays back a map it tilted in the 3D view as well", () => {
+      app.threeDVisible = true;
+      map().jumpTo({ pitch: 10 });
+
+      controls.show();
+      expect(map().getPitch()).toBe(50);
+      controls.close();
+
+      expect(map().easeTo).toHaveBeenLastCalledWith({ pitch: 10 });
+    });
+
+    it("tilts from where it laid the map back to, opened again on the way there", () => {
+      controls.show();
+      controls.close();
+      // Half way back
+      map().jumpTo({ pitch: 25 });
+      map().isMoving.mockReturnValue(true);
+
+      controls.show();
+      expect(map().getPitch()).toBe(50);
+      controls.close();
+
+      expect(map().easeTo).toHaveBeenLastCalledWith({ pitch: 0 });
+    });
+
+    it("keeps the tilt from before in the link and the saved state while the map is tilted for it", () => {
+      map().jumpTo({ pitch: 5 });
+      controls.show();
+
+      expect(app.replayState.pitchBefore).toBe(5);
+      controls.close();
+      expect(app.replayState.pitchBefore).toBeNull();
+
+      map().jumpTo({ pitch: 30 });
+      controls.show();
+      expect(app.replayState.pitchBefore).toBeNull();
     });
 
     it("reads the time into every flight on its clock", () => {

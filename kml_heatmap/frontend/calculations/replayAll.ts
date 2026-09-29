@@ -69,9 +69,8 @@ export interface ReplayAllPoints {
  * (see groundedFlights) with the clock `clock` of their segments. A point
  * of a curve is kept where it is REPLAY_ALL_STEP_PX on from the last one
  * kept at the middle of the zoom level `detail`, where its height has
- * changed by HEIGHT_STEP_PX as exaggerated at the relief level `level`
- * (not on the flat map, where `level` is null), and at either end of a
- * curve. A flight whose clock is shorter than
+ * changed by HEIGHT_STEP_PX as exaggerated at the relief level `level`,
+ * and at either end of a curve. A flight whose clock is shorter than
  * MIN_FLIGHT_S (no times and no speeds) sits out.
  */
 export function replayAllPoints(
@@ -80,9 +79,9 @@ export function replayAllPoints(
   clock: FlightClock,
   keep: (pathId: number) => boolean,
   detail: number,
-  level: number | null,
+  level: number,
 ): ReplayAllPoints {
-  const exaggeration = level === null ? 0 : liftExaggeration(level);
+  const exaggeration = liftExaggeration(level);
   const values: number[] = [];
   const played = new Set<number>();
   let duration = 0;
@@ -114,9 +113,7 @@ export function replayAllPoints(
         Math.cos(points[0]![0] * DEGREES_TO_RADIANS);
       const stepM = REPLAY_ALL_STEP_PX * pixelM;
       const heightStepFt =
-        exaggeration > 0
-          ? (HEIGHT_STEP_PX * pixelM) / exaggeration / FEET_TO_METERS
-          : Infinity;
+        (HEIGHT_STEP_PX * pixelM) / exaggeration / FEET_TO_METERS;
       const heightAt = (j: number): number => (ground?.[j] ?? 0) + heights[j]!;
       let keptFt = heightAt(0);
       let along = 0;

@@ -191,7 +191,8 @@ export class StateManager {
         center: this.app.map.getCenter(),
         zoom: this.app.map.getZoom(),
         bearing: this.app.map.getBearing(),
-        pitch: this.app.map.getPitch(),
+        // Not the tilt the replay of every flight gave the map for a while
+        pitch: this.app.replayState.pitchBefore ?? this.app.map.getPitch(),
       };
     // Panning across the antimeridian takes the longitude past 180. The
     // wrapped one is the same place, and what a link is expected to carry;

@@ -15,6 +15,7 @@ import {
 } from "../../../../kml_heatmap/frontend/calculations/replayAll";
 import { flightClock } from "../../../../kml_heatmap/frontend/calculations/flightClock";
 import { smoothFlights } from "../../../../kml_heatmap/frontend/calculations/smoothing";
+import { RELIEF_MAX_LEVEL } from "../../../../kml_heatmap/frontend/calculations/lift";
 import type { PathSegment } from "../../../../kml_heatmap/frontend/types";
 
 /** A WebGL2 context that records what is asked of it */
@@ -141,7 +142,7 @@ function flights(): ReplayAllPoints {
     flightClock(segments),
     () => true,
     14,
-    null,
+    RELIEF_MAX_LEVEL,
   );
 }
 

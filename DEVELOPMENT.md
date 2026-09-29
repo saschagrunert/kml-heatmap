@@ -1102,23 +1102,46 @@ The replay of all flights builds its heat up with the cloud: while it is
 open the cloud is drawn at full strength up to the replay's clock
 (`HeatCloudStyle.until`, `u_until` in the vertex shader, which leaves out a
 stretch not begun and cuts the one under way where the clock is), on the
-flat map as well, flat on the ground, in place of the flat heatmap, and
-under the replay's trails. Scrubbing back shrinks it, since the layer draws
-from the clock alone. The flat heatmap cannot be cut by time: its points
-carry no time, its clusters merge fixes of different flights and times,
-and a filter or a weight by time is worked out again in MapLibre's worker
-for every tile, far too slow for every frame. A heatmap of its own drawn
-into a texture and coloured by the ramp would have matched the heatmap to
-the pixel, but it needed some 4 KB more of the feature bundle than there
-was room for. The cloud's glow uses the heatmap's colours and reach, and
-the end of the replay shows it a little lighter and narrower than the
-heatmap the page goes back to. For all years (104 files) on the Radeon RX
+flat map as well, in place of the flat heatmap, and under the replay's
+trails. The trails are drawn at their height there too, and the heat with
+them: flat on the map, the replay drew lines on the ground under Wrapped's
+intro, whose camera flies and tilts over them through the lifted cloud,
+and a tilted map showed no height either. Both are lifted as the cloud is
+(`heatCloudLevel`: the 3D view's relief level, and outside it the level of
+the zoom the map last came to rest at), so the heads fly in the heat, and
+the cloud's shadow marks the ground. With the heat left flat under lifted
+trails, each trail lay beside its heat by its height (some 100 px at `z` 10
+tilted by 60 degrees) and read as the track of another flight. A map
+flatter than the 3D view's tilt (20 degrees) is tilted to it (50) as the
+replay opens, and laid back as it closes, unless the user tilted it
+meanwhile (by more than 5 degrees in one gesture: a right drag that turns
+the map tilts it as the pointer strays up or down) or turned the 3D view
+on. Meanwhile the link and the saved state keep the tilt from before
+(`ReplayState.pitchBefore`). The flights are cut for the level the cloud
+takes as a zoom ends, so the cloud's listener is added as it is followed,
+ahead of the player's, and like the cloud and the ribbons they are handed
+to the flat lines at `LIFT_MAX_ZOOM` as the zoom ends. Scrubbing back
+shrinks the heat, since the layer draws from the clock alone. The flat
+heatmap cannot be cut by time: its points carry no time, its clusters
+merge fixes of different flights and times, and a filter or a weight by
+time is worked out again in MapLibre's worker for every tile, far too
+slow for every frame. A heatmap of its own drawn into a texture and
+coloured by the ramp would have matched the heatmap to the pixel, but it
+needed some 4 KB more of the feature bundle than there was room for. The
+cloud's glow uses the heatmap's colours and reach, and the end of the
+replay shows it a little lighter and narrower than the heatmap the page
+goes back to. For all years (104 files) on the Radeon RX
 9070 XT at 1280x800, `z` 6 on the flat map, MapLibre's `_render` took
 1.36 ms a frame on average (95th percentile 3.3 ms) with the heat and
 0.66 ms (1.0 ms) without, and the frames came every 16.7 ms either way;
 with the CPU slowed down four times 2.1 ms against 2.6 ms, and in the 3D
 view 4.0 ms against 0.8 ms with the cloud's shadow at full strength.
 Opening the replay took about 45 ms more for cutting the cloud's points.
+With the flights and the heat lifted on the flat map (tilted to 50
+degrees, the cloud and its shadow), the same view took 1.37 ms a frame
+(95th percentile 2.9 ms) against 0.97 ms (1.6 ms) flat, the median of
+three runs each on a machine busy with other work, and the frames still
+came every 16.7 ms.
 
 **The look of the flat heatmap:**
 

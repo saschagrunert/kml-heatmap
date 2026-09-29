@@ -62,6 +62,13 @@ export interface ReplayAirplane extends PopupHost {
 export class ReplayState {
   /** Whether the replay running is the one of every flight (ui/replayAll.ts) */
   all = false;
+  /**
+   * The tilt of a map the replay of every flight tilted to show the
+   * heights, which it lays the map back to as it closes and which the link
+   * and the saved state keep meanwhile; null where it tilted none, or the
+   * user has taken the tilt over
+   */
+  pitchBefore: number | null = null;
   playing = false;
   currentTime = 0;
   maxTime = 0;

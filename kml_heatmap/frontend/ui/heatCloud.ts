@@ -15,8 +15,10 @@
  * before. The replay of all flights draws it at full strength instead, as
  * far as its clock has come into every flight (replayAllTime), so the heat
  * builds up behind the flights and ends as the whole of it; on the flat
- * map as well, flat on the ground, where it stands in for the heatmap,
- * whose colours it glows in, until the replay closes. The flat heatmap
+ * map as well, at its height as the flights are there, where it stands in
+ * for the heatmap, whose colours it glows in, until the replay closes.
+ * Left on the ground, it lay beside the trails by their height and read
+ * as other flights than theirs. The flat heatmap
  * steps aside for it (heatCloud in the store, see
  * ui/layerVisibility.ts) from the moment the cloud's layer is on the map
  * until the 3D view is turned off,
@@ -265,9 +267,24 @@ export const CLOUD_IDLE_MS = 15_000;
 
 /**
  * The apps whose cloud is followed, each with what cuts its points ahead
- * of time (see prepareHeatCloud)
+ * of time (see prepareHeatCloud) and the relief level it is lifted as
+ * (see heatCloudLevel)
  */
-const followed = new WeakMap<MapApp, (levels: readonly number[]) => void>();
+const followed = new WeakMap<
+  MapApp,
+  { prepare: (levels: readonly number[]) => void; level: () => number }
+>();
+
+/**
+ * The relief level the cloud of `app` is lifted as, or null while nothing
+ * follows it: the 3D view's, and outside it the level of the zoom the map
+ * last came to rest at, not one of the moves of a replay's camera or of
+ * Wrapped's intro. The replay of all flights lifts its flights as much
+ * (ui/replayAll.ts), so they fly in the heat.
+ */
+export function heatCloudLevel(app: MapApp): number | null {
+  return followed.get(app)?.level() ?? null;
+}
 
 /**
  * Cut the points of Wrapped's cloud (forcedHeatCloud) for the map `zooms`
@@ -279,7 +296,7 @@ const followed = new WeakMap<MapApp, (levels: readonly number[]) => void>();
  * them.
  */
 export function prepareHeatCloud(app: MapApp, zooms: readonly number[]): void {
-  followed.get(app)?.(zooms);
+  followed.get(app)?.prepare(zooms);
 }
 
 /**
@@ -363,8 +380,12 @@ export function followHeatCloud(app: MapApp): void {
     const metres = exaggeration * FEET_TO_METERS;
     return {
       groundM: onReliefIn(app, app.forcedHeatCloud) ? metres : 0,
-      // Flat on the flat map, as the replay's trails are
-      liftM: lifted && (app.threeDVisible || app.forcedHeatCloud) ? metres : 0,
+      // At their height on the flat map too while the replay of all
+      // flights builds it up, where its trails fly in it
+      liftM:
+        lifted && (app.threeDVisible || app.forcedHeatCloud || growing())
+          ? metres
+          : 0,
       opacity,
       flow: !app.replayActive,
       until: growing() ? (replayAllTime(app) ?? 0) : undefined,
@@ -494,12 +515,15 @@ export function followHeatCloud(app: MapApp): void {
     const detail = cloudDetail(at, zoom);
     draw(pointsAt(at, forced, detail, detail >= CULL_FROM_ZOOM));
   };
-  followed.set(app, (zooms) => {
-    for (const zoom of zooms) {
-      const at = reliefLevel(zoom);
-      pointsAt(at, true, cloudDetail(at, zoom));
-    }
-    release();
+  followed.set(app, {
+    prepare: (zooms) => {
+      for (const zoom of zooms) {
+        const at = reliefLevel(zoom);
+        pointsAt(at, true, cloudDetail(at, zoom));
+      }
+      release();
+    },
+    level,
   });
 
   /**
@@ -626,28 +650,34 @@ export function followHeatCloud(app: MapApp): void {
     map.triggerRepaint();
   };
 
+  // At once, not once the map is ready: the replay of all flights, whose
+  // player follows the cloud as it is made, cuts its flights for the level
+  // this takes at the end of a zoom (see heatCloudLevel), so this is to
+  // come first among the map's listeners
+  const zoomed = map.on("zoomend", (event: object) => {
+    // Outside the 3D view the cloud follows the level itself, where the
+    // map comes to rest: not on every jump of the replay's camera, nor on
+    // the moves of Wrapped's intro (see REPLAY_CAMERA_MOVE)
+    if (!isReplayCameraMove(event)) publishScale();
+    const at = reliefLevel(map.getZoom());
+    if (!isReplayCameraMove(event)) restZoom = map.getZoom();
+    if (!isReplayCameraMove(event) && at !== atRest) {
+      atRest = at;
+      if (!app.threeDVisible && shown()) {
+        updatePoints();
+        map.triggerRepaint();
+      }
+    }
+    if (lifted === isLiftedAt(map.getZoom())) return;
+    lifted = !lifted;
+    map.triggerRepaint();
+  });
+  app.signal.addEventListener("abort", () => zoomed.unsubscribe());
+
   void app.mapReady.then(() => {
     const signal = app.signal;
     if (signal.aborted) return;
     const unsubscribe = app.store.subscribeKeys(CLOUD_KEYS, sync);
-    const zoomed = map.on("zoomend", (event: object) => {
-      // Outside the 3D view the cloud follows the level itself, where the
-      // map comes to rest: not on every jump of the replay's camera, nor
-      // on the moves of Wrapped's intro (see REPLAY_CAMERA_MOVE)
-      if (!isReplayCameraMove(event)) publishScale();
-      const at = reliefLevel(map.getZoom());
-      if (!isReplayCameraMove(event)) restZoom = map.getZoom();
-      if (!isReplayCameraMove(event) && at !== atRest) {
-        atRest = at;
-        if (!app.threeDVisible && shown()) {
-          updatePoints();
-          map.triggerRepaint();
-        }
-      }
-      if (lifted === isLiftedAt(map.getZoom())) return;
-      lifted = !lifted;
-      map.triggerRepaint();
-    });
     // Cut around the view, or closer in than the last relief level, the
     // points are cut again for the view the map comes to rest at, in a
     // task of their own after the frame the move ends in
@@ -676,7 +706,6 @@ export function followHeatCloud(app: MapApp): void {
       clearTimeout(idle);
       unsubscribe();
       styled.unsubscribe();
-      zoomed.unsubscribe();
       moved.unsubscribe();
       clearTimeout(recut);
     });
