@@ -78,6 +78,45 @@ function parsePathId(text: string, radix: number): number | null {
  */
 export const HEIGHT_BAND_TEXT = /^(\d{1,5})-(\d{0,5})$/;
 
+/**
+ * The heights the thumbs of the band's control stop at, in feet above
+ * ground: closer together low down, where a circuit and a climb out are
+ * told apart, than up at a cruise. A top past the last is no top at all.
+ * Here for isHeightBand; the rest of the band is the feature bundle's.
+ */
+export const HEIGHT_BAND_STOPS_FT: readonly number[] = [
+  0, 100, 200, 300, 500, 700, 1000, 1500, 2000, 2500, 3000, 4000, 5000, 6000,
+  8000, 10000,
+];
+
+/**
+ * Whether `text`, from a link or the saved state, is a band the control
+ * writes: two of its stops, the bottom below the top, and not every
+ * height, which is no band at all. Anything else, such as a link edited
+ * by hand (`5-7`, `3000-500`), is every height, which the store would
+ * otherwise hold and write back, and Reset view count as a change.
+ */
+export function isHeightBand(text: unknown): text is string {
+  const [, bottom, top] = HEIGHT_BAND_TEXT.exec(String(text)) ?? [];
+  const at = (feet: string | undefined): number =>
+    HEIGHT_BAND_STOPS_FT.indexOf(Number(feet));
+  return at(bottom) >= 0 && (top ? at(top) > at(bottom) : at(bottom) > 0);
+}
+
+/**
+ * Whether `text`, from a link or the saved state, is the line of the
+ * cross-section as a link writes it, "lat,lng,lat,lng" from its start to
+ * its end (see ui/crossSection.ts): four numbers, the latitudes within 90
+ * degrees and the longitudes within 180, where a map can put its ends
+ */
+export function isSectionLine(text: unknown): text is string {
+  const values = String(text).split(",").map(parseFloat);
+  return (
+    values.length === 4 &&
+    values.every((value, i) => Math.abs(value) <= (i % 2 ? 180 : 90))
+  );
+}
+
 /** The link's `v` string of a first visit, which a link leaves out */
 const INITIAL_VISIBILITY = visibilityString(initialToggles());
 
@@ -154,6 +193,8 @@ function parsePathIds(urlParams: URLSearchParams): number[] | undefined {
  *       distance, which is gone, is ignored like any unknown parameter
  *   h - the heights above ground the 3D view's heat cloud shows, in feet:
  *       '500-3000', '1000-' without a top (absent: all of them)
+ *   x - the line of the cross-section, from its start to its end:
+ *       '51.5,12.1,51.6,12.3' (absent: the tool is closed)
  * @param params - URLSearchParams object or search string
  * @returns Parsed state or null if no params
  */
@@ -197,8 +238,10 @@ export function parseUrlParams(
   if (bearing !== null) state.bearing = bearing;
   const pitch = toMapPitch(parseFloat(urlParams.get("t") ?? ""));
   if (pitch !== null) state.pitch = pitch;
-  const band = urlParams.get("h") ?? "";
-  if (HEIGHT_BAND_TEXT.test(band)) state.heightBand = band;
+  const band = urlParams.get("h");
+  if (isHeightBand(band)) state.heightBand = band;
+  const line = paramText(urlParams, "x");
+  if (isSectionLine(line)) state.crossSectionLine = line;
 
   return state;
 }
@@ -268,6 +311,7 @@ export function encodeStateToUrl(state: AppState): string {
     if ("param" in url && state[toggle.key]) params.set(url.param, "1");
   }
   if (state.heightBand) params.set("h", state.heightBand);
+  if (state.crossSectionLine) params.set("x", state.crossSectionLine);
 
   return params.toString();
 }

@@ -198,6 +198,49 @@ class TestTimezoneHandling:
         result = obfuscate_kml_content(kml)
         assert _whens(result) == ["2025-01-01T00:00:00.25Z"]
 
+    def test_comma_fractions_are_kept(self):
+        """ISO 8601 allows a comma: dropping its fraction changed the
+        intervals of the flight."""
+        kml = (
+            "<kml><Placemark><when>2025-03-03T10:25:15,5Z</when>"
+            "<when>2025-03-03T10:25:16,5Z</when>"
+            "<when>2025-03-03T10:25:17Z</when></Placemark></kml>"
+        )
+        result = obfuscate_kml_content(kml)
+        assert result is not None
+        assert _whens(result) == [
+            "2025-01-01T00:00:00.5Z",
+            "2025-01-01T00:00:01.5Z",
+            "2025-01-01T00:00:02Z",
+        ]
+        assert obfuscate_kml_content(result) is None
+
+    def test_timestamps_with_a_comment_inside_are_rewritten(self, tmp_path):
+        """The parser reads past the comment, so the rewrite does too."""
+        kml = (
+            "<kml><Placemark><when>2025-03-03T10:<!-- local -->25:15Z</when>"
+            "<when>2025-03-03T10:30:15Z</when></Placemark></kml>"
+        )
+        result = obfuscate_kml_content(kml)
+        assert _whens(result) == ["2025-01-01T00:00:00Z", "2025-01-01T00:05:00Z"]
+        kml_file = tmp_path / "comment.kml"
+        kml_file.write_text(kml.replace("2025-03-03", "2025-01-01"), encoding="utf-8")
+        assert check_kml_obfuscated(kml_file) == [
+            "Flight does not start at 00:00:00 on Jan 1: 2025-01-01T10:25:15Z"
+        ]
+
+    def test_timestamps_with_a_processing_instruction_inside_are_rewritten(self):
+        """The parser drops processing instructions like comments."""
+        kml = (
+            '<?xml version="1.0"?><kml><Placemark>'
+            "<when>2025-03-03T10:<?x?>25:15Z</when>"
+            "<when>2025-03-03T10:30:15Z</when></Placemark></kml>"
+        )
+        result = obfuscate_kml_content(kml)
+        assert result is not None
+        assert _whens(result) == ["2025-01-01T00:00:00Z", "2025-01-01T00:05:00Z"]
+        assert result.startswith('<?xml version="1.0"?>')
+
     def test_unshifted_offset_timestamp_is_written_in_utc(self, tmp_path):
         """Its local date would otherwise stay a day past the accepted window."""
         kml = (
@@ -898,6 +941,7 @@ class TestCheckObfuscated:
             "track_14-03-2024.kml",
             "N123AB_Mar14_2024.kml",
             "log 2024-03.kml",
+            "flight 2024W33.kml",
         ],
     )
     def test_other_file_name_shapes_are_violations(self, tmp_path, name):
@@ -936,6 +980,41 @@ class TestCheckObfuscated:
         assert obfuscate_kml_directory(tmp_path) == 3
         assert check_directory_obfuscated(tmp_path) == {}
 
+    @pytest.mark.parametrize(
+        ("name", "violations"),
+        [
+            (
+                "20260816143015.kml",
+                [
+                    "File name contains a date: 20260816",
+                    "File name contains a time of day: 143015",
+                ],
+            ),
+            (
+                "flight_202608161430.kml",
+                [
+                    "File name contains a date: 20260816",
+                    "File name contains a time of day: 1430",
+                ],
+            ),
+            (
+                "log-2026-08-16-14-30.kml",
+                [
+                    "File name contains a date: 2026-08-16",
+                    "File name contains a date: 08-16-14",
+                    "File name contains a time of day: 14-30",
+                ],
+            ),
+        ],
+    )
+    def test_file_name_with_a_date_and_time_in_one_run(
+        self, tmp_path, name, violations
+    ):
+        """A time of day right after a date no longer hides either."""
+        kml_file = tmp_path / name
+        kml_file.write_text("<kml/>", encoding="utf-8")
+        assert check_kml_obfuscated(kml_file) == violations
+
     def test_charterware_file_name_with_date_is_a_violation(self, tmp_path):
         kml_file = tmp_path / "2026-01-12_1513h_OE-AKI_LOAV-LOAV.kml"
         kml_file.write_text(
@@ -967,6 +1046,13 @@ class TestCheckObfuscated:
             ("2026-01-01_0000h_OE-AKI_LOAV-LOAV_1513h.kml", "a time of day: 1513h"),
             ("1_DEHYL_1513H.kml", "a time of day: 1513H"),
             ("EDDS 3pm.kml", "a time of day: 3pm"),
+            ("Aunt farm 1430 GMT.kml", "a time of day: 1430 GMT"),
+            ("EDDS 0930 hours.kml", "a time of day: 0930 hours"),
+            ("Block 0930Z-1045Z.kml", "a time of day: 0930Z-1045Z"),
+            ("EDDS 1430 Zulu.kml", "a time of day: 1430 Zulu"),
+            ("EDDS 14.30Z.kml", "a time of day: 14.30Z"),
+            ("EDDS 14h30 UTC.kml", "a time of day: 14h30 UTC"),
+            ("EDDS 1430+0200.kml", "a time of day: 1430+0200"),
             ("EDDS - EDDF Saturday.kml", "a weekday: Saturday"),
             ("1_DEHYL_Sonntag.kml", "a weekday: Sonntag"),
         ],
@@ -1012,6 +1098,48 @@ class TestCheckObfuscated:
             f"File name contains a time of day: {time}"
         ]
 
+    @pytest.mark.parametrize(
+        ("element", "violation"),
+        [
+            ("<name>Flight 16<!-- -->.08.2026</name>", "Date not on Jan 1: 16.08.2026"),
+            ("<name>Flight 16<?x?>.08.2026</name>", "Date not on Jan 1: 16.08.2026"),
+            (
+                "<name>Flight 14:<!-- -->30</name>",
+                "Time of day gives the flight away, remove it: 14:30",
+            ),
+            (
+                "<name>Sun<!-- -->day flight</name>",
+                "Weekday gives the day of the flight away, remove it: Sunday",
+            ),
+            # A date in the comment itself counts as well
+            (
+                "<!-- logged 2026-08-16 --><name>EDDS</name>",
+                "Date not on Jan 1: 2026-08-16",
+            ),
+        ],
+    )
+    def test_a_comment_does_not_hide_a_date(self, tmp_path, element, violation):
+        """A reader sees the text of an element without its comments and
+        processing instructions, and so does the check."""
+        kml_file = tmp_path / "1_DEHYL_DA40.kml"
+        kml_file.write_text(
+            '<?xml version="1.0" encoding="UTF-8"?>\n'
+            f"<kml><Placemark>{element}"
+            "<when>2026-01-01T00:00:00Z</when></Placemark></kml>",
+            encoding="utf-8",
+        )
+        assert check_kml_obfuscated(kml_file) == [violation]
+
+    def test_the_xml_declaration_and_a_comment_pass(self, tmp_path):
+        kml_file = tmp_path / "1_DEHYL_DA40.kml"
+        kml_file.write_text(
+            '<?xml version="1.0" encoding="UTF-8"?>\n'
+            "<kml><!-- exported --><Placemark><name>EDDS</name>"
+            "<when>2026-01-01T00:00:00Z</when></Placemark></kml>",
+            encoding="utf-8",
+        )
+        assert check_kml_obfuscated(kml_file) == []
+
     def test_weekday_in_a_file_is_a_violation(self, tmp_path):
         """The timestamps moved to January 1st, the weekday of the flight
         did not."""
@@ -1032,6 +1160,15 @@ class TestCheckObfuscated:
             ("<name>Evening flight 18:30</name>", "18:30"),
             ("<description>Off blocks 0930Z</description>", "0930Z"),
             ("<description>logged 2026-01-01T09:12:00Z</description>", "T09:12:00Z"),
+            # Zones other than UTC and the German ones, the local time and
+            # the hours, with the fraction and the offset along
+            ("<name>Home strip - Aunt farm 1430 GMT</name>", "1430 GMT"),
+            ("<name>Aunt farm 1430 EST</name>", "1430 EST"),
+            ("<name>Aunt farm 14:30 BST</name>", "14:30 BST"),
+            ("<name>Aunt farm 1430 local</name>", "1430 local"),
+            ("<name>Aunt farm 0930 hours</name>", "0930 hours"),
+            ("<name>Aunt farm 14:30 +02:00</name>", "14:30 +02:00"),
+            ("<name>Aunt farm 14:30:00.123Z</name>", "14:30:00.123Z"),
         ],
     )
     def test_time_of_day_in_a_file_is_a_violation(self, tmp_path, element, time):
@@ -1135,6 +1272,8 @@ class TestExtractFrac:
             ("2025-03-03T08:25:15.5848385Z", ".5848385"),
             ("2025-03-03T08:25:15.123", ".123"),
             ("2025-03-03T08:25:15.5+02:00", ".5"),
+            ("2025-03-03T08:25:15,5Z", ".5"),
+            ("2025-03-03T08:25:15,123456+02:00", ".123456"),
             ("2025-03-03T08:25:15Z", ""),
         ],
     )

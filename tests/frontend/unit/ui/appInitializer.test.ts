@@ -35,7 +35,7 @@ function setupDOM(): void {
     <div id="altitude-legend"></div>
     <div id="airspeed-legend"></div>
     <div id="map-empty" hidden>
-      <p>The flights could not be loaded.</p>
+      <p>Could not load the flights</p>
       <button id="map-empty-retry"></button>
     </div>
   `;
@@ -745,7 +745,7 @@ describe("appInitializer", () => {
       it("says what failed on the panel, in place of a toast", async () => {
         app.dataManager.loadData.mockImplementation(() => {
           // The data manager hands it failures while the map has no flights
-          app.dataManager.failureNote!("Failed to load flight data for 2025");
+          app.dataManager.failureNote!("Could not load the flights of 2025");
           // Heard once the panel is there, and not while it is hidden: a
           // load of all years that brings some hides it unseen
           expect(toastMock.announceStatus).not.toHaveBeenCalled();
@@ -755,18 +755,18 @@ describe("appInitializer", () => {
         await loadInitialData(asMapApp(app));
 
         expect(document.querySelector("#map-empty p")!.textContent).toBe(
-          "Failed to load flight data for 2025",
+          "Could not load the flights of 2025",
         );
         // Heard, as the toast was, and once
         expect(toastMock.announceStatus).toHaveBeenCalledExactlyOnceWith(
-          "Failed to load flight data for 2025",
+          "Could not load the flights of 2025",
         );
         expect(toastMock.showToast).not.toHaveBeenCalled();
 
         // A failure while it is on screen is heard at once
-        app.dataManager.failureNote!("Failed to load flight data for 2024");
+        app.dataManager.failureNote!("Could not load the flights of 2024");
         expect(toastMock.announceStatus).toHaveBeenLastCalledWith(
-          "Failed to load flight data for 2024",
+          "Could not load the flights of 2024",
         );
       });
 

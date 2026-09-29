@@ -5,6 +5,9 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { holdControls } from "../../../../kml_heatmap/frontend/ui/heldControls";
 
+/** The mode that holds the controls */
+const WHY = "the replay";
+
 describe("holdControls", () => {
   let root: HTMLElement;
   const control = (id: string): HTMLButtonElement | HTMLSelectElement =>
@@ -25,7 +28,10 @@ describe("holdControls", () => {
   });
 
   it("disables the buttons and selects it is given", () => {
-    holdControls(["heatmap-btn", "airspeed-btn", "year-select", "stats-rail"]);
+    holdControls(
+      ["heatmap-btn", "airspeed-btn", "year-select", "stats-rail"],
+      WHY,
+    );
 
     expect(control("heatmap-btn").disabled).toBe(true);
     expect(control("airspeed-btn").disabled).toBe(true);
@@ -34,16 +40,15 @@ describe("holdControls", () => {
     expect(
       document.getElementById("stats-rail")!.hasAttribute("disabled"),
     ).toBe(false);
-    expect(() => holdControls(["no-such-btn"])).not.toThrow();
+    expect(() => holdControls(["no-such-btn"], WHY)).not.toThrow();
   });
 
   it("gives each back as it was, a disabled one disabled (regression)", () => {
     // The speed layer of a site without timing data came back on
-    const release = holdControls([
-      "heatmap-btn",
-      "airspeed-btn",
-      "year-select",
-    ]);
+    const release = holdControls(
+      ["heatmap-btn", "airspeed-btn", "year-select"],
+      WHY,
+    );
 
     release();
 
@@ -52,8 +57,20 @@ describe("holdControls", () => {
     expect(control("year-select").disabled).toBe(false);
   });
 
+  it("says why on each while it holds them, and gives each its title back", () => {
+    control("heatmap-btn").title = "Heatmap";
+    const release = holdControls(["heatmap-btn", "year-select"], WHY);
+
+    expect(control("heatmap-btn").title).toBe("End the replay to change this");
+    expect(control("year-select").title).toBe("End the replay to change this");
+
+    release();
+    expect(control("heatmap-btn").title).toBe("Heatmap");
+    expect(control("year-select").title).toBe("");
+  });
+
   it("gives them back once", () => {
-    const release = holdControls(["heatmap-btn"]);
+    const release = holdControls(["heatmap-btn"], WHY);
     release();
     control("heatmap-btn").disabled = true;
 

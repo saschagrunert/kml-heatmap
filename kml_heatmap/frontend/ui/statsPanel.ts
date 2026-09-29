@@ -16,6 +16,7 @@ import type { MapApp } from "../mapApp";
 import { loadWrapped } from "../services/featureLoader";
 import { domCache } from "../utils/domCache";
 import { logError } from "../utils/logger";
+import { isPageEscape } from "../utils/mapHelpers";
 
 /** Panel element the statistics are rendered into */
 export const STATS_PANEL_ID = "stats-panel";
@@ -76,4 +77,26 @@ export function followStatsPanel(app: MapApp): void {
   if (app.savedState?.statsPanelVisible) void loadWrapped();
   open(app.statsPanelVisible);
   app.store.subscribe("statsPanelVisible", open);
+  // On a phone the panel is a sheet over the map without the collapse
+  // control of the rail, which the bar's Stats tab stands in for: Escape
+  // closes it, as it closes the other sheets, and the focus goes to that
+  // tab (see setupStatsRail). The bar steps aside for a replay and the
+  // hotspot tour, which hide the sheet and take Escape. Not an Escape for
+  // a popup, a marker or the readout of the cloud, which close first, nor
+  // one that empties the search of the flights.
+  document.addEventListener(
+    "keydown",
+    (event) => {
+      if (
+        isPageEscape(event, ",input[type=search]") &&
+        app.statsPanelVisible &&
+        !app.wrappedVisible &&
+        app.mobileBar?.isVisible()
+      ) {
+        event.preventDefault();
+        app.statsPanelVisible = false;
+      }
+    },
+    { signal: app.signal },
+  );
 }

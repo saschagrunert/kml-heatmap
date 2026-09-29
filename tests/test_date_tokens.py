@@ -61,15 +61,29 @@ class TestFindDateTokens:
             "16 08 2024",
             "16 - 08 - 2024",
             "8 16 2024",
-            # The German calendar week with its year
+            # A calendar week with its year, and the ISO week without the
+            # hyphen
             "KW33 2024",
             "KW 33/2024",
+            "Week 33 2024",
+            "week 33/2024",
+            "W33 2024",
+            "2024W33",
+            "2024W336",
             # "of" between the day and the month
             "16th of August 2024",
         ],
     )
     def test_every_shape_is_found(self, text):
         assert find_date_tokens(f"x {text} y") == [text]
+
+    @pytest.mark.parametrize(
+        "text",
+        ["20260816143015", "flight_202608161430", "Log_20260816-1430"],
+    )
+    def test_a_compact_date_with_its_time_is_found(self, text):
+        """The time of day right after it no longer hides the date."""
+        assert find_date_tokens(text) == ["20260816"]
 
     @pytest.mark.parametrize(
         "text",
@@ -93,6 +107,8 @@ class TestFindDateTokens:
             "01_01_2024",
             "01 01 2024",
             "KW1 2024",
+            "2024W01",
+            "202401010000",
         ],
     )
     def test_the_days_after_jan_first_pass_only_when_asked(self, text):
@@ -135,6 +151,14 @@ class TestFindDateTokens:
             "16 13 2024",
             "16 08 1024",
             "KW 54 2024",
+            # Twelve digits that are no date and time, a week of a
+            # registration, and a calendar week without its year
+            "EDDS 123456789012",
+            "EDDS 202613161430",
+            "N2026W33",
+            "2024W54",
+            "W33",
+            "Week 33",
         ],
     )
     def test_not_a_date_with_a_year(self, text):
@@ -238,6 +262,59 @@ class TestFindTimeTokens:
             ("Log_2026-01-01_1430", ["1430"]),
             ("EDDS 20260816T1430", ["T1430"]),
             ("EDDS 16.08.2026, 15.13", ["15.13"]),
+            # Zones of other countries, the local time and the hours, whole
+            ("Home strip - Aunt farm 1430 GMT", ["1430 GMT"]),
+            ("Aunt farm 1430 EST", ["1430 EST"]),
+            ("Aunt farm 14:30 BST", ["14:30 BST"]),
+            ("Aunt farm 09:30 EDT", ["09:30 EDT"]),
+            ("Aunt farm 14:30 AEST", ["14:30 AEST"]),
+            ("Aunt farm 14:30 local", ["14:30 local"]),
+            ("Aunt farm 1430 local time", ["1430 local time"]),
+            ("Aunt farm 0930 hours", ["0930 hours"]),
+            ("Aunt farm 14:30 UTC+2", ["14:30 UTC+2"]),
+            ("Takeoff 3:15 pm EST", ["3:15 pm EST"]),
+            # A fraction of a second and a UTC offset along with the time
+            ("Aunt farm 14:30 +02:00", ["14:30 +02:00"]),
+            ("Aunt farm 14:30:00+0200", ["14:30:00+0200"]),
+            ("Aunt farm 14:30:00.123Z", ["14:30:00.123Z"]),
+            ("Aunt farm 14:30:00,5Z", ["14:30:00,5Z"]),
+            ("EDDS T1430+0200", ["T1430+0200"]),
+            ("EDDS 1430+0200", ["1430+0200"]),
+            # After a compact date without a separator, and after a date as
+            # hours and minutes with hyphens
+            ("20260816143015", ["143015"]),
+            ("flight_202608161430", ["1430"]),
+            ("log-2026-08-16-14-30", ["14-30"]),
+            ("log_2026_08_16_14_30_15", ["14_30_15"]),
+            # A range, whole
+            ("Block 0930Z-1045Z", ["0930Z-1045Z"]),
+            ("Block 0930Z-1045", ["0930Z-1045"]),
+            ("EDDS 1430L-1545L", ["1430L-1545L"]),
+            ("EDDS 1430 LT-1545 LT", ["1430 LT-1545 LT"]),
+            ("EDDS 1430 UTC-1545 UTC", ["1430 UTC-1545 UTC"]),
+            ("EDDS 1430Z - 1545Z", ["1430Z", "1545Z"]),
+            ("1_DEHYL_DA40-1430Z-1545Z", ["1430Z-1545Z"]),
+            # Zulu, and the other common zones
+            ("EDDS 1430 Zulu", ["1430 Zulu"]),
+            ("EDDS 1430 ZULU", ["1430 ZULU"]),
+            ("EDDS 1430 UT", ["1430 UT"]),
+            ("EDDS 1430 WET", ["1430 WET"]),
+            ("EDDS 1430 WEST", ["1430 WEST"]),
+            ("EDDS 1430 LOC", ["1430 LOC"]),
+            ("EDDS 1430 lcl", ["1430 lcl"]),
+            ("EDDS 14:30 IDT", ["14:30 IDT"]),
+            ("EDDS 14:30 SAST", ["14:30 SAST"]),
+            ("EDDS 14:30 JST", ["14:30 JST"]),
+            ("EDDS 14:30 HKT", ["14:30 HKT"]),
+            ("EDDS 14:30 SGT", ["14:30 SGT"]),
+            # A dot or an "h" with a zone, the local time or the hours
+            ("EDDS 14.30Z", ["14.30Z"]),
+            ("EDDS 14.30 UTC", ["14.30 UTC"]),
+            ("EDDS 9.30 CET", ["9.30 CET"]),
+            ("EDDS 14.30L", ["14.30L"]),
+            ("EDDS 14.30 hrs", ["14.30 hrs"]),
+            ("EDDS 14h30Z", ["14h30Z"]),
+            ("EDDS 9h30 UTC", ["9h30 UTC"]),
         ],
     )
     def test_times(self, text, expected):
@@ -265,6 +342,35 @@ class TestFindTimeTokens:
             "FL100 1430",
             "2026-08-16",
             "LOAV-LOAV",
+            # Frequencies, runways, codes and years, whatever follows them
+            "EDDS 123.45 EST",
+            "RWY 09/27 local",
+            "EDDS 2026",
+            "Squawk 7000 hours",
+            "EDDS 1200 ist gut",
+            "EDDS 1430 ESTATE",
+            # "14.30" is a decimal as often (fuel, a distance)
+            "Aunt farm 14.30",
+            # A frequency, a version, durations and litres
+            "EDDS 118.30 UTC",
+            "v14.30Z",
+            "EDDS 1.30 hrs",
+            "Fuel 5.30L",
+            "Fuel 14.30 l",
+            # Registrations and types with hyphens, ranges and offsets that
+            # are none
+            "HB-EST",
+            "OE-KLT",
+            "PA-28-181",
+            "A320-214",
+            "B737-800",
+            "EDDS 1000-2000 ft",
+            "EDDS 1200-1400",
+            "EDDS 1430+02",
+            # Zulu and localizer without a time, METAR winds
+            "ATIS Zulu",
+            "ILS 27 LOC",
+            "27015G25KT",
         ],
     )
     def test_no_times(self, text):
@@ -427,6 +533,79 @@ class TestStripDates:
             ("Log_2026-08-16_1430hrs", "Log"),
             ("EDDS 16.08.2026, 15.13", "EDDS"),
             ("EDDS 3pm", "EDDS"),
+            # Other zones, the local time and the hours go whole, and so do
+            # a fraction and an offset: nothing of the time is left behind
+            ("Home strip - Aunt farm 1430 GMT", "Home strip - Aunt farm"),
+            ("Aunt farm 1430 EST", "Aunt farm"),
+            ("Aunt farm 14:30 BST", "Aunt farm"),
+            ("Aunt farm 09:30 EDT", "Aunt farm"),
+            ("Aunt farm 14:30 AEST - EDDS", "Aunt farm - EDDS"),
+            ("Aunt farm 14:30 local", "Aunt farm"),
+            ("Aunt farm 0930 hours", "Aunt farm"),
+            ("Aunt farm 14:30 hrs", "Aunt farm"),
+            ("Aunt farm 14:30 GMT+1", "Aunt farm"),
+            ("Aunt farm 14:30 +02:00", "Aunt farm"),
+            ("Aunt farm 14:30:00+0200", "Aunt farm"),
+            ("Aunt farm 14:30:00.123Z", "Aunt farm"),
+            ("EDDS 2026-08-16T14:30:00,5+02:00 - EDDP", "EDDS - EDDP"),
+            ("EDDS 16.08.2026 14:30 +02:00", "EDDS"),
+            ("EDDS 12:00 +10 min", "EDDS +10 min"),
+            ("EDDS 1430+0200", "EDDS"),
+            # A compact date with its time, and a date and time all with
+            # hyphens: nothing of them is left behind
+            ("20260816143015", None),
+            ("Log_20260816143015", "Log"),
+            ("flight_202608161430", "flight"),
+            ("log-2026-08-16-14-30", "log"),
+            ("Log_2026_08_16_14_30", "Log"),
+            # Both ends of a range
+            ("Block 0930Z-1045Z", "Block"),
+            ("Block 1430 LT-1545 LT", "Block"),
+            ("Block 1430 UTC-1545 UTC", "Block"),
+            ("EDDS 1430L-1545L EDDP", "EDDS EDDP"),
+            ("1_DEHYL_DA40-1430Z-1545Z", "1_DEHYL_DA40"),
+            # Zulu and the other common zones
+            ("EDDS 1430 Zulu", "EDDS"),
+            ("EDDS 1430 WEST - EDDP", "EDDS - EDDP"),
+            ("EDDS 14:30 JST", "EDDS"),
+            ("EDDS 1430 UT", "EDDS"),
+            ("EDDS 1430 LOC", "EDDS"),
+            # A dot or an "h" with a zone, the local time or the hours
+            ("EDDS 14.30Z", "EDDS"),
+            ("EDDS 14.30 UTC - EDDP", "EDDS - EDDP"),
+            ("EDDS 14.30L", "EDDS"),
+            ("EDDS 14.30 hrs", "EDDS"),
+            ("EDDS 14h30Z", "EDDS"),
+            ("EDDS 14h30 UTC", "EDDS"),
+            # Weeks: the ISO week without the hyphen, and a week with or
+            # without the year
+            ("Flight 2026W33", "Flight"),
+            ("EDDS Week 33", "EDDS"),
+            ("EDDS W33 2026", "EDDS"),
+            # Kept: "W33" alone is an airport code in the US, a range is no
+            # time with an offset, a frequency or a version no dotted time,
+            # and a METAR wind no time either
+            ("W33 Friday Harbor", "W33 Friday Harbor"),
+            ("EDDS W10", "EDDS W10"),
+            ("EDDS 1200-1400", "EDDS 1200-1400"),
+            ("EDDS 1000-2000 ft", "EDDS 1000-2000 ft"),
+            ("EDDS 118.30 UTC", "EDDS 118.30 UTC"),
+            ("EDDS 1.30 hrs", "EDDS 1.30 hrs"),
+            ("EDDS 27015G25KT", "EDDS 27015G25KT"),
+            ("ATIS Zulu", "ATIS Zulu"),
+            ("ILS 27 LOC", "ILS 27 LOC"),
+            ("HB-EST EDDS", "HB-EST EDDS"),
+            ("A320-214 EDDS", "A320-214 EDDS"),
+            ("EDDS 123456789012", "EDDS 123456789012"),
+            # A number before "hours" loses it: a time of day as often
+            ("Engine 1500 hours", "Engine"),
+            # Kept: a decimal is no time ("fuel 14.30"), nor a frequency
+            # before a zone's letters
+            ("Aunt farm 14.30", "Aunt farm 14.30"),
+            ("EDDS 123.45 EST", "EDDS 123.45 EST"),
+            # A year before a zone is a time as well (20:26), and the year
+            # is no secret
+            ("Rundflug 2026 local", "Rundflug"),
             ("1_N1513H_C172", "1_N1513H_C172"),
             ("RA-1513H EDDS", "RA-1513H EDDS"),
             ("Mi-8AM", "Mi-8AM"),
@@ -490,6 +669,27 @@ class TestStripDates:
                 "{h}{m}Z",
                 "{h}{m}UTC",
                 "{h}:{m}",
+                "{h}{m} GMT",
+                "{h}{m} EST",
+                "{h}{m} local",
+                "{h}{m} hours",
+                "{h}:{m} PDT",
+                "{h}:{m} AEST",
+                "{h}:{m} local time",
+                "{h}:{m}:00.5Z",
+                "{h}:{m}:00+02:00",
+                "{h}:{m} -0500",
+                "{h}{m} Zulu",
+                "{h}{m} UT",
+                "{h}{m} WEST",
+                "{h}{m} JST",
+                "{h}{m}+0200",
+                "{h}.{m}Z",
+                "{h}.{m} UTC",
+                "{h}.{m}L",
+                "{h}.{m} hrs",
+                "{h}h{m}Z",
+                "{h}h{m} CET",
             ]
         ),
         separator=st.sampled_from(["_", " ", " - "]),
@@ -527,6 +727,56 @@ class TestStripDates:
     def test_no_weekday_is_left(self, weekday, case, separator, head):
         assert strip_dates(f"{head}{separator}{case(weekday)}") == head
         assert strip_dates(f"{case(weekday)}{separator}{head}") == head
+
+    @given(
+        hour=st.integers(min_value=0, max_value=23),
+        minute=st.integers(min_value=0, max_value=59),
+        second=st.integers(min_value=0, max_value=59),
+        form=st.sampled_from(
+            [
+                "20260816{h}{m}",
+                "20260816{h}{m}{s}",
+                "2026-08-16-{h}-{m}",
+                "2026_08_16_{h}_{m}_{s}",
+            ]
+        ),
+        separator=st.sampled_from(["_", " ", " - "]),
+        head=st.sampled_from(["Log", "1_DEHYL", "EDDS - EDDP"]),
+    )
+    def test_no_date_and_time_is_left(
+        self, hour, minute, second, form, separator, head
+    ):
+        """A date and time written as one run of digits or with hyphens."""
+        stamp = form.format(h=f"{hour:02d}", m=f"{minute:02d}", s=f"{second:02d}")
+        assert strip_dates(f"{head}{separator}{stamp}") == head
+        assert find_date_tokens(stamp) != []
+        assert find_time_tokens(stamp) != []
+
+    @given(
+        first=st.integers(min_value=0, max_value=23 * 60 + 59),
+        second=st.integers(min_value=0, max_value=23 * 60 + 59),
+        zone=st.sampled_from(["Z", "L", "z", " LT", " CET", " local"]),
+        head=st.sampled_from(["Block", "1_DEHYL_DA40", "EDDS"]),
+    )
+    def test_no_end_of_a_range_is_left(self, first, second, zone, head):
+        """The second time of a range is no registration after a prefix."""
+        start = f"{first // 60:02d}{first % 60:02d}{zone}"
+        end = f"{second // 60:02d}{second % 60:02d}{zone}"
+        assert strip_dates(f"{head} {start}-{end}") == head
+        assert find_time_tokens(f"{head} {start}-{end}") == [f"{start}-{end}"]
+        assert find_time_tokens(f"{head} {start} - {end}") == [start, end]
+
+    @given(
+        number=st.integers(min_value=0, max_value=9999),
+        head=st.sampled_from(["HB", "D", "OE", "N", "RA"]),
+        suffix=st.sampled_from(["", "Z", "H", "L"]),
+    )
+    def test_registrations_are_kept(self, number, head, suffix):
+        """A nationality prefix and its hyphen, or a letter, before the
+        digits make them a registration."""
+        joined = "" if head == "N" else "-"
+        registration = f"{head}{joined}{number:04d}{suffix}"
+        assert strip_dates(f"{registration} EDDS") == f"{registration} EDDS"
 
 
 def test_month_number():

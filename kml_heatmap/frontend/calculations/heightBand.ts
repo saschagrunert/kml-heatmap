@@ -20,18 +20,8 @@
  * left out for every height (see state/urlState.ts); this module reads and
  * writes that text.
  */
-import { HEIGHT_BAND_TEXT } from "../state/urlState";
+import { HEIGHT_BAND_STOPS_FT, HEIGHT_BAND_TEXT } from "../state/urlState";
 import { formatNumber } from "../utils/formatters";
-
-/**
- * The heights the thumbs of the control stop at, in feet above ground:
- * closer together low down, where a circuit and a climb out are told
- * apart, than up at a cruise. A top past the last is no top at all.
- */
-export const HEIGHT_BAND_STOPS_FT: readonly number[] = [
-  0, 100, 200, 300, 500, 700, 1000, 1500, 2000, 2500, 3000, 4000, 5000, 6000,
-  8000, 10000,
-];
 
 /** The stop of a band without a top: one past the last of the stops */
 export const OPEN_TOP = HEIGHT_BAND_STOPS_FT.length;

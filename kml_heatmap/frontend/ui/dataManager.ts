@@ -192,8 +192,9 @@ export class DataManager {
       hideLoading: () => this.hideLoading(),
       onLoadError: (failedYears, stale) => {
         this.loadErrorReported = true;
+        // As the other failure of a load says it (see loadData)
         this.fail(
-          "Failed to load flight data for " +
+          "Could not load the flights of " +
             failedYears.join(", ") +
             // The site was published again since the page was loaded
             (stale ? ". Reload the page to update it." : ""),
@@ -451,11 +452,13 @@ export class DataManager {
 
   /**
    * Ask the year decoder, and hand its answer to `take` while the app is
-   * still there: the worker ends with it, and takes its requests along
+   * still there: the worker ends with it, and takes its requests along.
+   * A question that gets no answer is told to `failed`.
    */
   private askWorker<T>(
     ask: (decoder: YearDecoder) => Promise<T>,
     take: (answer: T) => void,
+    failed?: () => void,
   ): void {
     this.heatRequests++;
     void this.dataLoader
@@ -463,8 +466,11 @@ export class DataManager {
       .then(ask)
       .then(
         (answer) => this.destroyed || take(answer),
-        (error: unknown) =>
-          this.destroyed || logError("Could not draw the heat:", error),
+        (error: unknown) => {
+          if (this.destroyed) return;
+          logError("Could not draw the heat:", error);
+          failed?.();
+        },
       )
       .finally(() => {
         // An answer that is not written (one for a heat let go of) gives
@@ -581,6 +587,11 @@ export class DataManager {
         ),
       (content) =>
         request === this.linesRequest && this.writeSource(source, content),
+      // Asked for again at the next zoom rather than held as if written;
+      // a heat that got no answer is asked for again with the next redraw
+      () => {
+        if (request === this.linesRequest) this.heatLinesFor = null;
+      },
     );
   }
 

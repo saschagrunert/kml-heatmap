@@ -9,9 +9,9 @@ AGENTS.md
 .playwright-mcp
 
 # Generated sites, never committed: docs/ is the default OUTPUT_DIR of
-# `make build`, out/ the output of the README examples, site/ the one the
-# deploy job publishes and visual-site/ the one the visual snapshots are
-# compared against.
+# `make build`, out/ the output of the examples in doc/usage.md, site/ the
+# one the deploy job publishes and visual-site/ the one the visual
+# snapshots are compared against.
 /docs/
 /out/
 /site/

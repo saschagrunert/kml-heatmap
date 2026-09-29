@@ -555,9 +555,9 @@ jobs:
   # the e2e job, with the digest of its multi-arch index (the
   # Docker-Content-Digest header of
   # https://mcr.microsoft.com/v2/playwright/manifests/<tag>), and the same
-  # reference in CONTRIBUTING.md and DEVELOPMENT.md (check_locks.py checks
-  # all of them). A digest left behind keeps pulling the old image,
-  # whatever the tag next to it says.
+  # reference in CONTRIBUTING.md and doc/development/testing.md
+  # (check_locks.py checks all of them). A digest left behind keeps pulling
+  # the old image, whatever the tag next to it says.
   visual:
     needs: unit
     # Not for Dependabot's Playwright bumps, see the top

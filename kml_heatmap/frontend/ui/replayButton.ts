@@ -10,7 +10,7 @@ import { domCache } from "../utils/domCache";
 
 export const REPLAY_BUTTON_LABEL = "Replay selected flight path";
 export const REPLAY_PRECONDITION_MESSAGE =
-  "Select exactly one flight with timing data to replay";
+  "Pick one flight with timing data to replay, under Statistics, Flights";
 
 /**
  * Show whether replay is available for the current selection.

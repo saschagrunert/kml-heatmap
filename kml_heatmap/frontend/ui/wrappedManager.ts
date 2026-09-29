@@ -48,6 +48,7 @@ import {
   startWrappedIntro,
   type WrappedIntro,
 } from "./wrappedIntro";
+import { restingPitch } from "./replayState";
 
 /**
  * Elements that stay out of the inert set while the dialog is open: the
@@ -73,9 +74,9 @@ const MAP_REVEAL_TIMEOUT_MS = 1200;
 
 /**
  * The user's map view: app-shaped center, zoom in the map's own unit, and
- * the globe and 3D switches, which the intro changes while the dialog is
- * open (see ui/wrappedIntro.ts). Without the intro the overview keeps the
- * projection the user chose.
+ * the globe and 3D switches, put back as the dialog closes: the intro
+ * turns the globe on while it plays (see ui/wrappedIntro.ts). Without the
+ * intro the overview keeps the projection the user chose.
  */
 export interface UserMapView {
   center: MapCenter;
@@ -355,7 +356,7 @@ export class WrappedManager {
         center: { lat: center.lat, lng: center.lng },
         zoom: this.app.map.getZoom(),
         bearing: this.app.map.getBearing(),
-        pitch: this.app.map.getPitch(),
+        pitch: restingPitch(this.app),
         globeVisible: this.app.globeVisible,
         threeDVisible: this.app.threeDVisible,
       };
@@ -830,7 +831,8 @@ export class WrappedManager {
     this.cancelHover();
     this.overview = null;
     // The globe and the 3D view go back with the view, before the map is
-    // measured again; the cloud the intro drew goes with them
+    // measured again, and the intro's cloud, should the dialog close while
+    // it plays
     const view = this.savedView;
     this.app.store.batch(() => {
       if (view) {

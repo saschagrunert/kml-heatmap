@@ -553,8 +553,14 @@ export function followCloudReadout(app: MapApp): void {
     announceStatus(`${time}: ${detail.replace(" · ", ", ")}`);
   };
 
+  /**
+   * Before the page's own Escapes (it listens as the event comes down),
+   * which leave one it took alone: the phone's statistics sheet closed
+   * with it
+   */
   const onKey = (e: KeyboardEvent): void => {
     if (e.key !== "Escape" || !box || box.hidden) return;
+    e.preventDefault();
     hide();
     dismissedAt = pointer;
     tapped = null;
@@ -579,7 +585,7 @@ export function followCloudReadout(app: MapApp): void {
       map.on("touchstart", onTouch);
       map.on("mousedown", onPress);
       map.on("click", onClick);
-      document.addEventListener("keydown", onKey);
+      document.addEventListener("keydown", onKey, true);
       popups.observe(container, { childList: true });
     } else {
       map.off("mousemove", onMove);
@@ -589,7 +595,7 @@ export function followCloudReadout(app: MapApp): void {
       map.off("touchstart", onTouch);
       map.off("mousedown", onPress);
       map.off("click", onClick);
-      document.removeEventListener("keydown", onKey);
+      document.removeEventListener("keydown", onKey, true);
       popups.disconnect();
       leave();
     }

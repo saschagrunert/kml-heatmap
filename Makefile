@@ -93,6 +93,8 @@ build: require-runtime ## Build the image and generate OUTPUT_DIR from INPUT_DIR
 	$(CONTAINER_RUNTIME) run --rm $(RUN_AS_USER) -e HOME=/tmp \
 	  -e CARTO_API_KEY -e KML_HEATMAP_SITE_URL \
 	  -e KML_HEATMAP_COMMIT -e KML_HEATMAP_REPOSITORY -e SOURCE_DATE_EPOCH \
+	  -e KML_HEATMAP_STABLE_MTIMES -e KML_HEATMAP_REQUIRE_AIRPORT_DB \
+	  -e KML_HEATMAP_REQUIRE_TERRAIN \
 	  -v "$(abspath $(INPUT_DIR)):$(INPUT_MOUNT)" \
 	  -v "$(abspath $(OUTPUT_DIR)):$(OUTPUT_MOUNT)" \
 	  -v "$(CACHE_DIR):/cache" \

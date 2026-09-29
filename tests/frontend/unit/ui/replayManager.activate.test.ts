@@ -129,13 +129,15 @@ describe("ReplayManager activation", () => {
       expect(mockApp.replayActive).toBe(false);
     });
 
-    it("shows an explanatory toast when no path is selected", () => {
+    it("shows an explanatory toast when no path is selected, and the flights to pick from", () => {
       mockApp.selectedPathIds = new Set();
 
       replayManager.toggleReplay();
 
       expect(mockApp.replayActive).toBe(false);
       expect(toastText()).toBe(REPLAY_PRECONDITION_MESSAGE);
+      expect(mockApp.statsPanelVisible).toBe(true);
+      expect(mockApp.flightListVisible).toBe(true);
     });
 
     it("shows an explanatory toast when multiple paths are selected", () => {
@@ -145,6 +147,8 @@ describe("ReplayManager activation", () => {
 
       expect(mockApp.replayActive).toBe(false);
       expect(toastText()).toBe(REPLAY_PRECONDITION_MESSAGE);
+      // They are picked already
+      expect(mockApp.statsPanelVisible).toBe(false);
     });
 
     it("shows an explanatory toast for a flight that takes no time", () => {
@@ -226,6 +230,27 @@ describe("ReplayManager activation", () => {
       replayManager.toggleReplay(false);
       expect(mockApp.replayActive).toBe(true);
       expect(easeTo).not.toHaveBeenCalled();
+    });
+
+    it("keeps the tilt of the map, or the one a lay-back it cuts short goes to", () => {
+      mockApp.selectedPathIds = new Set([1]);
+      const easeTo = vi.mocked(mockApp.map!.easeTo);
+      mockApp.map!.jumpTo({ pitch: 25 });
+      easeTo.mockClear();
+
+      replayManager.toggleReplay();
+      expect(easeTo).toHaveBeenCalledWith(
+        expect.objectContaining({ pitch: 25 }),
+      );
+      replayManager.toggleReplay();
+
+      // The replay of all flights lays the map back flat
+      mockApp.replayState.layingBack = 0;
+      easeTo.mockClear();
+      replayManager.toggleReplay();
+      expect(easeTo).toHaveBeenCalledWith(
+        expect.objectContaining({ pitch: 0 }),
+      );
     });
 
     it("leaves persistence to the store subscription", () => {
@@ -1016,6 +1041,7 @@ describe("ReplayManager activation", () => {
       expect(mockApp.map!.easeTo).toHaveBeenCalledWith({
         center: [16.0, 48.0],
         zoom: 15,
+        pitch: 0,
         duration: 800,
         animate: true,
       });
@@ -1049,6 +1075,7 @@ describe("ReplayManager activation", () => {
       expect(mockApp.map!.easeTo).toHaveBeenCalledTimes(1);
       expect(mockApp.map!.easeTo).toHaveBeenCalledWith({
         center: [16.0, 48.0],
+        pitch: 0,
         duration: 800,
         animate: true,
       });

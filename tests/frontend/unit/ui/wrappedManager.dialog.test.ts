@@ -784,6 +784,16 @@ describe("WrappedManager dialog", () => {
       expect(mockApp.map!.getPitch()).toBe(45);
     });
 
+    it("keeps the tilt the replay of all flights is laying the map back to", () => {
+      // Opened half way back from the tilt of that replay
+      mockApp.map!.jumpTo({ pitch: 25 });
+      mockApp.replayState.layingBack = 0;
+
+      openWrapped();
+
+      expect(wrappedManager.userMapView()).toMatchObject({ pitch: 0 });
+    });
+
     it("keeps the user's view through a reopening before it was put back", () => {
       mockApp.map!.getCenter.mockReturnValue(new LngLat(11.6, 48.1));
       mockApp.map!.getZoom.mockReturnValue(12);

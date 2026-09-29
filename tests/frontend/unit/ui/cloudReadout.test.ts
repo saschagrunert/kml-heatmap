@@ -307,7 +307,21 @@ describe("the readout of the heat cloud", () => {
     enter3D();
     move(0, 0);
     await nextFrame();
-    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    // Taken before the page's own Escapes hear of it, which leave it alone
+    let prevented: boolean | null = null;
+    const later = (event: KeyboardEvent): void => {
+      prevented = event.defaultPrevented;
+    };
+    document.body.addEventListener("keydown", later);
+    document.body.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "Escape",
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+    document.body.removeEventListener("keydown", later);
+    expect(prevented).toBe(true);
     expect(shown()).toBeNull();
 
     move(3, 3);

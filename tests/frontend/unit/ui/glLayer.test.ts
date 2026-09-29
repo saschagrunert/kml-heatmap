@@ -370,6 +370,48 @@ describe("LayerGl", () => {
     });
   });
 
+  describe("empty", () => {
+    it("lets go of the points it uploaded, and uploads them again once asked to draw them", () => {
+      begin();
+      const points = gl.createBuffer.mock.results[1]!.value as unknown;
+      gl.bufferData.mockClear();
+
+      objects.empty(context());
+
+      expect(gl.bufferData).toHaveBeenCalledWith(
+        gl.ARRAY_BUFFER,
+        0,
+        gl.STATIC_DRAW,
+      );
+      expect(lastBefore(gl.bindBuffer, order(gl.bufferData)[0]!)).toEqual([
+        gl.ARRAY_BUFFER,
+        points,
+      ]);
+      // Nothing is deleted: the buffer takes the next points
+      expect(gl.deleteBuffer).not.toHaveBeenCalled();
+
+      gl.bufferData.mockClear();
+      begin();
+      expect(gl.bufferData).toHaveBeenCalledWith(
+        gl.ARRAY_BUFFER,
+        data.points,
+        gl.STATIC_DRAW,
+      );
+    });
+
+    it("does nothing without points, nor in another context", () => {
+      objects.empty(context());
+      begin();
+      objects.empty(context(mockGl()));
+      objects.empty(context());
+      gl.bufferData.mockClear();
+
+      objects.empty(context());
+
+      expect(gl.bufferData).not.toHaveBeenCalled();
+    });
+  });
+
   describe("release", () => {
     it("deletes the buffers and the vertex array, and keeps the programs for the layer's return", () => {
       begin();

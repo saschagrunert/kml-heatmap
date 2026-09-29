@@ -11,11 +11,12 @@ import {
 } from "../state/toggles";
 import type { MapCenter, SavedState } from "../types";
 import {
-  HEIGHT_BAND_TEXT,
+  isHeightBand,
   isPathId,
   isSupportedSchemaVersion,
   STATE_SCHEMA_VERSION,
   encodeStateToUrl,
+  isSectionLine,
   parseUrlParams,
 } from "../state/urlState";
 import { toMapBearing, toMapCenter, toMapPitch } from "../utils/geometry";
@@ -38,8 +39,8 @@ export function storageKey(
 }
 
 /**
- * What a session keeps of the store: the filters, every toggle and the
- * heat cloud's band of heights
+ * What a session keeps of the store: the filters, every toggle, the heat
+ * cloud's band of heights and the line of the cross-section
  */
 const PERSISTED_KEYS: readonly (keyof StoreState)[] = [
   "selectedYear",
@@ -47,6 +48,7 @@ const PERSISTED_KEYS: readonly (keyof StoreState)[] = [
   "selectedPathIds",
   ...TOGGLE_KEYS,
   "heightBand",
+  "crossSectionLine",
 ];
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -91,9 +93,9 @@ export function sanitizeSavedState(candidate: unknown): SavedState {
     }
   }
   const band = candidate["heightBand"];
-  if (typeof band === "string" && HEIGHT_BAND_TEXT.test(band)) {
-    result.heightBand = band;
-  }
+  if (isHeightBand(band)) result.heightBand = band;
+  const line = candidate["crossSectionLine"];
+  if (isSectionLine(line)) result.crossSectionLine = line;
   // Path ids are only meaningful when they were written with an id scheme
   // this build reads; older payloads refer to different flights. Schema 4
   // only changed how a link spells the ids, so a selection saved as 3 still
@@ -213,6 +215,7 @@ export class StateManager {
       selectedPathIds: Array.from(this.app.selectedPathIds),
       // The tour shows every height while it runs (ui/hotspotTour.ts)
       heightBand: this.app.tourView?.heightBand ?? this.app.heightBand,
+      crossSectionLine: this.app.crossSectionLine,
       // Replay state is not persisted: too complex to restore reliably
     };
     for (const toggle of TOGGLES) {

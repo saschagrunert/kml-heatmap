@@ -317,7 +317,7 @@ describe("DataManager", () => {
     it("shows an error toast listing failed years", () => {
       loaderMocks.options!.onLoadError!(["2024", "2025"]);
       expect(toastMock.showToast).toHaveBeenCalledWith(
-        "Failed to load flight data for 2024, 2025",
+        "Could not load the flights of 2024, 2025",
         "error",
         undefined,
       );
@@ -697,7 +697,7 @@ describe("DataManager", () => {
 
       expect(toastMock.showToast).toHaveBeenCalledTimes(1);
       expect(toastMock.showToast).toHaveBeenCalledWith(
-        "Failed to load flight data for 2025",
+        "Could not load the flights of 2025",
         "error",
         undefined,
       );
@@ -716,7 +716,7 @@ describe("DataManager", () => {
 
       // Once, where its Retry is: the toast beside it said it twice
       expect(note).toHaveBeenCalledExactlyOnceWith(
-        "Failed to load flight data for 2025",
+        "Could not load the flights of 2025",
       );
       expect(toastMock.showToast).not.toHaveBeenCalled();
 
@@ -726,7 +726,7 @@ describe("DataManager", () => {
 
       expect(note).toHaveBeenCalledTimes(1);
       expect(toastMock.showToast).toHaveBeenCalledWith(
-        "Failed to load flight data for 2025",
+        "Could not load the flights of 2025",
         "error",
         undefined,
       );
@@ -748,7 +748,7 @@ describe("DataManager", () => {
       // The flights of the other years hide the note it went on
       expect(note).toHaveBeenCalledOnce();
       expect(toastMock.showToast).toHaveBeenCalledExactlyOnceWith(
-        "Failed to load flight data for 2023",
+        "Could not load the flights of 2023",
         "error",
         undefined,
       );
@@ -763,7 +763,7 @@ describe("DataManager", () => {
 
       await dataManager.loadData("2025", undefined, retry);
       expect(toastMock.showToast).toHaveBeenLastCalledWith(
-        "Failed to load flight data for 2025",
+        "Could not load the flights of 2025",
         "error",
         retry,
       );
@@ -799,7 +799,7 @@ describe("DataManager", () => {
       await all;
 
       expect(toastMock.showToast).toHaveBeenCalledWith(
-        "Failed to load flight data for 2023",
+        "Could not load the flights of 2023",
         "error",
         undefined,
       );
@@ -825,7 +825,7 @@ describe("DataManager", () => {
       await dataManager.loadData("2025");
 
       expect(toastMock.dismissToast).toHaveBeenCalledWith(
-        "Failed to load flight data for 2025",
+        "Could not load the flights of 2025",
       );
     });
 
@@ -842,7 +842,7 @@ describe("DataManager", () => {
       // one that is still true included (regression)
       expect(toastMock.dismissToast).toHaveBeenCalledTimes(1);
       expect(toastMock.dismissToast).toHaveBeenCalledWith(
-        "Failed to load flight data for 2025",
+        "Could not load the flights of 2025",
       );
       toastMock.dismissToast.mockClear();
       dataManager.dismissFailures();
@@ -853,7 +853,7 @@ describe("DataManager", () => {
       loaderMocks.options!.onLoadError!(["2024", "2025"], true);
 
       expect(toastMock.showToast).toHaveBeenCalledWith(
-        "Failed to load flight data for 2024, 2025. Reload the page to update it.",
+        "Could not load the flights of 2024, 2025. Reload the page to update it.",
         "error",
         undefined,
       );
@@ -1466,6 +1466,67 @@ describe("DataManager", () => {
       dataManager.updateLayers();
       await answered();
       expect(heatLinesSource().setData).toHaveBeenCalledTimes(1);
+      expect(decoder.linesSource).toHaveBeenCalledOnce();
+    });
+
+    it("are asked for again at the next zoom when the worker failed over them", async () => {
+      mockApp.map!.jumpTo({ zoom: HEAT_LINES.fullZoom });
+      decoder.linesSource.mockRejectedValueOnce(new Error("no answer"));
+      mockApp.currentData = baseData();
+      await answered();
+      expect(logError).toHaveBeenCalledWith(
+        "Could not draw the heat:",
+        expect.any(Error),
+      );
+      expect(heatLinesSource().setData).not.toHaveBeenCalled();
+
+      mockApp.map!.emit("zoomend");
+      await answered();
+
+      expect(decoder.linesSource).toHaveBeenCalledTimes(2);
+      expect(heatLinePoints()).toEqual(ALL_FIXES);
+    });
+
+    it("are not asked for again after a failure over lines asked for before them", async () => {
+      mockApp.map!.jumpTo({ zoom: HEAT_LINES.fullZoom });
+      let fail!: (error: unknown) => void;
+      decoder.linesSource.mockReturnValueOnce(
+        new Promise<Blob>((_, no) => (fail = no)),
+      );
+      mockApp.currentData = baseData();
+      await answered();
+      mockApp.selectedYear = "2025";
+      await answered();
+      expect(decoder.linesSource).toHaveBeenCalledTimes(2);
+
+      fail(new Error("no answer"));
+      await answered();
+      mockApp.map!.emit("zoomend");
+      await answered();
+
+      // The lines of the year shown were written, and stay
+      expect(decoder.linesSource).toHaveBeenCalledTimes(2);
+      expect(heatLinesSource().setData).toHaveBeenCalledOnce();
+    });
+
+    it("are not asked for again after a failure over a heat", async () => {
+      mockApp.map!.jumpTo({ zoom: HEAT_LINES.fullZoom });
+      mockApp.currentData = baseData();
+      await answered();
+      expect(decoder.linesSource).toHaveBeenCalledOnce();
+
+      // The heat of a selection isolated
+      decoder.drawHeat.mockRejectedValueOnce(new Error("no answer"));
+      mockApp.selectedPathIds = new Set([1]);
+      mockApp.isolateSelection = true;
+      dataManager.updateLayers();
+      await answered();
+      expect(logError).toHaveBeenCalled();
+      mockApp.isolateSelection = false;
+      dataManager.updateLayers();
+      mockApp.map!.emit("zoomend");
+      await answered();
+
       expect(decoder.linesSource).toHaveBeenCalledOnce();
     });
 

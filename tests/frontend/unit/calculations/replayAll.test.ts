@@ -1,14 +1,18 @@
 /**
  * The points of the replay of all flights: every flight's curve with the
  * seconds into its flight at each point, thinned for the zoom it is drawn
- * at, the step from one curve to the next left out.
+ * at, the step from one curve to the next left out; and the camera that
+ * fits them on a tilted map.
  */
 import { describe, it, expect } from "vitest";
 import {
+  fitTilted,
   REPLAY_ALL_POINT_FLOATS,
   replayAllPoints,
+  type FitMap,
   type ReplayAllPoints,
 } from "../../../../kml_heatmap/frontend/calculations/replayAll";
+import { mercatorOf } from "../../../../kml_heatmap/frontend/calculations/heatCloud";
 import { flightClock } from "../../../../kml_heatmap/frontend/calculations/flightClock";
 import { smoothFlights } from "../../../../kml_heatmap/frontend/calculations/smoothing";
 import type { PathSegment } from "../../../../kml_heatmap/frontend/types";
@@ -201,5 +205,133 @@ describe("replayAllPoints", () => {
     expect(points.flights).toBe(0);
     expect(points.duration).toBe(0);
     expect(points.bounds).toBeNull();
+  });
+});
+
+describe("the fit of the flights on a tilted map", () => {
+  /** A desktop map, the panel of the replay along its bottom */
+  const MAP: FitMap = {
+    width: 1440,
+    height: 900,
+    padding: { top: 24, right: 24, bottom: 110, left: 24 },
+    pitch: 50,
+    fov: 36.87,
+  };
+  /** Flights from the Baltic to the Adriatic, wider in the south */
+  const RUN = build([
+    ...flight(1, 54.5, { count: 3 }),
+    ...flight(2, 45.5, { count: 3 }),
+  ]);
+  // Spread out east and west, a flight at each end
+  const spread: [number, number][] = [
+    [8, 54.5],
+    [14, 54],
+    [5.5, 47],
+    [16.5, 45.5],
+  ];
+  const run = {
+    ...RUN,
+    points: Float32Array.from(
+      spread.flatMap(([lng, lat]) => {
+        const [x, y] = mercatorOf([lat, lng]);
+        return [x - RUN.origin[0], y - RUN.origin[1], 0, 0, 0, 1];
+      }),
+    ),
+    count: spread.length,
+  };
+
+  /**
+   * Where MapLibre draws `[lng, lat]` on the flat map of `map` with the
+   * camera `camera`, north up, worked out anew: the camera at the distance
+   * of the field of view from the middle of the map, turned down by the
+   * tilt, and a perspective division by the depth along its view
+   */
+  function project(
+    [lng, lat]: [number, number],
+    camera: { center: [number, number]; zoom: number },
+    map: FitMap = MAP,
+  ): [number, number] {
+    const world = 512 * 2 ** camera.zoom;
+    const [cx, cy] = mercatorOf([camera.center[1], camera.center[0]]);
+    const [x, y] = mercatorOf([lat, lng]);
+    const pitch = (map.pitch * Math.PI) / 180;
+    const distance = map.height / 2 / Math.tan((map.fov * Math.PI) / 360);
+    // The camera, south of the middle and above it, looking at it
+    const eye = [0, distance * Math.sin(pitch), distance * Math.cos(pitch)];
+    const ahead = eye.map((v) => -v / distance);
+    const up = [0, -Math.cos(pitch), Math.sin(pitch)];
+    const to = [(x - cx) * world, (y - cy) * world, 0].map(
+      (v, i) => v - eye[i]!,
+    );
+    const dot = (a: number[], b: number[]) =>
+      a.reduce((sum, v, i) => sum + v * b[i]!, 0);
+    const depth = dot(to, ahead);
+    return [
+      map.width / 2 + (to[0]! * distance) / depth,
+      map.height / 2 - (dot(to, up) * distance) / depth,
+    ];
+  }
+
+  /** Left, top, right and bottom of the flights with `camera` */
+  function box(
+    camera: { center: [number, number]; zoom: number },
+    map: FitMap = MAP,
+  ): [number, number, number, number] {
+    const at = spread.map((place) => project(place, camera, map));
+    const xs = at.map(([x]) => x);
+    const ys = at.map(([, y]) => y);
+    return [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)];
+  }
+
+  it("fills the room between the padding with the flights, all of them in it", () => {
+    const camera = fitTilted(run, { center: [11, 50], zoom: 5 }, MAP, 22);
+
+    const [left, top, right, bottom] = box(camera);
+    const { padding } = MAP;
+    expect(left).toBeGreaterThanOrEqual(padding.left - 2);
+    expect(right).toBeLessThanOrEqual(MAP.width - padding.right + 2);
+    expect(top).toBeGreaterThanOrEqual(padding.top - 2);
+    expect(bottom).toBeLessThanOrEqual(MAP.height - padding.bottom + 2);
+    // Across or down, edge to edge of the room
+    const fill = Math.max(
+      (right - left) / (MAP.width - padding.left - padding.right),
+      (bottom - top) / (MAP.height - padding.top - padding.bottom),
+    );
+    expect(fill).toBeGreaterThan(0.98);
+    // Tilted, the north is further away and smaller than the south
+    const north = project([14, 54], camera)[0] - project([8, 54], camera)[0];
+    const south = project([14, 46], camera)[0] - project([8, 46], camera)[0];
+    expect(north).toBeLessThan(south);
+  });
+
+  it("fits a flat map as a fit of the bounds does", () => {
+    const flat = { ...MAP, pitch: 0 };
+
+    const camera = fitTilted(run, { center: [11, 50], zoom: 5 }, flat, 22);
+
+    const [left, top, right, bottom] = box(camera, flat);
+    // Down fills the room: the flights are taller than wide for it
+    expect(top).toBeCloseTo(24, 0);
+    expect(bottom).toBeCloseTo(900 - 110, 0);
+    expect((left + right) / 2).toBeCloseTo(720, 0);
+  });
+
+  it("comes in from behind the camera of a steep tilt", () => {
+    const steep = { ...MAP, pitch: 85 };
+
+    const camera = fitTilted(run, { center: [11, 50], zoom: 9 }, steep, 22);
+
+    expect(camera.zoom).toBeLessThan(9);
+    const [left, top, right, bottom] = box(camera, steep);
+    expect([left, top, right, bottom].every(Number.isFinite)).toBe(true);
+    expect(top).toBeGreaterThanOrEqual(24 - 2);
+    expect(bottom).toBeLessThanOrEqual(900 - 110 + 2);
+  });
+
+  it("stays at the camera it is given without flights or room, and no closer than the limit", () => {
+    const camera = { center: [11, 50] as [number, number], zoom: 5 };
+    expect(fitTilted({ ...run, count: 0 }, camera, MAP, 22)).toBe(camera);
+    expect(fitTilted(run, camera, { ...MAP, width: 0 }, 22)).toBe(camera);
+    expect(fitTilted(run, camera, MAP, 5.5).zoom).toBe(5.5);
   });
 });

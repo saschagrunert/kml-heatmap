@@ -1064,6 +1064,22 @@ describe("MapApp.initialize", () => {
       expect(app.savedState).not.toHaveProperty("wrappedVisible");
     });
 
+    it("is done with the restore of the wrapped modal when it fails to open", async () => {
+      vi.useFakeTimers();
+      mockStateManagerInstance.loadState.mockReturnValue({
+        wrappedVisible: true,
+      });
+      mockWrappedManagerInstance.showWrapped.mockImplementationOnce(() => {
+        throw new Error("no dialog");
+      });
+
+      await initializeApp(app);
+      await vi.advanceTimersByTimeAsync(500);
+
+      // A save writes what the store says, not the flag restored
+      expect(app.savedState).not.toHaveProperty("wrappedVisible");
+    });
+
     it("does not reopen the wrapped modal once the app is destroyed", async () => {
       vi.useFakeTimers();
       mockStateManagerInstance.loadState.mockReturnValue({

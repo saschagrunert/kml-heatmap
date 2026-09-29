@@ -76,6 +76,13 @@ export interface StoreState extends ToggleFlags {
    */
   heightBand: string;
   /**
+   * The line of the cross-section as a link writes it, "lat,lng,lat,lng"
+   * from its start to its end (see isSectionLine in state/urlState.ts),
+   * "" while it shows none (see ui/crossSection.ts, its writer once the
+   * saved state has been put back)
+   */
+  crossSectionLine: string;
+  /**
    * Whether the 3D view draws the lines of a selection as ribbons at their
    * height, for which the flat lines step aside (see ui/selectionRibbons.ts,
    * its only writer)
@@ -130,6 +137,7 @@ export const STORE_ACCESSOR_KEYS = [
   "heatmapExposure",
   "forcedHeatCloud",
   "heightBand",
+  "crossSectionLine",
   "selectionRibbons",
   "replayActive",
   "tourView",
@@ -179,6 +187,7 @@ export function createDefaultState(): StoreState {
     heatmapExposure: 1,
     forcedHeatCloud: false,
     heightBand: "",
+    crossSectionLine: "",
     selectionRibbons: false,
     replayActive: false,
     tourView: null,

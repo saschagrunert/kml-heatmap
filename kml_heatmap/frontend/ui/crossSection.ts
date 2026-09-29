@@ -10,7 +10,9 @@
  * fix by default, or above sea level with the terrain under the flights
  * drawn beneath them. The corridor is drawn on the map for as long as the
  * tool is open, and its two ends can be dragged, or moved with the arrow
- * keys, afterwards.
+ * keys, afterwards. The line is in the link and the saved state
+ * (`crossSectionLine` of the store), and the tool opens on it as the page
+ * does.
  *
  * It counts the flights the filters keep and, while flights are selected,
  * the selected ones among them, so a click on a flight shows that flight
@@ -54,7 +56,8 @@ import {
   metresPerPixel,
   type Coordinate,
 } from "../utils/geometry";
-import { toLngLat } from "../utils/mapHelpers";
+import { isPageEscape, toLngLat } from "../utils/mapHelpers";
+import { isSectionLine } from "../state/urlState";
 import { COLUMNS, createChart, ROWS } from "./crossSectionChart";
 import {
   addLayers,
@@ -66,6 +69,7 @@ import {
   tooShort,
 } from "./crossSectionCorridor";
 import { button, element, select } from "./crossSectionElements";
+import { focusModeControl } from "./heldControls";
 import { sectionSummary, widthLabel } from "./crossSectionText";
 
 /** The control in the View group that opens and closes the tool */
@@ -339,6 +343,12 @@ function createTool(app: MapApp): Tool {
           })
         : null;
     frame = line ? lineFrame(line[0], line[1]) : null;
+    // For the link, to about a metre
+    app.crossSectionLine =
+      line
+        ?.flat()
+        .map((degrees) => degrees.toFixed(5))
+        .join(",") ?? "";
     draw(section);
   };
 
@@ -517,16 +527,9 @@ function createTool(app: MapApp): Tool {
   };
 
   const onKeyDown = (event: KeyboardEvent): void => {
-    if (event.key !== "Escape" || event.defaultPrevented) return;
-    // An Escape in a popup or on an airport's marker closes the popup
-    const from = event.target;
-    if (
-      phase === "closed" ||
-      (from instanceof Element &&
-        from.closest(
-          ".maplibregl-popup, .maplibregl-marker:not(.section-handle)",
-        ))
-    ) {
+    // An Escape in a popup or on an airport's marker closes the popup; one
+    // on an end of the line is the tool's
+    if (phase === "closed" || !isPageEscape(event, ":not(.section-handle)")) {
       return;
     }
     event.preventDefault();
@@ -643,6 +646,19 @@ function createTool(app: MapApp): Tool {
     addLayers(target);
     listen(target);
     startPlacing();
+    // The line of the link or of the last visit, as the page opens
+    const saved = app.crossSectionLine;
+    if (isSectionLine(saved)) {
+      const [a, b, c, d] = saved.split(",").map(parseFloat) as [
+        number,
+        number,
+        number,
+        number,
+      ];
+      finish([a, b], [c, d]);
+    }
+    // One too short to show leaves the link and the saved state with it
+    if (phase !== "shown") app.crossSectionLine = "";
     notify();
     placeButton.focus({ preventScroll: true });
   };
@@ -652,6 +668,7 @@ function createTool(app: MapApp): Tool {
     stopPlacing();
     phase = "closed";
     line = null;
+    app.crossSectionLine = "";
     section = null;
     frame = null;
     if (frameRequest) cancelAnimationFrame(frameRequest);
@@ -671,7 +688,7 @@ function createTool(app: MapApp): Tool {
     if (target) removeLayers(target);
     syncChrome();
     notify();
-    if (hadFocus) document.getElementById(CROSS_SECTION_BUTTON_ID)?.focus();
+    if (hadFocus) focusModeControl(app, CROSS_SECTION_BUTTON_ID);
   };
 
   // The controls of the panel

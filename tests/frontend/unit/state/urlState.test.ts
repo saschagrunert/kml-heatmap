@@ -1,5 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
+  isHeightBand,
+  isSectionLine,
   parseUrlParams,
   encodeStateToUrl,
 } from "../../../../kml_heatmap/frontend/state/urlState";
@@ -630,8 +632,18 @@ describe("URL state management", () => {
       expect(parseUrlParams("h=1000-")).toEqual({ heightBand: "1000-" });
     });
 
-    it("ignores a band that is not two heights", () => {
-      for (const band of ["", "500", "-3000", "500-3000-", "a-b", "123456-"]) {
+    it("ignores a band that is not two heights of the control, the lower first", () => {
+      for (const band of [
+        "",
+        "500",
+        "-3000",
+        "500-3000-",
+        "a-b",
+        "123456-",
+        "5-7",
+        "3000-500",
+        "0-",
+      ]) {
         expect(parseUrlParams(`y=2025&h=${band}`), band).toEqual({
           selectedYear: "2025",
         });
@@ -654,6 +666,62 @@ describe("URL state management", () => {
       const link = encodeStateToUrl(state);
       expect(link).toBe("y=2025&t=60&d=1&h=0-1500");
       expect(parseUrlParams(link)).toEqual(state);
+    });
+  });
+
+  describe("isHeightBand", () => {
+    it("is a band of two of the control's stops, the lower first", () => {
+      for (const text of ["500-3000", "0-1500", "1000-", "100-10000"]) {
+        expect(isHeightBand(text), text).toBe(true);
+      }
+    });
+
+    it("is none for every height and for what the control cannot write", () => {
+      for (const text of ["", "0-", "5-7", "3000-500", "500-500", "500"]) {
+        expect(isHeightBand(text), text).toBe(false);
+      }
+      for (const value of [500, null, undefined, {}]) {
+        expect(isHeightBand(value), JSON.stringify(value)).toBe(false);
+      }
+    });
+  });
+
+  describe("the line of the cross-section", () => {
+    it("is two ends, latitude first", () => {
+      expect(isSectionLine("51.5,12.1,51.6,12.3")).toBe(true);
+      expect(isSectionLine("-90,-180,90,180")).toBe(true);
+    });
+
+    it("is none for anything but four numbers of two places", () => {
+      for (const text of [
+        "",
+        "51.5,12.1,51.6",
+        "51.5,12.1,51.6,12.3,1",
+        "a,b,c,d",
+        "91,12,51,12",
+        "51,190,51,12",
+        "51.5,,51.6,12.3",
+        null,
+      ]) {
+        expect(isSectionLine(text), String(text)).toBe(false);
+      }
+    });
+
+    it("comes back from a link as it was written", () => {
+      const state: AppState = {
+        selectedYear: "2025",
+        crossSectionLine: "51.50000,12.10000,51.60000,12.30000",
+      };
+      const link = encodeStateToUrl(state);
+      expect(link).toBe("y=2025&x=51.50000%2C12.10000%2C51.60000%2C12.30000");
+      expect(parseUrlParams(link)).toEqual(state);
+      expect(parseUrlParams("y=2025&x=51.5,12.1,51.6,12.3")).toEqual({
+        selectedYear: "2025",
+        crossSectionLine: "51.5,12.1,51.6,12.3",
+      });
+      expect(parseUrlParams("y=2025&x=51.5,12.1")).toEqual({
+        selectedYear: "2025",
+      });
     });
   });
 });

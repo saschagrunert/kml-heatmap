@@ -2,8 +2,8 @@
 
 The build helpers `build.js` imports, the repository consistency check, the
 pre-push hook, the test data generator and the builder of the site the visual
-snapshots use. The JavaScript files are type-checked with
-`tsconfig.node.json` (`npm run typecheck`).
+snapshots use. The JavaScript files are type-checked with `tsconfig.node.json`
+(`npm run typecheck`).
 
 ## generate_test_data.py
 
@@ -13,12 +13,13 @@ European airports.
 ### Features
 
 - Curved flight paths using quadratic Bezier curves (not straight lines)
-- Random deviations to spread data across Germany for better heatmap visualization
+- Random deviations to spread data across Germany for better heatmap
+  visualization
 - Realistic altitude profiles (climb, cruise, descend)
-- SkyDemon-style filenames (`N_REGISTRATION_TYPE.kml`) with the start and
-  end of the flight in a `<TimeSpan>` element and no per-point times, so the
-  speed layer falls back to path averages: the length of the path over its
-  duration, at a groundspeed of 90 to 150 kt
+- SkyDemon-style filenames (`N_REGISTRATION_TYPE.kml`) with the start and end of
+  the flight in a `<TimeSpan>` element and no per-point times, so the speed
+  layer falls back to path averages: the length of the path over its duration,
+  at a groundspeed of 90 to 150 kt
 
 ### Usage
 
@@ -36,7 +37,7 @@ python3 scripts/generate_test_data.py 5000 --output custom_test_data
 python3 scripts/generate_test_data.py --help
 ```
 
-### Testing Generated Data
+### Testing generated data
 
 Generating a site reads the KML files and leaves them alone; only
 `--obfuscate-inputs` or `make obfuscate` rewrites them. The generated files
@@ -54,7 +55,7 @@ docker run --rm --user "$(id -u):$(id -g)" \
   kml-heatmap kml_test_10000 --output-dir out
 ```
 
-### Performance Testing
+### Performance testing
 
 Recommended test sizes:
 
@@ -65,52 +66,52 @@ Every file holds 50 points and takes about 3.4 KB.
 - **100k flights**: Stress test, ~340 MB source data (about 5M points),
   processed in about 10 minutes with parallel parsing and export
 
-These numbers are the reference for the processing time mentioned in the main
-`README.md`. The system has been tested and optimized to handle 100k+ flights.
+These numbers are the reference for the processing time mentioned in
+[Data export](../doc/output.md#data-export). The system has been tested and
+optimized to handle 100k+ flights.
 
 ## check_locks.py
 
-Checks the versions that are written down in more than one place, which
-nothing else reads together:
+Checks the versions that are written down in more than one place, which nothing
+else reads together:
 
-- `requirements.lock` and `requirements-test.lock` still satisfy the ranges
-  in `pyproject.toml`, and the two agree on every package both pin (CI
-  installs `requirements-test.lock` alone where it needs both).
-  `requirements-build.lock` satisfies `build-system.requires` (the
-  setuptools CI builds the wheel with), and `requirements-tools.lock` the
-  pip-tools pin in `requirements-tools.in` (what `make lock` runs).
-  Dependabot bumps `pyproject.toml` and `requirements-tools.in` without
-  recompiling the locks, so this fails such a pull request with a hint to
-  run `make lock`.
+- `requirements.lock` and `requirements-test.lock` still satisfy the ranges in
+  `pyproject.toml`, and the two agree on every package both pin (CI installs
+  `requirements-test.lock` alone where it needs both). `requirements-build.lock`
+  satisfies `build-system.requires` (the setuptools CI builds the wheel with),
+  and `requirements-tools.lock` the pip-tools pin in `requirements-tools.in`
+  (what `make lock` runs). Dependabot bumps `pyproject.toml` and
+  `requirements-tools.in` without recompiling the locks, so this fails such a
+  pull request with a hint to run `make lock`.
 - The Playwright image of the `e2e` and `visual` jobs in
   `.github/workflows/test.yml` is the same in both, pinned by its `@sha256`
-  digest, its tag matches the `@playwright/test` version in
-  `package-lock.json`, and `CONTRIBUTING.md` and `DEVELOPMENT.md` quote
-  exactly the same image reference.
-- `__version__` in `kml_heatmap/__init__.py` matches `version` in
-  `package.json` and both version fields of `package-lock.json`.
+  digest, its tag matches the `@playwright/test` version in `package-lock.json`,
+  and `CONTRIBUTING.md` and `doc/development/testing.md` quote exactly the same
+  image reference. A document that is missing, or quotes no image, fails the
+  check too, rather than leaving the command it moved to unchecked.
+- `__version__` in `kml_heatmap/__init__.py` matches `version` in `package.json`
+  and both version fields of `package-lock.json`.
 
-The pre-commit hook revisions are not checked: the linters and formatters
-run from the project environment, so they have no revision of their own to
-drift. `make lint` and the CI lint job run it.
+The pre-commit hook revisions are not checked: the linters and formatters run
+from the project environment, so they have no revision of their own to drift.
+`make lint` and the CI lint job run it.
 
 ## pre_push.py
 
 The pre-push hook, installed once per clone with `make hooks`. It runs the
-obfuscation check on every KML file that the commits about to be pushed add
-or change, and refuses the push when one carries a real date or when it
-cannot run the check. It needs nothing beyond Python; `--no-verify` skips it.
+obfuscation check on every KML file that the commits about to be pushed add or
+change, and refuses the push when one carries a real date or when it cannot run
+the check. It needs nothing beyond Python; `--no-verify` skips it.
 
 ## build_visual_site.py
 
-Builds `visual-site/`, the site the visual snapshots are compared against
-(see the "Visual snapshots" section of `CONTRIBUTING.md`), from the fixture
-flights in `tests/fixtures/visual/`. The snapshots allow no differing pixel,
-so the script pins what would otherwise vary from build to build: the build
-time and commit the statistics panel prints, the airport and runway databases
-(`tests/fixtures/airports.csv` and `runways.csv` in a throwaway cache
-directory, so nothing is downloaded) and the tile API key. Run
-`npm run build` first.
+Builds `visual-site/`, the site the visual snapshots are compared against (see
+[Visual snapshots](../CONTRIBUTING.md#visual-snapshots)), from the fixture
+flights in `tests/fixtures/visual/`. The snapshots allow no differing pixel, so
+the script pins what would otherwise vary from build to build: the build time
+and commit the statistics panel prints, the airport and runway databases
+(`tests/fixtures/airports.csv` and `runways.csv` in a throwaway cache directory,
+so nothing is downloaded) and the tile API key. Run `npm run build` first.
 
 ```bash
 python scripts/build_visual_site.py
@@ -118,50 +119,51 @@ python scripts/build_visual_site.py
 
 ## source-hash.js
 
-The content hash of everything that shapes a built site: the TypeScript
-sources in `kml_heatmap/frontend/`, the files in `BUILD_FILES` (`build.js`,
-`scripts/vendor.js`, `tsconfig.json` and the three stylesheets) and the
-versions `package-lock.json` pins for `BUILD_PACKAGES` (esbuild, Lucide as
-the one package bundled into the page, and MapLibre, html-to-image and
-flag-icons, which are vendored next to the bundles). `build.js` writes it into
-the first line of every bundle. A Playwright fixture
-(`tests/e2e/site-check.ts`) compares that line in the `mapApp.bundle.js` of
-the site under test (`docs/`, or `visual-site/` for the snapshots) with the
-checkout, so the e2e tests refuse to run against a stale site, and
-the generator warns when the bundle it is about to publish is stale.
-`kml_heatmap/site_assets.py` mirrors the hash in Python;
+The content hash of everything that shapes a built site: the TypeScript sources
+in `kml_heatmap/frontend/`, the files in `BUILD_FILES` (`build.js`,
+`scripts/vendor.js`, `tsconfig.json` and the three stylesheets) and the versions
+`package-lock.json` pins for `BUILD_PACKAGES` (esbuild, Lucide as the one
+package bundled into the page, and MapLibre, html-to-image and flag-icons, which
+are vendored next to the bundles). `build.js` writes it into the first line of
+every bundle. A Playwright fixture (`tests/e2e/site-check.ts`) compares that
+line in the `mapApp.bundle.js` of the site under test (`docs/`, or
+`visual-site/` for the snapshots) with the checkout, so the e2e tests refuse to
+run against a stale site, and the generator warns when the bundle it is about to
+publish is stale. `kml_heatmap/site_assets.py` mirrors the hash in Python;
 `TestSourceHashParity` in `tests/test_site_assets.py` checks that both
 implementations agree.
 
 ## vendor.js
 
-Copies the third-party files the published page loads (the three modules
-of MapLibre GL JS with its stylesheet) out of `node_modules` into
-`kml_heatmap/static/vendor/`, bundles the module of html-to-image into one
-file next to them (the package ships it as a dozen, and the page imports it
-with `import()` on the first export), and copies every country flag of
-`flag-icons` into `kml_heatmap/static/flags/`. Both directories are
-generated and gitignored, and each build replaces them, so a file dropped
-from the list does not linger. A copy differs from its original in the
-closing `sourceMappingURL` comment, left off because the maps (five
-megabytes for MapLibre) are not shipped and every DevTools session would
-ask for them and get a 404, and `maplibre-gl.mjs` in three fixes of a few
-characters each for bugs the app cannot work around from the outside
-(`VENDOR_PATCHES` in `vendor.js`): tiles of the chase view's trail culled
-below the camera on the relief, the raw data of before kept by a GeoJSON
-tile that loads empty, and, in WebKit on Linux alone (WebKitGTK as in
-Epiphany, and WPE, Playwright's WebKit), elevation tiles read into pixels
-on the main thread rather than sent to MapLibre's worker as bitmaps, which
-crashed or hung the page's process there (`LINUX_WEBKIT` in `vendor.js`
-tells that browser by `navigator.platform` and the user agent). The texts
-of their upstream issues are with the owner and not filed yet. A fix that no longer matches exactly
-once fails the build, so a MapLibre bump shows whether it is still needed.
-Serving the files from the site keeps the page working during a CDN
-outage, keeps visitors' addresses away from CDNs and leaves
+Copies the third-party files the published page loads (the three modules of
+MapLibre GL JS with its stylesheet) out of `node_modules` into
+`kml_heatmap/static/vendor/`, bundles the module of html-to-image into one file
+next to them (the package ships it as a dozen, and the page imports it with
+`import()` on the first export), and copies every country flag of `flag-icons`
+into `kml_heatmap/static/flags/`. Both directories are generated and gitignored,
+and each build replaces them, so a file dropped from the list does not linger. A
+copy differs from its original in the closing `sourceMappingURL` comment, left
+off because the maps (five megabytes for MapLibre) are not shipped and every
+DevTools session would ask for them and get a 404, and the MapLibre modules in
+five fixes of a few characters each for what the app cannot do from the outside
+(`VENDOR_PATCHES` in `vendor.js`). Three are in `maplibre-gl.mjs`, for bugs:
+tiles of the chase view's trail culled below the camera on the relief, the raw
+data of before kept by a GeoJSON tile that loads empty, and, in WebKit on Linux
+alone (WebKitGTK as in Epiphany, and WPE, Playwright's WebKit), elevation tiles
+read into pixels on the main thread rather than sent to MapLibre's worker as
+bitmaps, which crashed or hung the page's process there (`LINUX_WEBKIT` in
+`vendor.js` tells that browser by `navigator.platform` and the user agent). The
+texts of their upstream issues are with the owner and not filed yet. The other
+two, one in `maplibre-gl-shared.mjs` and one in `maplibre-gl-worker.mjs`, let
+MapLibre's worker read a GeoJSON source from a `blob:` URL without the main
+thread, as the heat sources are given (see
+[The heat sources and the year worker](../doc/development/heat.md#the-heat-sources-and-the-year-worker)).
+A fix that no longer matches exactly once fails the build, so a MapLibre bump
+shows whether it is still needed. Serving the files from the site keeps the page
+working during a CDN outage, keeps visitors' addresses away from CDNs and leaves
 `package-lock.json` as the one place their versions are pinned.
-`kml_heatmap/site_assets.py` keeps its own list of the files it publishes,
-in step with `VENDOR_FILES` and `VENDOR_MODULES`, which
-`tests/test_site_assets.py` checks; `tests/frontend/unit/vendor.test.ts`
-checks both against `node_modules`. The wheel ships `vendor/` but not
-`flags/`, and the Python side publishes only the flags of the countries an
-export visited.
+`kml_heatmap/site_assets.py` keeps its own list of the files it publishes, in
+step with `VENDOR_FILES` and `VENDOR_MODULES`, which `tests/test_site_assets.py`
+checks; `tests/frontend/unit/vendor.test.ts` checks both against `node_modules`.
+The wheel ships `vendor/` but not `flags/`, and the Python side publishes only
+the flags of the countries an export visited.

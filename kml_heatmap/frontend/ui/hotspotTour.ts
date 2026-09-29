@@ -29,7 +29,8 @@
  * It holds the filters, the weighing switches, the selection and the
  * features that would take the map (Replay, Replay all, Wrapped, the
  * cross-section, which it closes) while it runs, as the replay does, and
- * none of those starts it. On a phone, the bar under it waits, inert. The
+ * none of those starts it. On a phone the bar steps aside while it runs,
+ * as it does for a replay, and the panel takes the bottom edge. The
  * readout of the cloud under the pointer hides meanwhile (features.css):
  * the camera moves under a pointer resting on the map.
  *
@@ -52,7 +53,7 @@ import {
 import { findHomeBase } from "../features/airports";
 import { siteData } from "../state/siteData";
 import { applyToggleButtonState } from "../utils/buttonState";
-import { holdControls } from "./heldControls";
+import { focusModeControl, holdControls } from "./heldControls";
 import { domCache } from "../utils/domCache";
 import {
   DEGREES_TO_RADIANS,
@@ -60,7 +61,7 @@ import {
   TILE_SIZE_PX,
 } from "../utils/geometry";
 import { setControlIcon, type IconName } from "../utils/icons";
-import { mapSize, toLngLat } from "../utils/mapHelpers";
+import { isPageEscape, mapSize, toLngLat } from "../utils/mapHelpers";
 import { prefersReducedMotion } from "../utils/motion";
 import { announceInRegion, announceStatus, showToast } from "../utils/toast";
 import {
@@ -72,6 +73,7 @@ import {
   type CameraStop,
 } from "./cameraScript";
 import { crossSectionOpen, toggleCrossSection } from "./crossSection";
+import { restingPitch } from "./replayState";
 
 /** How long the camera flies from one place to the next, in ms */
 export const TOUR_FLY_MS = 4000;
@@ -307,16 +309,7 @@ export class HotspotTour {
     document.addEventListener(
       "keydown",
       (event) => {
-        if (!this.map || event.key !== "Escape" || event.defaultPrevented) {
-          return;
-        }
-        const target = event.target;
-        if (
-          target instanceof Element &&
-          target.closest(".maplibregl-popup, .maplibregl-marker")
-        ) {
-          return;
-        }
+        if (!this.map || !isPageEscape(event)) return;
         event.preventDefault();
         this.stop();
       },
@@ -377,7 +370,7 @@ export class HotspotTour {
       center: { lat: center.lat, lng: center.lng },
       zoom: map.getZoom(),
       bearing: map.getBearing(),
-      pitch: map.getPitch(),
+      pitch: restingPitch(app),
       // On the way back from a tour before, the view that one started from
       ...this.returning,
       globeVisible: app.globeVisible,
@@ -395,7 +388,7 @@ export class HotspotTour {
       app.heightBand = "";
     });
     this.release?.();
-    this.release = holdControls(HELD_CONTROL_IDS);
+    this.release = holdControls(HELD_CONTROL_IDS, "the hotspot tour");
     this.showRunning(true);
 
     const listening = new AbortController();
@@ -511,17 +504,27 @@ export class HotspotTour {
     flyToStop(map, stop.camera, TOUR_FLY_MS);
     // After the move, which ends the one before
     this.moving = true;
-    if (this.playing) this.after(TOUR_FLY_MS, () => this.dwell());
+    this.after(TOUR_FLY_MS, () =>
+      this.playing ? this.dwell() : this.arrive(),
+    );
   }
 
   /**
    * Arrived: the app follows the view it came to (the relief level and its
    * exaggeration above all, which stays the one of where the flight set
-   * off until then), and the camera turns over the place, then moves on
+   * off until then). Paused, it waits there, the whole turn over the
+   * place still to come.
    */
-  private dwell(): void {
+  private arrive(): void {
     this.phase = "dwell";
+    this.flying = false;
+    this.left = TOUR_DWELL_MS;
     restCamera(this.map!);
+  }
+
+  /** Arrived, and the camera turns over the place, then moves on */
+  private dwell(): void {
+    this.arrive();
     this.turn(TOUR_DWELL_MS);
   }
 
@@ -603,22 +606,18 @@ export class HotspotTour {
         });
       }
     }
-    // A button that hides drops its focus to <body>
-    if (hadFocus) {
-      const target = app.mobileBar?.isVisible()
-        ? document.getElementById("mobile-tab-more")
-        : domCache.get(TOUR_BUTTON_ID);
-      target?.focus();
-    }
+    if (hadFocus) focusModeControl(app, TOUR_BUTTON_ID);
     announceStatus(
       how === "takeover" ? "Hotspot tour ended here" : "Hotspot tour ended",
     );
   }
 
-  /** The page as the tour runs or not: its control, the body, the bar */
+  /**
+   * The page as the tour runs or not: its control and the body. The
+   * phone's bar follows `tourView` in the store.
+   */
   private showRunning(running: boolean): void {
     document.body.classList.toggle(TOUR_ACTIVE_CLASS, running);
-    document.getElementById("mobile-bar")?.toggleAttribute("inert", running);
     const button = domCache.get(TOUR_BUTTON_ID);
     if (button) {
       setControlIcon(button, running ? "stop" : "trophy");

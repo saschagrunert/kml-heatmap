@@ -164,7 +164,7 @@ describe("showToast", () => {
 
     it("carries the action that puts it right", () => {
       const run = vi.fn();
-      showToast("Failed to load flight data for 2025", "error", {
+      showToast("Could not load the flights of 2025", "error", {
         label: "Retry",
         run,
       });
@@ -181,7 +181,7 @@ describe("showToast", () => {
 
     it("stays when its action cannot be done now", () => {
       const run = vi.fn(() => false);
-      showToast("Failed to load flight data for 2025", "error", {
+      showToast("Could not load the flights of 2025", "error", {
         label: "Retry",
         run,
       });

@@ -689,6 +689,11 @@ test.describe("State Persistence", () => {
       .poll(() => new URL(page.url()).searchParams.has("h"))
       .toBe(false);
     expect(await page.evaluate(() => window.mapApp!.heightBand)).toBe("");
+
+    // A band the control cannot write, as a link edited by hand may have,
+    // is every height, which Reset view has nothing to put back of
+    await gotoApp(page, "?h=5-7");
+    expect(await page.evaluate(() => window.mapApp!.heightBand)).toBe("");
   });
 });
 

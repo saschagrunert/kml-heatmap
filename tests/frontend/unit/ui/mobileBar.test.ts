@@ -625,7 +625,7 @@ describe("MobileBar", () => {
         '[data-row="replay"] .sheet-row-hint',
       )!;
       expect(hint.hidden).toBe(false);
-      expect(hint.textContent).toBe("Select one flight with timing data");
+      expect(hint.textContent).toBe("Pick one flight under Stats, Flights");
     });
 
     it("does not repeat the tile credit, which the map itself carries", () => {
@@ -838,6 +838,26 @@ describe("MobileBar", () => {
       app.store.set("replayActive", false);
 
       expect(document.contains(created.root)).toBe(true);
+      expect(created.isVisible()).toBe(true);
+    });
+
+    it("steps aside for the hotspot tour as for a replay, and comes back", () => {
+      const created = create();
+      tab("layers").click();
+
+      // The tour keeps the user's view in the store while it runs
+      app.store.set("tourView", {} as never);
+      expect(document.contains(created.root)).toBe(false);
+      expect(created.currentTab()).toBeNull();
+      // Nor does a replay's end bring it back while the tour runs
+      app.store.set("replayActive", true);
+      app.store.set("replayActive", false);
+      expect(document.contains(created.root)).toBe(false);
+      setWidth(DESKTOP_WIDTH);
+      setWidth(PHONE_WIDTH);
+      expect(document.contains(created.root)).toBe(false);
+
+      app.store.set("tourView", null);
       expect(created.isVisible()).toBe(true);
     });
 

@@ -104,7 +104,10 @@ const POPUP_KEYS = ["currentData", "selectedYear", "selectedAircraft"] as const;
  */
 const AIRPORT_MAX_DISTANCE_RATIO = 2;
 
-/** Tilt in degrees up to which no airport in view is that far (see above) */
+/**
+ * Tilt in degrees up to which no airport in view is that far (see above),
+ * with a margin under the 55 where the first one can be
+ */
 const AIRPORT_ALL_NEAR_PITCH = 50;
 
 /** Store keys that change which markers are shown */

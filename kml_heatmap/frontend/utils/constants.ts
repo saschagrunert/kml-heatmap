@@ -167,11 +167,11 @@ export const MAP_LAYERS = {
  * weight. Closer in it holds the fixes.
  *
  * The intensity of a point halves with every level zoomed out (see
- * heatmapIntensity in the data manager), and MapLibre adds the points up in
- * a half-float texture. Below about 0.004 a single point's share underflows
- * there and the whole heatmap vanishes, which with every fix drawn happens
- * under zoom 9. So the fixes are drawn as they are from zoom 9 on, and
- * `maxZoom` is the level below.
+ * heatmapIntensity in ui/heatmapPaint.ts), and MapLibre adds the points up in a
+ * half-float texture. Below about 0.004 a single point's share underflows there
+ * and the whole heatmap vanishes, which with every fix drawn happens under zoom
+ * 9. So the fixes are drawn as they are from zoom 9 on, and `maxZoom` is the
+ * level below.
  *
  * A cluster gathers the fixes within `radius` pixels of its first one, so
  * along a track the clusters are about `radius` apart at a whole zoom and
@@ -189,8 +189,8 @@ export const MAP_LAYERS = {
  * weighs about 0.0115 at every zoom, and where flights overlap it weighs
  * more. That holds for fixes as close as a flight logger writes them. A
  * fix without a neighbour in reach stays a point of its own, which is why
- * the weight of the heat layer has a floor (see heatmapWeight in the data
- * manager).
+ * the weight of the heat layer has a floor (see heatmapWeight in
+ * ui/heatmapPaint.ts).
  */
 export const HEATMAP_CLUSTER = { radius: 6, maxZoom: 8 } as const;
 

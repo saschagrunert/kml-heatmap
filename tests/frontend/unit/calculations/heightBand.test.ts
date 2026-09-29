@@ -5,7 +5,6 @@
 import { describe, it, expect } from "vitest";
 import {
   FULL_BAND,
-  HEIGHT_BAND_STOPS_FT,
   heightBandEdgesFt,
   heightBandLabel,
   heightBandText,
@@ -14,6 +13,7 @@ import {
   parseHeightBand,
   type HeightBand,
 } from "../../../../kml_heatmap/frontend/calculations/heightBand";
+import { HEIGHT_BAND_STOPS_FT } from "../../../../kml_heatmap/frontend/state/urlState";
 
 /** The stop of `feet` */
 const stop = (feet: number): number => HEIGHT_BAND_STOPS_FT.indexOf(feet);

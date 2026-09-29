@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { ReplayState } from "../../../../kml_heatmap/frontend/ui/replayState";
+import {
+  ReplayState,
+  restingPitch,
+} from "../../../../kml_heatmap/frontend/ui/replayState";
+import type { MapApp } from "../../../../kml_heatmap/frontend/mapApp";
 
 describe("ReplayState", () => {
   describe("default values", () => {
@@ -105,6 +109,24 @@ describe("ReplayState", () => {
 
       expect(state.currentTime).toBe(0);
       expect(state.lastDrawnIndex).toBe(-1);
+    });
+  });
+
+  describe("restingPitch", () => {
+    const appWith = (pitch: number | null, layingBack: number | null) => {
+      const replayState = new ReplayState();
+      replayState.layingBack = layingBack;
+      const map = pitch === null ? null : { getPitch: () => pitch };
+      return { map, replayState } as unknown as Pick<
+        MapApp,
+        "map" | "replayState"
+      >;
+    };
+
+    it("is the tilt of the map, or the one it is being laid back to", () => {
+      expect(restingPitch(appWith(30, null))).toBe(30);
+      expect(restingPitch(appWith(30, 5))).toBe(5);
+      expect(restingPitch(appWith(null, null))).toBe(0);
     });
   });
 });

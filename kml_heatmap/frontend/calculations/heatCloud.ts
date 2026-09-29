@@ -173,6 +173,14 @@ export function mercatorOf([lat, lng]: Readonly<Coordinate>): [number, number] {
   ];
 }
 
+/** The `[lng, lat]` of the Mercator x and y (0 to 1), as mercatorOf's */
+export function lngLatOfMercator(x: number, y: number): [number, number] {
+  return [
+    x * 360 - 180,
+    (360 / Math.PI) * Math.atan(Math.exp((1 - 2 * y) * Math.PI)) - 90,
+  ];
+}
+
 /** A point to a Chord: where it is, its height and the ground, and its time */
 type ChordPoint<T> = (
   x: number,

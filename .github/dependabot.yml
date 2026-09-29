@@ -88,9 +88,9 @@ updates:
       # On its own because it cannot be merged as it comes: the visual and
       # e2e jobs run in the Playwright image, whose tag and digest in
       # test.yml (and the same reference in CONTRIBUTING.md and
-      # DEVELOPMENT.md) have to be bumped by hand on the same branch.
-      # scripts/check_locks.py fails the lint job until they are; the
-      # visual job comment in test.yml says how to look up the digest.
+      # doc/development/testing.md) have to be bumped by hand on the same
+      # branch. scripts/check_locks.py fails the lint job until they are;
+      # the visual job comment in test.yml says how to look up the digest.
       playwright:
         patterns:
           - "@playwright/test"

@@ -491,6 +491,73 @@ describe("cross-section", () => {
       expect(document.activeElement).toBe(button);
     });
 
+    it("puts its line in the store for the link, and takes it out as it closes", async () => {
+      const { app, canvas } = await setup();
+      await open(app);
+      expect(app.crossSectionLine).toBe("");
+
+      drawLine(canvas);
+      const [a, b] = app.crossSectionLine.split(",").map(Number) as [
+        number,
+        number,
+      ];
+      expect(app.crossSectionLine.split(",")).toHaveLength(4);
+      expect(a).toBeCloseTo(LAT, 4);
+      expect(b).toBeCloseTo(LON - 0.035, 4);
+
+      toggleCrossSection(asMapApp(app));
+      expect(app.crossSectionLine).toBe("");
+    });
+
+    it("opens on the line of the link, drawn and ready to read", async () => {
+      const line = `${LAT},${LON - 0.035},${LAT},${LON + 0.035}`;
+      const { app, map } = await setup({ crossSectionLine: line });
+
+      await open(app);
+
+      expect(part(".section-plot").hidden).toBe(false);
+      expect(summary()).not.toBeNull();
+      expect(map.dragPan.isEnabled()).toBe(true);
+      expect(handles().map((handle) => handle.map)).toEqual([map, map]);
+      expect(app.crossSectionLine.split(",").map(Number)).toEqual([
+        LAT,
+        LON - 0.035,
+        LAT,
+        LON + 0.035,
+      ]);
+    });
+
+    it.each([[`${LAT},${LON},${LAT},${LON}`], ["0,-180,0,180"]])(
+      "places a line of its own where the link's is too short: %s",
+      async (line) => {
+        const { app } = await setup({ crossSectionLine: line });
+
+        await open(app);
+
+        expect(part(".section-plot").hidden).toBe(true);
+        expect(handles().some((handle) => handle.map)).toBe(false);
+        // Neither in the link nor in the saved state any longer
+        expect(app.crossSectionLine).toBe("");
+      },
+    );
+
+    it("hands the focus to the More tab on a phone as it closes", async () => {
+      const { app } = await setup();
+      const more = document.createElement("button");
+      more.id = "mobile-tab-more";
+      document.body.append(more);
+      app.mobileBar = {
+        isVisible: () => true,
+      } as unknown as MockApp["mobileBar"];
+      await open(app);
+
+      part(".section-btn[aria-label='Close the cross-section']").click();
+
+      // The control of the columns is hidden there
+      expect(document.activeElement).toBe(more);
+      more.remove();
+    });
+
     it("draws a new line, and Escape goes back to the one before", async () => {
       const { app, canvas } = await setup();
       await open(app);

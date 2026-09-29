@@ -51,8 +51,16 @@ def _parse_kml_tree(kml_file: str) -> etree._Element:
         # huge_tree lifts libxml2's 10 MB limit per text node, which a single
         # long <coordinates> reaches well below the accepted file size.
         # Entities stay unresolved and the amplification limit still applies.
+        # Comments and processing instructions are dropped while parsing, so
+        # the text around one is a single text again: elem.text stopped at a
+        # comment inside a <coordinates>, a <gx:coord>, a <when> or a <name>
+        # and lost the points or the words after it.
         parser = etree.XMLParser(
-            resolve_entities=False, no_network=True, huge_tree=True
+            resolve_entities=False,
+            no_network=True,
+            huge_tree=True,
+            remove_comments=True,
+            remove_pis=True,
         )
         tree = etree.parse(kml_file, parser)
         root = tree.getroot()

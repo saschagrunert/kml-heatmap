@@ -44,6 +44,8 @@
      beside; then #808080, which passed on the primary but not on raised. */
   --color-text-dim: #8c8c8c;
   --color-accent-blue: #4facfe;
+  /* The ring of whatever has the keyboard's focus */
+  --focus-ring: 2px solid var(--color-accent-blue);
   --color-accent-green: #28a745;
   --color-accent-red: #f5576c;
   --color-accent-pink: #f093fb;
@@ -294,7 +296,7 @@ body {
   border-radius: var(--radius-control);
 }
 .skip-nav:focus-visible {
-  outline: 2px solid var(--color-accent-blue);
+  outline: var(--focus-ring);
   outline-offset: 2px;
 }
 
@@ -341,7 +343,7 @@ body {
 /* The ring of every `.control-btn` and of the selection's Clear too: they
    are all `.btn-surface` */
 .btn-surface:focus-visible {
-  outline: 2px solid var(--color-accent-blue);
+  outline: var(--focus-ring);
   outline-offset: 2px;
 }
 
@@ -488,7 +490,7 @@ body {
   outline: none;
 }
 .filter-dropdown select:focus-visible {
-  outline: 2px solid var(--color-accent-blue);
+  outline: var(--focus-ring);
   outline-offset: -2px;
 }
 .filter-dropdown select option {
@@ -497,7 +499,7 @@ body {
   text-align: left;
 }
 .control-row:has(select:focus-visible) {
-  outline: 2px solid var(--color-accent-blue);
+  outline: var(--focus-ring);
   outline-offset: -2px;
 }
 /* Dimmed once, like a disabled button: the browser dims a disabled select
@@ -609,7 +611,7 @@ body {
   border-bottom-right-radius: calc(var(--radius-panel) - 1px);
 }
 .control-row:has(> .control-btn:focus-visible) {
-  outline: 2px solid var(--color-accent-blue);
+  outline: var(--focus-ring);
   outline-offset: -2px;
 }
 .control-row > .control-btn:focus-visible,
@@ -827,6 +829,19 @@ body {
 .no-data .color-legend {
   display: none;
 }
+/* The toasts stand where the legend is on a phone, and beside the
+   statistics or in a narrow window over it, and a toast drawn over it cut
+   both short: the legend steps aside while one shows. The widest toast
+   (400px, in the middle) meets the heat's legend below 940px, and beside
+   the rail below 1600px. */
+.stats-open:has(.toast-visible) .color-legend {
+  visibility: hidden;
+}
+@media (max-width: 939.98px) {
+  body:has(.toast-visible) .color-legend {
+    visibility: hidden;
+  }
+}
 @starting-style {
   .color-legend:not([hidden]) {
     opacity: 0;
@@ -975,7 +990,7 @@ body {
   );
 }
 #stats-panel:focus-visible {
-  outline: 2px solid var(--color-accent-blue);
+  outline: var(--focus-ring);
   outline-offset: -2px;
 }
 
@@ -1194,7 +1209,7 @@ body.stats-open #left-buttons {
 }
 .maplibregl-map .maplibregl-ctrl-attrib a:focus-visible {
   color: var(--color-text);
-  outline: 2px solid var(--color-accent-blue);
+  outline: var(--focus-ring);
   outline-offset: 1px;
 }
 
@@ -1205,12 +1220,12 @@ body.stats-open #left-buttons {
   outline: none;
 }
 .maplibregl-canvas:focus-visible {
-  outline: 2px solid var(--color-accent-blue);
+  outline: var(--focus-ring);
   outline-offset: -2px;
 }
 .maplibregl-marker:focus-visible,
 .airport-marker-root:focus-visible {
-  outline: 2px solid var(--color-accent-blue);
+  outline: var(--focus-ring);
   outline-offset: 1px;
 }
 
@@ -1266,7 +1281,7 @@ body.stats-open #left-buttons {
   background-color: transparent;
 }
 .maplibregl-popup-close-button:focus-visible {
-  outline: 2px solid var(--color-accent-blue);
+  outline: var(--focus-ring);
   outline-offset: -2px;
 }
 
@@ -1476,7 +1491,7 @@ body.stats-open #left-buttons {
   color: var(--color-text);
 }
 #github-footer a:focus-visible {
-  outline: 2px solid var(--color-accent-blue);
+  outline: var(--focus-ring);
   outline-offset: 4px;
 }
 #github-footer .github-icon {
@@ -1572,7 +1587,7 @@ body.stats-open #left-buttons {
   }
 }
 .toast-button:focus-visible {
-  outline: 2px solid var(--color-accent-blue);
+  outline: var(--focus-ring);
   outline-offset: 2px;
 }
 
@@ -1701,7 +1716,7 @@ body.stats-open #left-buttons {
     height: var(--icon-lg);
   }
   .mobile-tab:focus-visible {
-    outline: 2px solid var(--color-accent-blue);
+    outline: var(--focus-ring);
     outline-offset: -2px;
   }
   .mobile-tab.active {
@@ -1750,6 +1765,11 @@ body.stats-open #left-buttons {
     transition:
       transform var(--duration-base) ease,
       visibility 0s linear var(--duration-base);
+  }
+  /* The layers are switched to be seen: their sheet takes half the height,
+     and the map above it shows what a switch did */
+  .mobile-sheet:has([data-row="heatmap"]) {
+    max-height: calc(50dvh - var(--mobile-bar-h) - var(--safe-bottom));
   }
   /* The grabber every bottom sheet on both platforms has. It says the sheet
      is a sheet, and that the edge it hangs from is the way out: a drag down
@@ -1834,7 +1854,7 @@ body.stats-open #left-buttons {
     height: var(--icon-md);
   }
   .sheet-row:focus-visible {
-    outline: 2px solid var(--color-accent-blue);
+    outline: var(--focus-ring);
     outline-offset: -2px;
   }
   /* Inset and rounded so two active rows next to each other stay two
@@ -1873,7 +1893,7 @@ body.stats-open #left-buttons {
     opacity: 0.5;
   }
   .sheet-row:has(select:focus-visible) {
-    outline: 2px solid var(--color-accent-blue);
+    outline: var(--focus-ring);
     outline-offset: -2px;
   }
   /* Right-aligned control at the end of a row */
@@ -1971,7 +1991,7 @@ body.stats-open #left-buttons {
     cursor: pointer;
   }
   .sheet-close:focus-visible {
-    outline: 2px solid var(--color-accent-blue);
+    outline: var(--focus-ring);
     outline-offset: -2px;
   }
 
@@ -1998,15 +2018,16 @@ body.stats-open #left-buttons {
   }
 
   /* The rail becomes a bottom sheet; the map keeps the whole viewport. It
-     spans the whole width, and the top edge at its full height (see
-     --color-bg-edge). */
+     spans the whole width, opaque: the labels of the map showed through
+     the 0.99 of --color-bg-edge. Its rounded top corners keep Chrome from
+     taking it for an edge that hides the map. */
   #stats-rail:not([hidden]) {
     top: auto;
     left: 0;
     right: 0;
     bottom: 0;
     width: auto;
-    background-color: var(--color-bg-edge);
+    background-color: var(--color-bg-secondary);
     max-height: 70vh;
     max-height: 70dvh;
     border-right: none;
@@ -2188,7 +2209,7 @@ body.stats-open #left-buttons {
   text-decoration: underline;
 }
 .kh-popup-link:focus-visible {
-  outline: 2px solid var(--color-accent-blue);
+  outline: var(--focus-ring);
   outline-offset: 2px;
 }
 /* A figure, not a control: the accent's bar and tint are what a toggle that
@@ -2262,7 +2283,7 @@ body.stats-open #left-buttons {
 }
 .kh-popup-flight:focus-visible,
 .kh-popup-airport:focus-visible {
-  outline: 2px solid var(--color-accent-blue);
+  outline: var(--focus-ring);
   outline-offset: -2px;
 }
 /* The same label as `.popup-section-label` above it: the popup had two

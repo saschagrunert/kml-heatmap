@@ -335,7 +335,7 @@ test.describe("Mobile bar", () => {
       await chooseSheetOption(row.locator("select"), other!);
 
       await expect(
-        toastMessage(page, `Failed to load flight data for ${other}`),
+        toastMessage(page, `Could not load the flights of ${other}`),
       ).toBeVisible();
       // The page put its dropdown back; the row used to keep the failed
       // choice, and picking the current year again changed nothing
@@ -392,6 +392,15 @@ test.describe("Mobile bar", () => {
 
     await expect(panel).toBeHidden();
     await expect(tab).toHaveAttribute("aria-expanded", "false");
+
+    // Escape closes it too, as it closes the other sheets, with the focus
+    // from inside it handed to the tab
+    await tab.click();
+    await expect(panel).toBeVisible();
+    await page.locator("#stats-tab").focus();
+    await page.keyboard.press("Escape");
+    await expect(panel).toBeHidden();
+    await expect(tab).toBeFocused();
   });
 
   test("the statistics sheet lists the flights on its own Flights tab", async ({
@@ -410,14 +419,19 @@ test.describe("Mobile bar", () => {
     const flight = list.locator("tbody .kh-flight").first();
     await expect(flight).toBeVisible();
 
-    // A tap picks one flight at a time
+    // A tap picks one flight at a time, and the sheet over the map it is
+    // shown on steps aside
     await flight.click();
 
     await expect(flight).toHaveAttribute("aria-pressed", "true");
     await expect(page.locator("#selection-chip-count")).toHaveText(
       "1 flight selected",
     );
+    await expect(page.locator("#stats-rail")).toBeHidden();
 
+    // Opened again on the list it was left on
+    await page.locator("#mobile-tab-stats").click();
+    await expect(flightsTab).toHaveAttribute("aria-selected", "true");
     await page.locator("#stats-tab").click();
     await expect(page.locator("#stats-panel .kh-stats")).toBeVisible();
   });
@@ -528,7 +542,7 @@ test.describe("Mobile bar", () => {
         "a disabled button would not be reachable by keyboard",
       ).toBe(false);
       await expect(replay.locator(".sheet-row-hint")).toHaveText(
-        "Select one flight with timing data",
+        "Pick one flight under Stats, Flights",
       );
       // The label dims, the hint that explains it does not
       await expect(replay).toHaveCSS("opacity", "1");
@@ -543,7 +557,7 @@ test.describe("Mobile bar", () => {
       );
       await expect(page.locator("#replay-btn")).toHaveAttribute(
         "title",
-        "Select exactly one flight with timing data to replay",
+        "Pick one flight with timing data to replay, under Statistics, Flights",
       );
 
       // Isolating needs something to isolate. Unavailable the way Isolate
