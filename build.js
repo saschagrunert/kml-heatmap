@@ -9,7 +9,9 @@ import * as esbuild from "esbuild";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
 import { readFileSync } from "fs";
+import { readFile } from "fs/promises";
 import { gzipSync } from "zlib";
+import ts from "typescript";
 import {
   buildBanner as makeBanner,
   computeSourceHash,
@@ -104,6 +106,100 @@ const pureConstantsPlugin = {
   },
 };
 
+/**
+ * GLSL as a minified build ships it: `text` without its comments, and each
+ * line without its indentation and the spaces around the punctuation that
+ * separates tokens anyway. Not around + and -, where "a - -b" would become
+ * a decrement, and not in a directive, where "#define A (b)" would become a
+ * macro of a parameter. The lines stay lines, for the preprocessor and for
+ * the line numbers a compiler's error names. `open` and `close` say
+ * whether the text starts or ends a line rather than meets an
+ * interpolation, whose value a space may separate from a word.
+ * @param {string} text
+ * @param {boolean} open
+ * @param {boolean} close
+ * @returns {string}
+ */
+function tightenGlsl(text, open, close) {
+  const lines = text
+    // Whichever comment opens first, a block one as a space or the breaks
+    // of the lines it spans
+    .replace(/\/\/[^\n]*|\/\*[\s\S]*?\*\//g, (comment) =>
+      comment.startsWith("//") ? "" : comment.replace(/[^\n]+/g, " "),
+    )
+    .split("\n");
+  return lines
+    .map((line, i) => {
+      let tight = line.replace(/[ \t]+/g, " ");
+      if (!/^ ?#/.test(tight)) {
+        tight = tight.replace(/ ?([=,;(){}[\]*/<>?:&|!]) ?/g, "$1");
+      }
+      if (i > 0 || open) tight = tight.trimStart();
+      if (i < lines.length - 1 || close) tight = tight.trimEnd();
+      return tight;
+    })
+    .join("\n");
+}
+
+/**
+ * Write the shaders of the custom layers (ui/*Layer.ts) as a minified
+ * build ships them (tightenGlsl). esbuild leaves a template literal as it
+ * is written, and their GLSL, some 12 KB of the feature bundle, was a
+ * sixth indentation and spaces. A template literal is taken for GLSL where
+ * its text holds "gl_" or "uniform ", and only its text is changed, never
+ * the expressions it interpolates. Tests and development builds read the
+ * shaders as they are written.
+ * @type {import("esbuild").Plugin}
+ */
+const shaderPlugin = {
+  name: "shaders",
+  setup(build) {
+    build.onLoad({ filter: /[\\/]ui[\\/]\w+Layer\.ts$/ }, async (args) => {
+      const source = await readFile(args.path, "utf8");
+      const file = ts.createSourceFile(
+        args.path,
+        source,
+        ts.ScriptTarget.Latest,
+      );
+      /** @type {ts.Node[]} */
+      const parts = [];
+      /** @param {ts.Node} node */
+      const visit = (node) => {
+        const literals = ts.isTemplateExpression(node)
+          ? [node.head, ...node.templateSpans.map((span) => span.literal)]
+          : ts.isNoSubstitutionTemplateLiteral(node)
+            ? [node]
+            : [];
+        if (/gl_|uniform /.test(literals.map((part) => part.text).join(""))) {
+          parts.push(...literals);
+        }
+        ts.forEachChild(node, visit);
+      };
+      visit(file);
+      // From the end, so the offsets of those before stay where they were
+      parts.sort((a, b) => b.end - a.end);
+      let contents = source;
+      for (const part of parts) {
+        const start = part.getStart(file);
+        const raw = source.slice(start, part.end);
+        // Between the backtick or the brace it opens with and the backtick
+        // or "${" it closes with
+        const close = raw.endsWith("${") ? 2 : 1;
+        const text = tightenGlsl(
+          raw.slice(1, -close),
+          raw[0] === "`",
+          close === 1,
+        );
+        contents =
+          contents.slice(0, start + 1) +
+          text +
+          contents.slice(part.end - close);
+      }
+      return { contents, loader: "ts" };
+    });
+  },
+};
+
 const STATIC_DIR = join(__dirname, "kml_heatmap/static");
 const FRONTEND_DIR = join(__dirname, "kml_heatmap/frontend");
 
@@ -156,7 +252,11 @@ const buildOptions = {
 
   // Don't drop console statements - they are guarded by debug flags in code
   drop: isDevelopment ? [] : ["debugger"],
-  plugins: [maplibreVendorPlugin, yearWorkerPlugin],
+  plugins: [
+    maplibreVendorPlugin,
+    yearWorkerPlugin,
+    ...(minify ? [shaderPlugin] : []),
+  ],
 };
 
 // The year worker (services/yearWorker.ts). A build of its own rather than a
@@ -404,7 +504,12 @@ const BUDGET_APP = { raw: 158 * 1024, gzip: 54.5 * 1024 };
 // came here from the Wrapped bundle (ui/cameraScript.ts): 137.78 KB raw
 // and 50.42 KB gzipped after, in a local build, about 50.62 KB in CI. The
 // places new in a year of the New areas switch taken out again: 136.28 KB
-// raw and 49.75 KB gzipped, in a local build.
+// raw and 49.75 KB gzipped, in a local build. The shaders written as a
+// minified build ships them (shaderPlugin) made room for the slider of
+// the replay of all flights, its thousand times and the heat it builds up
+// with the cloud: 137.52 KB raw and 50.31 KB gzipped before, 138.74 KB
+// and 50.62 KB with them as written, 136.82 KB and 50.3 KB tightened, in a
+// local build.
 const BUDGET_FEATURES = { raw: 138 * 1024, gzip: 50.75 * 1024 };
 
 // The Wrapped bundle is fetched only when the Wrapped dialog or the

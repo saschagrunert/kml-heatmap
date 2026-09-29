@@ -11,10 +11,11 @@ WORKDIR /build
 
 # Install dependencies first so that source changes do not invalidate this
 # layer. The build needs the runtime dependencies (vendored or bundled into
-# the page) and two of the development ones: esbuild, which runs it, and
-# flag-icons, which scripts/vendor.js copies. The rest of the development
-# tools (Playwright, Vitest, jsdom, ESLint) only test and lint, so the
-# development dependencies are cut down to those two before installing.
+# the page) and three of the development ones: esbuild, which runs it,
+# TypeScript, whose parser finds the shaders it tightens, and flag-icons,
+# which scripts/vendor.js copies. The rest of the development tools
+# (Playwright, Vitest, jsdom, ESLint) only test and lint, so the
+# development dependencies are cut down to those three before installing.
 # npm ci would refuse the edited package.json; npm install takes every
 # version and integrity hash from the unchanged package-lock.json and
 # --no-save leaves it as it is. A package build.js starts to import without
@@ -23,7 +24,7 @@ COPY package.json package-lock.json ./
 RUN node -e ' \
       const fs = require("node:fs"); \
       const manifest = JSON.parse(fs.readFileSync("package.json", "utf8")); \
-      const build = ["esbuild", "flag-icons"]; \
+      const build = ["esbuild", "typescript", "flag-icons"]; \
       manifest.devDependencies = Object.fromEntries( \
         build.map((name) => [name, manifest.devDependencies[name]])); \
       fs.writeFileSync("package.json", JSON.stringify(manifest, null, 2)); \

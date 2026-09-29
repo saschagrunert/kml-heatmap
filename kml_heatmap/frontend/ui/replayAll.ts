@@ -1,10 +1,10 @@
 /**
  * Replay of all flights: every flight the filters keep starts from its own
- * first fix at once and plays at a hundred to five hundred times its speed,
+ * first fix at once and plays at a hundred to a thousand times its speed,
  * each a bright head with a trail fading behind it, so the year blooms out
  * of the home field. The only clock is the one each flight carries (see
  * calculations/flightClock.ts): the panel reads "0:42 into every flight",
- * never a date or an hour.
+ * and its slider moves along the same clock, never a date or an hour.
  *
  * ReplayAllPlayer plays and draws (ui/replayAllLayer.ts), and nothing else:
  * Wrapped's intro plays it under its own camera. ReplayAllControls is the
@@ -12,7 +12,9 @@
  * map (replayActive), which hides the heatmap and the colour layers and
  * holds the selection, the filters and Wrapped as the replay of one flight
  * does, fits the camera to the flights north up, and turns it slowly
- * round them on request.
+ * round them on request. The heat builds up behind the flights instead of
+ * the heatmap, as far as the clock has come (see replayAllTime), unless
+ * the Heatmap switch is off.
  */
 import type { MapApp } from "../mapApp";
 import type { KMLDataset } from "../types";
@@ -40,7 +42,7 @@ import {
 } from "../utils/mapHelpers";
 import { prefersReducedMotion } from "../utils/motion";
 import { announceInRegion, announceStatus, showToast } from "../utils/toast";
-import { HEAT_CLOUD_LAYER } from "./heatCloudLayer";
+import { followHeatCloud } from "./heatCloud";
 import {
   REPLAY_ALL_LAYER,
   ReplayAllLayer,
@@ -49,13 +51,19 @@ import {
 import { REPLAY_PANEL_HEIGHT_VAR } from "./replayManager";
 
 /** The speeds the panel offers, in seconds of flight per second */
-const REPLAY_ALL_SPEEDS = [100, 200, 300, 500] as const;
+const REPLAY_ALL_SPEEDS = [100, 200, 300, 500, 1000] as const;
 
 /** The speed a replay of all flights starts at */
 export const REPLAY_ALL_SPEED = 200;
 
-/** Seconds on the wall a trail takes to fade, at every speed */
+/**
+ * Seconds on the wall a trail takes to fade, up to TRAIL_MOST_S of flight:
+ * at a thousand times its speed a trail of 3 s was 50 minutes of flight,
+ * most of a flight behind every head, where the heat built up behind them
+ * shows the way flown already
+ */
 const TRAIL_FADE_S = 3;
+const TRAIL_MOST_S = 1500;
 
 /** The longest step one frame moves the clock by, as for one flight */
 const MAX_FRAME_S = 0.1;
@@ -78,9 +86,10 @@ const CUTS_KEPT = 3;
 const ZOOM_AHEAD_LEVELS = 2;
 
 /**
- * The layer the replay is drawn below: the first of the ribbons, next to
- * the heat cloud (see CLOUD_BEFORE in ui/heatCloud.ts), so it does not cut
- * the run of flat layers the relief draws into a texture of it
+ * The layer the replay is drawn below: the first of the ribbons, right
+ * over the heat cloud (see CLOUD_BEFORE in ui/heatCloud.ts), so it does not
+ * cut the run of flat layers the relief draws into a texture of it, and
+ * the trails are drawn over the heat that builds up behind them
  */
 const REPLAY_ALL_BEFORE = MAP_LAYERS.pathsAltitudeRibbons;
 
@@ -305,7 +314,20 @@ export class ReplayAllPlayer {
 
   /** The seconds of flight a trail fades over at the speed played */
   private fade(): number {
-    return TRAIL_FADE_S * this.speed;
+    return Math.min(TRAIL_FADE_S * this.speed, TRAIL_MOST_S);
+  }
+
+  /**
+   * Move the clock to `seconds` into every flight, between the start and
+   * the landing of the last, playing on from there if it plays. The layer
+   * draws from the clock alone, so the trails are the ones flown up to
+   * there, backwards as well as forwards.
+   */
+  seek(seconds: number): void {
+    if (!this.active) return;
+    this.time = Math.min(Math.max(seconds, 0), this.duration);
+    this.app.map?.triggerRepaint();
+    this.onChange?.();
   }
 
   /**
@@ -449,7 +471,7 @@ export class ReplayAllPlayer {
 
   /**
    * Put the layer on the map, below the flights in the air and the labels
-   * and next to the heat cloud (REPLAY_ALL_BEFORE), or back there
+   * and over the heat cloud (REPLAY_ALL_BEFORE), or back there
    */
   private place(): void {
     const map = this.app.map;
@@ -463,16 +485,10 @@ export class ReplayAllPlayer {
       return;
     }
     // A new base style keeps the layer, which is none it knows of, but not
-    // necessarily where it was. The heat cloud puts itself right below the
-    // ribbons, and is the one layer that may stand between them.
+    // necessarily where it was. The heat cloud puts itself right below it.
     if (!before) return;
     const order = map.getLayersOrder();
-    const at = order.indexOf(REPLAY_ALL_LAYER);
-    const end = order.indexOf(before);
-    if (
-      at > end ||
-      order.slice(at + 1, end).some((id) => id !== HEAT_CLOUD_LAYER)
-    ) {
+    if (order.indexOf(REPLAY_ALL_LAYER) !== order.indexOf(before) - 1) {
       map.moveLayer(REPLAY_ALL_LAYER, before);
     }
   }
@@ -545,6 +561,12 @@ const REPLAY_ALL_BUTTON_ID = "replay-all-btn";
 /** Pixels kept free around the flights by the fit, the panel below them */
 const FIT_PADDING = { top: 40, right: 40, bottom: 110, left: 40 };
 
+/**
+ * The seconds of flight a step of the slider moves the clock by, with the
+ * arrow keys: a minute, a third of a second at 200 times
+ */
+const SLIDER_STEP_S = 60;
+
 /** "0:42 into every flight": hours and minutes into every flight */
 export function replayAllClock(seconds: number): string {
   const minutes = Math.floor(seconds / 60);
@@ -569,13 +591,14 @@ function nameButton(button: HTMLElement, name: string): void {
 }
 
 /**
- * The "Replay all" control and its panel: play and pause, the speed, the
- * clock, the orbit and the way out
+ * The "Replay all" control and its panel: play and pause, the clock and
+ * its slider, the speed, the orbit and the way out
  */
 export class ReplayAllControls {
   readonly player: ReplayAllPlayer;
   private readonly app: MapApp;
   private panel: HTMLElement | null = null;
+  private slider: HTMLInputElement | null = null;
   private open = false;
   /** The clock as last written, so a frame writes it only when it changes */
   private shown = "";
@@ -587,6 +610,9 @@ export class ReplayAllControls {
     this.app = app;
     this.player = new ReplayAllPlayer(app);
     this.player.onChange = () => this.sync();
+    // The heat that builds up behind the flights is the heat cloud's, on
+    // the flat map as well (see ui/heatCloud.ts)
+    followHeatCloud(app);
     // Escape leaves it, as it leaves the replay of one flight; not from the
     // speed picker, whose own list it closes, nor from a popup or a marker
     document.addEventListener(
@@ -648,6 +674,10 @@ export class ReplayAllControls {
       return;
     }
     this.open = true;
+    const slider = this.slider!;
+    slider.max = String(
+      Math.ceil(this.player.duration / SLIDER_STEP_S) * SLIDER_STEP_S,
+    );
     void ended.then((landed) => {
       if (landed && this.open) this.announce("Every flight has landed");
     });
@@ -757,11 +787,15 @@ export class ReplayAllControls {
           : "Play the replay of all flights",
       );
     }
-    const text = replayAllClock(Math.min(player.time, player.duration));
+    const time = Math.min(player.time, player.duration);
+    const slider = this.slider!;
+    slider.value = String(time);
+    const text = replayAllClock(time);
     if (text !== this.shown) {
       this.shown = text;
       const clock = panel.querySelector("#replay-all-clock");
       if (clock) clock.textContent = text;
+      slider.setAttribute("aria-valuetext", text);
     }
   }
 
@@ -792,6 +826,31 @@ export class ReplayAllControls {
 
     const clock = document.createElement("div");
     clock.id = "replay-all-clock";
+
+    // The clock as a slider: a drag holds it where the thumb is, and lets
+    // it play on as the pointer lets go if it played; a click jumps, and
+    // the keys step a minute, Home and End to either end
+    const slider = document.createElement("input");
+    slider.type = "range";
+    slider.id = "replay-all-time";
+    slider.min = "0";
+    slider.step = String(SLIDER_STEP_S);
+    slider.setAttribute("aria-label", "Time into every flight");
+    slider.addEventListener("input", () => {
+      this.player.seek(Number(slider.value));
+    });
+    slider.addEventListener("pointerdown", () => {
+      if (!this.player.playing) return;
+      this.player.pause();
+      const letGo = (): void => {
+        removeEventListener("pointerup", letGo);
+        removeEventListener("pointercancel", letGo);
+        if (this.open) this.player.resume();
+      };
+      addEventListener("pointerup", letGo);
+      addEventListener("pointercancel", letGo);
+    });
+    this.slider = slider;
 
     const speed = document.createElement("select");
     speed.id = "replay-all-speed";
@@ -828,7 +887,7 @@ export class ReplayAllControls {
     live.setAttribute("aria-live", "polite");
     live.setAttribute("aria-atomic", "true");
 
-    panel.append(play, clock, speed, orbit, exit, live);
+    panel.append(play, clock, slider, speed, orbit, exit, live);
     document.body.append(panel);
     this.panel = panel;
     return panel;
@@ -837,6 +896,16 @@ export class ReplayAllControls {
 
 /** The controls of each app, made the first time they are used */
 const controlsOf = new WeakMap<MapApp, ReplayAllControls>();
+
+/**
+ * The seconds into every flight while the replay of all flights of `app`
+ * is open, which the heat is drawn up to (see ui/heatCloud.ts), and null
+ * otherwise: Wrapped's intro plays its own player under the whole year
+ */
+export function replayAllTime(app: MapApp): number | null {
+  const controls = controlsOf.get(app);
+  return controls?.isOpen ? controls.player.time : null;
+}
 
 /** Open or close the replay of all flights of `app` */
 export function toggleReplayAll(app: MapApp): void {

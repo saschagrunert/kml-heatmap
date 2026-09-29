@@ -348,6 +348,11 @@ export interface HeatCloudStyle {
    * (see heightBandEdgesFt)
    */
   band: readonly [number, number, number, number];
+  /**
+   * The seconds into every flight its heat is drawn up to, by the clock of
+   * the replay of all flights (see flightClock); all of it without
+   */
+  until?: number | undefined;
 }
 
 /**
@@ -457,9 +462,7 @@ float marked(float glow, vec2 p, vec2 dir, float across, float t, float sigma, f
 `;
 
 /**
- * The quad of a stretch, and what its pixels need to know of it. Its
- * comments are here rather than in the shader, which is shipped as it is
- * written:
+ * The quad of a stretch, and what its pixels need to know of it:
  * - The joins, where the stretch hands over to the one before and the one
  *   after, are the bisectors of the angles between them, which are as far
  *   from either line, so their glows meet without a gap or an overlap
@@ -484,6 +487,9 @@ float marked(float glow, vec2 p, vec2 dir, float across, float t, float sigma, f
  *   periods of the flight's time along it (CLOUD_FLOW_CLOSEST).
  * - A stretch whose two ends are below the band of heights, or both above
  *   it, is left out whole: none of it is in the band.
+ * - A stretch is cut where the clock of the replay of all flights has
+ *   come to (`u_until`), and one that begins later is left out whole; the
+ *   end cut has no join with the next.
  * - A stretch that reaches behind the camera's near plane is cut there
  *   (`kept`, the part of it left, from its start), and its ends have the
  *   time, height, marks and place on the ground of the ends of that part,
@@ -511,6 +517,7 @@ uniform vec2 u_ground;
 uniform vec2 u_shadow;
 uniform vec4 u_flow;
 uniform vec2 u_flowMix;
+uniform float u_until;
 flat out vec4 v_ends;
 flat out vec4 v_joins;
 flat out vec4 v_blur;
@@ -546,23 +553,26 @@ void main() {
   bool shadow = u_shadow.y > 0.0;
   float shade = shadow ? smoothstep(u_shadow.x, u_shadow.y, max(a_start.w, a_end.w)) : 1.0;
   vec4 a = project(a_start);
-  vec4 b = project(a_end);
+  float flown = a_out.y > u_until ? (u_until - a_heat.y) / (a_out.y - a_heat.y) : 1.0;
+  vec4 b = mix(a, project(a_end), flown);
   float near = u_depth.z;
   if (
-    a_heat.x <= 0.0 || shade <= 0.0 || (a.w < near && b.w < near)
+    a_heat.x <= 0.0 || a_heat.y >= u_until || shade <= 0.0 || (a.w < near && b.w < near)
     || max(a_start.w, a_end.w) <= u_band.x || min(a_start.w, a_end.w) >= u_band.w
   ) {
     gl_Position = vec4(0.0, 0.0, 2.0, 1.0);
     return;
   }
-  vec2 kept = vec2(0.0, 1.0);
+  vec2 kept = vec2(0.0, flown);
   if (a.w < near) {
-    kept.x = (near - a.w) / (b.w - a.w);
-    a = mix(a, b, kept.x);
+    float cut = (near - a.w) / (b.w - a.w);
+    a = mix(a, b, cut);
+    kept.x = cut * flown;
   }
   if (b.w < near) {
-    kept.y = 1.0 - (near - b.w) / (a.w - b.w);
-    b = mix(b, a, 1.0 - kept.y);
+    float cut = (near - b.w) / (a.w - b.w);
+    b = mix(b, a, cut);
+    kept.y = mix(kept.y, kept.x, cut);
   }
   float middle = projectTileFor3D(u_centre.xy, u_centre.z).w;
   vec2 scales = vec2(middle / a.w, middle / b.w);
@@ -578,7 +588,7 @@ void main() {
     vec4 c = project(a_before);
     if (c.w > near) joinA = unit(unit(pa - onScreen(c), dir) + dir, dir);
   }
-  if (a_out.x > 0.0) {
+  if (a_out.x > 0.0 && flown >= 1.0) {
     vec4 c = project(a_after);
     if (c.w > near) joinB = unit(dir + unit(onScreen(c) - pb, dir), dir);
   }
@@ -755,6 +765,7 @@ const UNIFORMS = [
   "u_flowMix",
   "u_band",
   "u_marks",
+  "u_until",
 ] as const;
 
 /**
@@ -974,6 +985,7 @@ export class HeatCloudLayer implements CustomLayerInterface {
     );
 
     gl.uniform4f(u.u_band, ...style.band);
+    gl.uniform1f(u.u_until, style.until ?? 1e30);
     gl.uniform1f(
       u.u_gain,
       (look.gain * this.exposure * CLOUD_REFERENCE_SPEED_MS * ratio) /

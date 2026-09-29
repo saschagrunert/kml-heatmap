@@ -126,7 +126,8 @@
   gap: var(--space-sm);
   align-items: center;
 }
-#replay-slider {
+#replay-slider,
+#replay-all-time {
   flex: 1;
   height: 6px;
   border-radius: var(--radius-bar);
@@ -136,11 +137,13 @@
   appearance: none;
   cursor: pointer;
 }
-#replay-slider:focus-visible {
+#replay-slider:focus-visible,
+#replay-all-time:focus-visible {
   outline: 2px solid var(--color-accent-blue);
   outline-offset: 4px;
 }
-#replay-slider::-webkit-slider-thumb {
+#replay-slider::-webkit-slider-thumb,
+#replay-all-time::-webkit-slider-thumb {
   -webkit-appearance: none;
   appearance: none;
   width: var(--icon-sm);
@@ -150,7 +153,8 @@
   cursor: pointer;
   box-shadow: var(--shadow-control);
 }
-#replay-slider::-moz-range-thumb {
+#replay-slider::-moz-range-thumb,
+#replay-all-time::-moz-range-thumb {
   width: var(--icon-sm);
   height: var(--icon-sm);
   border-radius: var(--radius-pill);
@@ -307,6 +311,9 @@ body.replay-all-active .toast-stack {
   bottom: calc(var(--space-lg) + var(--safe-bottom));
   left: 50%;
   transform: translateX(-50%);
+  /* As wide as its row: from the middle of the screen, only the right half
+     of it would count as room, and the slider wrapped the row there */
+  width: max-content;
   display: flex;
   flex-wrap: wrap;
   justify-content: center;
@@ -335,6 +342,13 @@ body.replay-all-active .toast-stack {
   font-family: var(--font-mono);
   white-space: nowrap;
 }
+/* The slider of the clock, and on a phone what the buttons leave beside
+   it, so the panel keeps its two lines there */
+#replay-all-time {
+  flex: 1 1 auto;
+  width: 240px;
+  min-width: 80px;
+}
 /* The colour legends say nothing of these trails */
 body.replay-all-active .color-legend {
   visibility: hidden;
@@ -342,6 +356,9 @@ body.replay-all-active .color-legend {
 @media (min-width: 768px) {
   body.stats-open #replay-all-controls {
     left: calc(50% + var(--stats-rail-w) / 2);
+    /* Beside the rail the map can be narrower than the row of the slider */
+    max-width: calc(100% - var(--stats-rail-w) - 2 * var(--edge-gap));
+    box-sizing: border-box;
   }
 }
 
@@ -776,7 +793,8 @@ body.cross-section-open .toast-stack {
     flex-basis: 100%;
     order: -1;
   }
-  #replay-slider {
+  #replay-slider,
+  #replay-all-time {
     /* A 44px touch target with the track still painted thin inside it */
     height: 44px;
     background-color: transparent;
@@ -802,19 +820,27 @@ body.cross-section-open .toast-stack {
     right: calc(var(--edge-gap) + var(--safe-right));
     bottom: calc(var(--attribution-h) + var(--space-sm) + var(--safe-bottom));
     transform: none;
+    width: auto;
   }
   /* Laid out like the replay of one flight: the clock on a line of its
      own, at the size of that one's readout and clear of the close in the
      corner, and the controls on one row under it. In one row with the
      clock, the orbit and the close went onto a second line of their own,
-     centred under the clock. */
+     centred under the clock. The line is as tall as the close reaches
+     down, or the slider pushed the orbit under its corner. */
   #replay-all-clock {
     order: -1;
     flex-basis: 100%;
     padding: 0 44px;
     box-sizing: border-box;
     font-size: var(--text-base);
+    line-height: calc(
+      var(--space-xs) + var(--btn-min-height) - 2 * var(--space-sm)
+    );
     text-align: center;
+  }
+  #replay-all-time {
+    width: 80px;
   }
   #replay-all-close-btn {
     position: absolute;

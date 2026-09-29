@@ -155,7 +155,10 @@ their traces in `test-results/`, and every run writes an HTML report to
 - **Format**: ES modules with code splitting; the page has to be served
   over HTTP (`make serve`), it does not work when opened from disk, and the
   map needs WebGL 2
-- **Production**: Minified bundles for optimal performance; the build fails
+- **Production**: Minified bundles for optimal performance, with the GLSL
+  of the custom layers (`ui/*Layer.ts`) written without comments,
+  indentation and the spaces around most punctuation, line for line
+  (`shaderPlugin` in `build.js`); the build fails
   when `mapApp.bundle.js` and `shared.bundle.js` together,
   `features.bundle.js`, `wrapped.bundle.js`, `yearWorker.bundle.js` or the
   vendored MapLibre and html-to-image files exceed their size budget in
@@ -1095,6 +1098,28 @@ upload took under a millisecond. In software WebGL (SwiftShader) it took
 170 to 250 ms. The e2e test (`orientation.spec.ts`, "on the relief") checks
 that the layer is on the map and drew stretches (`drawn`, which the layer
 counts per frame), not what the pixels look like.
+
+The replay of all flights builds its heat up with the cloud: while it is
+open the cloud is drawn at full strength up to the replay's clock
+(`HeatCloudStyle.until`, `u_until` in the vertex shader, which leaves out a
+stretch not begun and cuts the one under way where the clock is), on the
+flat map as well, flat on the ground, in place of the flat heatmap, and
+under the replay's trails. Scrubbing back shrinks it, since the layer draws
+from the clock alone. The flat heatmap cannot be cut by time: its points
+carry no time, its clusters merge fixes of different flights and times,
+and a filter or a weight by time is worked out again in MapLibre's worker
+for every tile, far too slow for every frame. A heatmap of its own drawn
+into a texture and coloured by the ramp would have matched the heatmap to
+the pixel, but it needed some 4 KB more of the feature bundle than there
+was room for. The cloud's glow uses the heatmap's colours and reach, and
+the end of the replay shows it a little lighter and narrower than the
+heatmap the page goes back to. For all years (104 files) on the Radeon RX
+9070 XT at 1280x800, `z` 6 on the flat map, MapLibre's `_render` took
+1.36 ms a frame on average (95th percentile 3.3 ms) with the heat and
+0.66 ms (1.0 ms) without, and the frames came every 16.7 ms either way;
+with the CPU slowed down four times 2.1 ms against 2.6 ms, and in the 3D
+view 4.0 ms against 0.8 ms with the cloud's shadow at full strength.
+Opening the replay took about 45 ms more for cutting the cloud's points.
 
 **The look of the flat heatmap:**
 
