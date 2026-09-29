@@ -39,11 +39,11 @@ function build(
   {
     keep = () => true,
     detail = 12,
-    level = null,
+    level = 6,
   }: {
     keep?: (pathId: number) => boolean;
     detail?: number;
-    level?: number | null;
+    level?: number;
   } = {},
 ): ReplayAllPoints {
   const flights = smoothFlights(segments, (i) => segments[i]!.altitude_ft, {
@@ -112,17 +112,22 @@ describe("replayAllPoints", () => {
     expect(column(far, 4)[far.count - 1]).toBeCloseTo(far.duration, 3);
   });
 
-  it("keeps a point where the height changes, in the 3D view only", () => {
+  it("keeps a point where the height changes, the more the more it is exaggerated", () => {
     // Climbing 100 ft a fix
     const segments = flight(1, 47, { count: 101 }).map((segment, i) => ({
       ...segment,
       altitude_ft: 1000 + i * 100,
     }));
+    const level = (at: number): number =>
+      build(segments, { detail: 6, level: at }).count;
 
-    const flat = build(segments, { detail: 6 });
-    const lifted = build(segments, { detail: 6, level: 6 });
-
-    expect(lifted.count).toBeGreaterThan(flat.count);
+    // Ten times its height out to level 7, twice from level 10 in
+    expect(level(6)).toBeGreaterThan(level(10));
+    // A level flight keeps the points of its length alone, at every level
+    const cruise = flight(1, 47, { count: 101 });
+    const cruising = build(cruise, { detail: 6, level: 6 }).count;
+    expect(build(cruise, { detail: 6, level: 10 }).count).toBe(cruising);
+    expect(level(10)).toBeGreaterThan(cruising);
   });
 
   it("plays only the flights it is asked to", () => {

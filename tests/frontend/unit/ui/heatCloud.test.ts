@@ -16,6 +16,7 @@ import type { StyleSpecification } from "maplibre-gl";
 import {
   CLOUD_IDLE_MS,
   followHeatCloud,
+  heatCloudLevel,
   prepareHeatCloud,
 } from "../../../../kml_heatmap/frontend/ui/heatCloud";
 import {
@@ -760,6 +761,17 @@ describe("the heat cloud", () => {
   });
 
   describe("under the replay of all flights", () => {
+    /** What the layer of the replay's flights draws with */
+    const flightsStyle = (): { groundM: number; liftM: number } => {
+      const calls = map().addLayer.mock.calls.filter(
+        ([spec]) => (spec as { id: string }).id === REPLAY_ALL_LAYER,
+      );
+      return (
+        calls[calls.length - 1]![0] as unknown as {
+          style: () => { groundM: number; liftM: number };
+        }
+      ).style();
+    };
     /** Move the replay's clock by its slider */
     const seek = (seconds: number): void => {
       const slider = document.getElementById(
@@ -781,7 +793,7 @@ describe("the heat cloud", () => {
       vi.unstubAllGlobals();
     });
 
-    it("builds the heat up on the flat map as far as the clock has come, flat and at full strength, under the trails", async () => {
+    it("builds the heat up on the flat map as far as the clock has come, at the height of the flights and at full strength, under the trails", async () => {
       await follow();
       toggleReplayAll(asMapApp(app));
 
@@ -790,11 +802,13 @@ describe("the heat cloud", () => {
       expect(latitudesOf(drawn())).toEqual([47, 48, 49]);
       expect(style()).toMatchObject({
         groundM: 0,
-        liftM: 0,
         opacity: 1,
         flow: false,
         until: 0,
       });
+      // As high as the replay's flights are drawn, on the flat ground
+      expect(style()!.liftM).toBeGreaterThan(0);
+      expect(style()!.liftM).toBe(flightsStyle().liftM);
       const layers = order();
       expect(layers.indexOf(HEAT_CLOUD_LAYER)).toBe(
         layers.indexOf(REPLAY_ALL_LAYER) - 1,
@@ -842,6 +856,34 @@ describe("the heat cloud", () => {
       toggleReplayAll(asMapApp(app));
 
       expect(style()).toBeNull();
+    });
+
+    it("lifts the flights of Wrapped's intro as its cloud, at the level of the zoom the map came to rest at", async () => {
+      expect(heatCloudLevel(asMapApp(app))).toBeNull();
+      await follow();
+      app.forcedHeatCloud = true;
+      // The overview, untagged, then the intro's flight from far out
+      map().setZoom(9.3);
+      map().emit("zoomend");
+      map().setZoom(1.2);
+      map().emit("zoomend", REPLAY_CAMERA_MOVE);
+      expect(heatCloudLevel(asMapApp(app))).toBe(9);
+
+      void new ReplayAllPlayer(asMapApp(app)).start({ zoom: 11 });
+
+      expect(flightsStyle()).toEqual(
+        expect.objectContaining({
+          groundM: 0,
+          liftM: liftExaggeration(9) * FEET_TO_METERS,
+        }),
+      );
+      expect(style()!.liftM).toBe(flightsStyle().liftM);
+      // The 3D view's own level where it is on
+      app.store.batch(() => {
+        app.threeDVisible = true;
+        app.reliefLevel = 4;
+      });
+      expect(heatCloudLevel(asMapApp(app))).toBe(4);
     });
 
     it("draws all of the heat under Wrapped's intro, which plays a player of its own", async () => {

@@ -557,6 +557,17 @@ describe("StateManager", () => {
       expect(url).toContain("&b=-40.3&t=35&g=1");
     });
 
+    it("saves and links the tilt from before the replay of every flight tilted the map", () => {
+      mockApp.map!.jumpTo({ pitch: 50 });
+      mockApp.replayState.pitchBefore = 0;
+
+      stateManager.saveMapState();
+
+      expect(savedState()).toMatchObject({ pitch: 0 });
+      const url = String(vi.mocked(history.replaceState).mock.calls[0]![2]);
+      expect(url).not.toMatch(/[?&]t=/);
+    });
+
     it("saves a reset view as a first visit's and links it without the flags", () => {
       // What MapApp.resetView leaves behind: the flags a session keeps back
       // at their defaults, the newest year and the fitted view

@@ -1,20 +1,22 @@
 /**
  * Replay of all flights: every flight the filters keep starts from its own
  * first fix at once and plays at a hundred to a thousand times its speed,
- * each a bright head with a trail fading behind it, so the year blooms out
- * of the home field. The only clock is the one each flight carries (see
- * calculations/flightClock.ts): the panel reads "0:42 into every flight",
- * and its slider moves along the same clock, never a date or an hour.
+ * each a bright head with a trail fading behind it at its height, so the
+ * year blooms out of the home field. The only clock is the one each flight
+ * carries (see calculations/flightClock.ts): the panel reads "0:42 into
+ * every flight", and its slider moves along the same clock, never a date
+ * or an hour.
  *
  * ReplayAllPlayer plays and draws (ui/replayAllLayer.ts), and nothing else:
  * Wrapped's intro plays it under its own camera. ReplayAllControls is the
  * "Replay all" control and its panel: it runs the player as a replay of the
  * map (replayActive), which hides the heatmap and the colour layers and
  * holds the selection, the filters and Wrapped as the replay of one flight
- * does, fits the camera to the flights north up, and turns it slowly
- * round them on request. The heat builds up behind the flights instead of
- * the heatmap, as far as the clock has come (see replayAllTime), unless
- * the Heatmap switch is off.
+ * does, fits the camera to the flights north up, tilted as the 3D view
+ * tilts it, and turns it slowly round them on request. The heat builds up
+ * behind the flights instead of the heatmap, as far as the clock has come
+ * (see replayAllTime) and at the height of the flights, unless the
+ * Heatmap switch is off.
  */
 import type { MapApp } from "../mapApp";
 import type { KMLDataset } from "../types";
@@ -42,7 +44,7 @@ import {
 } from "../utils/mapHelpers";
 import { prefersReducedMotion } from "../utils/motion";
 import { announceInRegion, announceStatus, showToast } from "../utils/toast";
-import { followHeatCloud } from "./heatCloud";
+import { followHeatCloud, heatCloudLevel } from "./heatCloud";
 import {
   REPLAY_ALL_LAYER,
   ReplayAllLayer,
@@ -156,9 +158,19 @@ export class ReplayAllPlayer {
   private broken = false;
   /** Whether the orbit has turned the camera since it last came to rest */
   private orbited = false;
+  /**
+   * Whether the flights are lifted: as the heat cloud and the ribbons,
+   * which are handed to the flat lines from LIFT_MAX_ZOOM on once a zoom
+   * has ended, not while it goes on
+   */
+  private lifted = true;
 
   constructor(app: MapApp) {
     this.app = app;
+    // The heat that builds up behind the flights is the heat cloud's, on
+    // the flat map as well, and the flights are lifted as it is (see
+    // level and ui/heatCloud.ts)
+    followHeatCloud(app);
     this.layer = new ReplayAllLayer(this.style, (error) => {
       if (this.broken) return;
       this.broken = true;
@@ -222,6 +234,7 @@ export class ReplayAllPlayer {
     this.scale = run.scale ?? 1;
     this.zoomAhead = run.zoom ?? null;
     this.aheadDrawn = this.nearAhead();
+    this.lifted = isLiftedAt(map.getZoom());
     this.time = 0;
     this.cut();
     if (this.flights === 0) {
@@ -254,6 +267,7 @@ export class ReplayAllPlayer {
       // The map's zoom is the one to follow from here on
       this.zoomAhead = null;
       this.aheadDrawn = false;
+      this.lifted = isLiftedAt(map.getZoom());
       this.cut();
     });
     const styled = map.on("styledata", () => this.place());
@@ -387,17 +401,33 @@ export class ReplayAllPlayer {
     this.onChange?.();
   };
 
-  /** What the layer draws with in the frame, as the heat cloud is drawn */
+  /**
+   * The relief level the flights are lifted as: the 3D view's, and outside
+   * it the heat cloud's (heatCloudLevel), which is at its height there as
+   * well while they play, so the heads fly in the heat
+   */
+  private level(): number {
+    const app = this.app;
+    return app.threeDVisible ? app.reliefLevel : (heatCloudLevel(app) ?? 0);
+  }
+
+  /**
+   * What the layer draws with in the frame, as the heat cloud is drawn:
+   * the flights at their height, on the relief where it is drawn. Outside
+   * the 3D view as well, where under a camera that flies and tilts over
+   * them (Wrapped's intro, the replay's own tilt) they were lines on the
+   * ground.
+   */
   private readonly style = (): ReplayAllStyle | null => {
     const app = this.app;
     const map = app.map;
     if (!map || !this.active) return null;
     const exaggeration =
-      map.getTerrain()?.exaggeration ?? liftExaggeration(app.reliefLevel);
-    const metres = app.threeDVisible ? exaggeration * FEET_TO_METERS : 0;
+      map.getTerrain()?.exaggeration ?? liftExaggeration(this.level());
+    const metres = exaggeration * FEET_TO_METERS;
     return {
       groundM: app.terrainActive ? metres : 0,
-      liftM: isLiftedAt(map.getZoom()) ? metres : 0,
+      liftM: this.lifted ? metres : 0,
       time: this.time,
       fade: this.fade(),
       scale: this.scale,
@@ -429,10 +459,10 @@ export class ReplayAllPlayer {
   }
 
   /**
-   * The curves cut for the view: on the ground and the relief level of the
-   * 3D view, as the heat cloud's, and thinned for the map zoom `zoom`. Those
-   * cut last are kept, and handed out again as long as nothing they were
-   * cut for changed.
+   * The curves cut for the view: on the ground of the 3D view and the
+   * relief level they are lifted as (see level), as the heat cloud's, and
+   * thinned for the map zoom `zoom`. Those cut last are kept, and handed
+   * out again as long as nothing they were cut for changed.
    */
   private pointsFor(zoom: number): ReplayAllPoints | null {
     const app = this.app;
@@ -440,7 +470,7 @@ export class ReplayAllPlayer {
     const keep = this.keep;
     if (!data || !keep) return null;
     const detail = Math.min(Math.max(Math.floor(zoom), 0), MAX_DETAIL);
-    const level = app.threeDVisible ? app.reliefLevel : null;
+    const level = this.level();
     const key = `${app.terrainActive}/${level}/${detail}`;
     let points = this.cuts.get(key);
     if (points) {
@@ -557,6 +587,23 @@ const HELD_CONTROL_IDS = [
 /** The control that opens and closes the replay of all flights */
 const REPLAY_ALL_BUTTON_ID = "replay-all-btn";
 
+/**
+ * The tilt a flatter map is turned to while the flights play at their
+ * height, and what is flat enough to need it: those of the 3D view
+ * (THREE_D_PITCH and THREE_D_MIN_PITCH in ui/mapOrientation.ts). Written
+ * out rather than shared: two more exports of the shared chunk renamed
+ * those Wrapped's bundle imports, 6 of the 7 bytes it had left.
+ */
+const TILT_PITCH = 50;
+const TILT_MIN_PITCH = 20;
+
+/**
+ * Degrees a gesture has to tilt the map by to be a tilt of the user's: a
+ * right drag that turns the map tilts it by as much as the pointer strays
+ * up or down, a degree for every two pixels
+ */
+const TILT_BY_HAND_DEG = 5;
+
 /** Pixels kept free around the flights by the fit, the panel below them */
 const FIT_PADDING = { top: 40, right: 40, bottom: 110, left: 40 };
 
@@ -602,6 +649,11 @@ export class ReplayAllControls {
   /** The clock as last written, so a frame writes it only when it changes */
   private shown = "";
   private stopWatchingUser: (() => void) | null = null;
+  /**
+   * The tilt the close lays the map back to (ReplayState.pitchBefore),
+   * which a replay opened again before the map is there starts from
+   */
+  private layingBack: number | null = null;
   /** Gives the held controls back as they were (see holdControls) */
   private release: (() => void) | null = null;
 
@@ -609,9 +661,6 @@ export class ReplayAllControls {
     this.app = app;
     this.player = new ReplayAllPlayer(app);
     this.player.onChange = () => this.sync();
-    // The heat that builds up behind the flights is the heat cloud's, on
-    // the flat map as well (see ui/heatCloud.ts)
-    followHeatCloud(app);
     // Escape leaves it, as it leaves the replay of one flight; not from the
     // speed picker, whose own list it closes, nor from a popup or a marker
     document.addEventListener(
@@ -702,6 +751,16 @@ export class ReplayAllControls {
     }
     panel.querySelector<HTMLElement>("button")?.focus();
 
+    // The flights fly at their height, which a map seen from straight
+    // above does not show: a flatter one is tilted as the 3D view tilts
+    // it, and laid back as the replay closes
+    const pitch =
+      this.layingBack !== null && map.isMoving()
+        ? this.layingBack
+        : map.getPitch();
+    this.layingBack = null;
+    const before = pitch < TILT_MIN_PITCH ? pitch : null;
+    app.replayState.pitchBefore = before;
     const bounds = this.player.bounds;
     if (bounds) {
       map.fitBounds(
@@ -712,16 +771,38 @@ export class ReplayAllControls {
         {
           padding: FIT_PADDING,
           bearing: 0,
-          pitch: map.getPitch(),
+          pitch: before === null ? pitch : TILT_PITCH,
           animate: !prefersReducedMotion(),
         },
       );
     }
-    // A camera the user moves is theirs: the orbit stops turning it
-    const moved = map.on("movestart", (event: { originalEvent?: unknown }) => {
+    // A camera the user moves is theirs: the orbit stops turning it, and
+    // a tilt of theirs stays as they leave it, as does the 3D view's
+    type UserEvent = { originalEvent?: unknown };
+    const moved = map.on("movestart", (event: UserEvent) => {
       if (event.originalEvent && this.player.orbit) this.setOrbit(false);
     });
-    this.stopWatchingUser = () => moved.unsubscribe();
+    let from = 0;
+    const tilting = map.on("pitchstart", () => {
+      from = map.getPitch();
+    });
+    const tilted = map.on("pitchend", (event: UserEvent) => {
+      if (
+        event.originalEvent &&
+        Math.abs(map.getPitch() - from) > TILT_BY_HAND_DEG
+      ) {
+        app.replayState.pitchBefore = null;
+      }
+    });
+    const threeD = app.store.subscribe("threeDVisible", (on) => {
+      if (on) app.replayState.pitchBefore = null;
+    });
+    this.stopWatchingUser = () => {
+      moved.unsubscribe();
+      tilting.unsubscribe();
+      tilted.unsubscribe();
+      threeD();
+    };
     announceStatus(
       `Replaying ${this.player.flights} flights at ${this.player.speed} times their speed`,
     );
@@ -747,6 +828,13 @@ export class ReplayAllControls {
     this.app.replayState.all = false;
     // The layers come back as they were, and the phone's bar with them
     this.app.replayActive = false;
+    // As flat as it was, unless the user or the 3D view took the tilt over
+    const pitch = this.app.replayState.pitchBefore;
+    this.app.replayState.pitchBefore = null;
+    if (pitch !== null) {
+      this.layingBack = pitch;
+      this.app.map?.easeTo({ pitch });
+    }
     const target = this.app.mobileBar?.isVisible()
       ? document.getElementById("mobile-tab-more")
       : button;

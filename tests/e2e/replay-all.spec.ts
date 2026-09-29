@@ -1,8 +1,9 @@
 /**
  * Replay of all flights: every flight of the filter starts at once and plays
  * at a hundred times its speed and more, drawn by a WebGL layer of its own,
- * with a clock that reads the time into every flight. The filters are held
- * while it plays, and closing it gives the page back as it was.
+ * with a clock that reads the time into every flight, at their height on a
+ * map it tilts for them. The filters are held while it plays, and closing
+ * it gives the page back as it was.
  */
 import { test, expect } from "./fixtures";
 import type { Page } from "./fixtures";
@@ -49,6 +50,23 @@ test.describe("Replay all flights", () => {
     await expect
       .poll(async () => (await drawn(page))?.time ?? 0, { timeout: 10000 })
       .toBeGreaterThan(0);
+    // At their height on the flat map too, which it tilts so they show
+    const pitch = (): Promise<number> =>
+      page.evaluate(() => window.mapApp!.map!.getPitch());
+    await expect.poll(pitch).toBe(50);
+    const liftM = await page.evaluate(() => {
+      const layer = window.mapApp!.map!.getLayer("replay-all") as
+        | { implementation?: { style: () => { liftM: number } | null } }
+        | undefined;
+      return layer?.implementation?.style()?.liftM ?? 0;
+    });
+    expect(liftM).toBeGreaterThan(0);
+    // The link keeps the tilt from before, not the replay's
+    const search = await page.evaluate(() => {
+      window.mapApp!.stateManager.flush();
+      return location.search;
+    });
+    expect(search).not.toMatch(/[?&]t=/);
 
     // Paused, the clock holds: half a second would be over a minute
     const play = page.locator("#replay-all-play-btn");
@@ -67,6 +85,8 @@ test.describe("Replay all flights", () => {
     await expect(page.locator("#year-select")).toBeEnabled();
     expect(await drawn(page)).toBeNull();
     expect(await page.evaluate(() => window.mapApp!.replayActive)).toBe(false);
+    // Laid flat again, as it was
+    await expect.poll(pitch).toBe(0);
   });
 
   test("scrubs the clock with its slider, and builds the heat up behind the flights", async ({
