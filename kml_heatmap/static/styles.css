@@ -338,6 +338,8 @@ body {
     background-color: var(--color-bg-active);
   }
 }
+/* The ring of every `.control-btn` and of the selection's Clear too: they
+   are all `.btn-surface` */
 .btn-surface:focus-visible {
   outline: 2px solid var(--color-accent-blue);
   outline-offset: 2px;
@@ -371,10 +373,6 @@ body {
    here is positioned against the viewport. */
 .control-btn {
   cursor: pointer;
-}
-.control-btn:focus-visible {
-  outline: 2px solid var(--color-accent-blue);
-  outline-offset: 2px;
 }
 /* Unavailable: a control that cannot act right now, `disabled` or, for the
    ones that stay in the tab order to explain themselves, aria-disabled.
@@ -698,7 +696,9 @@ body {
 
    What is selected, and the way out of it. It sits at the top centre, the
    one edge of the map no panel claims, so it does not move when the rail
-   opens or the mobile bar takes over.
+   opens or the mobile bar takes over. Only the phone's statistics sheet
+   reaches it, and the chip moves aside into the sheet's header then (see
+   the mobile layout).
    ========================================================================== */
 #selection-chip {
   position: fixed;
@@ -745,10 +745,6 @@ body {
 #selection-clear-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
-}
-#selection-clear-btn:focus-visible {
-  outline: 2px solid var(--color-accent-blue);
-  outline-offset: 2px;
 }
 
 /* ==========================================================================
@@ -1193,11 +1189,11 @@ body.stats-open #left-buttons {
 .maplibregl-map .maplibregl-ctrl-attrib a {
   color: var(--color-text-secondary);
 }
-.maplibregl-map .maplibregl-ctrl-attrib a:hover,
-.maplibregl-map .maplibregl-ctrl-attrib a:focus-visible {
+.maplibregl-map .maplibregl-ctrl-attrib a:hover {
   color: var(--color-text);
 }
 .maplibregl-map .maplibregl-ctrl-attrib a:focus-visible {
+  color: var(--color-text);
   outline: 2px solid var(--color-accent-blue);
   outline-offset: 1px;
 }
@@ -2123,13 +2119,26 @@ body.stats-open #left-buttons {
     );
     z-index: calc(var(--z-controls) - 3);
   }
+  /* The sheet at its full height takes the top edge the selection chip
+     sits on, and the chip covered its title. While the sheet is open the
+     chip goes to the right end of its header, where no collapse control is
+     shown here, with its Clear and profile only (the count is hidden
+     below): the sheet says what is selected itself, in the notice above
+     the figures and the marked rows of the list, and the count ran into
+     the longest title. */
+  .stats-open #selection-chip {
+    inset: var(--safe-top) var(--space-sm) auto auto;
+    transform: none;
+    padding-left: var(--space-xs);
+  }
   body:has(.mobile-bar) #stats-panel {
     padding-bottom: var(--space-md);
   }
   /* The collapse control is redundant once the Stats tab toggles the sheet.
      The title stays: without it the sheet opens straight into bare numbers
      with nothing saying whether they are filtered or a selection. */
-  body:has(.mobile-bar) #stats-collapse-btn {
+  body:has(.mobile-bar) #stats-collapse-btn,
+  .stats-open #selection-chip-count {
     display: none;
   }
 }
@@ -2227,6 +2236,12 @@ body.stats-open #left-buttons {
   border-radius: var(--radius-control);
   padding: 3px var(--space-xs);
   cursor: pointer;
+}
+/* A rule in the gap between two rows (the list holds nothing else): bare
+   lines of text did not read as something to pick. A shadow, so the rows
+   keep their height. */
+.kh-popup-flight + * {
+  box-shadow: 0 -1px var(--color-divider);
 }
 .kh-popup-flight:hover {
   background: var(--color-bg-hover);

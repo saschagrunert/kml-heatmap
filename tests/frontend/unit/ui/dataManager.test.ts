@@ -669,19 +669,19 @@ describe("DataManager", () => {
       await dataManager.loadData("2025");
 
       expect(toastMock.showToast).toHaveBeenCalledWith(
-        "No flight data available for 2025",
+        "Could not load the flights of 2025",
         "error",
         undefined,
       );
     });
 
-    it("mentions all years in the toast for 'all'", async () => {
+    it("names no year in the toast for 'all'", async () => {
       loaderMocks.loadData.mockResolvedValue(null);
 
       await dataManager.loadData("all");
 
       expect(toastMock.showToast).toHaveBeenCalledWith(
-        "No flight data available for all years",
+        "Could not load the flights",
         "error",
         undefined,
       );
@@ -771,7 +771,7 @@ describe("DataManager", () => {
       loaderMocks.loadData.mockResolvedValue(null);
       await dataManager.loadData("2024", undefined, retry);
       expect(toastMock.showToast).toHaveBeenLastCalledWith(
-        "No flight data available for 2024",
+        "Could not load the flights of 2024",
         "error",
         retry,
       );

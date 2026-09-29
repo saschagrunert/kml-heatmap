@@ -63,7 +63,7 @@ const PATH_LINE = { width: 4, opacity: 0.85 };
 const SELECTED_PATH_LINE = { width: 6, opacity: 1 };
 const REPLAY_ROUTE_LINE = { width: 2, opacity: 0.5 };
 const REPLAY_TRAIL_LINE = { width: 3, opacity: 0.8 };
-const SELECTION_LINE = { width: 1.5, opacity: 0.9 };
+const SELECTION_LINE = { width: 2.5, opacity: 0.9 };
 /** The colour of the lines of a selection where the stylesheet has none */
 const SELECTION_COLOR = "#f2f2f2";
 
@@ -293,8 +293,9 @@ function addDataLayersTo(map: MapLibreMap): void {
   // The selected flights over the heatmap while no colour layer draws them
   // (see ui/selectionHighlight.ts): thin and light, so they read over the
   // heatmap, which steps back for them, and are not taken for a colour
-  // layer; flat and as wide at every zoom. And the route of a replay, which
-  // is always visible and empty outside one
+  // layer; flat and as wide at every zoom, and fainter the more there are
+  // (selectionOpacity). And the route of a replay, which is always visible
+  // and empty outside one
   for (const [id, color, fallback, line, layout] of [
     [
       MAP_LAYERS.selectionHighlight,
@@ -329,7 +330,11 @@ function addDataLayersTo(map: MapLibreMap): void {
   }
 
   // Main layers first, then both selections, so a selected flight is
-  // never painted over by an unselected one of the other mode
+  // never painted over by an unselected one of the other mode. A flight is
+  // a line per run of one colour, and the main lines are translucent: cut
+  // square, the runs meet edge to edge where round caps overlapped in a
+  // brighter bead at every change of colour, as the heat lines did. The
+  // selected lines are opaque and keep their round ends.
   const pathLayers = [
     [MAP_LAYERS.pathsAltitude, MAP_SOURCES.pathsAltitude, PATH_LINE],
     [MAP_LAYERS.pathsAirspeed, MAP_SOURCES.pathsAirspeed, PATH_LINE],
@@ -358,7 +363,11 @@ function addDataLayersTo(map: MapLibreMap): void {
         id,
         type: "line",
         source,
-        layout: { ...round, ...hidden },
+        layout: {
+          ...round,
+          ...hidden,
+          ...(line === PATH_LINE && { "line-cap": "butt" }),
+        },
         paint: {
           "line-color": ["get", "color"],
           "line-width": line.width,

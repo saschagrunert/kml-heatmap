@@ -979,6 +979,10 @@ body:has(#wrapped-modal:not([hidden]))
   -webkit-text-fill-color: transparent;
   background-clip: text;
 }
+/* One colour for the whole fleet, with the rank of an aircraft in how
+   strong its tint is (calculateAircraftColorClass). In four accents the
+   busiest one was in the red of an error, and the four read as four kinds
+   of aircraft rather than one order. */
 .wrapped-square-card .fleet-aircraft {
   display: flex;
   justify-content: space-between;
@@ -986,6 +990,8 @@ body:has(#wrapped-modal:not([hidden]))
   padding: var(--space-sm) var(--space-md);
   margin: var(--space-sm) 0;
   border-radius: var(--radius-panel);
+  background: rgba(var(--color-accent-blue-rgb), var(--fleet-tint, 0.08));
+  border-left: 3px solid var(--color-accent-blue);
   transition:
     transform var(--duration-fast) ease,
     box-shadow var(--duration-fast) ease;
@@ -997,48 +1003,13 @@ body:has(#wrapped-modal:not([hidden]))
   }
 }
 .wrapped-square-card .fleet-aircraft-high {
-  background: linear-gradient(
-    135deg,
-    rgba(var(--color-accent-red-rgb), 0.15) 0%,
-    rgba(var(--color-accent-pink-rgb), 0.08) 100%
-  );
-  border-left: 3px solid var(--color-accent-red);
-}
-.wrapped-square-card .fleet-aircraft-high .fleet-aircraft-stats {
-  color: var(--color-accent-red);
+  --fleet-tint: 0.22;
 }
 .wrapped-square-card .fleet-aircraft-medium-high {
-  background: linear-gradient(
-    135deg,
-    rgba(var(--color-accent-mint-rgb), 0.15) 0%,
-    rgba(var(--color-accent-cyan-rgb), 0.08) 100%
-  );
-  border-left: 3px solid var(--color-accent-mint);
-}
-.wrapped-square-card .fleet-aircraft-medium-high .fleet-aircraft-stats {
-  color: var(--color-accent-mint);
+  --fleet-tint: 0.16;
 }
 .wrapped-square-card .fleet-aircraft-medium-low {
-  background: linear-gradient(
-    135deg,
-    rgba(var(--color-accent-cyan-rgb), 0.15) 0%,
-    rgba(var(--color-accent-blue-rgb), 0.08) 100%
-  );
-  border-left: 3px solid var(--color-accent-cyan);
-}
-.wrapped-square-card .fleet-aircraft-medium-low .fleet-aircraft-stats {
-  color: var(--color-accent-cyan);
-}
-.wrapped-square-card .fleet-aircraft-low {
-  background: linear-gradient(
-    135deg,
-    rgba(var(--color-accent-blue-rgb), 0.15) 0%,
-    rgba(var(--color-accent-cyan-rgb), 0.06) 100%
-  );
-  border-left: 3px solid var(--color-accent-blue);
-}
-.wrapped-square-card .fleet-aircraft-low .fleet-aircraft-stats {
-  color: var(--color-accent-blue);
+  --fleet-tint: 0.12;
 }
 .wrapped-square-card .fleet-aircraft-info {
   display: flex;
@@ -1062,10 +1033,47 @@ body:has(#wrapped-modal:not([hidden]))
 .wrapped-square-card .fleet-aircraft-flights {
   font-size: var(--text-base);
   font-weight: bold;
+  color: var(--color-accent-blue);
 }
 .wrapped-square-card .fleet-aircraft-time {
   font-size: var(--text-sm);
   color: var(--color-text-secondary);
+}
+
+/* The cards column side by side with the map (see #wrapped-cards-column)
+   fades out at its top edge as well once it is scrolled: only the bottom
+   did, and a card scrolled past the top was cut off square. The fade grows
+   over the first gap of the scroll, driven by the scroll itself, and stays
+   while the bottom's goes at the end (is-at-end). Without scroll-driven
+   animations the top stays as it was. */
+@property --wrapped-top-fade {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+@keyframes wrapped-top-fade {
+  to {
+    --wrapped-top-fade: var(--space-lg);
+  }
+}
+@supports (animation-timeline: scroll()) {
+  @media (min-width: 1024px) {
+    #wrapped-cards-column,
+    #wrapped-cards-column.is-at-end {
+      mask-image: linear-gradient(
+        transparent,
+        #000 var(--wrapped-top-fade),
+        #000 calc(100% - var(--wrapped-bottom-fade, var(--space-lg))),
+        transparent
+      );
+      animation: wrapped-top-fade linear both;
+      animation-timeline: scroll(self);
+      animation-range: 0 var(--space-lg);
+    }
+    #wrapped-cards-column.is-at-end {
+      --wrapped-bottom-fade: 0px;
+    }
+  }
 }
 
 /* ==========================================================================

@@ -6,6 +6,7 @@ import {
   type GeoJSONSource,
   type MapLayerMouseEvent,
   type Point,
+  type PositionAnchor,
   type Subscription,
 } from "maplibre-gl";
 import type { MapApp } from "../mapApp";
@@ -61,6 +62,36 @@ const POPUP_PAN_PADDING_PX = 50;
  */
 const POPUP_OFFSET_PX = 12;
 
+/**
+ * Distance from the middle of a marker to the top of its code, which sits
+ * above the dot (ui/airportLabels.ts): a popup that hangs above the airport
+ * points at the code rather than covering it
+ */
+const POPUP_ABOVE_LABEL_PX = 40;
+
+/**
+ * Distance from the middle of a marker to a popup beside it, clear of the
+ * code above the dot, whose four letters are about 50 pixels wide
+ */
+const POPUP_BESIDE_LABEL_PX = 30;
+
+/**
+ * Where the popup's tip goes for each side MapLibre hangs it on. Below the
+ * airport it points at the dot, as the code is above it; above and beside
+ * it, the code stays in view.
+ */
+const POPUP_OFFSETS: Record<PositionAnchor, [number, number]> = {
+  center: [0, 0],
+  top: [0, POPUP_OFFSET_PX],
+  "top-left": [0, POPUP_OFFSET_PX],
+  "top-right": [0, POPUP_OFFSET_PX],
+  bottom: [0, -POPUP_ABOVE_LABEL_PX],
+  "bottom-left": [0, -POPUP_ABOVE_LABEL_PX],
+  "bottom-right": [0, -POPUP_ABOVE_LABEL_PX],
+  left: [POPUP_BESIDE_LABEL_PX, 0],
+  right: [-POPUP_BESIDE_LABEL_PX, 0],
+};
+
 /** Store keys that change the popup counts and the home base */
 const POPUP_KEYS = ["currentData", "selectedYear", "selectedAircraft"] as const;
 
@@ -99,7 +130,7 @@ export class AirportManager {
   private readonly popup = new Popup({
     focusAfterOpen: false,
     maxWidth: "none",
-    offset: POPUP_OFFSET_PX,
+    offset: POPUP_OFFSETS,
     closeOnClick: false,
   });
   /** The airport the popup is open for */

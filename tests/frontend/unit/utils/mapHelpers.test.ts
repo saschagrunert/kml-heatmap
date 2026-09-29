@@ -551,6 +551,45 @@ describe("mapHelpers", () => {
       expect(map.doubleClickZoom.isEnabled()).toBe(true);
     });
 
+    it("keeps the second tap of a double tap off the map from zooming", () => {
+      const { map, onMarker, onCanvas } = mapWithMarker();
+      keepMarkerTapsFromZoom(map);
+      const at = (timeStamp: number) => (event: { originalEvent: Event }) => {
+        Object.defineProperty(event.originalEvent, "timeStamp", {
+          value: timeStamp,
+        });
+        return event;
+      };
+      map.emit("touchstart", at(1000)(onMarker("touchstart")));
+      map.emit("touchend", at(1050)(onMarker("touchend")));
+      expect(map.doubleClickZoom.isEnabled()).toBe(true);
+
+      // The popup's pan carried the marker off: the second tap is beside it
+      map.emit(
+        "touchstart",
+        at(1000 + DOUBLE_TAP_MS - 1)(onCanvas("touchstart")),
+      );
+      expect(map.doubleClickZoom.isEnabled()).toBe(false);
+      // Its dblclick, which a busy page hands over seconds later
+      const preventDefault = vi.fn();
+      map.emit("dblclick", {
+        ...at(9000)(onCanvas("dblclick")),
+        preventDefault,
+      });
+      expect(preventDefault).toHaveBeenCalledOnce();
+      map.emit("touchend", at(1000 + DOUBLE_TAP_MS)(onCanvas("touchend")));
+      expect(map.doubleClickZoom.isEnabled()).toBe(true);
+
+      // A tap of its own zooms as ever, and so does its dblclick
+      map.emit("touchstart", at(1000 + DOUBLE_TAP_MS)(onCanvas("touchstart")));
+      expect(map.doubleClickZoom.isEnabled()).toBe(true);
+      map.emit("dblclick", {
+        ...at(9500)(onCanvas("dblclick")),
+        preventDefault,
+      });
+      expect(preventDefault).toHaveBeenCalledOnce();
+    });
+
     it("leaves a zoom that was switched off by someone else off", () => {
       const { map, onMarker } = mapWithMarker();
       map.doubleClickZoom.disable();

@@ -134,13 +134,29 @@ describe("AirportManager", () => {
 
   describe("the shared popup", () => {
     it("is one popup that leaves focus and width to the app", () => {
-      expect(popup.options).toEqual({
+      const { offset, ...options } = popup.options;
+      expect(options).toEqual({
         focusAfterOpen: false,
         maxWidth: "none",
-        offset: 12,
         // MapLibre would close it in the click on the marker that opened
         // it; MapApp's click dispatcher closes it instead
         closeOnClick: false,
+      });
+      // Every side MapLibre may hang it on: one left out would be [0, 0],
+      // over the dot
+      expect(offset).toEqual({
+        center: [0, 0],
+        // Below the airport, at the edge of its dot's pointer target
+        top: [0, 12],
+        "top-left": [0, 12],
+        "top-right": [0, 12],
+        // Above it, clear of its code, which sits above the dot
+        bottom: [0, -40],
+        "bottom-left": [0, -40],
+        "bottom-right": [0, -40],
+        // Beside it, clear of the code's half width
+        left: [30, 0],
+        right: [-30, 0],
       });
       // `setPopup` brings click and key handling that would toggle twice
       for (const marker of Object.values(markers)) {

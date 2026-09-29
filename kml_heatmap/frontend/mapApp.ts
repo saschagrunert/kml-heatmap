@@ -49,6 +49,7 @@ import { applyGradientTokens } from "./utils/colors";
 import { renderControlIcons } from "./utils/icons";
 import {
   createActivationFilter,
+  DOUBLE_TAP_MS,
   followContextLoss,
   isOnMarker,
   isReplayCameraMove,
@@ -151,8 +152,12 @@ export interface MapConfig {
  */
 const VIEW_KEYS = [...TOGGLE_KEYS, "heightBand"] as const;
 
-/** Padding around the flights when the view is fitted to all of them */
-const START_VIEW_PADDING = 30;
+/**
+ * Padding around the flights when the view is fitted to all of them. The
+ * heat's glow reaches about 22 pixels past the outermost fix, and at 30 the
+ * edge of the map cut it off at the farthest airport.
+ */
+const START_VIEW_PADDING = 48;
 
 /** Delay before a Wrapped panel restored from state opens again */
 const WRAPPED_RESTORE_DELAY_MS = 500;
@@ -259,6 +264,14 @@ export class MapApp {
    * would on a marker (see createActivationFilter)
    */
   private readonly isLabelActivation = createActivationFilter();
+  /**
+   * When an airport's marker or label was last clicked. The popup the click
+   * opens pans the map until it shows in full, which can carry the airport
+   * out from under the second tap of a double tap, and the map gets that
+   * one: it must not close the popup. By the time of the event, as in
+   * createActivationFilter, since a busy page hands the second tap over late.
+   */
+  private airportClickAt = -Infinity;
 
   // Handles of the layers the map is created with. The layers are never
   // added or removed; the handles switch their visibility.
@@ -1087,7 +1100,12 @@ export class MapApp {
    * here.
    */
   private handleMapClick(e: MapMouseEvent): void {
-    if (isOnMarker(e)) return;
+    const at = e.originalEvent.timeStamp;
+    if (isOnMarker(e)) {
+      this.airportClickAt = at;
+      return;
+    }
+    if (at - this.airportClickAt < DOUBLE_TAP_MS) return;
     // The overview of the Wrapped dialog is this map, and it takes gestures
     // so it can be moved. A click there is none on the main map: it must
     // not change the selection behind the dialog, nor open the values of a
@@ -1098,6 +1116,7 @@ export class MapApp {
     // its marker (see ui/airportLabels.ts), replay or not
     const airport = this.airportManager.airportLabelAt(e.point);
     if (airport !== null) {
+      this.airportClickAt = at;
       if (this.isLabelActivation(e.originalEvent)) {
         this.airportManager.activateAirport(airport);
       }

@@ -167,6 +167,23 @@ describe("layer handles", () => {
     );
   });
 
+  it("cut the translucent colour lines square and keep the ends of a selection round", () => {
+    const map = createMockApp().map!;
+
+    // A flight is a line per run of one colour: round caps overlapped where
+    // one run meets the next, a brighter bead on a translucent line
+    for (const id of [MAP_LAYERS.pathsAltitude, MAP_LAYERS.pathsAirspeed]) {
+      expect(map.layer(id).layout["line-cap"]).toBe("butt");
+      expect(map.layer(id).layout["line-join"]).toBe("round");
+    }
+    for (const id of [
+      MAP_LAYERS.pathsAltitudeSelected,
+      MAP_LAYERS.pathsAirspeedSelected,
+    ]) {
+      expect(map.layer(id).layout["line-cap"]).toBe("round");
+    }
+  });
+
   it("draw the selection's lines over the heat, below the paths and the labels", () => {
     const app = createMockApp();
     const map = app.map!;
@@ -181,8 +198,10 @@ describe("layer handles", () => {
     // At every zoom, the overview included
     expect(line.minzoom).toBeUndefined();
     expect(line.layout["visibility"]).toBe("none");
-    // Thin, and one colour: not a colour layer's line
-    expect(line.paint["line-width"]).toBeLessThanOrEqual(2);
+    // Thinner than a colour layer's line, and one colour: not taken for one
+    expect(line.paint["line-width"]).toBeLessThan(
+      map.layer(MAP_LAYERS.pathsAltitude).paint["line-width"] as number,
+    );
     expect(line.paint["line-color"]).toBe("#f2f2f2");
 
     const order = map.getLayersOrder();

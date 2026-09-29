@@ -15,7 +15,7 @@ import type { MapApp } from "../mapApp";
 import type { PathSegment } from "../types";
 import { segmentsForPathIds } from "../calculations/statistics";
 import { appendCurve, flatCurves } from "../calculations/curves";
-import { MAP_SOURCES } from "../utils/constants";
+import { MAP_LAYERS, MAP_SOURCES } from "../utils/constants";
 import { highlightsSelection } from "./layerVisibility";
 import {
   toLngLat,
@@ -53,6 +53,25 @@ export function selectionLines(
 }
 
 /**
+ * How strong the lines of a selection are: at full strength for a few
+ * flights, which have to be found, and at half of it for many. A click on
+ * the home base selects every flight of it, and 27 opaque lines out of one
+ * field and over one another were a white knot over the heat.
+ */
+const SELECTION_OPACITY = { few: 0.9, many: 0.45 };
+/** Flights up to which the lines are at full strength */
+const SELECTION_FEW = 3;
+/** Flights from which they are at the least, fading in between */
+const SELECTION_MANY = 20;
+
+/** The opacity of the lines of `count` selected flights (see above) */
+export function selectionOpacity(count: number): number {
+  const { few, many } = SELECTION_OPACITY;
+  const t = (count - SELECTION_FEW) / (SELECTION_MANY - SELECTION_FEW);
+  return few - (few - many) * Math.min(Math.max(t, 0), 1);
+}
+
+/**
  * Keep the lines on the selected flights of the dataset on the map while
  * they show (see highlightsSelection), and bring them up to date as they
  * come to show: under a colour layer, which draws the selection itself,
@@ -69,9 +88,17 @@ export function followSelectionHighlight(app: MapApp): void {
   // The lines are of another dataset or selection than the store's
   let stale = true;
   const write = (): void => {
-    void app.map
+    const map = app.map;
+    void map
       ?.getSource<GeoJSONSource>(MAP_SOURCES.selectionHighlight)
       ?.setData(lines);
+    if (map?.getLayer(MAP_LAYERS.selectionHighlight)) {
+      map.setPaintProperty(
+        MAP_LAYERS.selectionHighlight,
+        "line-opacity",
+        selectionOpacity(lines.features.length),
+      );
+    }
   };
   const update = (): void => {
     const selected = app.selectionRibbons

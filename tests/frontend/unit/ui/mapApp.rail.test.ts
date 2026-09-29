@@ -31,7 +31,10 @@ import {
   loadFeatures,
   loadWrapped,
 } from "../../../../kml_heatmap/frontend/services/featureLoader";
-import { REPLAY_CAMERA_MOVE } from "../../../../kml_heatmap/frontend/utils/mapHelpers";
+import {
+  DOUBLE_TAP_MS,
+  REPLAY_CAMERA_MOVE,
+} from "../../../../kml_heatmap/frontend/utils/mapHelpers";
 import * as motion from "../../../../kml_heatmap/frontend/utils/motion";
 import { segmentOf } from "../../testHelpers";
 
@@ -1049,7 +1052,11 @@ describe("MapApp controls and map", () => {
   });
 
   describe("map event handlers", () => {
-    const click = { point: { x: 10, y: 20 }, lngLat: { lng: 8.5, lat: 50.5 } };
+    const click = {
+      point: { x: 10, y: 20 },
+      lngLat: { lng: 8.5, lat: 50.5 },
+      originalEvent: { detail: 1, timeStamp: 0 },
+    };
 
     it("schedules a state save on move and zoom", async () => {
       await initializeApp(app);
@@ -1160,6 +1167,33 @@ describe("MapApp controls and map", () => {
       expect(mockLayerManagerInstance.closeSegmentPopup).toHaveBeenCalledTimes(
         1,
       );
+    });
+
+    it("leaves the popup of an airport a double tap carried off its marker", async () => {
+      await initializeApp(app);
+      app.selectedPathIds.add(1);
+      const marker = document.createElement("div");
+      marker.className = "maplibregl-marker";
+      mockMap(app).emit("click", {
+        ...click,
+        originalEvent: { target: marker, detail: 1, timeStamp: 1000 },
+      });
+
+      // The second tap, on the map the popup's pan moved under it
+      mockMap(app).emit("click", {
+        ...click,
+        originalEvent: { detail: 1, timeStamp: 1000 + DOUBLE_TAP_MS - 1 },
+      });
+      expect(mockAirportManagerInstance.closePopup).not.toHaveBeenCalled();
+      expect(mockPathSelectionInstance.clearSelection).not.toHaveBeenCalled();
+
+      // A tap of its own
+      mockMap(app).emit("click", {
+        ...click,
+        originalEvent: { detail: 1, timeStamp: 1000 + DOUBLE_TAP_MS },
+      });
+      expect(mockAirportManagerInstance.closePopup).toHaveBeenCalledOnce();
+      expect(mockPathSelectionInstance.clearSelection).toHaveBeenCalledOnce();
     });
 
     it("does not clear an empty selection", async () => {
@@ -1325,7 +1359,7 @@ describe("MapApp controls and map", () => {
       await initializeApp(app);
 
       expect(mockMap(app).options["fitBoundsOptions"]).toEqual({
-        padding: 30,
+        padding: 48,
         bearing: 90,
       });
     });

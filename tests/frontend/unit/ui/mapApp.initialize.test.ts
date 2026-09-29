@@ -558,7 +558,7 @@ describe("MapApp.initialize", () => {
           [8, 50],
           [10, 52],
         ],
-        { padding: 30, pitch: 0 },
+        { padding: 48, pitch: 0 },
       );
       expect(app.map!.getBearing()).toBe(0);
       expect(app.map!.getPitch()).toBe(0);
@@ -1167,7 +1167,7 @@ describe("MapApp.initialize", () => {
           [8, 50],
           [10, 52],
         ],
-        fitBoundsOptions: { padding: 30 },
+        fitBoundsOptions: { padding: 48 },
       });
       expect(mockMap(app).options).not.toHaveProperty("center");
       expect(mockMap(app).options).not.toHaveProperty("zoom");

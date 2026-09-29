@@ -227,6 +227,14 @@ export function isInMarker(target: EventTarget | null | undefined): boolean {
  * Only a zoom this switched off is switched on again, once the last finger
  * has left.
  *
+ * A touch within a double tap of one on a marker counts as on the marker
+ * too, and so does the `dblclick` that follows it: the popup the first tap
+ * opens pans the map until it shows in full, which can carry the marker
+ * out from under the second, and that one would zoom the map beside it.
+ * The touches are told by their time, as in createActivationFilter, but
+ * the `dblclick` by the touch before it: a busy page hands it over seconds
+ * late, and with the time it is handed over.
+ *
  * Left as it is: a tap followed by a press and a drag, MapLibre's zoom with
  * one finger. Its only switch is `touchZoomRotate`, which is the pinch as
  * well, and a pinch with a finger on a marker has to go on working. The
@@ -237,13 +245,20 @@ export function keepMarkerTapsFromZoom(
   isTarget: (point: Point) => boolean = () => false,
 ): () => void {
   let switchedOff = false;
+  /** When the last touch on a target began */
+  let touchedAt = -Infinity;
+  /** Whether the last touch was on a target, or within a double tap of one */
+  let onTargetLast = false;
   const onTarget = (e: MapMouseEvent | MapTouchEvent): boolean =>
     isOnMarker(e) || isTarget(e.point);
   const onDoubleClick = (e: MapMouseEvent): void => {
-    if (onTarget(e)) e.preventDefault();
+    if (onTarget(e) || onTargetLast) e.preventDefault();
   };
   const onTouchStart = (e: MapTouchEvent): void => {
-    if (!onTarget(e) || !map.doubleClickZoom.isEnabled()) return;
+    const at = e.originalEvent.timeStamp;
+    if (onTarget(e)) touchedAt = at;
+    onTargetLast = at - touchedAt < DOUBLE_TAP_MS;
+    if (!onTargetLast || !map.doubleClickZoom.isEnabled()) return;
     map.doubleClickZoom.disable();
     switchedOff = true;
   };
