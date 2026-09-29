@@ -136,7 +136,7 @@ export function generateFunFactsHtml(funFacts: FunFact[]): string {
 /**
  * Colour class of one fleet entry, from its flight count relative to the
  * busiest and the quietest aircraft of the same fleet. A fleet whose entries
- * all have the same count is drawn entirely in the warmest colour.
+ * all have the same count is drawn entirely in the strongest tint.
  */
 export function calculateAircraftColorClass(
   flights: number,
@@ -147,13 +147,13 @@ export function calculateAircraftColorClass(
 
   const normalized = (flights - minFlights) / (maxFlights - minFlights);
   if (normalized >= 0.75) {
-    return "fleet-aircraft-high"; // Most flights - warm color
+    return "fleet-aircraft-high"; // Most flights, the strongest tint
   } else if (normalized >= 0.5) {
     return "fleet-aircraft-medium-high";
   } else if (normalized >= 0.25) {
     return "fleet-aircraft-medium-low";
   } else {
-    return "fleet-aircraft-low"; // Least flights - cool color
+    return "fleet-aircraft-low"; // Fewest flights, the faintest tint
   }
 }
 

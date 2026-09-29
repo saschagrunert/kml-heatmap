@@ -626,7 +626,7 @@ export class DataManager {
       !this.destroyed
     ) {
       this.fail(
-        "No flight data available for " + (year === "all" ? "all years" : year),
+        "Could not load the flights" + (year === "all" ? "" : " of " + year),
         retry,
       );
     }

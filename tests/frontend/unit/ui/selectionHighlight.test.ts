@@ -7,8 +7,12 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import {
   followSelectionHighlight,
   selectionLines,
+  selectionOpacity,
 } from "../../../../kml_heatmap/frontend/ui/selectionHighlight";
-import { MAP_SOURCES } from "../../../../kml_heatmap/frontend/utils/constants";
+import {
+  MAP_LAYERS,
+  MAP_SOURCES,
+} from "../../../../kml_heatmap/frontend/utils/constants";
 import { flatCurves } from "../../../../kml_heatmap/frontend/calculations/curves";
 import {
   asMapApp,
@@ -180,6 +184,47 @@ describe("selection highlight", () => {
 
     app.selectionRibbons = false;
     expect(lines()).toHaveLength(2);
+  });
+
+  it("fades the lines as more flights are selected", () => {
+    const opacity = (): unknown =>
+      app.map!.layer(MAP_LAYERS.selectionHighlight).paint["line-opacity"];
+
+    // An airport's whole traffic: 25 flights of one segment each
+    const ids = Array.from({ length: 25 }, (_, index) => index + 1);
+    app.currentData = createDataset(
+      ids.map((id) => ({ id, year: 2025 })),
+      ids.map((id) =>
+        createSegment({
+          path_id: id,
+          coords: [
+            [50, id / 10],
+            [50.1, id / 10],
+          ],
+        }),
+      ),
+    );
+
+    select(1);
+    expect(opacity()).toBe(0.9);
+    select(...ids);
+    expect(lines()).toHaveLength(25);
+    expect(opacity()).toBeCloseTo(0.45);
+    // By the lines drawn: none while the 3D view draws ribbons instead
+    app.selectionRibbons = true;
+    expect(opacity()).toBe(0.9);
+    app.selectionRibbons = false;
+    select(1, 2);
+    expect(opacity()).toBe(0.9);
+  });
+
+  it("draws a few flights at full strength and many at half of it", () => {
+    expect(selectionOpacity(1)).toBe(0.9);
+    expect(selectionOpacity(3)).toBe(0.9);
+    expect(selectionOpacity(10)).toBeLessThan(0.9);
+    expect(selectionOpacity(10)).toBeGreaterThan(0.45);
+    expect(selectionOpacity(20)).toBeCloseTo(0.45);
+    expect(selectionOpacity(300)).toBeCloseTo(0.45);
   });
 
   it("writes the lines again once the map has its WebGL context back", () => {

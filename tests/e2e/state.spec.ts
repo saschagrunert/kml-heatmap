@@ -540,7 +540,7 @@ test.describe("State Persistence", () => {
           [west, south],
           [east, north],
         ],
-        { padding: 30 },
+        { padding: 48 },
       )!;
       const center = map.getCenter();
       const target = fit.center as { lng: number; lat: number };
