@@ -122,9 +122,10 @@ describe("layer handles", () => {
       expect(layer.type).toBe("heatmap");
       expect(layer.source).toBe(id);
       // One layer for every zoom: a second one could not show the tiles
-      // of the level before while its own still load
+      // of the level before while its own still load. It ends where it has
+      // faded out, so its source is no longer cut into tiles further in.
       expect(layer.minzoom).toBeUndefined();
-      expect(layer.maxzoom).toBeUndefined();
+      expect(layer.maxzoom).toBe(HEAT_LINES.fullZoom);
       expect(layer.filter).toBeUndefined();
     }
 

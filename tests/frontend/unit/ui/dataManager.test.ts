@@ -1848,25 +1848,37 @@ describe("DataManager", () => {
     /**
      * What the weight comes to for a feature with these properties. Only the
      * shape heatmapWeight builds is understood: an interpolation over the
-     * zoom whose outputs are the count or `["max", count, floor]`.
+     * zoom whose outputs are made of `get`, `coalesce`, `max`, `*` and `-`.
      */
-    const weightAt = (zoom: number, properties: { w?: number }): number => {
+    const weightAt = (
+      zoom: number,
+      properties: { w?: number; n?: number },
+    ): number => {
       const weight = paint["heatmap-weight"] as unknown[];
       expect(weight.slice(0, 3)).toEqual([
         "interpolate",
         ["exponential", 0.5],
         ["zoom"],
       ]);
-      const count = properties.w ?? 1;
+      const feature = { w: 1, ...properties } as Record<string, number>;
       const output = (value: unknown): number => {
-        const countExpression = ["get", "w"];
-        if (JSON.stringify(value) === JSON.stringify(countExpression)) {
-          return count;
+        if (typeof value === "number") return value;
+        const [operator, ...args] = value as [string, ...unknown[]];
+        switch (operator) {
+          case "get":
+            return feature[args[0] as string] ?? NaN;
+          case "coalesce": {
+            const [name, fallback] = args as [[string, string], number];
+            return feature[name[1]] ?? fallback;
+          }
+          case "max":
+            return Math.max(...args.map(output));
+          case "*":
+            return args.map(output).reduce((a, b) => a * b);
+          case "-":
+            return output(args[0]) - output(args[1]);
         }
-        const [operator, first, floor] = value as [string, unknown, number];
-        expect(operator).toBe("max");
-        expect(first).toEqual(countExpression);
-        return Math.max(count, floor);
+        throw new Error(`not understood: ${JSON.stringify(value)}`);
       };
       const stops = weight.slice(3);
       const zooms = stops.filter((_, i) => i % 2 === 0) as number[];
@@ -1944,6 +1956,36 @@ describe("DataManager", () => {
           (weightAt(zoom, { w: 0.00625 }) * intensityAt(zoom)) /
             HEATMAP_LEAST_POINT_CONTRIBUTION,
         ).toBeCloseTo(1, 1);
+      }
+    });
+
+    it("draws a point of merged fixes as its fixes were, with their floors and less the cuts they no longer lose", () => {
+      for (let zoom = 0; zoom <= HEATMAP_CLUSTER.maxZoom; zoom += 0.5) {
+        // A cluster has no count, and a point of merged fixes is one fix
+        // among the clusters, which take no floor of their own
+        expect(weightAt(zoom, { w: 3, n: 4 })).toBe(weightAt(zoom, { w: 3 }));
+      }
+      for (
+        let zoom = HEATMAP_CLUSTER.maxZoom + 1;
+        zoom <= MAP_MAX_ZOOM;
+        zoom++
+      ) {
+        const floor = HEATMAP_LEAST_POINT_CONTRIBUTION / intensityAt(zoom);
+        const cut = weightAt(zoom, { w: 50 }) - weightAt(zoom, { w: 50, n: 2 });
+        // What MapLibre's cut takes out of a point: more than the least it
+        // draws at all, less than the floor
+        expect(cut * intensityAt(zoom)).toBeGreaterThan(
+          1 / 255 / 16 / 0.3989422804014327,
+        );
+        expect(cut).toBeLessThan(floor);
+        // Heavy fixes weigh their heat, light ones their floors, each less
+        // the cut for every fix beyond the first
+        expect(weightAt(zoom, { w: 50, n: 3 })).toBeCloseTo(50 - 2 * cut, 9);
+        expect(weightAt(zoom, { w: floor / 100, n: 3 })).toBeCloseTo(
+          3 * floor - 2 * cut,
+          9,
+        );
+        expect(weightAt(zoom, { w: 2, n: 1 })).toBe(2);
       }
     });
 

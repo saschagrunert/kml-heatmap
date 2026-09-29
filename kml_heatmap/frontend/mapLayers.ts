@@ -241,7 +241,9 @@ function addDataLayersTo(map: MapLibreMap): void {
   // one by one (see HEATMAP_CLUSTER), adding up the heat of each point, `w`
   // (see drawHeat in services/heatSource.ts). Isolate draws the selected
   // flights from a source of their own, so neither is written again for
-  // it.
+  // it. The layers end where they have faded out to the heat lines (see
+  // HEAT_LINES), so their sources are not cut into tiles of every level
+  // beyond that no one sees.
   for (const id of [MAP_LAYERS.heat, MAP_LAYERS.heatIsolated]) {
     map.addSource(id, {
       type: "geojson",
@@ -251,7 +253,16 @@ function addDataLayersTo(map: MapLibreMap): void {
       clusterMaxZoom: HEATMAP_CLUSTER.maxZoom,
       clusterProperties: { w: ["+", ["get", "w"]] },
     });
-    map.addLayer({ id, type: "heatmap", source: id, layout: hidden }, before);
+    map.addLayer(
+      {
+        id,
+        type: "heatmap",
+        source: id,
+        maxzoom: HEAT_LINES.fullZoom,
+        layout: hidden,
+      },
+      before,
+    );
   }
 
   // What the heatmap hands over to when zoomed in (see HEAT_LINES): the
