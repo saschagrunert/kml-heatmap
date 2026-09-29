@@ -588,6 +588,26 @@ describe("the heat cloud", () => {
       expect(cuts.count).toBe(count + 1);
     });
 
+    it("is cut where a scripted camera comes to rest and moves on at once, as the hotspot tour turns over each place it arrives at", async () => {
+      await follow();
+      const count = cuts.count;
+      // Arrived at the next place (restCamera), away from the first
+      map().setCenter({ lng: 16, lat: 48 });
+      map().emit("moveend");
+      // And turning over it, which ends with no rest the cloud follows
+      map().emit("movestart", REPLAY_CAMERA_MOVE);
+      map().isMoving.mockReturnValue(true);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(cuts.count).toBe(count + 1);
+      expect(latitudesOf(drawn())).toEqual([]);
+      // A move of the user's own still comes to rest of its own
+      map().setCenter({ lng: 11.02, lat: 48 });
+      map().emit("moveend");
+      map().emit("movestart");
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(cuts.count).toBe(count + 1);
+    });
+
     it("is cut for the relief level, all of the map, while a replay runs", async () => {
       await follow();
       app.replayActive = true;
@@ -924,6 +944,73 @@ describe("the heat cloud", () => {
       expect(map().getLayer(HEAT_CLOUD_LAYER)).toBeUndefined();
       expect(app.store.get("heatCloud")).toBe(false);
       expect(drawn()).toBeNull();
+    });
+
+    it("hands Wrapped's map over to the heatmap as its intro ends, fading out over it rather than leaving the map without heat", async () => {
+      vi.useFakeTimers();
+      const now = vi.spyOn(performance, "now").mockReturnValue(1000);
+      try {
+        await follow();
+        app.store.batch(() => {
+          app.wrappedVisible = true;
+          app.forcedHeatCloud = true;
+        });
+        const cloud = drawn();
+        expect(style()!.fade).toBe(1);
+
+        app.forcedHeatCloud = false;
+        // The heatmap shows at once, under the cloud, drawn as it was
+        expect(app.store.get("heatCloud")).toBe(false);
+        expect(map().getLayer(HEAT_CLOUD_LAYER)).toBeDefined();
+        expect(drawn()).toBe(cloud);
+        expect(style()).toMatchObject({ liftM: liftM(7), opacity: 1 });
+        // Its glow goes, not its strength: that dimmed the heatmap under it
+        now.mockReturnValue(1250);
+        expect(style()!.fade).toBeCloseTo(0.75, 9);
+        expect(style()!.opacity).toBe(1);
+        now.mockReturnValue(3000);
+        expect(style()!.fade).toBe(0);
+        vi.advanceTimersByTime(1000);
+        expect(map().getLayer(HEAT_CLOUD_LAYER)).toBeUndefined();
+        expect(drawn()).toBeNull();
+
+        // Forced again meanwhile, it stays
+        app.forcedHeatCloud = true;
+        app.forcedHeatCloud = false;
+        app.forcedHeatCloud = true;
+        vi.advanceTimersByTime(1000);
+        expect(map().getLayer(HEAT_CLOUD_LAYER)).toBeDefined();
+        expect(style()!.fade).toBe(1);
+
+        // A close takes a fading cloud off at once
+        app.forcedHeatCloud = false;
+        expect(map().getLayer(HEAT_CLOUD_LAYER)).toBeDefined();
+        app.wrappedVisible = false;
+        expect(map().getLayer(HEAT_CLOUD_LAYER)).toBeUndefined();
+        expect(drawn()).toBeNull();
+        vi.advanceTimersByTime(1000);
+        expect(map().getLayer(HEAT_CLOUD_LAYER)).toBeUndefined();
+        app.wrappedVisible = true;
+        app.forcedHeatCloud = true;
+
+        // The 3D view keeps a cloud of its own, and a closed dialog fades
+        // nothing
+        app.threeDVisible = true;
+        app.forcedHeatCloud = false;
+        expect(style()!.fade).toBe(1);
+        app.store.batch(() => {
+          app.threeDVisible = false;
+          app.forcedHeatCloud = true;
+        });
+        app.store.batch(() => {
+          app.wrappedVisible = false;
+          app.forcedHeatCloud = false;
+        });
+        expect(map().getLayer(HEAT_CLOUD_LAYER)).toBeUndefined();
+      } finally {
+        now.mockRestore();
+        vi.useRealTimers();
+      }
     });
 
     it("draws the year of the cards, whatever the Heatmap switch, Isolate, a colour layer or a selection say, and leaves them as they were", async () => {

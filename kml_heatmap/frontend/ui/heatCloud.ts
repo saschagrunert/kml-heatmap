@@ -114,6 +114,13 @@ import { REPLAY_ALL_LAYER } from "./replayAllLayer";
  */
 const CLOUD_BEFORE = MAP_LAYERS.pathsAltitudeRibbons;
 
+/**
+ * How long Wrapped's cloud takes to fade out over the flat heatmap it hands
+ * the dialog's map to, in ms: about as long as the heatmap takes to cut its
+ * tiles, early in the camera's settle on the overview
+ */
+const CLOUD_HANDOVER_MS = 1000;
+
 /** How strongly the cloud is drawn while a replay runs */
 const CLOUD_REPLAY_OPACITY = 0.25;
 
@@ -371,22 +378,35 @@ export function followHeatCloud(app: MapApp): void {
   const shown = (): boolean =>
     wanted() && (app.forcedHeatCloud || app.heatmapVisible);
 
+  /**
+   * When Wrapped's cloud began to hand the dialog's map over to the flat
+   * heatmap (see sync), 0 while it does not: it fades out over
+   * CLOUD_HANDOVER_MS, drawn as it was, over the heatmap, which shows at
+   * once and has the time to cut its tiles. Taken off at once, it left
+   * the map without heat for the frames those took.
+   */
+  let leaving = 0;
+  let left: ReturnType<typeof setTimeout> | undefined;
+  /** Wrapped's cloud was on as the store last changed */
+  let wasForced = false;
+
   const style = (): HeatCloudStyle | null => {
-    if (!shown()) return null;
+    if (!shown() && !leaving) return null;
+    const forced = app.forcedHeatCloud || !!leaving;
     // The relief's own exaggeration, which it switches as a zoom ends (see
     // ui/terrain.ts), or the level's where the map draws none
     const exaggeration =
       map.getTerrain()?.exaggeration ?? liftExaggeration(level());
     const metres = exaggeration * FEET_TO_METERS;
     return {
-      groundM: onReliefIn(app, app.forcedHeatCloud) ? metres : 0,
+      groundM: onReliefIn(app, forced) ? metres : 0,
       // At their height on the flat map too while the replay of all
       // flights builds it up, where its trails fly in it
-      liftM:
-        lifted && (app.threeDVisible || app.forcedHeatCloud || growing())
-          ? metres
-          : 0,
+      liftM: lifted && (app.threeDVisible || forced || growing()) ? metres : 0,
       opacity,
+      fade: leaving
+        ? Math.max(1 - (performance.now() - leaving) / CLOUD_HANDOVER_MS, 0)
+        : 1,
       flow: !app.replayActive,
       until: growing() ? (replayAllTime(app) ?? 0) : undefined,
       // Wrapped shows the whole year, and the flat map (the replay of all
@@ -593,7 +613,7 @@ export function followHeatCloud(app: MapApp): void {
   const place = (): void => {
     if (hasLostContext(map)) return;
     const on = !!map.getLayer(HEAT_CLOUD_LAYER);
-    if (!wanted()) {
+    if (!wanted() && !leaving) {
       if (on) map.removeLayer(HEAT_CLOUD_LAYER);
       return;
     }
@@ -618,6 +638,22 @@ export function followHeatCloud(app: MapApp): void {
 
   const sync = (): void => {
     if (app.signal.aborted) return;
+    // Wrapped's cloud hands its map over to the flat heatmap as its intro
+    // ends (ui/wrappedIntro.ts), fading out over it, unless the 3D view
+    // keeps a cloud there. A close takes it off at once: the page's map
+    // shows the user's own heat.
+    const forced = app.forcedHeatCloud;
+    if (forced || wanted() || !app.wrappedVisible) {
+      clearTimeout(left);
+      leaving = 0;
+    } else if (wasForced && drawn) {
+      leaving = performance.now();
+      left = setTimeout(() => {
+        leaving = 0;
+        sync();
+      }, CLOUD_HANDOVER_MS);
+    }
+    wasForced = forced;
     place();
     // The flat heatmap steps aside while the layer is there to draw
     app.heatCloud = wanted();
@@ -630,8 +666,9 @@ export function followHeatCloud(app: MapApp): void {
       // asks for them again as soon as the closing dialog hands it the
       // focus back.
       if (left3D) forget(false);
-      draw(null);
+      if (!leaving) draw(null);
       release();
+      map.triggerRepaint();
       return;
     }
     // Wrapped's at full strength: the dialog hides what the heatmap steps
@@ -680,13 +717,23 @@ export function followHeatCloud(app: MapApp): void {
     const unsubscribe = app.store.subscribeKeys(CLOUD_KEYS, sync);
     // Cut around the view, or closer in than the last relief level, the
     // points are cut again for the view the map comes to rest at, in a
-    // task of their own after the frame the move ends in
+    // task of their own after the frame the move ends in. Not while the
+    // map moves on by then, unless a scripted camera moves it, whose rest
+    // is none the cloud follows (REPLAY_CAMERA_MOVE): the hotspot tour
+    // turns over each place from the moment it arrives there (restCamera),
+    // and every place after the first stayed dark.
     let recut: ReturnType<typeof setTimeout> | undefined;
+    let scripted = false;
+    const started = map.on("movestart", (event: object) => {
+      scripted = isReplayCameraMove(event);
+    });
     const moved = map.on("moveend", (event: object) => {
       if (isReplayCameraMove(event) || !shown()) return;
       clearTimeout(recut);
       recut = setTimeout(() => {
-        if (signal.aborted || !shown() || map.isMoving()) return;
+        if (signal.aborted || !shown() || (map.isMoving() && !scripted)) {
+          return;
+        }
         updatePoints();
       }, 0);
     });
@@ -704,8 +751,10 @@ export function followHeatCloud(app: MapApp): void {
     });
     signal.addEventListener("abort", () => {
       clearTimeout(idle);
+      clearTimeout(left);
       unsubscribe();
       styled.unsubscribe();
+      started.unsubscribe();
       moved.unsubscribe();
       clearTimeout(recut);
     });

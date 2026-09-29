@@ -714,7 +714,21 @@ all through the intro, and the camera comes down only two zoom levels
 closer than that (`HOME` in `ui/wrappedIntro.ts`): five levels closer, the
 few stretches the circuits and the taxiing at the home field are merged
 into at the overview's level were each a hundred pixels long and glowed
-far past white, a hard-edged polygon round the field. Side by side the map
+far past white, a hard-edged polygon round the field. As the settle sets
+off, the intro hands the map back to the flat heatmap and the projection
+the user had (`flat` in `ui/wrappedIntro.ts`, which a skip goes through as
+well), so the camera settles on the overview a skip shows, and the flights
+to a destination hovered on the cards and back fly over a heatmap MapLibre
+draws anew at every zoom. The cloud, cut only where the map comes to rest,
+drew the year's coarse stretches over the field flown in to and the
+destination's view alone all the way back out. It fades out over the
+heatmap in `CLOUD_HANDOVER_MS` (1 s), drawn as it was: the heatmap shows
+at once and cuts its tiles under it, where taken off at once the cloud
+left the map without heat for the frames those took. A close takes it off
+at once, as the page's map shows the user's own heat. The fade scales its
+heat (`fade` of `HeatCloudStyle`, on `u_gain`) rather than its `opacity`,
+which moves what it glows over towards that much of white and turned the
+heatmap under it red as it went to 0. Side by side the map
 has the whole dialog while the intro plays and keeps that size while it
 draws back into its panel beside the cards (a `clip-path` transition in
 `wrapped.css`), with its view padded by the width of the cards on its way
@@ -737,7 +751,10 @@ quarter (`CLOUD_VIEW_SPARE`: a pan of a view, or a zoom out of one and a
 half levels, shows no edge of it before the map comes to rest; the GPU time
 is the same, as the stretches out of the view are dropped before a pixel is
 drawn), and again once the map comes to rest with the view out of it, in a
-task after the frame the move ends in (the points of the last four zoom
+task after the frame the move ends in, unless the map moves on by then in a
+move whose rest it follows: a scripted one (`REPLAY_CAMERA_MOVE`) is not,
+and the hotspot tour, which turns over each place as it arrives, showed no
+heat at any place after the first (the points of the last four zoom
 levels are kept, so a zoom back into one takes no work; during a replay,
 whose camera moves on its own, they are the relief level's of all the
 map), along the curves the

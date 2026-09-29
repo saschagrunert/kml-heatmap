@@ -65,8 +65,9 @@ export interface StoreState extends ToggleFlags {
   /**
    * Whether the heat cloud is drawn with the 3D view off as well: for
    * Wrapped's intro (ui/wrappedIntro.ts), which flies over it without
-   * lifting the flights, until the intro is skipped or the dialog closes
-   * (WrappedManager.closeWrapped). Neither saved nor carried by a link.
+   * lifting the flights, until it settles, is skipped or the dialog
+   * closes (WrappedManager.closeWrapped). Neither saved nor carried by a
+   * link.
    */
   forcedHeatCloud: boolean;
   /**

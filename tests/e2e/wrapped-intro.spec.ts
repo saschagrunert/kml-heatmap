@@ -16,6 +16,7 @@ import {
   getOrientation,
   getZoom,
   heatCloudOnMap,
+  heatmapOnMap,
   setOrientation,
   waitForMapReady,
 } from "./map";
@@ -235,9 +236,16 @@ test.describe("Wrapped's intro", () => {
       measured: true,
       padding: { top: 0, right: 0, bottom: 0, left: 0 },
     });
+    // On the projection of before and the flat heatmap, as after a skip:
+    // the globe and the cloud were the intro's, and the cloud has faded
+    // out over the heatmap
     await expect
       .poll(() => getOrientation(page))
-      .toMatchObject({ bearing: 0, pitch: 0, projection: "globe" });
+      .toMatchObject({ bearing: 0, pitch: 0, projection: "mercator" });
+    await expect
+      .poll(() => heatCloudOnMap(page))
+      .toMatchObject({ onMap: false, stepsIn: false });
+    expect(await heatmapOnMap(page)).toBe(true);
     await expect(
       page.locator("#wrapped-stats .stat-card").first(),
     ).toBeVisible();
@@ -257,8 +265,8 @@ test.describe("Wrapped's intro", () => {
   }) => {
     const modal = await openWithIntro(page);
 
-    // The intro draws the cloud over the globe with the 3D view off, and
-    // both stay while the dialog is open, whether it still flies or not
+    // The intro draws the cloud over the globe with the 3D view off, until
+    // it settles
     await expect
       .poll(() => getOrientation(page).then((view) => view.projection), {
         timeout: 15000,

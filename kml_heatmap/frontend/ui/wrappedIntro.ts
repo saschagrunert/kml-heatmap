@@ -22,10 +22,11 @@
  * does not arrive in time (INTRO_WAIT_MS).
  *
  * The cloud is drawn without switching the 3D view on (forcedHeatCloud),
- * over the globe; both stay while Wrapped is open after the intro and go
- * back as it closes (WrappedManager.closeWrapped). Neither reaches the link
- * or the saved state, which keep the user's switches while Wrapped holds
- * the user's view (StateManager.saveMapState).
+ * over the globe; both go as the intro ends, however it ends, and the map
+ * beside the cards shows the flat heatmap, which MapLibre draws anew at
+ * every zoom of a flight to a destination. Neither reaches the link or the
+ * saved state, which keep the user's switches while Wrapped holds the
+ * user's view (StateManager.saveMapState).
  *
  * The flight and the turn carry REPLAY_CAMERA_MOVE, so what the app does
  * as the map comes to rest waits for the settle, which does not: the
@@ -384,22 +385,30 @@ export function startWrappedIntro(
     onEnd();
   };
   /**
+   * The map back on the projection of before, with the flat heatmap, which
+   * MapLibre draws anew at every zoom of a flight to a destination: the
+   * cloud fades out over it (see ui/heatCloud.ts). As the settle sets off,
+   * whose camera then comes to rest on the overview Wrapped opens on
+   * without the intro, or on a skip.
+   */
+  const flat = (): void =>
+    app.store.batch(() => {
+      app.globeVisible = globeBefore;
+      app.forcedHeatCloud = false;
+    });
+  /**
    * Wrapped as it opens without the intro: the map in its panel beside or
    * below the cards, measured again and fitted to the overview at once
    */
   const rest = (): void => {
     if (!phase) return;
+    flat();
     end();
     app.map?.resize();
     fit({ animate: false });
   };
   const skip = (): void => {
-    if (phase !== "intro") return;
-    app.store.batch(() => {
-      app.globeVisible = globeBefore;
-      app.forcedHeatCloud = false;
-    });
-    rest();
+    if (phase === "intro") rest();
   };
   /**
    * To rest on the overview as the cards come in. Not tagged: the app
@@ -416,6 +425,7 @@ export function startWrappedIntro(
     phase = "settle";
     replay?.stop();
     replay = null;
+    flat();
     // Taken while the stacked column is still out of the layout
     const room = cardsRoom();
     showIntroChrome("settle");
@@ -481,12 +491,8 @@ export function startWrappedIntro(
       });
       // The user takes over: a press, a wheel or a key on the map. The map
       // stops the camera for them, and the intro makes way, or the settle
-      // ends where it was going.
-      found.followTakeover(
-        map,
-        () => (phase === "intro" ? skip() : rest()),
-        listening.signal,
-      );
+      // ends where it was going: either rests.
+      found.followTakeover(map, rest, listening.signal);
       return true;
     },
 
