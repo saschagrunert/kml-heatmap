@@ -1,6 +1,7 @@
 """Tests for validation module."""
 
 import os
+import zipfile
 from pathlib import Path, PureWindowsPath
 from unittest.mock import patch
 
@@ -26,6 +27,13 @@ class TestValidateKmlFile:
     def test_uppercase_extension_accepted(self, tmp_path):
         path = tmp_path / "TEST.KML"
         path.write_text("<kml/>")
+        assert validate_kml_file(str(path)) == (True, None)
+
+    @pytest.mark.parametrize("name", ["track.kmz", "TRACK.KMZ"])
+    def test_kmz_accepted(self, tmp_path, name):
+        path = tmp_path / name
+        with zipfile.ZipFile(path, "w") as archive:
+            archive.writestr("doc.kml", "<kml/>")
         assert validate_kml_file(str(path)) == (True, None)
 
     def test_nonexistent_file(self, tmp_path):
@@ -234,6 +242,7 @@ class TestFindKmlFiles:
             "2_a.kml",
             "flight.KML",
             "readme.txt",
+            "4_c.kmz",
             "sub/3_b.kml",
             "sub/1_b.kml",
             "sub/deeper/x.kml",
@@ -246,6 +255,7 @@ class TestFindKmlFiles:
 
         assert found == [
             "2_a.kml",
+            "4_c.kmz",
             "10_a.kml",
             "flight.KML",
             "sub/1_b.kml",

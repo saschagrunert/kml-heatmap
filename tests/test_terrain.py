@@ -7,27 +7,25 @@ source of the test's own. conftest.py makes any download fail loudly.
 
 import ast
 import http.client
-import io
 import logging
 import math
 import operator
 import os
 import re
 import struct
-import urllib.error
 import zlib
 from array import array
 from concurrent.futures.process import BrokenProcessPool
-from email.message import Message
 from pathlib import Path
+from typing import ClassVar
 from unittest.mock import MagicMock
 
 import pytest
 
 import kml_heatmap.terrain as terrain_module
 from kml_heatmap.constants import KM_TO_NAUTICAL_MILES, METERS_TO_FEET
-from kml_heatmap.data_exporter import PATH_ID_BITS
 from kml_heatmap.exceptions import TerrainUnavailableError
+from kml_heatmap.path_content import PATH_ID_BITS
 from kml_heatmap.segment_codec import (
     ALTITUDE_STEP,
     COORDINATE_SCALE,
@@ -491,22 +489,181 @@ class TestSamplePathElevations:
 # --- Tiles from AWS -----------------------------------------------------
 
 
-def _response(body):
-    response = MagicMock()
-    response.read.return_value = body
-    response.__enter__.return_value = response
-    return response
+class FakeResponse:
+    """What ``HTTPSConnection.getresponse`` answers."""
+
+    def __init__(self, status=200, body=b"", headers=None):
+        self.status = status
+        self._body = body
+        self._headers = headers or {}
+
+    def read(self, amount=None):
+        if amount is None:
+            amount = len(self._body)
+        body, self._body = self._body[:amount], self._body[amount:]
+        return body
+
+    def isclosed(self):
+        # A real response closes once its body is read to the end
+        return not self._body
+
+    def getheader(self, name, default=None):
+        return self._headers.get(name, default)
+
+
+class FakeConnection:
+    """An ``HTTPSConnection`` whose answers a test scripts.
+
+    ``answer`` is called with the request path and returns a
+    ``FakeResponse``, or raises. ``connections`` counts the connections
+    opened and ``requests`` lists every path asked for, across threads.
+    """
+
+    connections = 0
+    requests: ClassVar[list[str]] = []
+    closed = 0
+
+    def __init__(self, host, timeout=None, context=None):
+        self.host = host
+        self.timeout = timeout
+        self.context = context
+        self.headers = None
+        self.path = ""
+        type(self).connections += 1
+
+    def request(self, method, path, headers=None):
+        assert method == "GET"
+        self.path = path
+        self.headers = headers
+        type(self).requests.append(path)
+
+    def getresponse(self):
+        return self.answer(self.path)
+
+    def close(self):
+        type(self).closed += 1
+
+    @staticmethod
+    def answer(path):
+        return FakeResponse(200, _tile_png(250.0))
+
+
+@pytest.fixture
+def connections(monkeypatch):
+    """A ``FakeConnection`` in place of the real one, counters reset."""
+    FakeConnection.connections = 0
+    FakeConnection.closed = 0
+    FakeConnection.requests = []
+    monkeypatch.setattr(terrain_module, "HTTPSConnection", FakeConnection)
+    return FakeConnection
+
+
+def _answers(answer):
+    """A connection class whose responses come from ``answer(path)``."""
+    return type(
+        "ScriptedConnection", (FakeConnection,), {"answer": staticmethod(answer)}
+    )
 
 
 def _tile_png(elevation=250.0):
     return terrarium_png(lambda x, y: elevation)
 
 
+@pytest.fixture(autouse=True)
+def no_proxy_environment(monkeypatch):
+    """No proxy of the machine running the tests reaches the fetch."""
+    for name in ("https_proxy", "HTTPS_PROXY", "no_proxy", "NO_PROXY"):
+        monkeypatch.delenv(name, raising=False)
+    return monkeypatch
+
+
+class TestHttpsProxy:
+    """The proxy settings urlopen honours, which the fetch honours as well."""
+
+    class Tunnelled(FakeConnection):
+        def __init__(self, host, port=None, timeout=None, context=None):
+            super().__init__(host, timeout, context)
+            self.port = port
+            self.tunnel = None
+
+        def set_tunnel(self, host, port=None, headers=None):
+            self.tunnel = (host, headers)
+
+    @pytest.fixture
+    def tunnelled(self, monkeypatch):
+        monkeypatch.setattr(self.Tunnelled, "connections", 0)
+        monkeypatch.setattr(terrain_module, "HTTPSConnection", self.Tunnelled)
+        return self.Tunnelled
+
+    def test_a_proxy_tunnels_to_the_host(
+        self, tmp_path, no_proxy_environment, tunnelled
+    ):
+        no_proxy_environment.setenv("HTTPS_PROXY", "http://proxy.example:3128")
+
+        connection = TerrariumTiles(tmp_path)._connection("s3.amazonaws.com")
+
+        assert isinstance(connection, tunnelled)
+        assert (connection.host, connection.port) == ("proxy.example", 3128)
+        assert connection.tunnel == ("s3.amazonaws.com", {})
+
+    @pytest.mark.usefixtures("tunnelled")
+    @pytest.mark.parametrize(
+        ("proxy", "port"),
+        [("proxy.example", 80), ("https://proxy.example", 443)],
+    )
+    def test_a_proxy_without_a_port_or_scheme(
+        self, tmp_path, no_proxy_environment, proxy, port
+    ):
+        no_proxy_environment.setenv("https_proxy", proxy)
+
+        connection = TerrariumTiles(tmp_path)._connection("s3.amazonaws.com")
+
+        assert (connection.host, connection.port) == ("proxy.example", port)
+
+    @pytest.mark.usefixtures("tunnelled")
+    def test_credentials_in_the_proxy_url_authorize(
+        self, tmp_path, no_proxy_environment
+    ):
+        no_proxy_environment.setenv(
+            "HTTPS_PROXY", "http://me:p%40ss@proxy.example:8080"
+        )
+
+        connection = TerrariumTiles(tmp_path)._connection("s3.amazonaws.com")
+
+        assert isinstance(connection, self.Tunnelled)
+        assert connection.tunnel == (
+            "s3.amazonaws.com",
+            {"Proxy-Authorization": "Basic bWU6cEBzcw=="},
+        )
+
+    @pytest.mark.usefixtures("tunnelled")
+    def test_no_proxy_for_the_host_connects_directly(
+        self, tmp_path, no_proxy_environment
+    ):
+        no_proxy_environment.setenv("HTTPS_PROXY", "http://proxy.example:3128")
+        no_proxy_environment.setenv("NO_PROXY", "amazonaws.com")
+
+        connection = TerrariumTiles(tmp_path)._connection("s3.amazonaws.com")
+
+        assert isinstance(connection, self.Tunnelled)
+        assert connection.host == "s3.amazonaws.com"
+        assert connection.tunnel is None
+
+    def test_the_connection_is_kept_for_the_host(
+        self, tmp_path, no_proxy_environment, tunnelled
+    ):
+        no_proxy_environment.setenv("HTTPS_PROXY", "http://proxy.example:3128")
+        tiles = TerrariumTiles(tmp_path)
+
+        first = tiles._connection("s3.amazonaws.com")
+
+        assert tiles._connection("s3.amazonaws.com") is first
+        assert tunnelled.connections == 1
+
+
 class TestTerrariumTiles:
-    def test_fetches_a_tile_once_and_reuses_the_cache(self, tmp_path, monkeypatch):
+    def test_fetches_a_tile_once_and_reuses_the_cache(self, tmp_path, connections):
         body = _tile_png(250.0)
-        fetch = MagicMock(return_value=_response(body))
-        monkeypatch.setattr(terrain_module, "urlopen", fetch)
         tiles = TerrariumTiles(tmp_path / "terrain")
         tile = TileKey(10, 546, 341)
 
@@ -515,12 +672,51 @@ class TestTerrariumTiles:
 
         assert first == {tile: array("d", [250.0, 250.0])}
         assert second == {tile: array("d", [250.0])}
-        fetch.assert_called_once()
-        request = fetch.call_args.args[0]
-        assert request.full_url.endswith("/terrarium/10/546/341.png")
-        assert request.get_header("User-agent").startswith("kml-heatmap/")
-        assert fetch.call_args.kwargs["timeout"] > 0
+        assert connections.requests == [
+            "/elevation-tiles-prod/terrarium/10/546/341.png"
+        ]
+        assert connections.connections == 1
         assert tiles.path(tile).read_bytes() == body
+
+    def test_one_connection_carries_the_tiles_of_a_thread(
+        self, tmp_path, monkeypatch, connections
+    ):
+        """A handshake per tile would take longer than the tiles themselves."""
+        monkeypatch.setattr(terrain_module, "FETCH_WORKERS", 1)
+        opened = []
+        original = connections.__init__
+
+        def record(self, host, timeout=None, context=None):
+            original(self, host, timeout, context)
+            opened.append((host, timeout, context))
+
+        monkeypatch.setattr(connections, "__init__", record)
+        wanted = {TileKey(10, x, 1): [0] for x in range(5)}
+
+        tiles = TerrariumTiles(tmp_path)
+        assert len(tiles.pixels(wanted)) == 5
+        assert len(connections.requests) == 5
+        # And closed once the downloads are done
+        assert connections.closed == 1
+        assert opened == [
+            (
+                "s3.amazonaws.com",
+                terrain_module.FETCH_TIMEOUT_SECONDS,
+                tiles._ssl_context,
+            )
+        ]
+
+    def test_sends_the_user_agent(self, tmp_path, monkeypatch):
+        seen = {}
+
+        class Recording(FakeConnection):
+            def request(self, method, path, headers=None):
+                seen["headers"] = headers
+                super().request(method, path, headers)
+
+        monkeypatch.setattr(terrain_module, "HTTPSConnection", Recording)
+        TerrariumTiles(tmp_path).pixels({TileKey(10, 1, 1): [0]})
+        assert seen["headers"]["User-Agent"].startswith("kml-heatmap/")
 
     def test_pixels_that_cannot_be_kept_are_decoded_again(self, tmp_path, caplog):
         """Keeping them is a saving for the next build, never a failure."""
@@ -532,14 +728,12 @@ class TestTerrariumTiles:
         assert list(tmp_path.iterdir()) == []
 
     def test_a_tile_the_host_does_not_have_is_missing(self, tmp_path, monkeypatch):
-        def fetch(request, **kwargs):
-            if request.full_url.endswith("/1/1.png"):
-                raise urllib.error.HTTPError(
-                    request.full_url, 403, "Forbidden", Message(), io.BytesIO()
-                )
-            return _response(_tile_png(10.0))
+        def answer(path):
+            if path.endswith("/1/1.png"):
+                return FakeResponse(403, b"Forbidden")
+            return FakeResponse(200, _tile_png(10.0))
 
-        monkeypatch.setattr(terrain_module, "urlopen", fetch)
+        monkeypatch.setattr(terrain_module, "HTTPSConnection", _answers(answer))
         wanted = {TileKey(10, 1, 1): [0], TileKey(10, 2, 1): [0]}
 
         answered = TerrariumTiles(tmp_path).pixels(wanted)
@@ -549,43 +743,115 @@ class TestTerrariumTiles:
     @pytest.mark.parametrize(
         "error",
         [
-            urllib.error.URLError("no network"),
+            ConnectionResetError("no network"),
             TimeoutError("timed out"),
             http.client.IncompleteRead(b""),
+            http.client.RemoteDisconnected("closed"),
         ],
     )
-    def test_offline_stops_asking_and_does_not_fail(self, tmp_path, monkeypatch, error):
-        fetch = MagicMock(side_effect=error)
-        monkeypatch.setattr(terrain_module, "urlopen", fetch)
+    def test_offline_stops_asking_and_does_not_fail(
+        self, tmp_path, monkeypatch, connections, error
+    ):
+        def answer(path):
+            raise error
+
+        connections.answer = staticmethod(answer)
         monkeypatch.setattr(terrain_module, "FETCH_WORKERS", 1)
         monkeypatch.setattr(terrain_module, "FETCH_RETRY_SECONDS", 0.0)
         wanted = {TileKey(10, x, 1): [0] for x in range(5)}
 
         assert TerrariumTiles(tmp_path).pixels(wanted) == {}
         # Every attempt of the first tile, and none of the others
-        assert fetch.call_count == terrain_module.FETCH_ATTEMPTS
+        assert len(connections.requests) == terrain_module.FETCH_ATTEMPTS
+        # A fresh connection for every attempt: the old one is in no known
+        # state after a failure on the way
+        assert connections.connections == terrain_module.FETCH_ATTEMPTS
+
+    def test_a_server_error_on_every_attempt_does_not_give_the_host_up(
+        self, tmp_path, monkeypatch, connections
+    ):
+        """A 503 is the host answering: the other tiles may well get through."""
+        seen = []
+
+        def answer(path):
+            seen.append(path)
+            if path.endswith("/0/1.png"):
+                return FakeResponse(503, b"later")
+            return FakeResponse(200, _tile_png(10.0))
+
+        connections.answer = staticmethod(answer)
+        monkeypatch.setattr(terrain_module, "FETCH_WORKERS", 1)
+        monkeypatch.setattr("kml_heatmap.terrain.time.sleep", lambda _: None)
+        wanted = {TileKey(10, x, 1): [0] for x in range(3)}
+
+        answered = TerrariumTiles(tmp_path).pixels(wanted)
+
+        assert set(answered) == {TileKey(10, 1, 1), TileKey(10, 2, 1)}
+        assert len(seen) == terrain_module.FETCH_ATTEMPTS + 2
+
+    def test_a_host_that_answers_every_tile_with_a_server_error_is_given_up(
+        self, tmp_path, monkeypatch, connections
+    ):
+        """Every tile's attempts and pauses would take minutes for a run."""
+        connections.answer = staticmethod(lambda path: FakeResponse(503, b"later"))
+        monkeypatch.setattr(terrain_module, "FETCH_WORKERS", 1)
+        monkeypatch.setattr("kml_heatmap.terrain.time.sleep", lambda _: None)
+        wanted = {TileKey(10, x, 1): [0] for x in range(10)}
+        tiles = TerrariumTiles(tmp_path)
+
+        assert tiles.pixels(wanted) == {}
+        given_up_after = terrain_module.SERVER_ERROR_TILES_TO_GIVE_UP
+        assert len(connections.requests) == (
+            given_up_after * terrain_module.FETCH_ATTEMPTS
+        )
+        assert tiles._offline.is_set()
+
+    def test_a_tile_that_gets_through_resets_the_server_errors(
+        self, tmp_path, monkeypatch, connections
+    ):
+        """Only tiles in a row give the host up."""
+        failing = {1, 2, 4, 5, 7, 8}
+
+        def answer(path):
+            x = int(path.rsplit("/", 2)[1])
+            if x in failing:
+                return FakeResponse(503, b"later")
+            return FakeResponse(200, _tile_png(10.0))
+
+        connections.answer = staticmethod(answer)
+        monkeypatch.setattr(terrain_module, "FETCH_WORKERS", 1)
+        monkeypatch.setattr("kml_heatmap.terrain.time.sleep", lambda _: None)
+        wanted = {TileKey(10, x, 1): [0] for x in range(10)}
+        tiles = TerrariumTiles(tmp_path)
+
+        answered = tiles.pixels(wanted)
+
+        assert set(answered) == {TileKey(10, x, 1) for x in (0, 3, 6, 9)}
+        assert not tiles._offline.is_set()
 
     @pytest.mark.parametrize(
         "glitch",
         [
-            urllib.error.URLError("connection reset"),
+            ConnectionResetError("connection reset"),
             TimeoutError("timed out"),
-            urllib.error.HTTPError("u", 503, "Unavailable", Message(), io.BytesIO()),
-            urllib.error.HTTPError("u", 429, "Too Many", Message(), io.BytesIO()),
+            FakeResponse(503, b"Unavailable"),
+            FakeResponse(429, b"Too Many"),
         ],
     )
     def test_a_glitch_is_tried_again(self, tmp_path, monkeypatch, glitch):
         """One dropped connection must not leave the other tiles unfetched."""
         glitched = set()
 
-        def fetch(request, **kwargs):
-            if request.full_url not in glitched:
-                glitched.add(request.full_url)
-                raise glitch
-            return _response(_tile_png(10.0))
+        def answer(path):
+            if path not in glitched:
+                glitched.add(path)
+                if isinstance(glitch, Exception):
+                    raise glitch
+                return glitch
+            return FakeResponse(200, _tile_png(10.0))
 
         pauses: list[float] = []
-        monkeypatch.setattr(terrain_module, "urlopen", fetch)
+        monkeypatch.setattr(terrain_module, "HTTPSConnection", _answers(answer))
         monkeypatch.setattr("kml_heatmap.terrain.time.sleep", pauses.append)
         wanted = {TileKey(10, x, 1): [0] for x in range(3)}
 
@@ -596,9 +862,11 @@ class TestTerrariumTiles:
 
     def test_the_pause_grows_with_every_attempt(self, tmp_path, monkeypatch):
         pauses: list[float] = []
-        monkeypatch.setattr(
-            terrain_module, "urlopen", MagicMock(side_effect=TimeoutError("slow"))
-        )
+
+        def answer(path):
+            raise TimeoutError("slow")
+
+        monkeypatch.setattr(terrain_module, "HTTPSConnection", _answers(answer))
         monkeypatch.setattr("kml_heatmap.terrain.time.sleep", pauses.append)
 
         assert TerrariumTiles(tmp_path).pixels({TileKey(10, 1, 1): [0]}) == {}
@@ -607,58 +875,196 @@ class TestTerrariumTiles:
             for attempt in range(terrain_module.FETCH_ATTEMPTS - 1)
         ]
 
-    def test_a_tile_the_host_refuses_is_not_asked_again(self, tmp_path, monkeypatch):
-        fetch = MagicMock(
-            side_effect=urllib.error.HTTPError(
-                "u", 404, "Not Found", Message(), io.BytesIO()
-            )
-        )
-        monkeypatch.setattr(terrain_module, "urlopen", fetch)
+    def test_a_tile_the_host_refuses_is_not_asked_again(self, tmp_path, connections):
+        connections.answer = staticmethod(lambda path: FakeResponse(404, b"gone"))
 
         assert TerrariumTiles(tmp_path).pixels({TileKey(10, 1, 1): [0]}) == {}
-        fetch.assert_called_once()
+        assert len(connections.requests) == 1
 
     @pytest.mark.parametrize(
-        "body", [b"<html>not found</html>", b"\x89PNG\r\n\x1a\n" + b"junk"]
+        ("location", "moved_to"),
+        [
+            ("https://s3.amazonaws.com/moved/1/1.png", "/moved/1/1.png"),
+            # Relative to the URL it answers, on the same host
+            ("/moved/1/1.png", "/moved/1/1.png"),
+            ("../moved.png", "/elevation-tiles-prod/terrarium/10/moved.png"),
+        ],
     )
-    def test_refuses_a_body_that_is_no_tile(self, tmp_path, monkeypatch, body):
-        monkeypatch.setattr(
-            terrain_module, "urlopen", MagicMock(return_value=_response(body))
+    def test_follows_a_redirect_on_the_host(
+        self, tmp_path, connections, location, moved_to
+    ):
+        def answer(path):
+            if path.endswith("/10/1/1.png"):
+                return FakeResponse(302, b"", {"Location": location})
+            return FakeResponse(200, _tile_png(10.0))
+
+        connections.answer = staticmethod(answer)
+
+        assert TerrariumTiles(tmp_path).pixels({TileKey(10, 1, 1): [0]}) == {
+            TileKey(10, 1, 1): array("d", [10.0])
+        }
+        assert connections.requests[-1] == moved_to
+
+    @pytest.mark.parametrize(
+        "target",
+        [
+            "https://evil.example/1/1.png",
+            "http://s3.amazonaws.com/1/1.png",
+            "",
+        ],
+    )
+    def test_refuses_a_redirect_off_the_host_or_off_https(
+        self, tmp_path, monkeypatch, connections, target
+    ):
+        """The request must not end up at a host nobody chose."""
+        connections.answer = staticmethod(
+            lambda path: FakeResponse(301, b"", {"Location": target})
         )
+        monkeypatch.setattr("kml_heatmap.terrain.time.sleep", lambda _: None)
+
+        assert TerrariumTiles(tmp_path).pixels({TileKey(10, 1, 1): [0]}) == {}
+        assert all(path.endswith("/10/1/1.png") for path in connections.requests)
+        assert "evil.example" not in "".join(connections.requests)
+
+    def test_a_refused_redirect_costs_only_its_tile(
+        self, tmp_path, monkeypatch, connections
+    ):
+        """The host answered: it stays online, and the tile is not asked again."""
+
+        def answer(path):
+            if path.endswith("/10/0/1.png"):
+                return FakeResponse(302, b"", {"Location": "https://evil.example/"})
+            return FakeResponse(200, _tile_png(10.0))
+
+        connections.answer = staticmethod(answer)
+        monkeypatch.setattr(terrain_module, "FETCH_WORKERS", 1)
+        monkeypatch.setattr("kml_heatmap.terrain.time.sleep", lambda _: None)
+        wanted = {TileKey(10, x, 1): [0] for x in range(3)}
+        tiles = TerrariumTiles(tmp_path)
+
+        answered = tiles.pixels(wanted)
+
+        assert set(answered) == {TileKey(10, 1, 1), TileKey(10, 2, 1)}
+        assert len(connections.requests) == 3
+        assert not tiles._offline.is_set()
+
+    def test_gives_up_after_too_many_redirects(
+        self, tmp_path, monkeypatch, connections
+    ):
+        connections.answer = staticmethod(
+            lambda path: FakeResponse(
+                307, b"", {"Location": "https://s3.amazonaws.com" + path + "/again"}
+            )
+        )
+        monkeypatch.setattr("kml_heatmap.terrain.time.sleep", lambda _: None)
+
+        assert TerrariumTiles(tmp_path).pixels({TileKey(10, 1, 1): [0]}) == {}
+
+    def test_refuses_a_tile_url_that_is_not_https(
+        self, tmp_path, monkeypatch, connections
+    ):
+        monkeypatch.setattr(terrain_module, "TILE_URL", "http://host/{z}/{x}/{y}.png")
+        monkeypatch.setattr("kml_heatmap.terrain.time.sleep", lambda _: None)
+
+        assert TerrariumTiles(tmp_path).pixels({TileKey(10, 1, 1): [0]}) == {}
+        assert connections.requests == []
+
+    @pytest.mark.parametrize(
+        "body",
+        [
+            b"<html>not found</html>",
+            b"\x89PNG\r\n\x1a\n" + b"junk",
+            # Cut off after the header: the chunks up to it are intact
+            _tile_png()[:33],
+            # A sound PNG, but not a tile's size
+            encode_png(4, 4, bytes(48)),
+        ],
+    )
+    def test_refuses_a_body_that_is_no_tile(self, tmp_path, connections, body):
+        """Nothing but a complete PNG of a tile's size reaches the cache."""
+        connections.answer = staticmethod(lambda path: FakeResponse(200, body))
         tiles = TerrariumTiles(tmp_path)
         tile = TileKey(10, 1, 1)
 
         assert tiles.pixels({tile: [0]}) == {}
-        # The second is PNG-shaped, and is removed once it fails to decode
         assert not tiles.path(tile).exists()
+        assert list(tmp_path.iterdir()) == []
 
-    def test_refuses_an_oversized_body(self, tmp_path, monkeypatch):
+    def test_refuses_an_oversized_body(self, tmp_path, monkeypatch, connections):
         monkeypatch.setattr(terrain_module, "MAX_TILE_BYTES", 10)
-        monkeypatch.setattr(
-            terrain_module, "urlopen", MagicMock(return_value=_response(_tile_png()))
-        )
 
         assert TerrariumTiles(tmp_path).pixels({TileKey(10, 1, 1): [0]}) == {}
 
-    def test_an_unwritable_cache_degrades(self, tmp_path, monkeypatch):
+    def test_an_oversized_body_leaves_the_next_tile_a_fresh_connection(
+        self, tmp_path, monkeypatch, connections
+    ):
+        """The rest of a body cut short would answer the next request."""
+        normal = _tile_png(10.0)
+        monkeypatch.setattr(terrain_module, "MAX_TILE_BYTES", len(normal) + 10)
+        monkeypatch.setattr(terrain_module, "FETCH_WORKERS", 1)
+
+        class Pipelined(FakeConnection):
+            # Like http.client: an answer not read to the end blocks the next
+            last: FakeResponse | None = None
+
+            def getresponse(self):
+                if self.last is not None and not self.last.isclosed():
+                    raise http.client.ResponseNotReady("Idle")
+                self.last = super().getresponse()
+                return self.last
+
+            @staticmethod
+            def answer(path):
+                if path.endswith("/1/1.png"):
+                    return FakeResponse(200, b"x" * (len(normal) + 100))
+                return FakeResponse(200, normal)
+
+        monkeypatch.setattr(terrain_module, "HTTPSConnection", Pipelined)
+        tiles = TerrariumTiles(tmp_path)
+
+        answered = tiles.pixels({TileKey(10, 1, 1): [0], TileKey(10, 2, 1): [0]})
+
+        assert Pipelined.requests == [
+            "/elevation-tiles-prod/terrarium/10/1/1.png",
+            "/elevation-tiles-prod/terrarium/10/2/1.png",
+        ]
+        assert answered == {TileKey(10, 2, 1): array("d", [10.0])}
+        assert not tiles._offline.is_set()
+        assert Pipelined.connections == 2
+
+    def test_an_unwritable_cache_degrades(self, tmp_path, connections):
         blocker = tmp_path / "file"
         blocker.write_text("")
-        fetch = MagicMock()
-        monkeypatch.setattr(terrain_module, "urlopen", fetch)
 
         answered = TerrariumTiles(blocker / "terrain").pixels({TileKey(10, 1, 1): [0]})
 
         assert answered == {}
-        fetch.assert_not_called()
+        assert connections.requests == []
 
-    def test_a_tile_that_cannot_be_stored_is_missing(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(
-            terrain_module, "urlopen", MagicMock(return_value=_response(_tile_png()))
-        )
+    def test_a_tile_that_cannot_be_stored_is_missing(
+        self, tmp_path, monkeypatch, connections
+    ):
         monkeypatch.setattr(os, "replace", MagicMock(side_effect=OSError("full")))
 
         assert TerrariumTiles(tmp_path).pixels({TileKey(10, 1, 1): [0]}) == {}
         assert list(tmp_path.iterdir()) == []
+
+    def test_kept_pixels_of_an_older_version_are_decoded_again(self, tmp_path):
+        """Version 1 kept them with zlib; the header tells them apart."""
+        tiles = TerrariumTiles(tmp_path)
+        tile = TileKey(10, 1, 1)
+        png = _tile_png(123.0)
+        tiles.path(tile).write_bytes(png)
+        kept = tmp_path / "10-1-1.pixels"
+        planes = terrain_module._decode_planes(png)
+        kept.write_bytes(
+            terrain_module._PIXELS_HEADER.pack(b"KHTP", 1, zlib.crc32(png))
+            + zlib.compress(planes, 6)
+        )
+
+        assert tiles.pixels({tile: [0]}) == {tile: array("d", [123.0])}
+        header = terrain_module._PIXELS_HEADER.unpack_from(kept.read_bytes())
+        assert header == (b"KHTP", terrain_module._PIXELS_VERSION, zlib.crc32(png))
 
     def test_the_pixels_of_a_decoded_tile_are_kept(self, tmp_path, monkeypatch):
         """The next build reads them instead of decoding the PNG again."""
@@ -718,6 +1124,51 @@ class TestTerrariumTiles:
         answered = tiles.pixels(wanted)
 
         assert answered == {tile: array("d", [tile.x, tile.x]) for tile in wanted}
+
+    @pytest.mark.parametrize(("version", "pooled"), [(1, True), (None, False)])
+    def test_pixels_of_an_older_version_are_decoded_in_the_pool(
+        self, tmp_path, monkeypatch, version, pooled
+    ):
+        """After an upgrade every tile is decoded again: not one by one."""
+        tiles = TerrariumTiles(tmp_path)
+        wanted = {}
+        for x in range(terrain_module.DECODE_POOL_MIN_TILES):
+            tile = TileKey(10, x, 1)
+            png = _tile_png(float(x))
+            tiles.path(tile).write_bytes(png)
+            wanted[tile] = [0]
+            planes = terrain_module._decode_planes(png)
+            if version is None:
+                terrain_module._keep_pixel_planes(tiles.path(tile), png, planes)
+            else:
+                (tmp_path / f"10-{x}-1.pixels").write_bytes(
+                    terrain_module._PIXELS_HEADER.pack(
+                        b"KHTP", version, zlib.crc32(png)
+                    )
+                    + zlib.compress(planes, 6)
+                )
+
+        class InlinePool:
+            started = 0
+
+            def __init__(self, max_workers):
+                InlinePool.started += 1
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+            def map(self, fn, *iterables, chunksize=1):
+                return map(fn, *iterables, strict=True)
+
+        monkeypatch.setattr(terrain_module, "ProcessPoolExecutor", InlinePool)
+
+        answered = tiles.pixels(wanted)
+
+        assert answered == {tile: array("d", [tile.x]) for tile in wanted}
+        assert InlinePool.started == (1 if pooled else 0)
 
     @pytest.mark.parametrize(
         "failure",
@@ -1017,7 +1468,7 @@ def test_the_frontend_reads_what_the_exporter_writes(relative, name, value):
 def test_the_parity_check_reads_expressions(expression, value):
     """Constants written as expressions are read, not skipped (regression)."""
     node = ast.parse(expression, mode="eval").body
-    assert _ts_evaluate(node, lambda name: pytest.fail(name)) == value
+    assert _ts_evaluate(node, pytest.fail) == value
 
 
 def test_the_parity_check_refuses_what_it_cannot_read():

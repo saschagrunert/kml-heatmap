@@ -15,7 +15,7 @@ import kml_heatmap.site_assets as assets_module
 from kml_heatmap.site_assets import (
     BuildCommit,
     _copy_javascript_bundle,
-    _escape_js_string,
+    _generate_map_config,
     build_commit,
     build_date,
     load_template,
@@ -70,25 +70,53 @@ def bundle(tmp_path_factory, monkeypatch):
     return bundle
 
 
-class TestEscapeJsString:
-    def test_plain_string_unchanged(self):
-        assert _escape_js_string("hello") == "hello"
+def _map_config(path):
+    """The object map_config.js assigns to window.MAP_CONFIG."""
+    text = path.read_text(encoding="ascii")
+    assert text.startswith("window.MAP_CONFIG=")
+    assert text.endswith(";")
+    return json.loads(text.removeprefix("window.MAP_CONFIG=").removesuffix(";"))
 
-    def test_escapes_quotes_backslash_and_control_chars(self):
-        assert _escape_js_string('say "hi"') == 'say \\"hi\\"'
-        assert _escape_js_string("it's") == "it\\'s"
-        assert _escape_js_string("path\\to") == "path\\\\to"
-        assert _escape_js_string("line1\nline2") == "line1\\nline2"
-        assert _escape_js_string("col1\tcol2") == "col1\\tcol2"
 
-    def test_xss_payload_neutralized(self):
-        result = _escape_js_string("'; alert('xss'); //")
-        assert "\\'" in result
-        assert "'" not in result.replace("\\'", "")
+class TestMapConfig:
+    @pytest.mark.parametrize(
+        "key",
+        [
+            "it's",
+            'say "hi"',
+            "path\\to",
+            "line1\nline2",
+            "'; alert('xss'); //",
+            "</script><script>alert(1)</script>",
+            "Flughafen München",
+        ],
+    )
+    def test_any_value_stays_a_string(self, tmp_path, key):
+        """JSON, not a JavaScript literal the value could end early."""
+        with patch.dict(os.environ, {"CARTO_API_KEY": key}):
+            _generate_map_config(tmp_path, BOUNDS, "data")
 
-    def test_empty_and_unicode(self):
-        assert _escape_js_string("") == ""
-        assert "M\\u00fcnchen" in _escape_js_string("Flughafen München")
+        assert _map_config(tmp_path / "map_config.js")["cartoApiKey"] == key
+
+    def test_the_fields_the_page_reads(self, tmp_path):
+        _generate_map_config(tmp_path, BOUNDS, 'da"ta')
+
+        config = _map_config(tmp_path / "map_config.js")
+        assert set(config) == {
+            "center",
+            "bounds",
+            "cartoApiKey",
+            "dataDir",
+            "builtOn",
+            "commit",
+            "commitUrl",
+        }
+        assert config["center"] == [BOUNDS["center_lat"], BOUNDS["center_lon"]]
+        assert config["bounds"] == [
+            [BOUNDS["min_lat"], BOUNDS["min_lon"]],
+            [BOUNDS["max_lat"], BOUNDS["max_lon"]],
+        ]
+        assert config["dataDir"] == 'da"ta'
 
 
 class TestLoadTemplate:
@@ -141,8 +169,24 @@ class TestRenderHtml:
             year_option="",
             base_style_preload="",
             link_preview="",
+            robots="",
         )
         assert len(content) < len(substituted)
+        # Indexable unless asked otherwise (--private)
+        assert "noindex" not in content
+
+    def test_a_private_page_asks_not_to_be_indexed(self, tmp_path):
+        from lxml import html as lxml_html
+
+        output_file = tmp_path / "index.html"
+        render_html(output_file, "data", private=True)
+
+        robots = [
+            meta.get("content")
+            for meta in lxml_html.fromstring(output_file.read_text()).iter("meta")
+            if meta.get("name") == "robots"
+        ]
+        assert robots == ["noindex, nofollow"]
 
     def test_data_dir_name_is_html_escaped(self, tmp_path):
         """A quote in the name must not end the href attribute early."""
@@ -174,6 +218,13 @@ class TestRenderHtml:
         # The same URL and the same mode the loader's fetch requests, so the
         # preload is what it gets. CARTO's files come after the site's own.
         assert preloads[-3] == ("fetch", "", 'da"ta/2026/data.json')
+        # After the page's own scripts and styles, which start the map
+        year_file = next(
+            link
+            for link in lxml_html.fromstring(output_file.read_text()).iter("link")
+            if str(link.get("href")).endswith("/2026/data.json")
+        )
+        assert year_file.get("fetchpriority") == "low"
         assert {preload[:2] for preload in preloads} == {("fetch", "")}
 
     @pytest.mark.parametrize(
@@ -299,13 +350,12 @@ class TestPackageAssets:
         with patch.dict(os.environ, {"CARTO_API_KEY": "test-carto's"}):
             package_assets(tmp_path, BOUNDS, "data")
 
-        config = (tmp_path / "map_config.js").read_text()
-        assert "51.0" in config
-        assert "test-carto\\'s" in config
-        assert "$center_lat" not in config
-        assert re.search(r"builtOn:'\d{4}-\d{2}-\d{2}'", config)
-        assert re.search(r"commit:'([0-9a-f]{7})?'", config)
-        assert re.search(r"commitUrl:'(https://[^']+)?'", config)
+        config = _map_config(tmp_path / "map_config.js")
+        assert config["center"][0] == BOUNDS["center_lat"]
+        assert config["cartoApiKey"] == "test-carto's"
+        assert re.fullmatch(r"\d{4}-\d{2}-\d{2}", config["builtOn"])
+        assert re.fullmatch(r"([0-9a-f]{7})?", config["commit"])
+        assert re.fullmatch(r"(https://\S+)?", config["commitUrl"])
         assert (tmp_path / "styles.css").stat().st_size > 0
         assert (tmp_path / "mapApp.bundle.js").read_text() == bundle.read_text()
         assert not (tmp_path / "mapApp.bundle.js.map").exists()
@@ -319,6 +369,8 @@ class TestPackageAssets:
             assert (tmp_path / fname).exists()
         # The library bundle was removed; it must not reappear in the output
         assert not (tmp_path / "bundle.js").exists()
+        # The server's own business, see test_a_robots_txt_of_its_own_is_left_alone
+        assert not (tmp_path / "robots.txt").exists()
 
     def test_bundle_and_source_map_are_copied(self, tmp_path):
         static_dir = tmp_path / "static"
@@ -486,36 +538,28 @@ class TestBuildCommit:
         assert build_commit() == BuildCommit()
 
 
-class TestBundleIsAvailable:
+class TestMissingBuildFiles:
     """A forgotten `npm run build` has to be caught before any work."""
 
-    def test_true_when_both_bundles_and_the_vendored_files_are_there(
+    def test_nothing_when_the_bundles_and_the_vendored_files_are_there(
         self, tmp_path, monkeypatch, bundle
     ):
         _install_vendor_files(tmp_path, monkeypatch)
 
-        assert assets_module.bundle_is_available() is True
+        assert assets_module.missing_build_files() == []
 
-    def test_a_missing_bundle_is_named(self, tmp_path, monkeypatch, bundle, capsys):
+    def test_a_missing_bundle_is_named(self, tmp_path, monkeypatch, bundle):
         _install_vendor_files(tmp_path, monkeypatch)
         bundle.unlink()
 
-        assert assets_module.bundle_is_available() is False
+        assert assets_module.missing_build_files() == [str(bundle)]
 
-        assert "mapApp.bundle.js" in capsys.readouterr().err
-
-    def test_a_missing_vendored_file_is_named(
-        self, tmp_path, monkeypatch, bundle, capsys
-    ):
+    def test_a_missing_vendored_file_is_named(self, tmp_path, monkeypatch, bundle):
         """The page has no map without them, so they are part of the gate."""
         static = _install_vendor_files(tmp_path, monkeypatch)
         (static / "vendor" / "maplibre-gl-worker.mjs").unlink()
 
-        assert assets_module.bundle_is_available() is False
-
-        err = capsys.readouterr().err
-        assert "vendor/maplibre-gl-worker.mjs" in err
-        assert "npm run build" in err
+        assert assets_module.missing_build_files() == ["vendor/maplibre-gl-worker.mjs"]
 
 
 class TestMissingFrontendBuild:

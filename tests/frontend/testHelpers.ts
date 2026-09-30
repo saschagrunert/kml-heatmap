@@ -664,7 +664,8 @@ export interface StubbedAnimationFrames {
 
 /**
  * Replace requestAnimationFrame and cancelAnimationFrame with a queue the
- * test runs itself. Undone by `vi.unstubAllGlobals()`.
+ * test runs itself. Undone before the next test (unstubGlobals in
+ * vitest.config.js).
  */
 export function stubAnimationFrames(): StubbedAnimationFrames {
   const frames = new Map<number, FrameRequestCallback>();

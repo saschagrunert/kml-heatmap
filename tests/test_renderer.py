@@ -7,6 +7,7 @@ import re
 import shutil
 import subprocess
 import sys
+import zipfile
 from concurrent.futures import Future
 from concurrent.futures.process import BrokenProcessPool
 from pathlib import Path
@@ -18,8 +19,13 @@ from lxml import html as lxml_html
 
 import kml_heatmap.cache as cache_module
 import kml_heatmap.data_exporter as exporter_module
-from kml_heatmap.data_exporter import STAGING_PREFIX
-from kml_heatmap.exceptions import KMLHeatmapError
+from kml_heatmap import path_content
+from kml_heatmap.exceptions import (
+    ExportError,
+    InvalidInputError,
+    KMLHeatmapError,
+    OutputRefusedError,
+)
 from kml_heatmap.previews import encode_path_id
 from kml_heatmap.renderer import (
     CoordinateExtent,
@@ -30,7 +36,9 @@ from kml_heatmap.renderer import (
     _parse_kml_files,
     _parse_with_error_handling,
     create_progressive_heatmap,
+    list_flights,
 )
+from kml_heatmap.site_output import STAGING_PREFIX
 from kml_heatmap.types import PathMetadata, TrackPoint
 from tests.conftest import (
     FIXTURE_AIRPORTS_CSV,
@@ -97,7 +105,7 @@ PARKED_KML = """<?xml version="1.0" encoding="UTF-8"?>
   </gx:Track></Placemark></Document></kml>
 """
 
-MAP_BOUNDS = re.compile(r"bounds:\[\[([-\d.]+),([-\d.]+)\],\[([-\d.]+),([-\d.]+)\]\]")
+MAP_BOUNDS = re.compile(r'"bounds":\[\[([-\d.]+),([-\d.]+)\],\[([-\d.]+),([-\d.]+)\]\]')
 
 
 def _write_kml(path, year=2025, template=TRACK_KML):
@@ -228,6 +236,25 @@ class TestParseWithoutAPool:
             _, metadata = _parse_kml_files([cached, fresh])
         assert submitted == [fresh]
         assert [m["year"] for m in metadata] == [2025, 2026]
+
+    def test_a_kmz_counts_with_the_kml_inside_for_the_pool(self, tmp_path, monkeypatch):
+        """The archive is a fraction of the KML the parse reads."""
+        kml = TRACK_KML.format(year=2025).replace(
+            "</kml>", "<!--" + " " * 200_000 + "--></kml>"
+        )
+        kmz = tmp_path / "1_DEAGJ_DA20.kmz"
+        with zipfile.ZipFile(kmz, "w", zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr("doc.kml", kml)
+        assert kmz.stat().st_size < 100_000
+        monkeypatch.setattr("kml_heatmap.renderer.POOLED_CACHE_MIN_BYTES", 100_000)
+        monkeypatch.setattr("kml_heatmap.renderer.POOLED_CACHE_MIN_WORKERS", 1)
+        # The stand-in parses nothing, so no coordinates come back
+        with (
+            patch("kml_heatmap.renderer._parse_in_pool") as parse_in_pool,
+            pytest.raises(InvalidInputError),
+        ):
+            _parse_kml_files([str(kmz)])
+        parse_in_pool.assert_called_once()
 
     def test_warm_cache_needs_no_pool(self, tmp_path, monkeypatch):
         files = [_write_kml(tmp_path / f"{i}_DEAGJ_DA20.kml", 2025) for i in (1, 2)]
@@ -709,7 +736,7 @@ class TestExportSite:
             {"year": 2025, "start_point": [49.5, 10.1, 320.0], "airport_name": ""},
         ]
         checked = []
-        real_check = exporter_module.is_exportable_path
+        real_check = path_content.is_exportable_path
 
         def check(path):
             checked.append(len(path))
@@ -739,13 +766,11 @@ class TestExportSite:
 class TestCreateProgressiveHeatmap:
     def test_refuses_overlapping_output_dir(self, tmp_path, capsys):
         kml_file = _write_kml(tmp_path / "1_DEAGJ_DA20.kml")
-        assert (
+        with pytest.raises(OutputRefusedError) as failure:
             create_progressive_heatmap(
                 [kml_file], str(tmp_path.parent / "index.html"), str(tmp_path)
             )
-            is False
-        )
-        assert "Refusing" in capsys.readouterr().err
+        assert "Refusing" in str(failure.value)
         assert not (tmp_path / "airports.json").exists()
 
     def test_refuses_when_aircraft_json_dir_overlaps(self, tmp_path):
@@ -756,12 +781,10 @@ class TestCreateProgressiveHeatmap:
         aircraft.parent.mkdir(parents=True)
         aircraft.write_text("{}")
         out = tmp_path / "out"
-        assert (
+        with pytest.raises(KMLHeatmapError):
             create_progressive_heatmap(
                 [kml_file], str(out / "index.html"), str(out / "data"), [aircraft]
             )
-            is False
-        )
 
     def test_missing_bundle_fails_before_any_work(self, tmp_path, capsys, monkeypatch):
         missing = tmp_path / "static" / "missing.js"
@@ -770,26 +793,25 @@ class TestCreateProgressiveHeatmap:
         kml_file = _write_kml(tmp_path / "input" / "1_DEAGJ_DA20.kml")
         out = tmp_path / "out"
 
-        ok = create_progressive_heatmap(
-            [kml_file], str(out / "index.html"), str(out / "data")
-        )
+        with pytest.raises(KMLHeatmapError) as failure:
+            create_progressive_heatmap(
+                [kml_file], str(out / "index.html"), str(out / "data")
+            )
 
-        assert ok is False
-        err = capsys.readouterr().err
-        assert err.count("JavaScript bundle not found") == 1
-        assert "npm run build" in err
+        # Said once, by the exception the command line prints
+        assert "JavaScript bundle not found" not in capsys.readouterr().err
+        assert "JavaScript bundle not found" in str(failure.value)
+        assert "npm run build" in str(failure.value)
         assert not out.exists()
 
     @pytest.mark.usefixtures("bundle")
     def test_no_valid_files(self, tmp_path):
-        assert (
+        with pytest.raises(KMLHeatmapError):
             create_progressive_heatmap(
                 [str(tmp_path / "missing.kml")],
                 str(tmp_path / "o" / "index.html"),
                 str(tmp_path / "o" / "data"),
             )
-            is False
-        )
 
     @pytest.mark.usefixtures("bundle")
     def test_output_dir_equal_to_input_dir_is_refused(self, tmp_path, capsys):
@@ -799,12 +821,12 @@ class TestCreateProgressiveHeatmap:
         kml_file = _write_kml(input_dir / "1_DEAGJ_DA20.kml")
         (input_dir / "manifest.json").write_text("{}")
 
-        ok = create_progressive_heatmap(
-            [kml_file], str(input_dir / "index.html"), str(input_dir / "data")
-        )
+        with pytest.raises(KMLHeatmapError) as failure:
+            create_progressive_heatmap(
+                [kml_file], str(input_dir / "index.html"), str(input_dir / "data")
+            )
 
-        assert ok is False
-        assert "Refusing to use output directory" in capsys.readouterr().err
+        assert "Refusing to use output directory" in str(failure.value)
         assert (input_dir / "manifest.json").read_text() == "{}"
         assert not (input_dir / "index.html").exists()
 
@@ -813,12 +835,14 @@ class TestCreateProgressiveHeatmap:
         """The page loads the data directory by its name, next to itself."""
         kml_file = _write_kml(tmp_path / "input" / "1_DEAGJ_DA20.kml")
 
-        ok = create_progressive_heatmap(
-            [kml_file], str(tmp_path / "a" / "index.html"), str(tmp_path / "b" / "data")
-        )
+        with pytest.raises(KMLHeatmapError) as failure:
+            create_progressive_heatmap(
+                [kml_file],
+                str(tmp_path / "a" / "index.html"),
+                str(tmp_path / "b" / "data"),
+            )
 
-        assert ok is False
-        assert "must be directly inside the output directory" in capsys.readouterr().err
+        assert "must be directly inside the output directory" in str(failure.value)
         assert not (tmp_path / "a").exists()
         assert not (tmp_path / "b").exists()
 
@@ -830,14 +854,15 @@ class TestCreateProgressiveHeatmap:
         empty = input_dir / "2_DEAGJ_DA20.kml"
         empty.write_text("")
 
-        ok = create_progressive_heatmap(
-            [good, str(empty)],
-            str(tmp_path / "o" / "index.html"),
-            str(tmp_path / "o" / "data"),
-        )
+        with pytest.raises(KMLHeatmapError) as failure:
+            create_progressive_heatmap(
+                [good, str(empty)],
+                str(tmp_path / "o" / "index.html"),
+                str(tmp_path / "o" / "data"),
+            )
 
-        assert ok is False
-        assert "1 of 2 input file(s) are not valid" in capsys.readouterr().err
+        assert "1 of 2 input file(s) are not valid" in str(failure.value)
+        assert isinstance(failure.value, InvalidInputError)
         assert not (tmp_path / "o").exists()
 
     @pytest.mark.usefixtures("bundle")
@@ -846,28 +871,27 @@ class TestCreateProgressiveHeatmap:
         input_dir.mkdir()
         (input_dir / "empty.kml").write_text("<kml><Document/></kml>")
         out = tmp_path / "out"
-        assert (
+        with pytest.raises(KMLHeatmapError):
             create_progressive_heatmap(
                 [str(input_dir / "empty.kml")],
                 str(out / "index.html"),
                 str(out / "data"),
             )
-            is False
-        )
 
     @pytest.mark.usefixtures("bundle")
     def test_no_path_with_a_year_is_an_error(self, tmp_path, capsys):
         kml_file = _write_kml(tmp_path / "input" / "track.kml", template=UNDATED_KML)
         out = tmp_path / "out"
 
-        ok = create_progressive_heatmap(
-            [kml_file], str(out / "index.html"), str(out / "data")
-        )
+        with pytest.raises(KMLHeatmapError) as failure:
+            create_progressive_heatmap(
+                [kml_file], str(out / "index.html"), str(out / "data")
+            )
 
-        assert ok is False
         err = capsys.readouterr().err
         assert f"{kml_file}: no track with a determinable year" in err
-        assert "1 of 1 file(s) hold no flight to export" in err
+        assert "1 of 1 file(s) hold no flight to export" in str(failure.value)
+        assert isinstance(failure.value, InvalidInputError)
         assert not (out / "index.html").exists()
 
     @pytest.mark.usefixtures("bundle")
@@ -887,15 +911,15 @@ class TestCreateProgressiveHeatmap:
         bad = _write_kml(tmp_path / "input" / "2_DEAGJ_DA20.kml", template=template)
         out = tmp_path / "out"
 
-        ok = create_progressive_heatmap(
-            [good, bad], str(out / "index.html"), str(out / "data")
-        )
+        with pytest.raises(KMLHeatmapError) as failure:
+            create_progressive_heatmap(
+                [good, bad], str(out / "index.html"), str(out / "data")
+            )
 
-        assert ok is False
         err = capsys.readouterr().err
         assert f"{bad}: {reason}" in err
         assert good not in err
-        assert "1 of 2 file(s) hold no flight to export" in err
+        assert "1 of 2 file(s) hold no flight to export" in str(failure.value)
         assert not out.exists()
 
     @pytest.mark.usefixtures("bundle")
@@ -926,18 +950,21 @@ class TestCreateProgressiveHeatmap:
         assert _map_bounds(out) == [[51.13, 12.05], [51.55, 13.76]]
 
     @pytest.mark.usefixtures("bundle")
-    def test_export_failure_returns_false(self, tmp_path, capsys):
+    def test_export_failure_raises(self, tmp_path, capsys):
         kml_file = _write_kml(tmp_path / "input" / "1_DEAGJ_DA20.kml")
         out = tmp_path / "out"
-        with patch(
-            "kml_heatmap.renderer.export_all_data",
-            side_effect=RuntimeError("Failed to process year 2025"),
+        with (
+            patch(
+                "kml_heatmap.renderer.export_all_data",
+                side_effect=RuntimeError("Failed to process year 2025"),
+            ),
+            pytest.raises(KMLHeatmapError) as failure,
         ):
-            ok = create_progressive_heatmap(
+            create_progressive_heatmap(
                 [kml_file], str(out / "index.html"), str(out / "data")
             )
-        assert ok is False
-        assert "Export failed: Failed to process year 2025" in capsys.readouterr().err
+        assert str(failure.value) == "Export failed: Failed to process year 2025"
+        assert isinstance(failure.value, ExportError)
         assert not (out / "index.html").exists()
 
     @pytest.mark.usefixtures("bundle")
@@ -957,16 +984,17 @@ class TestCreateProgressiveHeatmap:
                 raise OSError(errno.ENOSPC, "No space left on device")
             return real_atomic_write(path, write)
 
-        with patch("kml_heatmap.data_exporter.atomic_write", atomic_write):
-            ok = create_progressive_heatmap(
+        with (
+            patch("kml_heatmap.data_exporter.atomic_write", atomic_write),
+            pytest.raises(ExportError) as failure,
+        ):
+            create_progressive_heatmap(
                 [first, second], str(out / "index.html"), str(out / "data")
             )
 
-        assert ok is False
-        err = capsys.readouterr().err
-        assert "Export failed" in err
-        assert "No space left on device" in err
-        assert "Traceback" not in err
+        assert "Export failed" in str(failure.value)
+        assert "No space left on device" in str(failure.value)
+        assert "Traceback" not in capsys.readouterr().err
         assert _tree(out) == previous
         assert _stages(out) == []
 
@@ -980,15 +1008,17 @@ class TestCreateProgressiveHeatmap:
         previous = _tree(out)
 
         other = _write_kml(tmp_path / "input" / "2_DEAGJ_DA20.kml", 2026)
-        with patch(
-            "kml_heatmap.renderer.package_assets",
-            side_effect=PermissionError(errno.EACCES, "Permission denied"),
+        with (
+            patch(
+                "kml_heatmap.renderer.package_assets",
+                side_effect=PermissionError(errno.EACCES, "Permission denied"),
+            ),
+            pytest.raises(ExportError),
         ):
-            ok = create_progressive_heatmap(
+            create_progressive_heatmap(
                 [kml_file, other], str(out / "index.html"), str(out / "data")
             )
 
-        assert ok is False
         assert _tree(out) == previous
         assert _stages(out) == []
 
@@ -1003,12 +1033,12 @@ class TestCreateProgressiveHeatmap:
         (out / "manifest.json").symlink_to(victim)
         kml_file = _write_kml(tmp_path / "input" / "1_DEAGJ_DA20.kml")
 
-        ok = create_progressive_heatmap(
-            [kml_file], str(out / "index.html"), str(out / "data")
-        )
+        with pytest.raises(KMLHeatmapError) as failure:
+            create_progressive_heatmap(
+                [kml_file], str(out / "index.html"), str(out / "data")
+            )
 
-        assert ok is False
-        assert "symlink" in capsys.readouterr().err
+        assert "symlink" in str(failure.value)
         assert victim.read_text() == "precious"
         assert not (out / "index.html").exists()
         assert not (out / "data" / "metadata.json").exists()
@@ -1022,12 +1052,13 @@ class TestCreateProgressiveHeatmap:
         (out / "README.md").write_text("docs")
         kml_file = _write_kml(tmp_path / "input" / "1_DEAGJ_DA20.kml")
 
-        ok = create_progressive_heatmap(
-            [kml_file], str(out / "index.html"), str(out / "data")
-        )
+        with pytest.raises(KMLHeatmapError) as failure:
+            create_progressive_heatmap(
+                [kml_file], str(out / "index.html"), str(out / "data")
+            )
 
-        assert ok is False
-        assert "--force" in capsys.readouterr().err
+        assert "--force" in str(failure.value)
+        assert isinstance(failure.value, OutputRefusedError)
         assert _tree(out) == {"README.md": b"docs", "index.html": b"my own page"}
 
         assert create_progressive_heatmap(
@@ -1093,6 +1124,26 @@ class TestCreateProgressiveHeatmap:
         assert (out / "CNAME").read_text() == "maps.example.org"
 
     @pytest.mark.usefixtures("bundle")
+    @pytest.mark.parametrize("private", [False, True])
+    def test_a_robots_txt_of_its_own_is_left_alone(self, tmp_path, private):
+        """robots.txt belongs to whoever runs the server: --private only adds
+        the meta tag to the page."""
+        out = tmp_path / "out"
+        out.mkdir()
+        (out / "map_config.js").write_text("")
+        (out / "robots.txt").write_text("User-agent: *\nAllow: /\n")
+        kml_file = _write_kml(tmp_path / "input" / "1_DEAGJ_DA20.kml")
+
+        assert create_progressive_heatmap(
+            [kml_file], str(out / "index.html"), str(out / "data"), private=private
+        )
+
+        assert (out / "robots.txt").read_text() == "User-agent: *\nAllow: /\n"
+        assert ('content="noindex, nofollow"' in (out / "index.html").read_text()) is (
+            private
+        )
+
+    @pytest.mark.usefixtures("bundle")
     def test_output_below_input_directory(self, tmp_path):
         """The documented ``kml-heatmap flight.kml --output-dir out`` layout."""
         kml_file = _write_kml(tmp_path / "1_DEAGJ_DA20.kml")
@@ -1101,7 +1152,7 @@ class TestCreateProgressiveHeatmap:
             create_progressive_heatmap(
                 [kml_file], str(out / "index.html"), str(out / "data")
             )
-            is True
+            is not None
         )
         assert (out / "data" / "2025" / "data.json").exists()
 
@@ -1119,7 +1170,7 @@ class TestCreateProgressiveHeatmap:
             create_progressive_heatmap(
                 [kml_file], str(out / "index.html"), str(out / "data"), [aircraft]
             )
-            is True
+            is not None
         )
 
         assert (out / "index.html").exists()
@@ -1335,13 +1386,94 @@ class TestLinkPreviews:
     def test_a_relative_site_url_fails_before_any_work(self, tmp_path, capsys):
         out = tmp_path / "out"
 
-        ok = create_progressive_heatmap(
-            self._inputs(tmp_path),
-            str(out / "index.html"),
-            str(out / "data"),
-            site_url="flights/",
+        with pytest.raises(KMLHeatmapError) as failure:
+            create_progressive_heatmap(
+                self._inputs(tmp_path),
+                str(out / "index.html"),
+                str(out / "data"),
+                site_url="flights/",
+            )
+
+        assert "absolute http(s) address" in str(failure.value)
+        assert isinstance(failure.value, InvalidInputError)
+        assert not out.exists()
+
+
+class TestListFlights:
+    def test_every_reason_a_flight_is_left_out(self, tmp_path):
+        files = [
+            _write_kml(tmp_path / "1_DEAGJ_DA20.kml"),
+            _write_kml(tmp_path / "2_DEAGJ_DA20.kml", template=UNDATED_KML),
+            _write_kml(tmp_path / "3_DEAGJ_DA20.kml", template=PARKED_KML),
+            _write_kml(tmp_path / "4_DEAGJ_DA20.kml", template=CLAMPED_KML),
+            _write_kml(tmp_path / "5.kml", template="not valid xml <"),
+        ]
+
+        rows = list_flights(files)
+
+        assert [(Path(row.file).name, row.skipped) for row in rows] == [
+            ("1_DEAGJ_DA20.kml", ""),
+            ("2_DEAGJ_DA20.kml", "no determinable year"),
+            ("3_DEAGJ_DA20.kml", "stays on one spot"),
+            (
+                "4_DEAGJ_DA20.kml",
+                (
+                    "no track of two or more points with altitudes above sea "
+                    "level (a clampToGround or relativeToGround track has none)"
+                ),
+            ),
+            ("5.kml", "failed to parse"),
+        ]
+        first = rows[0]
+        assert (first.year, first.aircraft, first.timed) == (2025, "D-EAGJ", True)
+        assert first.airports.startswith("EDAQ")
+        # A name that is no route
+        assert rows[1].airports == "somewhere"
+        assert rows[2].airports == "EDAQ Halle-Oppin"
+
+    def test_a_second_recording_of_a_flight(self, tmp_path, monkeypatch):
+        files = [
+            _write_kml(tmp_path / "1_DEAGJ_DA20.kml"),
+            _write_kml(tmp_path / "2_DEAGJ_DA20.kml", year=2026),
+        ]
+        # Found by where it was when; here the second is taken for one
+        monkeypatch.setattr(
+            "kml_heatmap.data_exporter.drop_overlapping_paths",
+            lambda by_year, *_: {2025: by_year[2025]},
         )
 
-        assert ok is False
-        assert "absolute http(s) address" in capsys.readouterr().err
-        assert not out.exists()
+        rows = list_flights(files)
+
+        assert rows[1].skipped == "the same flight as another recording"
+
+
+class TestPipelineErrors:
+    @pytest.mark.usefixtures("bundle")
+    def test_a_parse_that_fails_on_the_way_is_an_export_error(self, tmp_path):
+        kml_file = _write_kml(tmp_path / "input" / "1_DEAGJ_DA20.kml")
+        out = tmp_path / "out"
+        with (
+            patch(
+                "kml_heatmap.renderer._parse_kml_files",
+                side_effect=OSError("disk gone"),
+            ),
+            pytest.raises(ExportError, match="disk gone"),
+        ):
+            create_progressive_heatmap(
+                [kml_file], str(out / "index.html"), str(out / "data")
+            )
+
+    @pytest.mark.usefixtures("bundle")
+    def test_an_input_error_of_the_export_keeps_its_kind(self, tmp_path):
+        kml_file = _write_kml(tmp_path / "input" / "1_DEAGJ_DA20.kml")
+        out = tmp_path / "out"
+        with (
+            patch(
+                "kml_heatmap.renderer._export_site",
+                side_effect=InvalidInputError("No flight paths"),
+            ),
+            pytest.raises(InvalidInputError, match=r"^No flight paths$"),
+        ):
+            create_progressive_heatmap(
+                [kml_file], str(out / "index.html"), str(out / "data")
+            )

@@ -7,8 +7,6 @@ template, the stylesheet, the favicons and the vendored third-party files in
 one place, the way ``export_writers`` holds the data files.
 """
 
-from __future__ import annotations
-
 import hashlib
 import html
 import json
@@ -50,9 +48,9 @@ __all__ = [
     "available_country_flags",
     "build_commit",
     "build_date",
-    "bundle_is_available",
     "load_template",
     "minify_html",
+    "missing_build_files",
     "package_assets",
     "render_html",
     "warn_about_a_stale_bundle",
@@ -93,6 +91,7 @@ BUNDLE_BANNER = re.compile(rb"/\* kml-heatmap build ([0-9a-f]{12}) \*/")
 # scripts/source-hash.js; TestSourceHashParity checks that they agree.
 BUILD_HASH_FILES = (
     "build.js",
+    "scripts/build-helpers.js",
     "scripts/vendor.js",
     "tsconfig.json",
     "kml_heatmap/static/styles.css",
@@ -138,6 +137,10 @@ VENDOR_FILES = (
 # cascade, so it is the order they are written in; the last two style
 # different elements, so which of them lands first does not.
 CSS_FILES = ("styles.css", "features.css", "wrapped.css")
+# Written with --private only. No robots.txt: crawlers read it only at the
+# origin root, and its Disallow would keep them from fetching the page and
+# ever seeing this noindex.
+ROBOTS_META = '<meta name="robots" content="noindex, nofollow" />'
 # The files the tool owns next to the page. Any of them that a run does not
 # produce (the source map of a bundle built without one) is removed.
 SITE_FILES = (
@@ -153,12 +156,6 @@ SITE_FILES = (
 # the export visited, and the link preview of every year and flight (see
 # previews). The ones a run does not publish are removed.
 SITE_FILE_PATTERNS = (f"{FLAGS_DIR_NAME}/*.svg", *PREVIEW_FILE_PATTERNS)
-
-
-def _escape_js_string(value: str) -> str:
-    """Escape a value for safe embedding in a single-quoted JS string."""
-    escaped: str = json.dumps(value)
-    return escaped[1:-1].replace("'", "\\'")
 
 
 def load_template() -> str:
@@ -236,8 +233,8 @@ def _missing_vendor_files(static_dir: Path) -> list[str]:
     return [name for name in VENDOR_FILES if not (vendor / name).is_file()]
 
 
-def bundle_is_available() -> bool:
-    """Whether everything `npm run build` produces is in place.
+def missing_build_files() -> list[str]:
+    """What `npm run build` produces that is not in place, empty for nothing.
 
     The bundles and the vendored third-party files: a site missing any of
     them has no map at all. Checked together and before the run does any
@@ -249,13 +246,7 @@ def bundle_is_available() -> bool:
     """
     missing = [str(bundle) for bundle in BUNDLE_FILES if not bundle.is_file()]
     missing += [f"vendor/{name}" for name in _missing_vendor_files(STATIC_DIR)]
-    if not missing:
-        return True
-    logger.error(
-        "JavaScript bundle not found: %s (run 'npm run build' to generate it)",
-        ", ".join(missing),
-    )
-    return False
+    return missing
 
 
 def warn_about_a_stale_bundle() -> None:
@@ -314,6 +305,7 @@ def render_html(
     data_dir_name: str,
     latest_year: int | None = None,
     site_url: str | None = None,
+    private: bool = False,
 ) -> None:
     """Render and minify the HTML template.
 
@@ -324,13 +316,15 @@ def render_html(
     tile index are preloaded after the site's own files. ``site_url`` is
     where the site is published (see ``previews.normalize_site_url``),
     which the link preview of the page is named by; None leaves the image
-    out.
+    out. ``private`` asks search engines not to index the page.
     """
     logger.info("\nGenerating progressive HTML...")
 
     data_dir = html.escape(data_dir_name)
+    # Low priority: the page's own scripts and styles decide when the map
+    # starts, and the year file is only read once they have run
     year_preload = (
-        f'<link rel="preload" as="fetch" crossorigin '
+        f'<link rel="preload" as="fetch" crossorigin fetchpriority="low" '
         f'href="{data_dir}/{latest_year}/data.json" />'
         if latest_year is not None
         else ""
@@ -348,6 +342,7 @@ def render_html(
         year_option=year_option,
         base_style_preload=_carto_preloads(_carto_api_key()),
         link_preview=page_preview_tags(site_url),
+        robots=ROBOTS_META if private else "",
     )
 
     logger.info("\nMinifying HTML...")
@@ -498,20 +493,23 @@ def _generate_map_config(
         map_config_raw = f.read()
 
     commit = build_commit()
-    config_vars = {
-        "carto_api_key": _escape_js_string(carto_api_key),
-        "data_dir_name": _escape_js_string(data_dir_name),
-        "built_on": build_date(),
+    # The fields MapConfig in the frontend's mapApp.ts reads
+    config = {
+        "center": [bounds["center_lat"], bounds["center_lon"]],
+        "bounds": [
+            [bounds["min_lat"], bounds["min_lon"]],
+            [bounds["max_lat"], bounds["max_lon"]],
+        ],
+        "cartoApiKey": carto_api_key,
+        "dataDir": data_dir_name,
+        "builtOn": build_date(),
         "commit": commit.hash,
-        "commit_url": _escape_js_string(commit.url),
-        "center_lat": str(bounds["center_lat"]),
-        "center_lon": str(bounds["center_lon"]),
-        "min_lat": str(bounds["min_lat"]),
-        "max_lat": str(bounds["max_lat"]),
-        "min_lon": str(bounds["min_lon"]),
-        "max_lon": str(bounds["max_lon"]),
+        "commitUrl": commit.url,
     }
-    map_config_content = string.Template(map_config_raw).substitute(config_vars)
+    # ASCII only, so the file reads the same whatever charset it is served as
+    map_config_content = string.Template(map_config_raw).substitute(
+        config=json.dumps(config, ensure_ascii=True)
+    )
     map_config_minified: str = rjsmin.jsmin(map_config_content)
 
     atomic_text_write(map_config_dst, map_config_minified)

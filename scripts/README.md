@@ -1,9 +1,9 @@
 # Scripts
 
 The build helpers `build.js` imports, the repository consistency check, the
-pre-push hook, the test data generator and the builder of the site the visual
-snapshots use. The JavaScript files are type-checked with `tsconfig.node.json`
-(`npm run typecheck`).
+pre-push hook, the test data generator, the builder of the site the visual
+snapshots use and the list of the slowest e2e tests of a CI run. The JavaScript
+files are type-checked with `tsconfig.node.json` (`npm run typecheck`).
 
 ## generate_test_data.py
 
@@ -16,10 +16,15 @@ European airports.
 - Random deviations to spread data across Germany for better heatmap
   visualization
 - Realistic altitude profiles (climb, cruise, descend)
-- SkyDemon-style filenames (`N_REGISTRATION_TYPE.kml`) with the start and end of
-  the flight in a `<TimeSpan>` element and no per-point times, so the speed
-  layer falls back to path averages: the length of the path over its duration,
-  at a groundspeed of 90 to 150 kt
+- SkyDemon-style filenames (`N_REGISTRATION_TYPE.kml`)
+- The same files for the same `--seed` (42 unless given)
+- Two formats (`--format`), both at a groundspeed of 90 to 150 kt:
+  - `gx-track` (the default): a `gx:Track` with a `<when>` for every point, as
+    SkyDemon writes it, at the pace of the flight (its 50 points are one to
+    three minutes apart)
+  - `linestring`: a `LineString` with the start and end of the flight in a
+    `<TimeSpan>` and no per-point times, so the speed layer falls back to path
+    averages: the length of the path over its duration
 
 ### Usage
 
@@ -32,6 +37,9 @@ python3 scripts/generate_test_data.py 10000
 
 # Generate 5000 files to custom directory
 python3 scripts/generate_test_data.py 5000 --output custom_test_data
+
+# Other flights, as lines without per-point times
+python3 scripts/generate_test_data.py 100 --seed 7 --format linestring
 
 # See all options
 python3 scripts/generate_test_data.py --help
@@ -59,12 +67,14 @@ docker run --rm --user "$(id -u):$(id -g)" \
 
 Recommended test sizes:
 
-Every file holds 50 points and takes about 3.4 KB.
+Every file holds 50 points and takes about 6.4 KB as a `gx:Track` (3.4 KB with
+`--format linestring`).
 
-- **1k flights**: Quick test, ~3.4 MB source data
-- **10k flights**: Standard test, ~34 MB source data
-- **100k flights**: Stress test, ~340 MB source data (about 5M points),
-  processed in about 10 minutes with parallel parsing and export
+- **1k flights**: Quick test, ~6.4 MB source data
+- **10k flights**: Standard test, ~64 MB source data
+- **100k flights**: Stress test, ~640 MB source data (about 5M points); the 10
+  minutes of parallel parsing and export were measured on the `linestring` files
+  (~340 MB)
 
 These numbers are the reference for the processing time mentioned in
 [Data export](../doc/output.md#data-export). The system has been tested and
@@ -117,21 +127,54 @@ so nothing is downloaded) and the tile API key. Run `npm run build` first.
 python scripts/build_visual_site.py
 ```
 
+## e2e_durations.js
+
+Lists the slowest attempts of the e2e tests from the report of Playwright's JSON
+reporter, which CI writes to `test-results/e2e-timings.json` and uploads from
+every e2e job as the `e2e-timings-<job>` artifact, whether the run passed or
+not. Each line gives the duration, the share of the test's timeout it took, the
+result, the project, the spec and the title; a retry is listed as an attempt of
+its own. It needs nothing but Node.js, so it runs on a downloaded artifact:
+
+```bash
+node scripts/e2e_durations.js e2e-timings.json          # the 20 slowest
+node scripts/e2e_durations.js --limit 50 */e2e-timings.json
+```
+
+## build-helpers.js
+
+What `build.js` does without building, kept apart because `build.js` runs a
+build as it is imported: the GLSL of the custom layers written as a minified
+build ships it (`tightenGlsl`, `tightenShaders`), the sizes of the files, the
+check that the build wrote only the five bundles the site publishes
+(`assertExpectedOutputs`), the composition of a bundle and the flags of the
+command. `tests/frontend/unit/glsl.test.ts` holds the tightened shaders of every
+`ui/*Layer.ts` to the same tokens as written, and
+`tests/frontend/unit/buildHelpers.test.ts` the rest.
+
+After the sizes, a production build prints what each bundle is made of, by kind
+of module and its ten largest modules. `npm run build -- --metafile [path]`
+keeps esbuild's metafile, the account of every module in every bundle
+(`bundle-meta.json` in the checkout without a path, gitignored), and
+`npm run build -- --compare <path>` prints what changed in each bundle since the
+build that wrote that file, the largest change first: build `main` with
+`--metafile`, then a branch with `--compare`, to see where its bytes went.
+
 ## source-hash.js
 
 The content hash of everything that shapes a built site: the TypeScript sources
 in `kml_heatmap/frontend/`, the files in `BUILD_FILES` (`build.js`,
-`scripts/vendor.js`, `tsconfig.json` and the three stylesheets) and the versions
-`package-lock.json` pins for `BUILD_PACKAGES` (esbuild, Lucide as the one
-package bundled into the page, and MapLibre, html-to-image and flag-icons, which
-are vendored next to the bundles). `build.js` writes it into the first line of
-every bundle. A Playwright fixture (`tests/e2e/site-check.ts`) compares that
-line in the `mapApp.bundle.js` of the site under test (`docs/`, or
-`visual-site/` for the snapshots) with the checkout, so the e2e tests refuse to
-run against a stale site, and the generator warns when the bundle it is about to
-publish is stale. `kml_heatmap/site_assets.py` mirrors the hash in Python;
-`TestSourceHashParity` in `tests/test_site_assets.py` checks that both
-implementations agree.
+`scripts/build-helpers.js`, `scripts/vendor.js`, `tsconfig.json` and the three
+stylesheets) and the versions `package-lock.json` pins for `BUILD_PACKAGES`
+(esbuild, Lucide as the one package bundled into the page, and MapLibre,
+html-to-image and flag-icons, which are vendored next to the bundles).
+`build.js` writes it into the first line of every bundle. A Playwright fixture
+(`tests/e2e/site-check.ts`) compares that line in the `mapApp.bundle.js` of the
+site under test (`docs/`, or `visual-site/` for the snapshots) with the
+checkout, so the e2e tests refuse to run against a stale site, and the generator
+warns when the bundle it is about to publish is stale.
+`kml_heatmap/site_assets.py` mirrors the hash in Python; `TestSourceHashParity`
+in `tests/test_site_assets.py` checks that both implementations agree.
 
 ## vendor.js
 
@@ -159,11 +202,17 @@ MapLibre's worker read a GeoJSON source from a `blob:` URL without the main
 thread, as the heat sources are given (see
 [The heat sources and the year worker](../doc/development/heat.md#the-heat-sources-and-the-year-worker)).
 A fix that no longer matches exactly once fails the build, so a MapLibre bump
-shows whether it is still needed. Serving the files from the site keeps the page
-working during a CDN outage, keeps visitors' addresses away from CDNs and leaves
-`package-lock.json` as the one place their versions are pinned.
-`kml_heatmap/site_assets.py` keeps its own list of the files it publishes, in
-step with `VENDOR_FILES` and `VENDOR_MODULES`, which `tests/test_site_assets.py`
-checks; `tests/frontend/unit/vendor.test.ts` checks both against `node_modules`.
-The wheel ships `vendor/` but not `flags/`, and the Python side publishes only
-the flags of the countries an export visited.
+shows whether it is still needed. The stylesheet is copied without the styles of
+the controls the app never adds (`VENDOR_CSS_STRIPS`): the navigation,
+fullscreen, globe, terrain, geolocate, logo and scale controls, whose icons as
+`data:` URIs were three quarters of its 83 KB. Every rule whose selectors all
+name one of them is left out, and the build fails when the number of such rules
+is not the one recorded, so a bump that adds or renames a control gets looked
+at. Serving the files from the site keeps the page working during a CDN outage,
+keeps visitors' addresses away from CDNs and leaves `package-lock.json` as the
+one place their versions are pinned. `kml_heatmap/site_assets.py` keeps its own
+list of the files it publishes, in step with `VENDOR_FILES` and
+`VENDOR_MODULES`, which `tests/test_site_assets.py` checks;
+`tests/frontend/unit/vendor.test.ts` checks both against `node_modules`. The
+wheel ships `vendor/` but not `flags/`, and the Python side publishes only the
+flags of the countries an export visited.

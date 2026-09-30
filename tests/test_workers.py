@@ -2,6 +2,7 @@
 
 import logging
 import pickle
+import zipfile
 from unittest.mock import mock_open, patch
 
 import kml_heatmap.airport_lookup as lookup_module
@@ -15,25 +16,25 @@ MB = 1024 * 1024
 class TestInitWorker:
     def test_enables_debug(self):
         try:
-            init_worker(True)
+            init_worker(logging.DEBUG)
             assert logger.level == logging.DEBUG
         finally:
             set_debug_mode(False)
 
     def test_without_debug_keeps_info_level(self):
-        init_worker(False)
+        init_worker(logging.INFO)
         assert logger.level == logging.INFO
 
     def test_does_not_load_the_airport_database(self):
         """Export workers never look up airports; lookups load it lazily."""
-        init_worker(False)
-        assert lookup_module._airport_cache is None
+        init_worker(logging.INFO)
+        assert lookup_module.databases.airports is None
 
     def test_uses_the_database_of_the_parent(self, monkeypatch):
         """Parse workers must not read the 86,000 row CSV again."""
-        monkeypatch.setattr(lookup_module, "_airport_cache", None)
+        lookup_module.databases.reset()
         record = lookup_module.AirportRecord(1.0, 2.0, "Parent Field", "DE")
-        init_worker(False, pickle.dumps({"ZZZZ": record}))
+        init_worker(logging.INFO, pickle.dumps({"ZZZZ": record}))
         with patch.object(lookup_module, "_read_airport_csv") as read_csv:
             assert lookup_module.lookup_airport_coordinates("ZZZZ") == (
                 1.0,
@@ -43,9 +44,9 @@ class TestInitWorker:
         read_csv.assert_not_called()
 
     def test_a_broken_database_is_loaded_lazily(self, monkeypatch):
-        monkeypatch.setattr(lookup_module, "_airport_cache", None)
-        init_worker(False, b"not a pickle")
-        assert lookup_module._airport_cache is None
+        lookup_module.databases.reset()
+        init_worker(logging.INFO, b"not a pickle")
+        assert lookup_module.databases.airports is None
 
 
 class TestParseWorkerCount:
@@ -98,6 +99,25 @@ class TestParseWorkerCount:
             patch.object(workers_module, "_available_memory_bytes", return_value=None),
         ):
             assert parse_worker_count(files) == 3
+
+    def test_a_kmz_counts_with_the_kml_inside(self, tmp_path):
+        """A KMZ is ten to twenty times smaller than the KML it holds."""
+        kmz = tmp_path / "large.kmz"
+        with zipfile.ZipFile(kmz, "w", zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr("doc.kml", b" " * MB)
+        assert kmz.stat().st_size < MB // 100
+        files = [str(kmz), *self._files(tmp_path, 10, 10)]
+        per_large = workers_module.WORKER_BASE_BYTES + MB * 15
+        per_small = workers_module.WORKER_BASE_BYTES + 10 * 15
+        # Room for all three if the archive counted with its own size
+        available = per_large + per_small // 2
+        with (
+            patch("os.process_cpu_count", return_value=8),
+            patch.object(
+                workers_module, "_available_memory_bytes", return_value=available
+            ),
+        ):
+            assert parse_worker_count(files) == 1
 
     def test_missing_file_counts_as_empty(self, tmp_path):
         with patch.object(

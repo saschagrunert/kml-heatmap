@@ -129,19 +129,8 @@ class AirportMarker(TypedDict):
     country: NotRequired[str]
 
 
-class AirportData(TypedDict):
-    """Airport location and metadata."""
-
-    name: str | None
-    lat: float
-    lon: float
-    path_index: NotRequired[int]
-    is_at_path_end: NotRequired[bool]
-
-
 __all__ = [
     "COORDINATE_DECIMALS",
-    "AirportData",
     "AirportMarker",
     "FlightPath",
     "FlightPathGroup",

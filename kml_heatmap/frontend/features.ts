@@ -25,54 +25,28 @@
  * all the same: by the time this bundle is imported, the page has run it.
  */
 import "./mapApp";
-import { ReplayManager } from "./ui/replayManager";
-import { followTerrain } from "./ui/terrain";
-import { followSatellite } from "./ui/satellite";
-import { followHeatCloud, prepareHeatCloud } from "./ui/heatCloud";
-import { followSelectionRibbons } from "./ui/selectionRibbons";
-import { ReplayAllPlayer, toggleReplayAll } from "./ui/replayAll";
-import { followFlightProfile } from "./ui/flightProfile";
-import { toggleCrossSection } from "./ui/crossSection";
-import {
+export { ReplayManager } from "./ui/replayManager";
+export { followTerrain } from "./ui/terrain";
+export { followSatellite } from "./ui/satellite";
+export { followHeatCloud, prepareHeatCloud } from "./ui/heatCloud";
+export { followSelectionRibbons } from "./ui/selectionRibbons";
+export { ReplayAllPlayer, toggleReplayAll } from "./ui/replayAll";
+export { followFlightProfile } from "./ui/flightProfile";
+export { toggleCrossSection } from "./ui/crossSection";
+export {
   flyToStop,
   followTakeover,
   jumpToStop,
   turnTo,
 } from "./ui/cameraScript";
-import { toggleHotspotTour } from "./ui/hotspotTour";
+export { toggleHotspotTour } from "./ui/hotspotTour";
 
-export interface FeatureModule {
-  ReplayManager: typeof ReplayManager;
-  followTerrain: typeof followTerrain;
-  followSatellite: typeof followSatellite;
-  followHeatCloud: typeof followHeatCloud;
-  prepareHeatCloud: typeof prepareHeatCloud;
-  followSelectionRibbons: typeof followSelectionRibbons;
-  ReplayAllPlayer: typeof ReplayAllPlayer;
-  toggleReplayAll: typeof toggleReplayAll;
-  followFlightProfile: typeof followFlightProfile;
-  toggleCrossSection: typeof toggleCrossSection;
-  flyToStop: typeof flyToStop;
-  followTakeover: typeof followTakeover;
-  jumpToStop: typeof jumpToStop;
-  turnTo: typeof turnTo;
-  toggleHotspotTour: typeof toggleHotspotTour;
-}
+/**
+ * The build this bundle belongs to, which the app compares with its own
+ * (services/featureLoader.ts): a page open over a deploy gets this file of
+ * the new build, next to the old build's shared.bundle.js
+ */
+export const BUILD = typeof __BUILD__ === "string" ? __BUILD__ : undefined;
 
-export {
-  ReplayManager,
-  followTerrain,
-  followSatellite,
-  followHeatCloud,
-  prepareHeatCloud,
-  followSelectionRibbons,
-  ReplayAllPlayer,
-  toggleReplayAll,
-  followFlightProfile,
-  toggleCrossSection,
-  flyToStop,
-  followTakeover,
-  jumpToStop,
-  turnTo,
-  toggleHotspotTour,
-};
+/** What the bundle hands the app: every export of this module */
+export type FeatureModule = typeof import("./features");

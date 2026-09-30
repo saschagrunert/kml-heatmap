@@ -71,7 +71,6 @@ describe("ReplayManager chase view", () => {
     replayManager.destroy();
     vi.useRealTimers();
     unmountReplayDom();
-    vi.restoreAllMocks();
   });
 
   it("is off by default, and its control says so", () => {

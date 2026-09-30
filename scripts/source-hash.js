@@ -25,6 +25,7 @@ const FRONTEND_DIR = join(REPO_ROOT, "kml_heatmap/frontend");
 /** Files outside the sources that change what a built site renders */
 const BUILD_FILES = [
   "build.js",
+  "scripts/build-helpers.js",
   "scripts/vendor.js",
   "tsconfig.json",
   "kml_heatmap/static/styles.css",

@@ -39,7 +39,21 @@ _LAZY_EXPORTS = {
     "validate_kml_file": ".validation",
 }
 
-__all__ = ["__version__", *sorted(_LAZY_EXPORTS)]
+# Written out, so that tools that read __all__ without running the module
+# see it; tests/test_init.py checks that it names every lazy export
+__all__ = [  # noqa: RUF022 - the version first, then the lazy names in order
+    "__version__",
+    "KMLHeatmapError",
+    "KMLParseError",
+    "check_kml_obfuscated",
+    "create_progressive_heatmap",
+    "deduplicate_airports",
+    "extract_airport_name",
+    "haversine_distance",
+    "obfuscate_kml_files",
+    "parse_aircraft_from_filename",
+    "validate_kml_file",
+]
 
 
 def __getattr__(name: str) -> Any:

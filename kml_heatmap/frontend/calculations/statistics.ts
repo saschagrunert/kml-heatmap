@@ -223,35 +223,6 @@ export function aggregateAircraft(
   return [...aircraftMap.values()].sort((a, b) => b.flights - a.flights);
 }
 
-/**
- * Filter segments by path IDs
- * @param segments - Array of all segments
- * @param pathInfo - Array of filtered path info objects
- * @returns Filtered segments
- */
-export function filterSegmentsByPaths(
-  segments: PathSegment[],
-  pathInfo: PathInfo[],
-): PathSegment[] {
-  return segmentsForPathIds(
-    segments,
-    pathInfo.map((p) => p.id),
-  );
-}
-
-/**
- * Calculate total distance from segments
- * @param segments - Array of segment objects with coords
- * @returns Total distance in kilometers
- */
-export function calculateTotalDistance(segments: PathSegment[]): number {
-  let total = 0;
-  for (const segment of segments) {
-    total += segmentDistance(segment);
-  }
-  return total;
-}
-
 const pathsByIdCache = new WeakMap<PathInfo[], Map<number, PathInfo>>();
 
 /** Paths by id, kept with the array: a filter view hands the same one again */

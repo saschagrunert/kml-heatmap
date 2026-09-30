@@ -1,8 +1,11 @@
 """KML file parsing for flight tracking data."""
 
 import logging
+import os
+import zipfile
+import zlib
 from pathlib import Path
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from lxml import etree
 
@@ -21,6 +24,7 @@ from .parser_common import (
 )
 from .parser_gx_track import process_gx_track
 from .parser_standard import process_standard_coordinates
+from .validation import MAX_KML_FILE_SIZE
 
 if TYPE_CHECKING:
     from .types import FlightPath, FlightPathGroup, PathMetadata, PlacemarkMetadata
@@ -29,6 +33,7 @@ __all__ = [
     "ParseResult",
     "load_cached_kml",
     "parse_kml_file",
+    "parse_size",
 ]
 
 # What a parse returns: the flat coordinate list, the flight paths and the
@@ -45,8 +50,146 @@ _TRACK_GX_COORDS = etree.XPath(
 )
 
 
+# Archives inside a KMZ, which it is not unpacked into
+_NESTED_ARCHIVE_SUFFIXES = (".kmz", ".zip")
+# The document Google Earth writes at the root of the archive
+_KMZ_DOCUMENT = "doc.kml"
+
+
+def _is_macos_metadata(name: str) -> bool:
+    """Whether a member is the resource fork macOS adds to a zip it makes.
+
+    "__MACOSX/doc.kml" or "._doc.kml" holds a few bytes of Finder data
+    under the name of a real file, not a KML document.
+    """
+    return name.startswith("__MACOSX/") or name.rpartition("/")[2].startswith("._")
+
+
+def _kmz_document(members: list[zipfile.ZipInfo]) -> zipfile.ZipInfo | None:
+    """The KML document among the members: doc.kml at the root when there
+    is one, the first other ``.kml`` otherwise."""
+    documents = [
+        info
+        for info in members
+        if info.filename.lower().endswith(".kml")
+        and not info.is_dir()
+        and not _is_macos_metadata(info.filename)
+    ]
+    return next(
+        (info for info in documents if info.filename.lower() == _KMZ_DOCUMENT),
+        documents[0] if documents else None,
+    )
+
+
+def _kmz_members(archive: zipfile.ZipFile) -> list[zipfile.ZipInfo]:
+    return [
+        info for info in archive.infolist() if not _is_macos_metadata(info.filename)
+    ]
+
+
+def parse_size(kml_file: str) -> int:
+    """The bytes of KML a parse of ``kml_file`` reads, 0 for a missing file.
+
+    For a KML file its size. A KMZ archive compresses its document ten to
+    twenty times, and the memory a parse takes follows the document, so
+    for one this is the size the zip central directory records for the
+    member ``_read_kmz`` picks, capped at ``MAX_KML_FILE_SIZE`` like the
+    read. Nothing is decompressed. An archive whose directory cannot be
+    read counts with its file size: the parse refuses it anyway.
+    """
+    try:
+        size = os.path.getsize(kml_file)
+    except OSError:
+        return 0
+    if not kml_file.lower().endswith(".kmz"):
+        return size
+    try:
+        with zipfile.ZipFile(kml_file) as archive:
+            document = _kmz_document(_kmz_members(archive))
+    except zipfile.BadZipFile, zipfile.LargeZipFile, OSError, EOFError, ValueError:
+        return size
+    if document is None:
+        return size
+    return min(document.file_size, MAX_KML_FILE_SIZE)
+
+
+def _read_kmz(kmz_file: str) -> bytes:
+    """The KML document of a KMZ archive (see ``_kmz_document``).
+
+    Google Earth writes the document as doc.kml, usually first; other
+    members are images and models the track does not need. The member is
+    read only up to ``MAX_KML_FILE_SIZE``, whatever the archive claims,
+    and an archive inside the archive is refused rather than unpacked.
+    """
+    try:
+        with zipfile.ZipFile(kmz_file) as archive:
+            members = _kmz_members(archive)
+            nested = [
+                info.filename
+                for info in members
+                if info.filename.lower().endswith(_NESTED_ARCHIVE_SUFFIXES)
+            ]
+            if nested:
+                raise KMLParseError(
+                    f"KMZ archive holds another archive ({nested[0]}); unzip it "
+                    "and pass the KML file instead",
+                    file_path=kmz_file,
+                )
+            document = _kmz_document(members)
+            if document is None:
+                raise KMLParseError(
+                    "KMZ archive holds no .kml file", file_path=kmz_file
+                )
+            if document.file_size > MAX_KML_FILE_SIZE:
+                raise KMLParseError(
+                    f"The KML file in the archive is too large "
+                    f"({document.file_size / 1024 / 1024:.1f} MB, max "
+                    f"{MAX_KML_FILE_SIZE / 1024 / 1024:.0f} MB)",
+                    file_path=kmz_file,
+                )
+            with archive.open(document) as member:
+                data = member.read(MAX_KML_FILE_SIZE + 1)
+    except (zipfile.BadZipFile, zipfile.LargeZipFile, EOFError, zlib.error) as e:
+        raise KMLParseError(f"Not a valid KMZ archive: {e}", file_path=kmz_file) from e
+    # A compression method zipfile does not know (such as Deflate64). Before
+    # RuntimeError, which it is a kind of.
+    except NotImplementedError as e:
+        raise KMLParseError(
+            f"The KMZ archive uses a compression this tool cannot read, unzip "
+            f"it first: {e}",
+            file_path=kmz_file,
+        ) from e
+    # zipfile raises RuntimeError for a member that needs a password
+    except RuntimeError as e:
+        raise KMLParseError(
+            f"The KML file in the archive is encrypted, unzip it first: {e}",
+            file_path=kmz_file,
+        ) from e
+    if len(data) > MAX_KML_FILE_SIZE:
+        raise KMLParseError(
+            "The KML file in the archive is larger than it claims", file_path=kmz_file
+        )
+    return data
+
+
+def _refuse_entity_declarations(tree: etree._ElementTree, kml_file: str) -> None:
+    """Refuse a document whose internal DTD subset declares entities.
+
+    No KML exporter writes one. The parser resolves no entities, and
+    libxml2 2.11 and later limit how far one can amplify, but a refusal
+    here keeps a "billion laughs" document out whatever the libxml2 below
+    lxml does.
+    """
+    # lxml-stubs knows neither internalDTD's type nor its entity iterator
+    dtd: Any = tree.docinfo.internalDTD
+    if dtd is not None and any(True for _ in dtd.iterentities()):
+        raise KMLParseError(
+            "Entity declarations are not allowed in a KML file", file_path=kml_file
+        )
+
+
 def _parse_kml_tree(kml_file: str) -> etree._Element:
-    """Parse KML file and return XML root element."""
+    """Parse a KML (or KMZ) file and return the XML root element."""
     try:
         # huge_tree lifts libxml2's 10 MB limit per text node, which a single
         # long <coordinates> reaches well below the accepted file size.
@@ -62,23 +205,25 @@ def _parse_kml_tree(kml_file: str) -> etree._Element:
             remove_comments=True,
             remove_pis=True,
         )
-        tree = etree.parse(kml_file, parser)
-        root = tree.getroot()
-
-        if logger.isEnabledFor(logging.DEBUG):
-            logger.debug("\n  Root tag: %s", root.tag)
-            logger.debug("Root attrib: %s", root.attrib)
-            all_tags = {local_name(elem.tag) for elem in root.iter()}
-            logger.debug("All unique tags in file: %s", sorted(all_tags))
-
-        return root
-
+        if kml_file.lower().endswith(".kmz"):
+            tree = etree.fromstring(_read_kmz(kml_file), parser).getroottree()
+        else:
+            tree = etree.parse(kml_file, parser)
     except etree.ParseError as e:
         raise KMLParseError(
             f"XML parsing error: {e}", file_path=kml_file, line_number=e.lineno
         ) from e
     except OSError as e:
         raise KMLParseError(f"File I/O error: {e}", file_path=kml_file) from e
+
+    _refuse_entity_declarations(tree, kml_file)
+    root = tree.getroot()
+    if logger.isEnabledFor(logging.DEBUG):
+        logger.debug("\n  Root tag: %s", root.tag)
+        logger.debug("Root attrib: %s", root.attrib)
+        all_tags = {local_name(elem.tag) for elem in root.iter()}
+        logger.debug("All unique tags in file: %s", sorted(all_tags))
+    return root
 
 
 def _document_namespaces(root: etree._Element) -> dict[str, str]:

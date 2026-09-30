@@ -1,12 +1,8 @@
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { frameCoalescer } from "../../../../kml_heatmap/frontend/utils/frameCoalescer";
 import { stubAnimationFrames } from "../../testHelpers";
 
 describe("frameCoalescer", () => {
-  afterEach(() => {
-    vi.unstubAllGlobals();
-  });
-
   it("draws once per frame, with the latest value", () => {
     const frames = stubAnimationFrames();
     const draw = vi.fn<(value: number) => void>();

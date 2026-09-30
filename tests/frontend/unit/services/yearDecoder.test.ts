@@ -42,7 +42,6 @@ describe("createYearDecoder", () => {
 
   afterEach(() => {
     vi.useRealTimers();
-    vi.unstubAllGlobals();
   });
 
   it("starts one worker, at once, and asks it for every year", async () => {

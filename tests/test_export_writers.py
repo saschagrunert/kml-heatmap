@@ -4,6 +4,7 @@ from typing import Any
 
 import pytest
 
+from kml_heatmap.airports import AirportData
 from kml_heatmap.export_writers import (
     export_airports_data,
     export_metadata,
@@ -11,14 +12,8 @@ from kml_heatmap.export_writers import (
 )
 
 
-def _airport(name, lat=48.6899, lon=9.2220, timestamps=None, is_at_path_end=False):
-    return {
-        "name": name,
-        "lat": lat,
-        "lon": lon,
-        "timestamps": timestamps or [],
-        "is_at_path_end": is_at_path_end,
-    }
+def _airport(name, lat=48.6899, lon=9.2220, is_at_path_end=False):
+    return AirportData(lat, lon, name, 0, is_at_path_end)
 
 
 class TestExportAirportsData:
@@ -35,7 +30,7 @@ class TestExportAirportsData:
         assert names == ["EDDS Stuttgart", "EDDP Leipzig"]
 
     def test_valid_airport_with_country(self, tmp_path, parse_data):
-        airports = [_airport("EDDS Stuttgart", timestamps=["t1"])]
+        airports = [_airport("EDDS Stuttgart")]
         filepath, size = export_airports_data(airports, str(tmp_path))
 
         assert filepath == str(tmp_path / "airports.json")
@@ -53,13 +48,10 @@ class TestExportAirportsData:
             ]
         }
 
-    def test_timestamps_never_exported(self, tmp_path, parse_data):
-        export_airports_data(
-            [_airport("EDDS Stuttgart", timestamps=["t1"])], str(tmp_path)
-        )
+    def test_only_the_marker_fields_are_exported(self, tmp_path, parse_data):
+        export_airports_data([_airport("EDDS Stuttgart")], str(tmp_path))
         data = parse_data(tmp_path / "airports.json")
-        assert "timestamps" not in data["airports"][0]
-        assert "icao" not in data["airports"][0]
+        assert set(data["airports"][0]) == {"code", "country", "lat", "lon", "name"}
 
     def test_country_of_an_airport_name_with_dash(self, tmp_path, parse_data):
         """The deduplicator stores one airport, not "EDAQ ... - LFBN ..."."""
@@ -125,8 +117,8 @@ class TestExportAirportsData:
     def test_every_deduplicated_airport_is_written(self, tmp_path, parse_data):
         """Merging nearby airports is the deduplicator's job, not the writer's."""
         airports = [
-            _airport("EDDS Stuttgart", timestamps=["t1"]),
-            _airport("EDDS Stuttgart", lat=48.68991, lon=9.22201, timestamps=["t2"]),
+            _airport("EDDS Stuttgart"),
+            _airport("EDDS Stuttgart", lat=48.68991, lon=9.22201),
         ]
         export_airports_data(airports, str(tmp_path))
         data = parse_data(tmp_path / "airports.json")
@@ -134,7 +126,7 @@ class TestExportAirportsData:
 
     def test_flight_count_never_exported(self, tmp_path, parse_data):
         """The frontend counts flights per active filter; see export_writers."""
-        airports = [_airport("EDDS Stuttgart", timestamps=["t1", "t2", "t3"])]
+        airports = [_airport("EDDS Stuttgart")]
         export_airports_data(airports, str(tmp_path))
         data = parse_data(tmp_path / "airports.json")
         assert "flight_count" not in data["airports"][0]

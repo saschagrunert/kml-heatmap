@@ -1,0 +1,642 @@
+/**
+ * LayerManager in the 3D view: the ribbons in place of the lines, cut
+ * again for the zoom and around the view, and the flights under the
+ * pointer among them. The relief they stand on is in terrain.test.ts.
+ */
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { Point, type Map as MapLibreMap } from "maplibre-gl";
+import { LngLatBounds } from "../../../mocks/maplibre-gl";
+import type { LayerManager } from "../../../../kml_heatmap/frontend/ui/layerManager";
+import type { PathSegment } from "../../../../kml_heatmap/frontend/types";
+import { createDataset, createSegment, type MockApp } from "../../testHelpers";
+import { liftOffsetPx } from "../../../../kml_heatmap/frontend/calculations/lift";
+import { heldGroundedFlights } from "../../../../kml_heatmap/frontend/calculations/groundProfile";
+import { REPLAY_CAMERA_MOVE } from "../../../../kml_heatmap/frontend/utils/mapHelpers";
+import {
+  type RunFeature,
+  ALTITUDE,
+  ALTITUDE_SELECTED,
+  segmentsAlong,
+  drawMode,
+  layerManagerHelpers,
+  setupLayerManager,
+  teardownLayerManager,
+} from "./layerManagerTestSetup";
+
+// The feature bundle, as far as the relief of the 3D view takes it (the
+// heat cloud has tests of its own), and with `held` still on its way
+const featureBundle = vi.hoisted(() => ({
+  available: true,
+  held: false,
+  followHeatCloud: vi.fn(),
+  followSelectionRibbons: vi.fn(),
+}));
+vi.mock("../../../../kml_heatmap/frontend/services/featureLoader", async () => {
+  const { followTerrain } =
+    await import("../../../../kml_heatmap/frontend/ui/terrain");
+  const { followHeatCloud, followSelectionRibbons } = featureBundle;
+  return {
+    loadFeatures: vi.fn(() =>
+      featureBundle.held
+        ? new Promise<never>(() => {})
+        : Promise.resolve(
+            featureBundle.available
+              ? { followTerrain, followHeatCloud, followSelectionRibbons }
+              : null,
+          ),
+    ),
+  };
+});
+
+describe("LayerManager 3D view", () => {
+  let layerManager: LayerManager;
+  let mockApp: MockApp;
+  /** Callbacks waiting for the next animation frame, by their handle */
+  let frames: Map<number, FrameRequestCallback>;
+  const {
+    features,
+    selectionFilter,
+    setDataCalls,
+    paint,
+    landed,
+    holdSetData,
+    rendered,
+    pointAt,
+    terrainCode,
+    settled,
+  } = layerManagerHelpers({
+    get layerManager() {
+      return layerManager;
+    },
+    get mockApp() {
+      return mockApp;
+    },
+    get frames() {
+      return frames;
+    },
+  });
+
+  beforeEach(() => {
+    featureBundle.held = false;
+    ({ layerManager, mockApp, frames } = setupLayerManager());
+  });
+
+  afterEach(() => teardownLayerManager(layerManager));
+
+  describe("the 3D view", () => {
+    const RIBBONS = "paths-altitude-3d";
+    const RIBBONS_SELECTED = "paths-altitude-selected-3d";
+
+    /** A climb from the ground at 1000 ft to 1100 ft, then level */
+    function drawClimb(): void {
+      mockApp.currentData = createDataset(
+        [{ id: 1, year: 2025 }],
+        [
+          createSegment({
+            path_id: 1,
+            altitude_ft: 1000,
+            coords: [
+              [48, 16],
+              [48, 16.01],
+            ],
+          }),
+          createSegment({
+            path_id: 1,
+            altitude_ft: 1100,
+            coords: [
+              [48, 16.01],
+              [48, 16.02],
+            ],
+          }),
+          createSegment({
+            path_id: 1,
+            altitude_ft: 1100,
+            coords: [
+              [48, 16.02],
+              [48, 16.03],
+            ],
+          }),
+        ],
+      );
+      mockApp.altitudeRange = { min: 0, max: 32000 };
+      // Over the flight: zoomed in, only the ribbons around the view are
+      // written
+      mockApp.map!.jumpTo({ center: [16.015, 48] });
+      mockApp.store.set("threeDVisible", true);
+      mockApp.altitudeLayer.setVisible(true);
+      drawMode(layerManager, "altitude");
+    }
+
+    const ribbons = (): RunFeature[] => features(RIBBONS);
+
+    /** How far apart the two edges of a ribbon's first quad are, in metres */
+    const ribbonWidthM = (): number => {
+      const geometry = ribbons()[0]!.geometry as GeoJSON.MultiPolygon;
+      const [a, , , d] = geometry.coordinates[0]![0]! as [number, number][];
+      const metresPerDegree = 111320;
+      const dLng =
+        (d![0] - a![0]) * metresPerDegree * Math.cos((48 * Math.PI) / 180);
+      const dLat = (d![1] - a![1]) * metresPerDegree;
+      return Math.hypot(dLng, dLat);
+    };
+
+    it("writes each run as ribbon pieces of the same run in place of its line", () => {
+      // Close in, where the ribbons are cut as the data has them
+      mockApp.map!.jumpTo({ zoom: 13 });
+      drawClimb();
+
+      // To a source of their own, which is not simplified
+      expect(features(ALTITUDE)).toEqual([]);
+      expect(ribbons().length).toBeGreaterThan(1);
+      for (const ribbon of ribbons()) {
+        expect(ribbon.geometry.type).toBe("MultiPolygon");
+        // One run: the table answers for all of its pieces
+        expect(ribbon.properties).toMatchObject({ r: 0, g: 1, pathId: 1 });
+      }
+    });
+
+    it("stands the ribbon on the flight's ground and slopes it with the climb", () => {
+      mockApp.map!.jumpTo({ zoom: 13 });
+      drawClimb();
+
+      // The ground of this flight is where it spent the lowest of its time,
+      // 1000 ft: level on it, then 100 ft of climb cut into pieces of 20 ft,
+      // each at the height of its middle, then level at the top
+      expect(ribbons().map((ribbon) => ribbon.properties.h)).toEqual([
+        0, 10, 30, 50, 70, 90, 100,
+      ]);
+    });
+
+    it("writes no ribbon outside the 3D view", () => {
+      drawClimb();
+      mockApp.store.set("threeDVisible", false);
+
+      expect(ribbons()).toEqual([]);
+      expect(features(ALTITUDE)).toHaveLength(1);
+    });
+
+    it("draws the ribbons a few pixels wide, cut again for another zoom level", async () => {
+      mockApp.map!.jumpTo({ zoom: 7.2 });
+      drawClimb();
+      await terrainCode();
+      const at7 = ribbonWidthM();
+      const writes = setDataCalls(RIBBONS);
+
+      // Within the level nothing is cut again
+      mockApp.map!.jumpTo({ zoom: 7.9 });
+      mockApp.map!.emit("zoomend");
+      expect(setDataCalls(RIBBONS)).toBe(writes);
+
+      // A level further in, half as wide on the ground: as wide on screen.
+      // Written over the cut of before, which stands on the relief of both
+      // levels until the new one has landed.
+      mockApp.map!.jumpTo({ zoom: 8.1 });
+      mockApp.map!.emit("zoomend");
+      expect(setDataCalls(RIBBONS)).toBe(writes + 1);
+      expect(ribbonWidthM()).toBeCloseTo(at7 / 2, 3);
+      // About 3 pixels at zoom 8.5, 512 px tiles, at 48 degrees
+      const metresPerPixel =
+        (40075016.686 * Math.cos((48 * Math.PI) / 180)) / (512 * 2 ** 8.5);
+      expect(ribbonWidthM() / metresPerPixel).toBeCloseTo(3, 1);
+    });
+
+    it("leaves the zooms of the replay's camera to its own rest", async () => {
+      mockApp.map!.jumpTo({ zoom: 7.2 });
+      drawClimb();
+      await terrainCode();
+      const writes = setDataCalls(RIBBONS);
+
+      mockApp.map!.jumpTo({ zoom: 8.1 });
+      mockApp.map!.emit("zoomend", REPLAY_CAMERA_MOVE);
+      expect(setDataCalls(RIBBONS)).toBe(writes);
+
+      // Which it tells the map of as MapLibre would
+      mockApp.map!.emit("zoomend");
+      expect(setDataCalls(RIBBONS)).toBe(writes + 1);
+    });
+
+    it("still answers for the flights while the ribbons are cut for another zoom", async () => {
+      // Beyond the level of the deepest elevation tiles, where only the
+      // width of the ribbons changes
+      mockApp.map!.jumpTo({ zoom: 12.2 });
+      drawClimb();
+      await terrainCode();
+      await landed();
+      settled();
+      const g = ribbons()[0]!.properties.g;
+      const workerAnswers = holdSetData(RIBBONS);
+
+      mockApp.map!.jumpTo({ zoom: 13.1 });
+      mockApp.map!.emit("zoomend");
+
+      // The same runs, so the tiles of before still stand for them: no
+      // click or pointer is kept waiting for the new ones
+      expect(ribbons()[0]!.properties.g).toBe(g);
+      mockApp.map!.renderedFeatures = [
+        rendered(RIBBONS, { r: 0, g, pathId: 1, h: 0 }),
+      ];
+      expect(layerManager.hitTest(pointAt(48, 16.005))).toMatchObject({
+        pathId: 1,
+      });
+      await workerAnswers();
+    });
+
+    it("draws the flights as lines zoomed in close, and lifts them again further out", async () => {
+      mockApp.map!.jumpTo({ zoom: 16.5 });
+      drawClimb();
+      await terrainCode();
+      expect(ribbons().length).toBeGreaterThan(0);
+
+      // The camera is lower than a circuit there
+      mockApp.map!.jumpTo({ zoom: 17.2 });
+      mockApp.map!.emit("zoomend");
+      expect(ribbons()).toEqual([]);
+      expect(features(ALTITUDE)).toHaveLength(1);
+
+      mockApp.map!.jumpTo({ zoom: 16.8 });
+      mockApp.map!.emit("zoomend");
+      expect(features(ALTITUDE)).toEqual([]);
+      expect(ribbons().length).toBeGreaterThan(0);
+    });
+
+    it("leaves the ribbons be as the map zooms while the flights are flat", () => {
+      drawClimb();
+      mockApp.store.set("threeDVisible", false);
+      const writes = setDataCalls(RIBBONS);
+
+      mockApp.map!.jumpTo({ zoom: 3 });
+      mockApp.map!.emit("zoomend");
+
+      expect(setDataCalls(RIBBONS)).toBe(writes);
+    });
+
+    it("draws the ribbons as strong as the lines, dimmed like them", () => {
+      drawClimb();
+
+      expect(paint(RIBBONS)["fill-extrusion-opacity"]).toBe(0.85);
+      expect(paint(ALTITUDE)["line-opacity"]).toBe(0.85);
+    });
+
+    it("keeps the ribbons of the selected flights off the main layer, like the lines", () => {
+      drawClimb();
+      mockApp.altitudeVisible = true;
+      mockApp.selectedPathIds.add(1);
+      layerManager.updateSelectionStyles();
+
+      expect(mockApp.map!.layer(RIBBONS).filter).toEqual([
+        "!",
+        ["in", ["get", "pathId"], ["literal", [1]]],
+      ]);
+      // The selection's own ribbons, at full strength
+      expect(features(ALTITUDE_SELECTED)).toEqual([]);
+      expect(features(RIBBONS_SELECTED).length).toBeGreaterThan(0);
+      expect(paint(RIBBONS_SELECTED)["fill-extrusion-opacity"]).toBe(1);
+    });
+
+    it("looks for the ribbons under the pointer only in the 3D view", () => {
+      drawClimb();
+
+      layerManager.hitTest(new Point(100, 50));
+      expect(mockApp.map!.queryRenderedFeatures).toHaveBeenLastCalledWith(
+        expect.anything(),
+        { layers: [ALTITUDE, ALTITUDE_SELECTED, RIBBONS, RIBBONS_SELECTED] },
+      );
+
+      mockApp.store.set("threeDVisible", false);
+      layerManager.hitTest(new Point(100, 50));
+      expect(mockApp.map!.queryRenderedFeatures).toHaveBeenLastCalledWith(
+        expect.anything(),
+        { layers: [ALTITUDE, ALTITUDE_SELECTED] },
+      );
+    });
+
+    it("finds the flight of a ribbon under the pointer", async () => {
+      drawClimb();
+      await terrainCode();
+      await landed();
+      settled();
+      mockApp.map!.renderedFeatures = [
+        rendered(RIBBONS, { r: 0, g: ribbons()[0]!.properties.g, h: 100 }),
+      ];
+
+      expect(layerManager.hitTest(pointAt(48, 16.025))).toMatchObject({
+        pathId: 1,
+      });
+    });
+
+    it("finds no ribbon while they are hidden on their way to another ground, and takes that for no empty map", async () => {
+      drawClimb();
+      await terrainCode();
+      await landed();
+      mockApp.map!.renderedFeatures = [
+        rendered(RIBBONS, { r: 0, g: ribbons()[0]!.properties.g, h: 100 }),
+      ];
+
+      // A query finds a feature whatever its opacity
+      mockApp.relief.showRibbons(false);
+      expect(layerManager.hitTest(pointAt(48, 16.025))).toBe("stale");
+      expect(mockApp.map!.queryRenderedFeatures).toHaveBeenLastCalledWith(
+        expect.anything(),
+        { layers: [ALTITUDE, ALTITUDE_SELECTED] },
+      );
+
+      mockApp.relief.showRibbons(true);
+      expect(layerManager.hitTest(pointAt(48, 16.025))).toMatchObject({
+        pathId: 1,
+      });
+    });
+
+    it("writes nothing again as the map zooms on among the flat lines", async () => {
+      mockApp.map!.jumpTo({ zoom: 17.2 });
+      drawClimb();
+      await terrainCode();
+      const writes = setDataCalls(ALTITUDE);
+
+      // A line is the same at every zoom
+      mockApp.map!.jumpTo({ zoom: 18.1 });
+      mockApp.map!.emit("zoomend");
+      mockApp.map!.jumpTo({ zoom: 19.1 });
+      mockApp.map!.emit("zoomend");
+      expect(setDataCalls(ALTITUDE)).toBe(writes);
+
+      // Out to where they are lifted again, as ribbons
+      mockApp.map!.jumpTo({ zoom: 16.5 });
+      mockApp.map!.emit("zoomend");
+      expect(ribbons().length).toBeGreaterThan(0);
+      expect(features(ALTITUDE)).toEqual([]);
+    });
+
+    it("cuts each source again for the zoom level it was written at", async () => {
+      mockApp.map!.jumpTo({ zoom: 7.2 });
+      drawClimb();
+      await terrainCode();
+      const at7 = ribbonWidthM();
+
+      // The selection is written at the next level before the zoom ends;
+      // the main ribbons are still those of the level before
+      mockApp.map!.jumpTo({ zoom: 8.1 });
+      mockApp.altitudeVisible = true;
+      mockApp.selectedPathIds.add(1);
+      layerManager.updateSelectionStyles();
+      mockApp.map!.emit("zoomend");
+
+      expect(ribbonWidthM()).toBeCloseTo(at7 / 2, 3);
+    });
+
+    it("writes neither the selection nor the flights isolate mode hides for isolation alone", async () => {
+      mockApp.map!.jumpTo({ zoom: 7.2 });
+      drawClimb();
+      await terrainCode();
+      mockApp.altitudeVisible = true;
+      mockApp.selectedPathIds.add(1);
+      layerManager.updateSelectionStyles();
+      /** The writes of a source that held any ribbon */
+      const drawnWrites = (id: string): number =>
+        mockApp
+          .map!.source(id)
+          .setData.mock.calls.filter(
+            ([data]) => (data as GeoJSON.FeatureCollection).features.length,
+          ).length;
+      const main = drawnWrites(RIBBONS);
+      const selected = drawnWrites(RIBBONS_SELECTED);
+      const g = features(RIBBONS_SELECTED)[0]!.properties.g;
+
+      // The same runs, styled for isolation: the features on the map stay
+      // those of the runs, and a click on the empty map counts
+      mockApp.isolateSelection = true;
+      layerManager.updateSelectionStyles();
+      expect(drawnWrites(RIBBONS_SELECTED)).toBe(selected);
+      expect(selectionFilter(RIBBONS)).toEqual(["literal", false]);
+      await landed();
+      settled();
+      mockApp.map!.renderedFeatures = [];
+      expect(layerManager.hitTest(pointAt(48, 16.5))).toBeNull();
+
+      // Framed on another level: the selection is cut for it, the flights
+      // out of sight are not
+      mockApp.map!.jumpTo({ zoom: 8.1 });
+      mockApp.map!.emit("zoomend");
+      expect(drawnWrites(RIBBONS)).toBe(main);
+      expect(drawnWrites(RIBBONS_SELECTED)).toBe(selected + 1);
+      expect(features(RIBBONS_SELECTED)[0]!.properties.g).toBe(g);
+
+      // Back in sight, they are, once, for the level they show at
+      mockApp.isolateSelection = false;
+      layerManager.updateSelectionStyles();
+      expect(drawnWrites(RIBBONS)).toBe(main + 1);
+      expect(drawnWrites(RIBBONS_SELECTED)).toBe(selected + 1);
+      expect(selectionFilter(RIBBONS)).not.toEqual(["literal", false]);
+      layerManager.updateSelectionStyles();
+      expect(drawnWrites(RIBBONS)).toBe(main + 1);
+    });
+
+    it("leaves a mode the replay hides as it is, and draws it again as it shows", () => {
+      mockApp.map!.jumpTo({ zoom: 8.2 });
+      drawClimb();
+      const writes = setDataCalls(RIBBONS);
+
+      // Hidden, not cleared, as the replay does it
+      mockApp.altitudeLayer.setVisible(false);
+      mockApp.map!.jumpTo({ zoom: 9.1 });
+      mockApp.map!.emit("zoomend");
+      mockApp.store.set("threeDVisible", false);
+      expect(setDataCalls(RIBBONS)).toBe(writes);
+      expect(setDataCalls(ALTITUDE)).toBe(0);
+
+      // Shown again, a change of the selection draws it as a whole, flat
+      mockApp.altitudeLayer.setVisible(true);
+      mockApp.altitudeVisible = true;
+      layerManager.updateSelectionStyles();
+      expect(ribbons()).toEqual([]);
+      expect(features(ALTITUDE)).toHaveLength(1);
+    });
+
+    it("lets the smoothed flights go once nothing lifted needs them", async () => {
+      const smoothed = heldGroundedFlights;
+      drawClimb();
+      expect(smoothed()).not.toBeNull();
+
+      mockApp.store.set("threeDVisible", false);
+      expect(smoothed()).toBeNull();
+
+      mockApp.store.set("threeDVisible", true);
+      await terrainCode();
+      expect(smoothed()).not.toBeNull();
+      // Another dataset, drawn flat zoomed in
+      mockApp.map!.jumpTo({ zoom: 17.5 });
+      mockApp.currentData = createDataset(
+        [{ id: 1, year: 2025 }],
+        [...mockApp.currentData!.path_segments],
+      );
+      drawMode(layerManager, "altitude");
+      expect(smoothed()).toBeNull();
+
+      mockApp.map!.jumpTo({ zoom: 12 });
+      mockApp.map!.emit("zoomend");
+      await terrainCode();
+      expect(smoothed()).not.toBeNull();
+      layerManager.clearLayer("altitude");
+      expect(smoothed()).toBeNull();
+
+      // Kept for the heat cloud, which draws along them (ui/heatCloud.ts)
+      drawMode(layerManager, "altitude");
+      expect(smoothed()).not.toBeNull();
+      mockApp.store.batch(() => {
+        mockApp.heatmapVisible = true;
+        mockApp.heatCloud = true;
+      });
+      layerManager.clearLayer("altitude");
+      expect(smoothed()).not.toBeNull();
+    });
+
+    it("takes a ribbon down by the lift at the map's centre, as MapLibre raises it", async () => {
+      // Due north at 60 degrees, a segment every 0.005 degrees, while the
+      // middle of the map is at the equator
+      const points = Array.from({ length: 40 }, (_, i): [number, number] => [
+        60 + i * 0.005,
+        16,
+      ]);
+      mockApp.currentData = createDataset(
+        [{ id: 1, year: 2025 }],
+        segmentsAlong(points),
+      );
+      mockApp.store.set("threeDVisible", true);
+      mockApp.altitudeLayer.setVisible(true);
+      mockApp.map!.jumpTo({ center: [16, 0], zoom: 12, pitch: 60 });
+      // A view that reaches up to the flight, whose ribbons are written
+      // only around it
+      mockApp.map!.getBounds.mockReturnValue(
+        new LngLatBounds([15, -1], [17, 61]),
+      );
+      drawMode(layerManager, "altitude");
+      await terrainCode();
+      await landed();
+      settled();
+      mockApp.map!.renderedFeatures = [
+        rendered(RIBBONS, {
+          r: 0,
+          g: ribbons()[0]!.properties.g,
+          h: 1000,
+          l: 11,
+        }),
+      ];
+
+      // Drawn up by the lift of the centre's latitude, half of that at 60
+      const ground = pointAt(60 + 20.5 * 0.005, 16);
+      const lift = liftOffsetPx(
+        mockApp.map! as unknown as MapLibreMap,
+        0,
+        1000,
+        2,
+      );
+      const hit = layerManager.hitTest(new Point(ground.x, ground.y - lift));
+
+      expect(hit).toMatchObject({
+        segment: mockApp.currentData.path_segments[20],
+      });
+    });
+
+    describe("zoomed in", () => {
+      /** Two flights, one at 48 N 16 E and one two and a half degrees east */
+      async function drawTwo(zoom: number): Promise<void> {
+        const along = (lng: number, id: number): PathSegment[] =>
+          [0, 1, 2].map((i) =>
+            createSegment({
+              path_id: id,
+              altitude_ft: 3000,
+              coords: [
+                [48, lng + i * 0.01],
+                [48, lng + (i + 1) * 0.01],
+              ],
+            }),
+          );
+        mockApp.currentData = createDataset(
+          [
+            { id: 1, year: 2025 },
+            { id: 2, year: 2025 },
+          ],
+          [...along(16, 1), ...along(18.5, 2)],
+        );
+        mockApp.altitudeRange = { min: 0, max: 32000 };
+        mockApp.map!.jumpTo({ center: [16.015, 48], zoom });
+        mockApp.store.set("threeDVisible", true);
+        mockApp.altitudeLayer.setVisible(true);
+        drawMode(layerManager, "altitude");
+        await terrainCode();
+      }
+      const paths = (): number[] => [
+        ...new Set(ribbons().map((ribbon) => ribbon.properties.pathId)),
+      ];
+
+      it("writes the ribbons around the view only, and again as it leaves that", async () => {
+        // The view of the mock map reaches a degree to each side
+        await drawTwo(9.5);
+        expect(paths()).toEqual([1]);
+        const g = ribbons()[0]!.properties.g;
+        const writes = setDataCalls(RIBBONS);
+
+        // Within the part written for, nothing is written again
+        mockApp.map!.jumpTo({ center: [16.2, 48] });
+        mockApp.map!.emit("moveend");
+        expect(setDataCalls(RIBBONS)).toBe(writes);
+
+        // Beyond it, the same runs around the new view: the features the
+        // tiles still hold answer for them, and finding none is no word of
+        // the empty map until the new ones have landed
+        await landed();
+        settled();
+        const workerAnswers = holdSetData(RIBBONS);
+        mockApp.map!.jumpTo({ center: [18.5, 48] });
+        mockApp.map!.emit("moveend");
+        expect(setDataCalls(RIBBONS)).toBe(writes + 1);
+        mockApp.map!.renderedFeatures = [];
+        expect(layerManager.hitTest(pointAt(48, 18.51))).toBe("stale");
+        await workerAnswers();
+        expect(layerManager.hitTest(pointAt(48, 18.51))).toBeNull();
+        const written = mockApp.map!.source(RIBBONS).setData.mock.calls.at(-1)!;
+        const features = (written[0] as { features: RunFeature[] }).features;
+        expect(new Set(features.map((f) => f.properties.pathId))).toEqual(
+          new Set([2]),
+        );
+        expect(features[0]!.properties.g).toBe(g);
+
+        // Not for the replay's camera, nor with the lines drawn flat
+        mockApp.map!.jumpTo({ center: [16, 48] });
+        mockApp.map!.emit("moveend", REPLAY_CAMERA_MOVE);
+        expect(setDataCalls(RIBBONS)).toBe(writes + 1);
+      });
+
+      it("reaches further around a tilted view, by as high as a flight is drawn", async () => {
+        // Twice the height, at the level of the least exaggeration
+        await drawTwo(10.5);
+        mockApp.map!.jumpTo({ center: [15.6, 48], pitch: 0 });
+        mockApp.map!.emit("moveend");
+        expect(paths()).toEqual([1]);
+        // Nearly a degree west of the view's edge: out of reach flat,
+        // but not of the flights of 32,000 ft of the range tilted
+        mockApp.map!.jumpTo({ center: [20.4, 48] });
+        mockApp.map!.emit("moveend");
+        expect(paths()).toEqual([]);
+        mockApp.map!.jumpTo({ pitch: 80 });
+        mockApp.map!.emit("moveend");
+        expect(paths()).toEqual([2]);
+      });
+
+      it("writes every ribbon zoomed out, where all of them are in view", async () => {
+        await drawTwo(7.5);
+        expect(paths()).toEqual([1, 2]);
+      });
+    });
+
+    it("cuts and writes the flights again as the 3D view comes and goes", async () => {
+      drawClimb();
+      await terrainCode();
+      const writes = setDataCalls(ALTITUDE);
+
+      mockApp.store.set("threeDVisible", false);
+      expect(setDataCalls(ALTITUDE)).toBe(writes + 1);
+      mockApp.store.set("threeDVisible", true);
+      expect(setDataCalls(ALTITUDE)).toBe(writes + 2);
+    });
+  });
+});

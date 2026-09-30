@@ -238,35 +238,6 @@ export function heightOnReliefFt(
 }
 
 /**
- * A point's feet above the ground of the relief level `level`, and the
- * ground of the levels around it there (see groundOffsetFt); a height of
- * null is none, where the flights are not lifted
- */
-export interface GroundedHeight {
-  heightFt: number | null;
-  offsetsFt?: readonly number[] | undefined;
-  level?: number | undefined;
-}
-
-/**
- * The feet above the relief under a tile of the map zoom `zoom` of a point
- * lifted as `point` says (see heightOnReliefFt), or null for none
- */
-export function heightAtZoomFt(
-  point: GroundedHeight,
-  zoom: number,
-): number | null {
-  return point.heightFt === null
-    ? null
-    : heightOnReliefFt(
-        point.heightFt,
-        point.offsetsFt,
-        point.level ?? reliefLevel(zoom),
-        zoom,
-      );
-}
-
-/**
  * The metres a pixel spans at `lat` of the elevation tiles the ribbons of
  * the relief level `level` stand on. MapLibre raises a ribbon by the
  * relief under it from the tiles one level coarser than its own (a
@@ -315,21 +286,4 @@ export function liftOffsetPx(
  */
 export function liftMetres(heightFt: number, exaggeration: number): number {
   return heightFt * FEET_TO_METERS * exaggeration;
-}
-
-/**
- * How far up the screen the replay's airplane is drawn at `zoom`: at its
- * height, on its trail, where the trail is lifted (see isLiftedAt).
- * `heightFt` is null while the trail is flat.
- */
-export function airplaneLiftPx(
-  map: MapLibreMap,
-  lat: number,
-  heightFt: number | null,
-  exaggeration: number,
-  zoom = map.getZoom(),
-): number {
-  return heightFt === null || !isLiftedAt(zoom)
-    ? 0
-    : liftOffsetPx(map, lat, heightFt, exaggeration, zoom);
 }

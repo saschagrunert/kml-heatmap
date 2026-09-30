@@ -188,8 +188,6 @@ describe("cross-section", () => {
 
   afterEach(() => {
     lifetime.abort();
-    vi.restoreAllMocks();
-    vi.unstubAllGlobals();
   });
 
   describe("drawing the line", () => {
@@ -1159,6 +1157,5 @@ describe("the chart's colours", () => {
     expect(alphas.size).toBeGreaterThan(1);
     expect(Math.max(...alphas)).toBe(255);
     lifetimeHere.abort();
-    vi.restoreAllMocks();
   });
 });

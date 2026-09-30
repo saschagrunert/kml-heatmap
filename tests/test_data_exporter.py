@@ -15,6 +15,7 @@ import pytest
 import kml_heatmap.data_exporter as exporter_module
 import kml_heatmap.path_content as path_content_module
 import kml_heatmap.site_output as site_output_module
+from kml_heatmap.airports import AirportData
 from kml_heatmap.data_exporter import (
     ChunkResult,
     ExportResult,
@@ -41,7 +42,7 @@ from kml_heatmap.path_content import (
 )
 from kml_heatmap.segment_codec import FORMAT_VERSION, decode_ground
 from kml_heatmap.site_output import STAGING_PREFIX, SiteOutput
-from kml_heatmap.types import AirportData, PathMetadata, TrackPoint
+from kml_heatmap.types import PathMetadata, TrackPoint
 from kml_heatmap.validation import protected_directories
 from tests.conftest import FlatTiles, decoded_segments
 
@@ -371,9 +372,13 @@ class TestPathIds:
         metadata = _metadata(
             [{"year": 2025}, {"year": 2026}, {"year": 2025}] + [{"year": 2026}] * 2
         )
-        export_all_data(paths, metadata, [], output_dir=str(tmp_path / "all"))
+        export_all_data(
+            paths, metadata, [], output_dir=str(tmp_path / "all"), available_flags=[]
+        )
         del paths[2], metadata[2]
-        export_all_data(paths, metadata, [], output_dir=str(tmp_path / "fewer"))
+        export_all_data(
+            paths, metadata, [], output_dir=str(tmp_path / "fewer"), available_flags=[]
+        )
 
         before = _ids_by_start(tmp_path / "all", parse_data)
         after = _ids_by_start(tmp_path / "fewer", parse_data)
@@ -396,11 +401,13 @@ class TestAirportEndpoints:
                 }
             ]
         )
-        airports: list[AirportData] = [
-            {"name": "Home", "lat": 50.0, "lon": 8.0},
-            {"name": "Aunt Martha", "lat": 50.2, "lon": 8.2, "is_at_path_end": True},
+        airports = [
+            AirportData(50.0, 8.0, "Home"),
+            AirportData(50.2, 8.2, "Aunt Martha", is_at_path_end=True),
         ]
-        export_all_data(paths, metadata, airports, output_dir=str(tmp_path))
+        export_all_data(
+            paths, metadata, airports, output_dir=str(tmp_path), available_flags=[]
+        )
         markers = parse_data(tmp_path / "airports.json")["airports"]
         info = parse_data(tmp_path / "2025" / "data.json")["path_info"]
         assert [marker["name"] for marker in markers] == ["Aunt Martha"]
@@ -420,7 +427,9 @@ class TestDropDuplicatePaths:
                 {"year": 2025, "filename": "copy of 1_DEAGJ_DA20.kml"},
             ]
         )
-        export_all_data(paths, metadata, [], output_dir=str(tmp_path))
+        export_all_data(
+            paths, metadata, [], output_dir=str(tmp_path), available_flags=[]
+        )
         year = parse_data(tmp_path / "2025" / "data.json")
         assert [info["id"] for info in year["path_info"]] == [
             path_content_id(paths[0]),
@@ -442,7 +451,11 @@ class TestDropDuplicatePaths:
         monkeypatch.setattr(path_content_module, "_path_content", content)
         paths = [_timed_path(), _timed_path(1.0), _timed_path()]
         export_all_data(
-            paths, _metadata([{"year": 2025}] * 3), [], output_dir=str(tmp_path)
+            paths,
+            _metadata([{"year": 2025}] * 3),
+            [],
+            output_dir=str(tmp_path),
+            available_flags=[],
         )
         assert packed == paths
 
@@ -1307,12 +1320,13 @@ class TestExportAllData:
             ]
         )
 
-        result = export_all_data(paths, metadata, [], output_dir=str(tmp_path))
+        result = export_all_data(
+            paths, metadata, [], output_dir=str(tmp_path), available_flags=("de",)
+        )
 
         # The third path does not move and gets no id
         assert result == ExportResult(
             years=[2025, 2026],
-            countries=[],
             path_ids={0: path_content_id(paths[0]), 1: path_content_id(paths[1])},
         )
         meta = parse_data(tmp_path / "metadata.json")
@@ -1324,7 +1338,7 @@ class TestExportAllData:
         speeds = [row[3] for row in rows_2026]
         assert meta == {
             "aircraft_models": {},
-            "available_flags": [],
+            "available_flags": ["de"],
             "available_years": [2025, 2026],
             "max_groundspeed_knots": max(speeds),
             "min_groundspeed_knots": min(speeds),
@@ -1355,6 +1369,7 @@ class TestExportAllData:
             [],
             output_dir=str(tmp_path),
             aircraft_data={"D-EAGJ": "Katana", "D-EHYL": "Star", "D-XXXX": "Other"},
+            available_flags=[],
         )
 
         meta = parse_data(tmp_path / "metadata.json")
@@ -1364,7 +1379,9 @@ class TestExportAllData:
         paths = [_timed_path(), _path((51.0, 9.0, 700.0), (51.1, 9.1, 800.0))]
         metadata = _metadata([{"year": 2025}, {"year": None}])
 
-        export_all_data(paths, metadata, [], output_dir=str(tmp_path))
+        export_all_data(
+            paths, metadata, [], output_dir=str(tmp_path), available_flags=[]
+        )
 
         assert sorted(p.name for p in tmp_path.iterdir()) == [
             "2025",
@@ -1379,14 +1396,26 @@ class TestExportAllData:
         paths = [_path((51.5, 12.0, 20.0)), _path((51.5, 12.0, 20.0)), _timed_path()]
         metadata = _metadata([{"year": 2024}, {"year": 2024}, {"year": 2025}])
 
-        result = export_all_data(paths, metadata, [], output_dir=str(tmp_path))
+        result = export_all_data(
+            paths, metadata, [], output_dir=str(tmp_path), available_flags=[]
+        )
 
         assert result.years == [2025]
         assert parse_data(tmp_path / "metadata.json")["available_years"] == [2025]
         assert not (tmp_path / "2024").exists()
 
+    def test_the_flags_have_to_be_given_by_name(self, tmp_path):
+        # A default of none would show country codes on a site with flags
+        with pytest.raises(TypeError, match="available_flags"):
+            export_all_data([], [], [], tmp_path)  # type: ignore[call-arg]
+        with pytest.raises(TypeError, match="positional"):
+            export_all_data([], [], [], tmp_path, None, None, None, None, [])  # type: ignore[call-arg]
+        assert not tmp_path.joinpath("metadata.json").exists()
+
     def test_no_paths_produces_empty_metadata(self, tmp_path, parse_data):
-        result = export_all_data([], _metadata([]), [], output_dir=str(tmp_path))
+        result = export_all_data(
+            [], _metadata([]), [], output_dir=str(tmp_path), available_flags=[]
+        )
         assert result.years == []
         assert parse_data(tmp_path / "metadata.json") == {
             "aircraft_models": {},
@@ -1413,7 +1442,7 @@ class TestExportAllData:
         for cpu_count in (1, 4):
             output_dir = tmp_path / str(cpu_count)
             with patch(
-                "kml_heatmap.data_exporter.os.process_cpu_count",
+                "os.process_cpu_count",
                 return_value=cpu_count,
             ):
                 export_all_data(
@@ -1423,6 +1452,7 @@ class TestExportAllData:
                     output_dir=str(output_dir),
                     aircraft_data={"D-EAGJ": "Katana"},
                     terrain=FlatTiles(100.0),
+                    available_flags=[],
                 )
             trees.append(
                 {
@@ -1457,7 +1487,11 @@ class OneTileMissing:
 class TestGround:
     def test_no_ground_without_terrain(self, tmp_path, parse_data):
         export_all_data(
-            [_timed_path()], _metadata([{"year": 2025}]), [], output_dir=tmp_path
+            [_timed_path()],
+            _metadata([{"year": 2025}]),
+            [],
+            output_dir=tmp_path,
+            available_flags=[],
         )
 
         entries = parse_data(tmp_path / "2025" / "data.json")["segments"].values()
@@ -1470,6 +1504,7 @@ class TestGround:
             [],
             output_dir=tmp_path,
             terrain=FlatTiles(100.0),
+            available_flags=[],
         )
 
         data = parse_data(tmp_path / "2025" / "data.json")
@@ -1486,6 +1521,7 @@ class TestGround:
             [],
             output_dir=tmp_path,
             terrain=OneTileMissing(),
+            available_flags=[],
         )
 
         segments = parse_data(tmp_path / "2025" / "data.json")["segments"]

@@ -34,33 +34,36 @@ hundred tiles turn into seconds on every build. The pixels of a decoded tile
 are therefore kept next to its PNG as well (see ``_read_pixel_planes``).
 """
 
-from __future__ import annotations
-
+import base64
 import contextlib
-import http.client
 import math
 import os
 import ssl
 import struct
 import threading
 import time
-import urllib.error
 import zlib
 from array import array
+from compression import zstd
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
+from http.client import HTTPException, HTTPSConnection
 from itertools import compress, pairwise
+from statistics import median_high
 from typing import TYPE_CHECKING, NamedTuple, Protocol
-from urllib.request import Request, urlopen
+from urllib.parse import unquote, urljoin, urlsplit
+from urllib.request import getproxies, proxy_bypass
 
 from . import __version__
 from .cache import CACHE_DIR, atomic_bytes_write
 from .constants import METERS_TO_FEET
 from .exceptions import TerrainUnavailableError
-from .geometry import longitude_difference
+from .geometry import METRES_PER_DEGREE, TERRAIN_MAX_LATITUDE, planar_metres
 from .logger import logger
-from .segment_codec import GROUND_STEP
+from .png import PNG_SIGNATURE, PngError, chunks
+from .segment_codec import ALTITUDE, GROUND_STEP, LAT, LON, SPEED
 from .types import COORDINATE_DECIMALS
+from .workers import default_worker_count
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping, Sequence
@@ -69,6 +72,7 @@ if TYPE_CHECKING:
     from .types import FlightPath, SegmentRow
 
 __all__ = [
+    "METRES_PER_DEGREE",
     "REQUIRE_TERRAIN_ENV",
     "TERRAIN_CACHE_DIR",
     "TERRAIN_ZOOM",
@@ -106,6 +110,52 @@ FETCH_ATTEMPTS = 4
 FETCH_RETRY_SECONDS = 1.0
 # Too many requests, and the server errors worth another attempt
 _RETRIED_HTTP_CODES = frozenset({429, 500, 502, 503, 504})
+# Tiles in a row, across the fetch threads, that used up their attempts on
+# server errors before the host is given up for the run. One such tile
+# costs only itself; a host that answers every tile so would otherwise cost
+# every tile of the run its attempts and pauses, minutes for a few hundred.
+SERVER_ERROR_TILES_TO_GIVE_UP = 3
+# Redirects followed to the same host over https, and how many in a row: the
+# tiles never move, and a redirect elsewhere would hand the request to a host
+# nobody chose
+_REDIRECT_CODES = frozenset({301, 302, 303, 307, 308})
+MAX_REDIRECTS = 3
+
+
+def _https_proxy(host: str) -> tuple[str, int, dict[str, str]] | None:
+    """The proxy the environment sets for https to ``host``, None for none.
+
+    ``urlopen`` honours HTTPS_PROXY and NO_PROXY (and the lowercase names),
+    and a build behind a mandatory proxy reaches no tile without it. The
+    proxy is spoken to in plain http and asked to CONNECT to the host, as
+    ``urlopen`` does; a URL without a scheme is taken as http, and one
+    without a port gets that of its scheme. Credentials in the URL are sent
+    as basic Proxy-Authorization.
+    """
+    proxy = getproxies().get("https")
+    if not proxy or proxy_bypass(host):
+        return None
+    parts = urlsplit(proxy if "://" in proxy else f"http://{proxy}")
+    if not parts.hostname:
+        return None
+    headers: dict[str, str] = {}
+    if parts.username is not None:
+        credentials = f"{unquote(parts.username)}:{unquote(parts.password or '')}"
+        headers["Proxy-Authorization"] = "Basic " + base64.b64encode(
+            credentials.encode()
+        ).decode("ascii")
+    port = parts.port or (443 if parts.scheme == "https" else 80)
+    return parts.hostname, port, headers
+
+
+class _RefusedURLError(ValueError):
+    """A URL the fetch does not follow: not https, or a redirect elsewhere.
+
+    The host answered, so like a status that is not tried again it costs
+    only this tile, and the host stays online for the others.
+    """
+
+
 # Set to "1", a tile that cannot be fetched or decoded fails the build
 REQUIRE_TERRAIN_ENV = "KML_HEATMAP_REQUIRE_TERRAIN"
 # A tile is about 100 KB; anything far larger is not a tile
@@ -121,12 +171,6 @@ DECODE_POOL_MIN_TILES = 8
 # (calculations/groundProfile.ts), which this mirrors
 TAXI_KNOTS = 40
 TAXI_MIN_FIXES = 3
-
-# Planar distances along a path, as the frontend measures them
-METRES_PER_DEGREE = 111320
-
-# Column indices of an exported segment row, see types.SegmentRow
-_LAT, _LON, _ALTITUDE, _SPEED = range(4)
 
 
 class TileKey(NamedTuple):
@@ -154,7 +198,6 @@ class TileSource(Protocol):
 
 # --- PNG ----------------------------------------------------------------
 
-PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 # Colour types this decoder reads, by the channels of a pixel: truecolour
 # and truecolour with alpha, which is what elevation tiles are
 _CHANNELS = {2: 3, 6: 4}
@@ -163,37 +206,18 @@ _CHANNELS = {2: 3, 6: 4}
 MAX_PNG_SIDE = 4096
 
 
-class PngError(ValueError):
-    """A PNG this decoder cannot or will not read."""
-
-
 class DecodeFailedError(RuntimeError):
     """The tiles could not be decoded at all: the decoding pool died."""
 
 
-def _chunks(data: bytes) -> Iterable[tuple[bytes, bytes]]:
-    """The chunks of a PNG after its signature, each checked against its CRC."""
-    pos = len(PNG_SIGNATURE)
-    while pos + 12 <= len(data):
-        (length,) = struct.unpack_from(">I", data, pos)
-        kind = data[pos + 4 : pos + 8]
-        body = data[pos + 8 : pos + 8 + length]
-        if len(body) != length or pos + 12 + length > len(data):
-            break
-        (crc,) = struct.unpack_from(">I", data, pos + 8 + length)
-        if zlib.crc32(kind + body) != crc:
-            raise PngError(f"PNG chunk {kind!r} is corrupt")
-        yield kind, body
-        pos += 12 + length
-    raise PngError("PNG ends before its IEND chunk")
-
-
-def _unfilter(raw: bytes, width: int, height: int, bpp: int) -> bytearray:
+def _unfilter(raw: bytes, width: int, height: int, bpp: int) -> bytearray:  # noqa: C901
     """Undo the per-line filters of a non-interlaced 8-bit image.
 
     Every line starts with its filter type; the filters predict a byte from
     the one ``bpp`` bytes to the left (a), the one above (b) and the one
-    above and to the left (c).
+    above and to the left (c). One branch per filter type in one loop
+    (hence the complexity exemption): a function call per byte would cost
+    what the pool of decoders saves.
     """
     stride = width * bpp
     if len(raw) != height * (stride + 1):
@@ -240,6 +264,34 @@ def _unfilter(raw: bytes, width: int, height: int, bpp: int) -> bytearray:
     return out
 
 
+def _header(body: bytes) -> tuple[int, ...]:
+    """The seven fields of an IHDR chunk."""
+    if len(body) != 13:
+        raise PngError("PNG header has the wrong length")
+    return struct.unpack(">IIBBBBB", body)
+
+
+def is_tile_png(data: bytes) -> bool:
+    """Whether ``data`` is a complete PNG of a tile's size.
+
+    Every chunk against its CRC, the header at ``TILE_SIZE`` a side and the
+    IEND chunk in place: a body cut short on the way, or one the host
+    filled with something else, must not be cached as a tile and decoded
+    again on every build after.
+    """
+    if not data.startswith(PNG_SIGNATURE):
+        return False
+    try:
+        for kind, body in chunks(data):
+            if kind == b"IHDR" and _header(body)[:2] != (TILE_SIZE, TILE_SIZE):
+                return False
+            if kind == b"IEND":
+                return True
+    except PngError:
+        return False
+    return False
+
+
 def decode_png(data: bytes) -> tuple[int, int, int, bytearray]:
     """Decode an 8-bit RGB or RGBA PNG without interlacing.
 
@@ -252,11 +304,9 @@ def decode_png(data: bytes) -> tuple[int, int, int, bytearray]:
         raise PngError("not a PNG file")
     header: tuple[int, ...] | None = None
     compressed = bytearray()
-    for kind, body in _chunks(data):
+    for kind, body in chunks(data):
         if kind == b"IHDR":
-            if len(body) != 13:
-                raise PngError("PNG header has the wrong length")
-            header = struct.unpack(">IIBBBBB", body)
+            header = _header(body)
         elif kind == b"IDAT":
             compressed += body
         elif kind == b"IEND":
@@ -301,19 +351,36 @@ def decode_tile_pixels(data: bytes, indices: Sequence[int]) -> list[float]:
 
 # The decoded pixels of a tile, next to its PNG: a header, then the red,
 # the green and the blue value of every pixel, one plane after the other,
-# compressed. Planes compress better than the PNG itself (the red one is all
-# but constant) and inflate in a fraction of a millisecond. The header holds
-# the CRC of the PNG the pixels are of, so a tile fetched again is decoded
-# again; bump the version whenever the layout changes.
+# compressed with zstd. Planes compress better than the PNG itself (the red
+# one is all but constant) and inflate in a fraction of a millisecond. The
+# header holds the CRC of the PNG the pixels are of, so a tile fetched
+# again is decoded again. Bump the version whenever the layout or the
+# compression changes (version 1 was zlib): a file of an older version is
+# decoded again and replaced.
 PIXELS_SUFFIX = ".pixels"
 _PIXELS_HEADER = struct.Struct(">4sBI")
 _PIXELS_MAGIC = b"KHTP"
-_PIXELS_VERSION = 1
+_PIXELS_VERSION = 2
+_PIXELS_ZSTD_LEVEL = 3
 _PLANES_BYTES = 3 * TILE_SIZE * TILE_SIZE
 
 
 def _pixels_path(path: Path) -> Path:
     return path.with_suffix(PIXELS_SUFFIX)
+
+
+def _has_current_pixels(path: Path) -> bool:
+    """Whether the pixels kept of the tile at ``path`` are of this version.
+
+    Only the header's magic and version: whether they are of this PNG
+    takes reading the PNG, which the decoding does anyway.
+    """
+    try:
+        with _pixels_path(path).open("rb") as kept:
+            head = kept.read(len(_PIXELS_MAGIC) + 1)
+    except OSError:
+        return False
+    return head == _PIXELS_MAGIC + bytes([_PIXELS_VERSION])
 
 
 def _decode_planes(data: bytes) -> bytes:
@@ -339,10 +406,11 @@ def _read_pixel_planes(path: Path, data: bytes) -> bytes | None:
         magic, version, crc = _PIXELS_HEADER.unpack_from(kept)
         if (magic, version, crc) != (_PIXELS_MAGIC, _PIXELS_VERSION, zlib.crc32(data)):
             return None
-        planes = zlib.decompressobj().decompress(
+        # Inflated no further than the planes and a byte, like the PNG
+        planes = zstd.ZstdDecompressor().decompress(
             kept[_PIXELS_HEADER.size :], _PLANES_BYTES + 1
         )
-    except OSError, struct.error, zlib.error:
+    except OSError, struct.error, zstd.ZstdError:
         return None
     return planes if len(planes) == _PLANES_BYTES else None
 
@@ -351,7 +419,10 @@ def _keep_pixel_planes(path: Path, data: bytes, planes: bytes) -> None:
     """Keep the planes of a decoded tile next to its PNG, atomically."""
     header = _PIXELS_HEADER.pack(_PIXELS_MAGIC, _PIXELS_VERSION, zlib.crc32(data))
     try:
-        atomic_bytes_write(_pixels_path(path), header + zlib.compress(planes, 6))
+        atomic_bytes_write(
+            _pixels_path(path),
+            header + zstd.compress(planes, level=_PIXELS_ZSTD_LEVEL),
+        )
     except OSError as e:
         # Only the next build pays for it: it decodes the tile again
         logger.debug("Cannot keep the pixels of %s: %s", path.name, e)
@@ -406,53 +477,158 @@ class TerrariumTiles:
     pixels once decoded next to it. A request that fails on the way or with
     a server error is tried again (see ``FETCH_ATTEMPTS``); the first one
     that fails every time (offline, DNS, the host down) stops the other
-    downloads of the run. A tile the host answers with another error is only
-    missing itself. Neither fails the build on its own.
+    downloads of the run, and so do ``SERVER_ERROR_TILES_TO_GIVE_UP`` tiles
+    in a row that got server errors every time. A tile the host answers with
+    another error is only missing itself. None of it fails the build on its
+    own.
     """
 
     def __init__(self, cache_dir: Path | None = None) -> None:
         """Keep the tiles in ``cache_dir`` (by default ``TERRAIN_CACHE_DIR``)."""
         self.cache_dir = cache_dir if cache_dir is not None else TERRAIN_CACHE_DIR
         self._offline = threading.Event()
+        # Tiles in a row that used up their attempts on server errors (see
+        # SERVER_ERROR_TILES_TO_GIVE_UP), across the fetch threads
+        self._server_error_tiles = 0
+        self._server_error_lock = threading.Lock()
+        # One context for the run: building it reads the system's
+        # certificates, a few milliseconds every tile would pay again
+        self._ssl_context = ssl.create_default_context()
+        # One connection per fetch thread, reused from tile to tile: a TLS
+        # handshake with S3 takes longer than a tile does
+        self._local = threading.local()
+        # Every connection opened, so the ones the threads leave open are
+        # closed when the downloads are done (see fetch)
+        self._opened: list[HTTPSConnection] = []
+        self._opened_lock = threading.Lock()
 
     def path(self, tile: TileKey) -> Path:
         """Where a tile is kept."""
         return self.cache_dir / f"{tile.z}-{tile.x}-{tile.y}.png"
+
+    def _connection(self, host: str) -> HTTPSConnection:
+        """This thread's connection to ``host``, opened when there is none.
+
+        Through the proxy of the environment, when it sets one for the host
+        (see ``_https_proxy``).
+        """
+        connection: HTTPSConnection | None = getattr(self._local, "connection", None)
+        # The host the connection reaches, which through a proxy is not
+        # the one it connects to
+        if connection is None or getattr(self._local, "host", None) != host:
+            self._close_connection()
+            proxy = _https_proxy(host)
+            if proxy is None:
+                connection = HTTPSConnection(
+                    host, timeout=FETCH_TIMEOUT_SECONDS, context=self._ssl_context
+                )
+            else:
+                proxy_host, proxy_port, headers = proxy
+                connection = HTTPSConnection(
+                    proxy_host,
+                    proxy_port,
+                    timeout=FETCH_TIMEOUT_SECONDS,
+                    context=self._ssl_context,
+                )
+                connection.set_tunnel(host, headers=headers)
+            self._local.connection = connection
+            self._local.host = host
+            with self._opened_lock:
+                self._opened.append(connection)
+        return connection
+
+    def _close_connection(self) -> None:
+        """Drop this thread's connection; the next request opens one again."""
+        connection: HTTPSConnection | None = getattr(self._local, "connection", None)
+        if connection is not None:
+            connection.close()
+            self._local.connection = None
+
+    def _get(self, url: str) -> tuple[int, bytes]:
+        """The status and the body of ``url``, redirects on the host followed.
+
+        A redirect that leaves https or the host is not followed: the tiles
+        never move, and the request must not end up at a host nobody chose.
+        Raises ``_RefusedURLError`` for such a redirect, and the errors of
+        ``http.client`` for a connection that fails.
+        """
+        for _ in range(MAX_REDIRECTS + 1):
+            parts = urlsplit(url)
+            if parts.scheme != "https" or not parts.netloc:
+                raise _RefusedURLError(f"refusing to fetch {url}: not https")
+            connection = self._connection(parts.netloc)
+            connection.request(
+                "GET",
+                parts.path + (f"?{parts.query}" if parts.query else ""),
+                headers={"User-Agent": USER_AGENT},
+            )
+            response = connection.getresponse()
+            data: bytes = response.read(MAX_TILE_BYTES + 1)
+            if not response.isclosed():
+                # The body was cut short at MAX_TILE_BYTES. Its rest would
+                # stay on the connection and the next tile of this thread
+                # would fail on it (ResponseNotReady), count as the host
+                # unreachable and, repeated, give the host up for the run.
+                # The next request opens a fresh connection instead.
+                self._close_connection()
+            if response.status not in _REDIRECT_CODES:
+                return response.status, data
+            location = response.getheader("Location") or ""
+            # A Location may be relative to the URL it answers
+            target = urljoin(url, location)
+            target_parts = urlsplit(target)
+            if (
+                not location
+                or target_parts.scheme != "https"
+                or target_parts.netloc != parts.netloc
+            ):
+                raise _RefusedURLError(
+                    f"refusing the redirect from {url} to {location!r}"
+                )
+            url = target
+        raise _RefusedURLError(f"too many redirects from {url}")
 
     def _fetch(self, url: str) -> bytes | None:
         """The body the host answers ``url`` with, None when there is none.
 
         Tries again with a growing pause after a failure on the way or a
         server error, and gives the host up for the run (see ``_offline``)
-        once the last attempt failed as well.
+        once the last attempt failed on the way as well. A server error is
+        the host answering: the other tiles may well get through, unless
+        ``SERVER_ERROR_TILES_TO_GIVE_UP`` tiles in a row got nothing else.
         """
-        error: Exception | None = None
+        error: Exception | str | None = None
+        unreachable = False
         for attempt in range(FETCH_ATTEMPTS):
             if attempt:
                 time.sleep(FETCH_RETRY_SECONDS * 2 ** (attempt - 1))
             if self._offline.is_set():
                 return None
-            request = Request(url, headers={"User-Agent": USER_AGENT})  # noqa: S310
             try:
-                with urlopen(  # noqa: S310 # nosec B310
-                    request,
-                    timeout=FETCH_TIMEOUT_SECONDS,
-                    context=ssl.create_default_context(),
-                ) as response:
-                    data: bytes = response.read(MAX_TILE_BYTES + 1)
-                    return data
-            except urllib.error.HTTPError as e:
-                e.close()
-                if e.code not in _RETRIED_HTTP_CODES:
-                    # The host answered: this tile is missing, the others
-                    # may not be
-                    logger.debug("Elevation tile %s: HTTP %s", url, e.code)
-                    return None
-                error = e
+                status, data = self._get(url)
+            except _RefusedURLError as e:
+                logger.debug("Elevation tile %s: %s", url, e)
+                return None
             # http.client.IncompleteRead (a connection dropped mid-body) is
             # no OSError
-            except (OSError, http.client.HTTPException, ValueError) as e:
+            except (OSError, HTTPException, ValueError) as e:
+                # Whatever state the connection is in, the next attempt
+                # starts a fresh one
+                self._close_connection()
                 error = e
+                unreachable = True
+            else:
+                if status == 200:
+                    with self._server_error_lock:
+                        self._server_error_tiles = 0
+                    return data
+                if status not in _RETRIED_HTTP_CODES:
+                    # The host answered: this tile is missing, the others
+                    # may not be
+                    logger.debug("Elevation tile %s: HTTP %s", url, status)
+                    return None
+                error = f"HTTP {status}"
+                unreachable = False
             logger.debug(
                 "Elevation tile %s, attempt %d of %d: %s",
                 url,
@@ -460,9 +636,20 @@ class TerrariumTiles:
                 FETCH_ATTEMPTS,
                 error,
             )
-        if not self._offline.is_set():
+        if unreachable and not self._offline.is_set():
             self._offline.set()
             logger.debug("Elevation tiles unreachable: %s", error)
+        elif not unreachable:
+            with self._server_error_lock:
+                self._server_error_tiles += 1
+                given_up = self._server_error_tiles >= SERVER_ERROR_TILES_TO_GIVE_UP
+            if given_up and not self._offline.is_set():
+                self._offline.set()
+                logger.debug(
+                    "Elevation tiles: %d tiles in a row got %s, giving the host up",
+                    SERVER_ERROR_TILES_TO_GIVE_UP,
+                    error,
+                )
         return None
 
     def _download(self, tile: TileKey) -> int:
@@ -473,7 +660,7 @@ class TerrariumTiles:
         data = self._fetch(url)
         if data is None:
             return 0
-        if len(data) > MAX_TILE_BYTES or not data.startswith(PNG_SIGNATURE):
+        if len(data) > MAX_TILE_BYTES or not is_tile_png(data):
             logger.debug("Elevation tile %s is not a PNG tile", url)
             return 0
         try:
@@ -496,8 +683,16 @@ class TerrariumTiles:
             logger.debug("Cannot create %s: %s", self.cache_dir, e)
             return
         started = time.monotonic()
-        with ThreadPoolExecutor(max_workers=FETCH_WORKERS) as pool:
-            fetched = [size for size in pool.map(self._download, missing) if size]
+        try:
+            with ThreadPoolExecutor(max_workers=FETCH_WORKERS) as pool:
+                fetched = [size for size in pool.map(self._download, missing) if size]
+        finally:
+            # The threads are gone; their connections would only wait for
+            # the host to drop them
+            with self._opened_lock:
+                opened, self._opened = self._opened, []
+            for connection in opened:
+                connection.close()
         logger.info(
             "  Downloaded %d of %d elevation tile(s), %.1f MB in %.1f s",
             len(fetched),
@@ -520,11 +715,13 @@ class TerrariumTiles:
         # which adds up over hundreds of them; the cores share it. Once the
         # pixels of every tile are kept, reading them takes less time than
         # starting the pool.
-        to_decode = sum(not _pixels_path(path).is_file() for path in paths)
+        # The pixels of an older version count: after an upgrade every tile
+        # is decoded again, which the pool takes a tenth of the time for
+        to_decode = sum(not _has_current_pixels(path) for path in paths)
         if to_decode < DECODE_POOL_MIN_TILES:
             decoded = list(map(_decode_cached_tile, paths, indices, strict=True))
         else:
-            workers = min(os.process_cpu_count() or 1, len(cached))
+            workers = min(default_worker_count(), len(cached))
             # A worker killed for its memory, or a pool that cannot start
             # (no semaphores in a sandbox), must not fail the build
             try:
@@ -555,8 +752,6 @@ Coordinate = tuple[float, float]
 # array rather than a mapping of coordinates, because a million points in
 # Python objects take a gigabyte and are pickled into every export chunk.
 type PointElevations = array[float]
-# Web Mercator ends here, in a square
-MAX_LATITUDE = 85.0511
 TILE_PIXELS = TILE_SIZE * TILE_SIZE
 
 
@@ -570,7 +765,11 @@ def _position(lat: float, lon: float, zoom: int) -> tuple[int, int, float, float
     above the centre of the top row.
     """
     world = TILE_SIZE << zoom
-    lat = max(min(lat, MAX_LATITUDE), -MAX_LATITUDE)
+    # Web Mercator in the form the tests and the frontend measure a pixel
+    # position in: the projection of geometry.web_mercator, but another
+    # formula for it rounds differently, which moves a point by a bit and,
+    # once in a few million, into the next pixel
+    lat = max(min(lat, TERRAIN_MAX_LATITUDE), -TERRAIN_MAX_LATITUDE)
     sin = math.sin(math.radians(lat))
     x = (lon + 180) / 360 * world - 0.5
     y = (0.5 - math.log((1 + sin) / (1 - sin)) / (4 * math.pi)) * world - 0.5
@@ -805,11 +1004,6 @@ def elevations_by_coordinate(
 # --- The ground of a flight ---------------------------------------------
 
 
-def _median(values: list[float]) -> float:
-    """The upper median, as the frontend takes it."""
-    return sorted(values)[len(values) // 2]
-
-
 def _field_offset_ft(
     rows: Sequence[SegmentRow], dem_ft: Sequence[float], order: Iterable[int]
 ) -> float | None:
@@ -826,13 +1020,14 @@ def _field_offset_ft(
     grounds: list[float] = []
     for index in order:
         row = rows[index]
-        if not 0 < row[_SPEED] < TAXI_KNOTS:
+        if not 0 < row[SPEED] < TAXI_KNOTS:
             break
-        altitudes.append(row[_ALTITUDE])
+        altitudes.append(row[ALTITUDE])
         grounds.append(dem_ft[index])
     if len(altitudes) < TAXI_MIN_FIXES:
         return None
-    return _median(altitudes) - _median(grounds)
+    # The upper median, as the frontend takes it
+    return median_high(altitudes) - median_high(grounds)
 
 
 def ground_profile_ft(
@@ -862,7 +1057,7 @@ def ground_profile_ft(
         return None
     dem_ft: list[float] = []
     for row in rows:
-        elevation = elevations.get((row[_LAT], row[_LON]))
+        elevation = elevations.get((row[LAT], row[LON]))
         if elevation is None:
             return None
         dem_ft.append(elevation * METERS_TO_FEET)
@@ -875,14 +1070,9 @@ def ground_profile_ft(
     # Metres flown to the end of each row, as the frontend measures them
     along: list[float] = []
     total = 0.0
-    points = [(start[0], start[1]), *((row[_LAT], row[_LON]) for row in rows)]
+    points = [(start[0], start[1]), *((row[LAT], row[LON]) for row in rows)]
     for (lat0, lon0), (lat1, lon1) in pairwise(points):
-        # The short way round across the antimeridian
-        dlon = longitude_difference(lon0, lon1)
-        total += math.hypot(
-            dlon * METRES_PER_DEGREE * math.cos(math.radians((lat0 + lat1) / 2)),
-            (lat1 - lat0) * METRES_PER_DEGREE,
-        )
+        total += planar_metres(lat0, lon0, lat1, lon1)
         along.append(total)
 
     ground: list[float] = []

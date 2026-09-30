@@ -47,7 +47,8 @@ import type { PathSegment } from "../types";
 import { datasetIndex } from "../calculations/datasetIndex";
 import { heightBandEdgesFt, parseHeightBand } from "../calculations/heightBand";
 import { heatWeight } from "../calculations/heatLines";
-import { airplaneLiftPx, liftExaggeration } from "../calculations/lift";
+import { airplaneLiftPx } from "../calculations/airplaneLift";
+import { liftExaggeration } from "../calculations/lift";
 import {
   readoutAt,
   readoutData,
@@ -63,6 +64,7 @@ import {
 import { frameCoalescer } from "../utils/frameCoalescer";
 import { DEGREES_TO_RADIANS, metresPerPixel } from "../utils/geometry";
 import { announceStatus } from "../utils/toast";
+import { whenIdle } from "../utils/whenIdle";
 import { cloudReachPx } from "./heatCloudLayer";
 
 /** The class of the box, styled in features.css */
@@ -105,12 +107,6 @@ const ESCAPE_SLACK_PX = 8;
 const READOUT_SLACK_PX = 3;
 
 /**
- * Longest what a readout needs at a new zoom waits for the page to have a
- * moment (whenIdle)
- */
-const PREPARE_IDLE_MS = 500;
-
-/**
  * Milliseconds after a touch in which a click or a move of the mouse is
  * the browser's for the tap, not one of a mouse
  */
@@ -134,20 +130,6 @@ const READOUT_KEYS: readonly (keyof StoreState)[] = [
   "reliefLevel",
   "tourView",
 ];
-
-/**
- * Run `work` in a task of its own once the page has a moment, as far as
- * the browser tells (requestIdleCallback, which Safari lacks), and not in
- * the task of the event that asked for it; as Wrapped's intro does (see
- * ui/wrappedIntro.ts), whose bundle this one does not share
- */
-function whenIdle(work: () => void): void {
-  if (typeof requestIdleCallback === "function") {
-    requestIdleCallback(work, { timeout: PREPARE_IDLE_MS });
-  } else {
-    setTimeout(work, 0);
-  }
-}
 
 /** The edges of a box on the map, in its pixels */
 interface Edges {

@@ -117,7 +117,11 @@ browser keeps the bitmap), and two that let MapLibre's worker read a GeoJSON
 source from a `blob:` URL without the main thread (see
 [The heat sources and the year worker](heat.md#the-heat-sources-and-the-year-worker)).
 Each fix has to find its code exactly once, or the build fails: after a bump of
-MapLibre, drop the fix it has made unnecessary, or match its code again.
+MapLibre, drop the fix it has made unnecessary, or match its code again. Its
+stylesheet loses the rules of the controls the app never adds (navigation,
+fullscreen, globe, terrain, geolocate, logo and scale; `VENDOR_CSS_STRIPS`),
+three quarters of it their icons as `data:` URIs, and the build fails unless
+exactly the expected number of rules goes.
 
 ### Country flags
 

@@ -5,16 +5,18 @@
 
 import { KM_TO_NAUTICAL_MILES } from "../utils/constants";
 import { formatFlightTime, formatNumber } from "../utils/formatters";
-import { escapeHtml } from "../utils/htmlGenerators";
+import { markup } from "../utils/markup";
 import {
   aggregateAircraft,
-  calculateTotalDistance,
   filterPaths,
-  filterSegmentsByPaths,
   perPathSeconds,
 } from "../calculations/statistics";
-import { collectAirports } from "../calculations/panelStats";
-import { countCountries } from "./airports";
+import {
+  calculateTotalDistance,
+  collectAirports,
+  filterSegmentsByPaths,
+} from "../calculations/panelStats";
+import { countCountries } from "./countries";
 import { calculateDistance, type Coordinate } from "../utils/geometry";
 import type {
   AircraftAggregate,
@@ -211,7 +213,7 @@ export function calculateYearStats(
  * year" read wrong in the All Years view and for any year but the current.
  */
 function periodPhrase(year: string): string {
-  return year === "all" ? "in total" : "in " + escapeHtml(year);
+  return year === "all" ? "in total" : "in " + year;
 }
 
 /**
@@ -234,7 +236,7 @@ export function generateFunFacts(
   if (newAreaKm2) {
     facts.push({
       icon: "milestone",
-      text: `<strong>${formatNumber(newAreaKm2)} km²</strong> of new airspace ${period}, never flown in the years before.`,
+      text: markup`<strong>${formatNumber(newAreaKm2)} km²</strong> of new airspace ${period}, never flown in the years before.`,
       category: "explore",
       priority: 9,
     });
@@ -248,14 +250,14 @@ export function generateFunFacts(
     const ratio = (distanceNm / earthCircumferenceNm).toFixed(1);
     facts.push({
       icon: "earth",
-      text: `You flew <strong>${ratio}x</strong> around the Earth!`,
+      text: markup`You flew <strong>${ratio}x</strong> around the Earth!`,
       category: "distance",
       priority: 10,
     });
   } else if (distanceNm > 1000) {
     facts.push({
       icon: "distance",
-      text: `You covered <strong>${formatNumber(distanceNm, 1)} nautical miles</strong> ${period}!`,
+      text: markup`You covered <strong>${formatNumber(distanceNm, 1)} nautical miles</strong> ${period}!`,
       category: "distance",
       priority: 8,
     });
@@ -267,23 +269,22 @@ export function generateFunFacts(
   if (numAircraft === 1 && onlyAircraft) {
     // The list only has registered aircraft; flights without a registration
     // (some exports carry none) count in the year total but not here
-    const model = escapeHtml(
-      onlyAircraft.model || onlyAircraft.type || onlyAircraft.registration,
-    );
-    const registration = escapeHtml(onlyAircraft.registration);
+    const model =
+      onlyAircraft.model || onlyAircraft.type || onlyAircraft.registration;
+    const registration = onlyAircraft.registration;
     const flights = onlyAircraft.flights;
     const plural = flights !== 1 ? "s" : "";
     if (flights === yearStats.total_flights) {
       facts.push({
         icon: "aircraft",
-        text: `Loyal to <strong>${registration}</strong>, all ${flights} flight${plural} in this ${model}!`,
+        text: markup`Loyal to <strong>${registration}</strong>, all ${flights} flight${plural} in this ${model}!`,
         category: "aircraft",
         priority: 9,
       });
     } else {
       facts.push({
         icon: "aircraft",
-        text: `<strong>${registration}</strong> took you on ${flights} flight${plural} in this ${model}.`,
+        text: markup`<strong>${registration}</strong> took you on ${flights} flight${plural} in this ${model}.`,
         category: "aircraft",
         priority: 7,
       });
@@ -291,14 +292,14 @@ export function generateFunFacts(
   } else if (numAircraft === 2) {
     facts.push({
       icon: "aircraft",
-      text: `You flew <strong>${numAircraft} different aircraft</strong> ${period}.`,
+      text: markup`You flew <strong>${numAircraft} different aircraft</strong> ${period}.`,
       category: "aircraft",
       priority: 7,
     });
   } else if (numAircraft >= 3) {
     facts.push({
       icon: "aircraft",
-      text: `Aircraft explorer! You flew <strong>${numAircraft} different aircraft</strong>.`,
+      text: markup`Aircraft explorer! You flew <strong>${numAircraft} different aircraft</strong>.`,
       category: "aircraft",
       priority: 8,
     });
@@ -311,14 +312,14 @@ export function generateFunFacts(
   if (numCountries >= 3) {
     facts.push({
       icon: "globe",
-      text: `You flew to airports in <strong>${numCountries} countries</strong>.`,
+      text: markup`You flew to airports in <strong>${numCountries} countries</strong>.`,
       category: "countries",
       priority: 9,
     });
   } else if (numCountries === 2) {
     facts.push({
       icon: "globe",
-      text: `You crossed borders, visiting <strong>2 countries</strong>.`,
+      text: markup`You crossed borders, visiting <strong>2 countries</strong>.`,
       category: "countries",
       priority: 7,
     });
@@ -332,7 +333,7 @@ export function generateFunFacts(
       if (filteredStats?.cruise_speed_knots) {
         facts.push({
           icon: "speed",
-          text: `Cruising at <strong>${formatNumber(filteredStats.cruise_speed_knots)} kt</strong>, averaging <strong>${formatNumber(avgDistanceNm, 1)} nm</strong> per trip.`,
+          text: markup`Cruising at <strong>${formatNumber(filteredStats.cruise_speed_knots)} kt</strong>, averaging <strong>${formatNumber(avgDistanceNm, 1)} nm</strong> per trip.`,
           category: "distance",
           priority: 8,
         });
@@ -340,7 +341,7 @@ export function generateFunFacts(
         // Show distance-only fact when speed data unavailable
         facts.push({
           icon: "ruler",
-          text: `Averaging <strong>${formatNumber(avgDistanceNm, 1)} nm</strong> per trip.`,
+          text: markup`Averaging <strong>${formatNumber(avgDistanceNm, 1)} nm</strong> per trip.`,
           category: "distance",
           priority: 8,
         });
@@ -361,7 +362,7 @@ export function generateFunFacts(
         : "";
       facts.push({
         icon: "milestone",
-        text: `Your longest journey: <strong>${formatNumber(longestNm, 1)} nm</strong>${comparison}.`,
+        text: markup`Your longest journey: <strong>${formatNumber(longestNm, 1)} nm</strong>${comparison}.`,
         category: "distance",
         priority: 8,
       });
@@ -372,7 +373,7 @@ export function generateFunFacts(
       const totalGainFt = filteredStats.total_altitude_gain_ft;
       facts.push({
         icon: "climb",
-        text: `Total elevation gain: <strong>${formatNumber(totalGainFt)} ft</strong>.`,
+        text: markup`Total elevation gain: <strong>${formatNumber(totalGainFt)} ft</strong>.`,
         category: "altitude",
         priority: 8,
       });
@@ -384,7 +385,7 @@ export function generateFunFacts(
         ).toFixed(1);
         facts.push({
           icon: "altitude",
-          text: `You climbed <strong>${ratio}x</strong> Mount Everest in altitude!`,
+          text: markup`You climbed <strong>${ratio}x</strong> Mount Everest in altitude!`,
           category: "altitude",
           priority: 9,
         });
@@ -405,7 +406,7 @@ export function generateFunFacts(
           : "AGL";
       facts.push({
         icon: "ruler",
-        text: `Most common cruise: <strong>${formatNumber(cruiseAltFt)} ft</strong> ${reference} (<strong>${formatNumber(cruiseAltM)} m</strong>).`,
+        text: markup`Most common cruise: <strong>${formatNumber(cruiseAltFt)} ft</strong> ${reference} (<strong>${formatNumber(cruiseAltM)} m</strong>).`,
         category: "altitude",
         priority: 7,
       });
@@ -423,7 +424,7 @@ export function generateFunFacts(
           : formatFlightTime(seconds);
       facts.push({
         icon: "clock",
-        text: `Total flight time: <strong>${duration}</strong> in the air!`,
+        text: markup`Total flight time: <strong>${duration}</strong> in the air!`,
         category: "time",
         priority: 4,
       });
@@ -433,7 +434,7 @@ export function generateFunFacts(
     if (filteredStats.cruise_speed_knots) {
       facts.push({
         icon: "speed",
-        text: `Average cruise speed: <strong>${formatNumber(filteredStats.cruise_speed_knots)} knots</strong>.`,
+        text: markup`Average cruise speed: <strong>${formatNumber(filteredStats.cruise_speed_knots)} knots</strong>.`,
         category: "speed",
         priority: 3,
       });
@@ -446,7 +447,7 @@ export function generateFunFacts(
     ) {
       facts.push({
         icon: "trophy",
-        text: `High altitude achievement: <strong>${formatNumber(filteredStats.max_altitude_ft)} feet</strong>!`,
+        text: markup`High altitude achievement: <strong>${formatNumber(filteredStats.max_altitude_ft)} feet</strong>!`,
         category: "achievement",
         priority: 9,
       });
@@ -473,11 +474,11 @@ function landingFacts(
   if (touchAndGoes > 1) {
     const inOne =
       mostTouchAndGoes > 1 && mostTouchAndGoes < touchAndGoes
-        ? `, <strong>${formatNumber(mostTouchAndGoes)}</strong> of them in one flight`
+        ? markup`, <strong>${formatNumber(mostTouchAndGoes)}</strong> of them in one flight`
         : "";
     facts.push({
       icon: "airport",
-      text: `<strong>${formatNumber(touchAndGoes)} touch-and-goes</strong> ${period}${inOne}.`,
+      text: markup`<strong>${formatNumber(touchAndGoes)} touch-and-goes</strong> ${period}${inOne}.`,
       category: "landings",
       priority: 9,
     });
@@ -486,7 +487,7 @@ function landingFacts(
   if (busiest && busiest.share < 1) {
     facts.push({
       icon: "compass",
-      text: `Favourite runway: <strong>RWY ${escapeHtml(busiest.runway)}</strong> at ${escapeHtml(busiest.airport)}, ${Math.round(busiest.share * 100)}% of the touchdowns there.`,
+      text: markup`Favourite runway: <strong>RWY ${busiest.runway}</strong> at ${busiest.airport}, ${Math.round(busiest.share * 100)}% of the touchdowns there.`,
       category: "landings",
       priority: 6,
     });

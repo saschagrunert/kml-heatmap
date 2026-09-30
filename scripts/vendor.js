@@ -11,7 +11,9 @@
  * comment that names a source map the site does not carry, and the one
  * thing changed in one is a few fixes of bugs of MapLibre or of a browser
  * under it, and of work it does on the main thread that the app cannot
- * spare it otherwise (VENDOR_PATCHES).
+ * spare it otherwise (VENDOR_PATCHES). MapLibre's stylesheet is copied
+ * without the styles of the controls the app never adds
+ * (VENDOR_CSS_STRIPS), three quarters of it.
  * html-to-image is the exception to "as it is": the package has no module
  * in one file, so its module is bundled into one here (VENDOR_MODULES).
  *
@@ -249,16 +251,153 @@ export const VENDOR_PATCHES = {
 };
 
 /**
- * A vendored file with its fixes (VENDOR_PATCHES) made. Matched as latin1,
- * one character per byte, like stripSourceMapComment, so every other byte
- * stays as it is.
+ * Published path inside vendor/ -> the controls of MapLibre whose styles
+ * are left out of that stylesheet as it is copied.
+ *
+ * MapLibre's stylesheet is 83 KB, three quarters of it the icons of its
+ * controls as `data:` URIs: the navigation buttons, the geolocate button
+ * in its six states, the fullscreen, globe and terrain buttons, the scale
+ * and the logo, each drawn again for forced colours in light and dark.
+ * The app adds none of them (its attribution control alone, and its own
+ * controls in styles.css), so every rule whose selectors all name one of
+ * these is dropped (stripControlStyles). What is left is the map, its
+ * canvas, the attribution, the markers and the popups, 11 KB. `rules` is
+ * how many rules the pinned version loses: a bump of MapLibre that adds
+ * or renames a control fails the build here, so the list gets looked at
+ * rather than the icons shipped again unseen.
+ * @type {Record<string, {names: string[], rules: number}>}
+ */
+export const VENDOR_CSS_STRIPS = {
+  "maplibre-gl.css": {
+    names: [
+      // NavigationControl
+      "maplibregl-ctrl-zoom-in",
+      "maplibregl-ctrl-zoom-out",
+      "maplibregl-ctrl-compass",
+      // The group the navigation buttons sit in; the attribution is none
+      "maplibregl-ctrl-group",
+      // FullscreenControl, and the map in full screen
+      "maplibregl-ctrl-fullscreen",
+      "maplibregl-ctrl-shrink",
+      "maplibregl-pseudo-fullscreen",
+      "maplibregl-map:fullscreen",
+      // GlobeControl and TerrainControl
+      "maplibregl-ctrl-globe",
+      "maplibregl-ctrl-terrain",
+      // GeolocateControl, with the dot it draws and its animations
+      "maplibregl-ctrl-geolocate",
+      "maplibregl-user-location",
+      "maplibregl-spin",
+      // LogoControl and ScaleControl
+      "maplibregl-ctrl-logo",
+      "maplibregl-ctrl-scale",
+    ],
+    rules: 62,
+  },
+};
+
+/**
+ * The rules of a minified stylesheet, each with its braces, so that
+ * joining them gives the text back: the ones between the top-level braces
+ * of `css`, at-rules included whole.
+ * @param {string} css
+ * @returns {string[]}
+ */
+function cssRules(css) {
+  /** @type {string[]} */
+  const rules = [];
+  let depth = 0;
+  let start = 0;
+  for (let i = 0; i < css.length; i++) {
+    if (css[i] === "{") depth++;
+    else if (css[i] === "}" && --depth === 0) {
+      rules.push(css.slice(start, i + 1));
+      start = i + 1;
+    }
+  }
+  if (depth !== 0 || start !== css.length) {
+    throw new Error("scripts/vendor.js: the stylesheet is not minified rules");
+  }
+  return rules;
+}
+
+/**
+ * Whether every selector of a rule, or the name of an at-rule, names one
+ * of `names` (see VENDOR_CSS_STRIPS)
+ * @param {string} head - What stands before the rule's first brace
+ * @param {string[]} names
+ * @returns {boolean}
+ */
+function namesOnly(head, names) {
+  const selectors = head.startsWith("@") ? [head] : head.split(",");
+  return selectors.every((selector) =>
+    names.some((name) => selector.includes(name)),
+  );
+}
+
+/**
+ * The stylesheet `css` without the rules whose selectors all name one of
+ * `names`, and without a conditional at-rule (`@media`) left with none;
+ * `dropped` counts the rules it loses, nested ones one by one
+ * @param {string} css
+ * @param {string[]} names
+ * @param {{count: number}} dropped
+ * @returns {string}
+ */
+function withoutRules(css, names, dropped) {
+  return cssRules(css)
+    .map((rule) => {
+      const open = rule.indexOf("{");
+      const head = rule.slice(0, open);
+      if (namesOnly(head, names)) {
+        dropped.count++;
+        return "";
+      }
+      // A conditional at-rule holds rules of its own; @keyframes holds
+      // steps, which are kept with their name
+      if (!/^@(?:media|supports)\b/.test(head)) return rule;
+      const kept = withoutRules(rule.slice(open + 1, -1), names, dropped);
+      return kept ? `${head}{${kept}}` : "";
+    })
+    .join("");
+}
+
+/**
+ * The stylesheet `published` without the styles of the controls the app
+ * never adds (VENDOR_CSS_STRIPS); as latin1, like applyVendorPatches, so
+ * every other byte stays as it is. The number of rules lost has to be the
+ * one recorded there, or the build fails.
+ * @param {Buffer} content
+ * @param {string} published - Path of the file inside vendor/
+ * @returns {Buffer}
+ */
+export function stripControlStyles(content, published) {
+  const strip = VENDOR_CSS_STRIPS[published];
+  if (!strip) return content;
+  const dropped = { count: 0 };
+  const text = withoutRules(content.toString("latin1"), strip.names, dropped);
+  if (dropped.count !== strip.rules) {
+    throw new Error(
+      `scripts/vendor.js: ${dropped.count} rules of ${published} name the ` +
+        `controls the app never adds, not ${strip.rules}. Has MapLibre ` +
+        `changed its controls? See VENDOR_CSS_STRIPS.`,
+    );
+  }
+  return Buffer.from(text, "latin1");
+}
+
+/**
+ * A vendored file with its fixes (VENDOR_PATCHES) made and the styles of
+ * the controls the app never adds left out (VENDOR_CSS_STRIPS). Matched as
+ * latin1, one character per byte, like stripSourceMapComment, so every
+ * other byte stays as it is.
  * @param {Buffer} content
  * @param {string} published - Path of the file inside vendor/
  * @returns {Buffer}
  */
 export function applyVendorPatches(content, published) {
   const patches = VENDOR_PATCHES[published];
-  if (!patches) return content;
+  if (!patches) return stripControlStyles(content, published);
   let text = content.toString("latin1");
   for (const { name, find, replace } of patches) {
     const found = [...text.matchAll(new RegExp(find.source, "g"))].length;

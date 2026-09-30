@@ -1107,13 +1107,6 @@ body.cross-section-open .toast-stack {
   }
 }
 
-@media print {
-  #flight-profile,
-  #cross-section {
-    display: none !important;
-  }
-}
-
 /* ==========================================================================
    What the heat cloud of the 3D view shows, in the heat legend, which
    ui/heatLegend.ts shows while the cloud is drawn

@@ -1,10 +1,11 @@
 """Initialization and sizing of process pool workers.
 
 Python 3.14 starts workers with the ``forkserver`` method, so the parent's
-logging configuration is not inherited. The initializer restores the debug
-log level. The export workers never look up an airport and do not get the
-airport database; the parse workers get the one the parent loaded, which
-takes a tenth of the time of reading the CSV again in every worker.
+logging configuration is not inherited. The initializer restores the log
+level (debug, the default or --quiet). The export workers never look up an
+airport and do not get the airport database; the parse workers get the one
+the parent loaded, which takes a tenth of the time of reading the CSV again
+in every worker. ``--jobs`` caps every pool (see ``configure_workers``).
 """
 
 import contextlib
@@ -13,21 +14,52 @@ import pickle  # nosec B403
 from typing import TYPE_CHECKING
 
 from .airport_lookup import use_airport_database
-from .logger import set_debug_mode
+from .logger import set_log_level
+from .parser import parse_size
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-__all__ = ["init_worker", "parse_worker_count"]
+__all__ = [
+    "configure_workers",
+    "default_worker_count",
+    "init_worker",
+    "parse_worker_count",
+]
 
 # Peak memory of a parse worker per byte of its KML file (a 121 MB gx:Track
 # file took 1.68 GB), and what the interpreter and its modules take anyway
 PARSE_BYTES_PER_FILE_BYTE = 15
 WORKER_BASE_BYTES = 100 * 1024 * 1024
 
+# The most workers any pool of the run gets (--jobs), None for every CPU
+_worker_limit: int | None = None
 
-def init_worker(debug: bool, airport_database: bytes | None = None) -> None:
+
+def configure_workers(jobs: int | None) -> None:
+    """Cap every pool of this process at ``jobs`` workers (None lifts the cap)."""
+    # One setting per process, which the command line sets before any pool
+    global _worker_limit  # noqa: PLW0603
+    _worker_limit = jobs if jobs is None or jobs > 0 else 1
+
+
+def default_worker_count() -> int:
+    """The workers a pool gets without a better measure.
+
+    Every CPU the process may use (``process_cpu_count`` honors the CPU
+    affinity, and with it a container's quota; ``cpu_count`` would start one
+    worker per CPU of the host), or the ``--jobs`` limit when that is lower.
+    """
+    workers = os.process_cpu_count() or 4
+    if _worker_limit is not None:
+        workers = min(workers, _worker_limit)
+    return workers
+
+
+def init_worker(log_level: int, airport_database: bytes | None = None) -> None:
     """Configure a worker process (log level, airport database).
+
+    ``log_level`` is the parent's (``logger.getEffectiveLevel()``).
 
     ``airport_database`` is the parent's database, pickled once by the
     parent: handing the pool the dictionary itself would pickle it again
@@ -36,7 +68,7 @@ def init_worker(debug: bool, airport_database: bytes | None = None) -> None:
     Any failure here would terminate the worker and break the whole pool,
     so nothing may escape: without the database the worker loads it itself.
     """
-    set_debug_mode(debug)
+    set_log_level(log_level)
     if airport_database is not None:
         with contextlib.suppress(Exception):
             database = pickle.loads(airport_database)  # noqa: S301  # nosec B301
@@ -103,29 +135,23 @@ def _available_memory_bytes() -> int | None:
     return min(known) if known else None
 
 
-def _file_size(path: str) -> int:
-    try:
-        return os.path.getsize(path)
-    except OSError:
-        return 0
-
-
 def parse_worker_count(kml_files: Sequence[str]) -> int:
     """The number of parse workers: one per CPU, as far as memory allows.
 
-    Parsing takes about 15 times the file size in memory, and every worker
-    may be parsing one of the largest files at the same time. The pool gets
+    Parsing takes about 15 times the size of the KML in memory, and every
+    worker may be parsing one of the largest files at the same time. The
+    size is the one ``parse_size`` gives, that of the document inside a KMZ
+    rather than of the archive, which is ten to twenty times smaller. The
+    pool gets
     as many workers as the largest files fit into the available memory, at
     least one; an unknown amount of memory does not limit it.
     """
-    # process_cpu_count honors the CPU affinity, and with it a container's
-    # CPU quota; cpu_count would start one worker per CPU of the host
-    workers = max(1, min(len(kml_files), os.process_cpu_count() or 4))
+    workers = max(1, min(len(kml_files), default_worker_count()))
     available = _available_memory_bytes()
     if available is None:
         return workers
 
-    largest = sorted((_file_size(path) for path in kml_files), reverse=True)
+    largest = sorted((parse_size(path) for path in kml_files), reverse=True)
     needed = 0
     for count, size in enumerate(largest[:workers]):
         needed += WORKER_BASE_BYTES + size * PARSE_BYTES_PER_FILE_BYTE

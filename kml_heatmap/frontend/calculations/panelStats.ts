@@ -17,13 +17,12 @@ import { formatFlightTime } from "../utils/formatters";
 import {
   aggregateAircraft,
   altitudeRangeFt,
-  calculateTotalDistance,
   filterPaths,
-  filterSegmentsByPaths,
   heightsAboveGround,
   pathsById,
   perPathSeconds,
   segmentDistance,
+  segmentsForPathIds,
 } from "./statistics";
 import type { FilterView } from "./datasetIndex";
 import type {
@@ -34,6 +33,35 @@ import type {
   FilteredStatistics,
   LandingTotals,
 } from "../types";
+
+/**
+ * Filter segments by path IDs
+ * @param segments - Array of all segments
+ * @param pathInfo - Array of filtered path info objects
+ * @returns Filtered segments
+ */
+export function filterSegmentsByPaths(
+  segments: PathSegment[],
+  pathInfo: PathInfo[],
+): PathSegment[] {
+  return segmentsForPathIds(
+    segments,
+    pathInfo.map((p) => p.id),
+  );
+}
+
+/**
+ * Calculate total distance from segments
+ * @param segments - Array of segment objects with coords
+ * @returns Total distance in kilometers
+ */
+export function calculateTotalDistance(segments: PathSegment[]): number {
+  let total = 0;
+  for (const segment of segments) {
+    total += segmentDistance(segment);
+  }
+  return total;
+}
 
 /**
  * Collect unique airports from path info

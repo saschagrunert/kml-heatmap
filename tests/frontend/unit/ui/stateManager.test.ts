@@ -218,7 +218,6 @@ describe("StateManager", () => {
   });
 
   afterEach(() => {
-    vi.unstubAllGlobals();
     vi.useRealTimers();
     setLocation("");
   });

@@ -1,12 +1,14 @@
 import { describe, it, expect, vi } from "vitest";
 import {
   formatNumber,
-  formatTime,
-  formatSpeed,
   formatFileSize,
-  formatBuildDate,
   formatTrack,
 } from "../../../../kml_heatmap/frontend/utils/formatters";
+import {
+  formatTime,
+  formatSpeed,
+} from "../../../../kml_heatmap/frontend/utils/replayFormatters";
+import { formatBuildDate } from "../../../../kml_heatmap/frontend/utils/statsFormat";
 
 describe("formatter utilities", () => {
   describe("formatFileSize", () => {

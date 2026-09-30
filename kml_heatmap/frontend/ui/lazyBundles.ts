@@ -15,10 +15,11 @@
  */
 import type { MapApp } from "../mapApp";
 import type { FeatureModule } from "../features";
-import { loadWrapped } from "../services/featureLoader";
+import { loadWrapped, wasSiteUpdated } from "../services/featureLoader";
 import { logError } from "../utils/logger";
 import { prefersReducedMotion } from "../utils/motion";
 import { dismissToast, showToast } from "../utils/toast";
+import { whenIdle } from "../utils/whenIdle";
 
 /**
  * Said when the feature bundle or the Wrapped bundle cannot be fetched.
@@ -68,15 +69,19 @@ export async function loadLazyBundle<T>(
   for (const message of messages) {
     if (bundle || message !== unavailable) dismissToast(message);
   }
-  if (!bundle) showToast(unavailable, "error");
+  // A bundle of a newer deploy has said so (services/featureLoader.ts).
+  // Any other failure after it is most likely the deploy's as well, and
+  // the reload it offers puts both right.
+  if (!bundle && !wasSiteUpdated()) showToast(unavailable, "error");
   return bundle;
 }
 
 /**
  * Get Wrapped and its intro ready while its button is pointed at or
- * focused, on either layout (see prepareWrappedIntro). Not under reduced
- * motion, where no intro plays: Wrapped's code comes with the click, as
- * it always has.
+ * focused, on either layout (see prepareWrappedIntro), once the page has
+ * a moment (whenIdle) rather than in the task of the pointer's move. Not
+ * under reduced motion, where no intro plays: Wrapped's code comes with
+ * the click, as it always has.
  */
 export function prepareWrappedOnIntent(app: MapApp): void {
   const prepare = (event: Event): void => {
@@ -85,9 +90,12 @@ export function prepareWrappedOnIntent(app: MapApp): void {
       (id === "wrapped-btn" || id === "mobile-tab-wrapped") &&
       !prefersReducedMotion()
     ) {
-      loadWrapped()
-        .then((wrapped) => wrapped?.prepareWrappedIntro(app))
-        .catch(logError);
+      whenIdle(() => {
+        if (app.signal.aborted) return;
+        loadWrapped()
+          .then((wrapped) => wrapped?.prepareWrappedIntro(app))
+          .catch(logError);
+      });
     }
   };
   // Neither event bubbles; both reach a listener that captures

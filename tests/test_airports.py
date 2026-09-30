@@ -8,6 +8,7 @@ import pytest
 import kml_heatmap.airports as airports_module
 from kml_heatmap.airports import (
     AirportDeduplicator,
+    AltitudeSample,
     airport_elevation,
     deduplicate_airports,
     extract_airport_name,
@@ -48,14 +49,14 @@ class TestSamplePathAltitudes:
         path = _profile(*range(0, 1000, 10))  # 100 points, 0..990
         start = sample_path_altitudes(path)
         end = sample_path_altitudes(path, from_end=True)
-        assert start == {"min": 0.0, "max": 240.0, "variation": 240.0}
-        assert end == {"min": 750.0, "max": 990.0, "variation": 240.0}
+        assert start == AltitudeSample(0.0, 240.0, 240.0)
+        assert end == AltitudeSample(750.0, 990.0, 240.0)
 
     def test_sample_is_capped(self):
         path = _profile(*range(1000))
         sample = sample_path_altitudes(path)
         assert sample is not None
-        assert sample["max"] == 49.0
+        assert sample.max == 49.0
 
     def test_no_altitudes_returns_none(self):
         path = [TrackPoint(50.0, 8.0, None, None)] * 100
@@ -297,8 +298,8 @@ class TestDeduplicateAirports:
         result = deduplicate_airports(metadata, path_groups)
 
         assert len(result) == 2
-        assert result[0]["is_at_path_end"] is False
-        assert result[1]["is_at_path_end"] is True
+        assert result[0].is_at_path_end is False
+        assert result[1].is_at_path_end is True
 
     def test_departure_is_registered_once(self):
         """The metadata start point is the path's first point; no second pass."""
@@ -312,7 +313,7 @@ class TestDeduplicateAirports:
 
         result = deduplicate_airports(metadata, [path])
 
-        assert [(a["lat"], a["is_at_path_end"]) for a in result] == [
+        assert [(a.lat, a.is_at_path_end) for a in result] == [
             (50.0, False),
             (50.86, True),
         ]
@@ -382,7 +383,7 @@ class TestDeduplicateAirports:
         result = deduplicate_airports(metadata, path_groups)
 
         assert len(result) == 1
-        assert result[0]["is_at_path_end"] is False
+        assert result[0].is_at_path_end is False
 
     def test_point_marker_skipped(self):
         metadata: list[PathMetadata] = [
@@ -431,9 +432,7 @@ class TestDeduplicateAirports:
 
         result = deduplicate_airports(metadata, [path])
 
-        assert [(a["name"], a["is_at_path_end"]) for a in result] == [
-            ("EDDM Munich", False)
-        ]
+        assert [(a.name, a.is_at_path_end) for a in result] == [("EDDM Munich", False)]
 
     def test_departure_from_an_alpine_field(self):
         """Samedan lies at 1707 m; the fixture database has no elevation for
@@ -453,9 +452,7 @@ class TestDeduplicateAirports:
         ):
             result = deduplicate_airports(metadata, [path])
 
-        assert [(a["name"], a["is_at_path_end"]) for a in result] == [
-            ("LSZS Samedan", False)
-        ]
+        assert [(a.name, a.is_at_path_end) for a in result] == [("LSZS Samedan", False)]
 
     def test_departure_from_a_high_field_without_the_database(self):
         """Without a known elevation the lowest altitude of the path is the ground."""
@@ -471,7 +468,7 @@ class TestDeduplicateAirports:
 
         result = deduplicate_airports(metadata, [path])
 
-        assert [a["name"] for a in result] == ["Alpine Strip"]
+        assert [a.name for a in result] == ["Alpine Strip"]
 
     def test_landing_at_an_alpine_field(self):
         descent = [3500.0 - i * 60.0 for i in range(30)]
@@ -488,7 +485,7 @@ class TestDeduplicateAirports:
         ):
             result = deduplicate_airports(metadata, [path])
 
-        assert [(a["name"], a["is_at_path_end"]) for a in result] == [
+        assert [(a.name, a.is_at_path_end) for a in result] == [
             ("EDDM Munich", False),
             ("LSZS Samedan", True),
         ]
@@ -507,16 +504,15 @@ class TestDeduplicateAirports:
 
         result = deduplicate_airports(metadata, [path])
 
-        assert [(a["name"], a["is_at_path_end"]) for a in result] == [
+        assert [(a.name, a.is_at_path_end) for a in result] == [
             ("EDAQ Halle-Oppin", False),
             ("LFBN Niort - Marais Poitevin", True),
         ]
         # Both snap to their own database position
-        assert result[0]["lat"] == pytest.approx(51.552223)
-        assert result[1]["lat"] == pytest.approx(46.313477)
+        assert result[0].lat == pytest.approx(51.552223)
+        assert result[1].lat == pytest.approx(46.313477)
         assert [
-            extract_airport_name(a["name"] or "", a.get("is_at_path_end", False))
-            for a in result
+            extract_airport_name(a.name or "", a.is_at_path_end) for a in result
         ] == [
             "EDAQ Halle-Oppin",
             "LFBN Niort - Marais Poitevin",
@@ -535,7 +531,7 @@ class TestDeduplicateAirports:
 
         result = deduplicate_airports(metadata, [path])
 
-        assert [a["name"] for a in result] == ["EDDS Some Field - Other Field - Third"]
+        assert [a.name for a in result] == ["EDDS Some Field - Other Field - Third"]
 
     @pytest.mark.parametrize(
         "name", ["Flight with Anna", "Untitled Path", "Sunday flight 16 Aug 2026"]
@@ -568,7 +564,7 @@ class TestDeduplicateAirports:
 
         result = deduplicate_airports(metadata, paths)
 
-        assert [(a["name"], a["lat"]) for a in result] == [
+        assert [(a.name, a.lat) for a in result] == [
             ("Home strip", 50.0),
             ("Aunt farm", 50.1),
         ]
@@ -587,7 +583,7 @@ class TestDeduplicateAirports:
         result = deduplicate_airports(metadata, [path])
 
         assert len(result) == 1
-        assert result[0]["is_at_path_end"] is True
+        assert result[0].is_at_path_end is True
 
 
 class TestAirportDeduplicator:
@@ -609,8 +605,8 @@ class TestAirportDeduplicator:
             is_at_path_end=False,
         )
         assert idx == 0
-        assert deduplicator.unique_airports[0]["name"] == "Some Field Name"
-        assert deduplicator.unique_airports[0]["lat"] == 50.0
+        assert deduplicator.unique_airports[0].name == "Some Field Name"
+        assert deduplicator.unique_airports[0].lat == 50.0
 
     def test_icao_name_uses_database_coordinates(self):
         deduplicator = AirportDeduplicator()
@@ -622,8 +618,8 @@ class TestAirportDeduplicator:
             is_at_path_end=False,
         )
         airport = deduplicator.unique_airports[0]
-        assert airport["lat"] == pytest.approx(50.026706)
-        assert airport["lon"] == pytest.approx(8.55835)
+        assert airport.lat == pytest.approx(50.026706)
+        assert airport.lon == pytest.approx(8.55835)
 
     def test_route_uses_arrival_icao_at_path_end(self):
         deduplicator = AirportDeduplicator()
@@ -635,7 +631,7 @@ class TestAirportDeduplicator:
             is_at_path_end=True,
         )
         airport = deduplicator.unique_airports[0]
-        assert airport["lat"] == pytest.approx(48.353802)
+        assert airport.lat == pytest.approx(48.353802)
 
     def test_update_existing_airport(self):
         deduplicator = AirportDeduplicator()
@@ -673,7 +669,7 @@ class TestAirportDeduplicator:
             is_at_path_end=False,
         )
         assert idx1 == idx2
-        assert deduplicator.unique_airports[0]["name"] == "EDDF Frankfurt - EDDM Munich"
+        assert deduplicator.unique_airports[0].name == "EDDF Frankfurt - EDDM Munich"
 
     @pytest.mark.parametrize("lat", [0.0, 51.0, 70.0, -65.0, 89.99])
     def test_fields_within_the_merge_distance_merge_at_any_latitude(self, lat):
@@ -726,7 +722,7 @@ class TestAirportDeduplicator:
             is_at_path_end=False,
         )
         assert idx == 0
-        assert deduplicator.unique_airports[0]["name"] is None
+        assert deduplicator.unique_airports[0].name is None
 
 
 class TestIcaoCodesNeverMerge:
@@ -742,7 +738,7 @@ class TestIcaoCodesNeverMerge:
         second = self._add(deduplicator, 49.2, 9.5097, "ZZTY Other Field")
         assert haversine_distance(49.2, 9.5, 49.2, 9.5097) < 0.8
         assert first != second
-        assert [a["name"] for a in deduplicator.unique_airports] == [
+        assert [a.name for a in deduplicator.unique_airports] == [
             "ZZTX Field",
             "ZZTY Other Field",
         ]
@@ -758,7 +754,7 @@ class TestIcaoCodesNeverMerge:
         first = self._add(deduplicator, 49.2, 9.5, "ZZTX Field")
         second = self._add(deduplicator, 49.2, 9.501, "Aunt Martha")
         assert first == second
-        assert deduplicator.unique_airports[0]["name"] == "ZZTX Field"
+        assert deduplicator.unique_airports[0].name == "ZZTX Field"
 
     @pytest.mark.parametrize("coded_first", [True, False])
     def test_code_wins_whatever_the_order(self, coded_first):
@@ -774,7 +770,7 @@ class TestIcaoCodesNeverMerge:
         path = _path((49.2, 9.5, 200.0), (49.3, 9.6, 200.0))
         metadata = [coded, plain] if coded_first else [plain, coded]
         result = deduplicate_airports(metadata, [path, path])
-        assert [a["name"] for a in result] == ["ZZTX Field"]
+        assert [a.name for a in result] == ["ZZTX Field"]
 
 
 class TestAntimeridian:

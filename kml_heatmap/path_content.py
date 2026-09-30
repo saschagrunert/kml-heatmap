@@ -9,8 +9,6 @@ path keeps from one export to the next (``assign_path_ids``). The ids end
 up in shared links and in the saved state of the frontend.
 """
 
-from __future__ import annotations
-
 import hashlib
 import math
 import struct

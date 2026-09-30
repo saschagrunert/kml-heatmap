@@ -6,17 +6,13 @@ import type { GeoJSONSource } from "maplibre-gl";
 import type { MapApp } from "../mapApp";
 import { domCache } from "../utils/domCache";
 import { announceInRegion, announceStatus, showToast } from "../utils/toast";
-import { formatTime } from "../utils/formatters";
+import { formatTime } from "../utils/replayFormatters";
 import { applyToggleButtonState } from "../utils/buttonState";
 import { focusModeControl, holdControls } from "./heldControls";
 import { setControlIcon } from "../utils/icons";
 import { AUTO_ZOOM_FOLLOW, MAP_SOURCES } from "../utils/constants";
-import {
-  airplaneLiftPx,
-  heightAtZoomFt,
-  liftExaggeration,
-  reliefLevel,
-} from "../calculations/lift";
+import { airplaneLiftPx, heightAtZoomFt } from "../calculations/airplaneLift";
+import { liftExaggeration, reliefLevel } from "../calculations/lift";
 import type { SmoothedFlights } from "../calculations/smoothing";
 import { groundProfilesFt } from "../calculations/groundProfile";
 import { appendCurve } from "../calculations/curves";

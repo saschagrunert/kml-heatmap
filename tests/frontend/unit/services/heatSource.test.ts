@@ -25,7 +25,19 @@ const line = (
   weights: Array.from({ length: count }, (_, i) => 0.5 + i / 11),
 });
 
-/** What the heat source used to be handed: a Point per point, heat as `w` */
+/** A point's position as the source writes it, to 5 decimals (1.1 m) */
+const degrees = (value: number): number => Math.round(value * 1e5) / 1e5;
+
+/** A line's position as the source writes it, to 7 decimals (1 cm) */
+const lineDegrees = (value: number): number => Math.round(value * 1e7) / 1e7;
+
+/** A heat as the source writes it, to 4 significant digits */
+const weight = (value: number): number => +value.toPrecision(4);
+
+/**
+ * What the heat source used to be handed: a Point per point, heat as `w`,
+ * rounded as it is written
+ */
 const features = (
   points: [number, number][],
   weights: ArrayLike<number>,
@@ -33,8 +45,23 @@ const features = (
   type: "FeatureCollection",
   features: points.map(([lat, lng], i) => ({
     type: "Feature",
-    properties: { w: weights[i]! },
-    geometry: { type: "Point", coordinates: [lng, lat] },
+    properties: { w: weight(weights[i]!) },
+    geometry: { type: "Point", coordinates: [degrees(lng), degrees(lat)] },
+  })),
+});
+
+/** Heat lines with their positions rounded as they are written */
+const rounded = (lines: HeatLines): HeatLines => ({
+  ...lines,
+  features: lines.features.map((feature) => ({
+    ...feature,
+    geometry: {
+      ...feature.geometry,
+      coordinates: feature.geometry.coordinates.map(
+        ([lng, lat]) =>
+          [lineDegrees(lng!), lineDegrees(lat!)] as [number, number],
+      ),
+    },
   })),
 });
 
@@ -87,15 +114,15 @@ describe("drawHeat", () => {
     expect(drawn).toHaveLength(2);
     const [merged, lone] = drawn as [(typeof drawn)[0], (typeof drawn)[0]];
     const sum = exposed[0]! + exposed[1]! + exposed[2]!;
-    expect(merged.properties.w).toBeCloseTo(sum, 12);
+    expect(merged.properties.w).toBe(weight(sum));
     expect(merged.properties.n).toBe(3);
     const mean = (axis: 0 | 1): number =>
       (points[0]![axis] * exposed[0]! +
         points[1]![axis] * exposed[1]! +
         points[2]![axis] * exposed[2]!) /
       sum;
-    expect(merged.geometry.coordinates[0]).toBeCloseTo(mean(1), 9);
-    expect(merged.geometry.coordinates[1]).toBeCloseTo(mean(0), 9);
+    expect(merged.geometry.coordinates[0]).toBe(degrees(mean(1)));
+    expect(merged.geometry.coordinates[1]).toBe(degrees(mean(0)));
     // A point of one fix is written as it was, without a count
     expect(lone).toEqual(features([points[3]!], [exposed[3]!]).features[0]);
   });
@@ -121,7 +148,33 @@ describe("linesSource", () => {
     expect(lines.features.length).toBeGreaterThan(1);
 
     expect(await linesSource(flatLines(lines)).text()).toBe(
-      JSON.stringify(lines),
+      JSON.stringify(rounded(lines)),
+    );
+  });
+
+  it("writes the lines to 7 decimals, finer than the points", async () => {
+    // Drawn up to the last zoom, where 1.1 m kinks a taxi line
+    const lines: HeatLines = {
+      type: "FeatureCollection",
+      features: [
+        {
+          type: "Feature",
+          properties: { heat: 0.5 },
+          geometry: {
+            type: "LineString",
+            coordinates: [
+              [8.123456789, 50.987654321],
+              [8.12345, 50.98765],
+            ],
+          },
+        },
+      ],
+    };
+
+    expect(await linesSource(flatLines(lines)).text()).toBe(
+      '{"type":"FeatureCollection","features":[{"type":"Feature",' +
+        '"properties":{"heat":0.5},"geometry":{"type":"LineString",' +
+        '"coordinates":[[8.1234568,50.9876543],[8.12345,50.98765]]}}]}',
     );
   });
 
@@ -144,7 +197,7 @@ describe("linesSource", () => {
     };
 
     expect(await linesSource(flatLines(lines)).text()).toBe(
-      JSON.stringify(lines),
+      JSON.stringify(rounded(lines)),
     );
     expect(
       await linesSource(

@@ -11,10 +11,11 @@
  * so a field quietly dropped on the Python side fails here.
  *
  * `docs/` is a local build output. The docs/data half of this suite is
- * skipped when the site has not been built, except in CI, where the unit job
- * builds it first and a missing build is a failure.
+ * skipped when the site has not been built, or was built from other sources
+ * than the checkout, except in CI, where the unit job builds it first and a
+ * missing build is a failure.
  */
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeEach } from "vitest";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { cwd, env } from "node:process";
@@ -30,6 +31,7 @@ import type {
   RawColumns,
   RawYearData,
 } from "../../../kml_heatmap/frontend/types";
+import { checkSite } from "../../e2e/site-check";
 
 // vitest runs with the repository root as working directory
 const DATA_DIR = join(cwd(), "docs", "data");
@@ -670,8 +672,32 @@ describe("export contract (inline new-format sample)", () => {
   });
 });
 
+/**
+ * Why docs/ does not match the checkout, or null when it does: the check
+ * the e2e tests refuse a stale site with (tests/e2e/site-check.ts), whose
+ * message names the command that rebuilds it
+ */
+function staleSite(): string | null {
+  try {
+    checkSite("docs");
+    return null;
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error);
+  }
+}
+
 describe("export contract (docs/data)", () => {
   const available = existsSync(join(DATA_DIR, "metadata.json"));
+  // A site left over from before the last change to the exporter or the
+  // frontend holds data of another shape, and failed here for a change
+  // that was fine. Locally that is a reason to skip, with the command that
+  // rebuilds it; CI builds the site from the checkout in the same job, so
+  // there it is checked whatever the result would be.
+  const stale = available && !env["CI"] ? staleSite() : null;
+
+  beforeEach((context) => {
+    if (stale) context.skip(stale);
+  });
 
   // Locally the site may simply not have been built yet. In CI the unit job
   // builds it before running vitest, so a missing build is a broken job,

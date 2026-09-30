@@ -73,6 +73,7 @@ import {
   type CameraStop,
 } from "./cameraScript";
 import { crossSectionOpen, toggleCrossSection } from "./crossSection";
+import { nameButton } from "./crossSectionElements";
 import { restingPitch } from "./replayState";
 
 /** How long the camera flies from one place to the next, in ms */
@@ -232,12 +233,6 @@ function tourButton(id: string, icon: IconName, onClick: () => void) {
   return button;
 }
 
-/** Name an icon-only button, for the eye and the ear */
-function nameButton(button: HTMLElement, name: string): void {
-  button.title = name;
-  button.setAttribute("aria-label", name);
-}
-
 /** How the tour ends, see the module's comment */
 type TourEnd =
   /** Back to the view and the switches it started from */
@@ -312,6 +307,24 @@ export class HotspotTour {
         if (!this.map || !isPageEscape(event)) return;
         event.preventDefault();
         this.stop();
+      },
+      { signal: app.signal },
+    );
+    // A hidden tab stops the camera's frames and not the tour's timer,
+    // which then took the next step mid-flight and jumped on return: the
+    // tour pauses as a click on Pause would, and plays on once the tab is
+    // back, if it was playing
+    let resumeOnShow = false;
+    document.addEventListener(
+      "visibilitychange",
+      () => {
+        if (document.hidden) {
+          resumeOnShow = this.playing;
+          this.pause();
+        } else if (resumeOnShow) {
+          resumeOnShow = false;
+          this.resume();
+        }
       },
       { signal: app.signal },
     );

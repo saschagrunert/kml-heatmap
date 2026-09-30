@@ -52,11 +52,8 @@ import type { MapApp } from "../mapApp";
 import type { StoreState } from "../state/store";
 import type { KMLDataset, PathSegment } from "../types";
 import { cloudPoints, type CloudPoints } from "../calculations/heatCloud";
-import {
-  groundedFlights,
-  heldFlights,
-  smoothGrounded,
-} from "../calculations/groundProfile";
+import { groundedFlights, heldFlights } from "../calculations/groundProfile";
+import { smoothGrounded } from "../calculations/smoothGrounded";
 import type { SmoothedFlights } from "../calculations/smoothing";
 import { datasetIndex } from "../calculations/datasetIndex";
 import { heatWeight } from "../calculations/heatLines";
@@ -717,7 +714,7 @@ export function followHeatCloud(app: MapApp): void {
   void app.mapReady.then(() => {
     const signal = app.signal;
     if (signal.aborted) return;
-    const unsubscribe = app.store.subscribeKeys(CLOUD_KEYS, sync);
+    app.store.subscribeKeys(CLOUD_KEYS, sync, { signal });
     // Cut around the view, or closer in than the last relief level, the
     // points are cut again for the view the map comes to rest at, in a
     // task of their own after the frame the move ends in. Not while the
@@ -755,7 +752,6 @@ export function followHeatCloud(app: MapApp): void {
     signal.addEventListener("abort", () => {
       clearTimeout(idle);
       clearTimeout(left);
-      unsubscribe();
       styled.unsubscribe();
       started.unsubscribe();
       moved.unsubscribe();

@@ -91,7 +91,6 @@ describe("ReplayManager display", () => {
   afterEach(() => {
     vi.useRealTimers();
     unmountReplayDom();
-    vi.restoreAllMocks();
   });
 
   describe("redrawReplayPath", () => {

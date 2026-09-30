@@ -47,6 +47,7 @@ import {
 } from "../utils/mapHelpers";
 import { prefersReducedMotion } from "../utils/motion";
 import { announceInRegion, announceStatus, showToast } from "../utils/toast";
+import { nameButton } from "./crossSectionElements";
 import { followHeatCloud, heatCloudLevel } from "./heatCloud";
 import {
   REPLAY_ALL_LAYER,
@@ -159,7 +160,8 @@ export class ReplayAllPlayer {
   private lastFrame: number | null = null;
   /** Settles the promise of the run with whether it played to the end */
   private settle: ((ended: boolean) => void) | null = null;
-  private readonly stopFollowing: (() => void)[] = [];
+  /** Ends what follows the map and the store while it plays */
+  private following: AbortController | null = null;
   private broken = false;
   /** Whether the orbit has turned the camera since it last came to rest */
   private orbited = false;
@@ -196,7 +198,7 @@ export class ReplayAllPlayer {
     // A destroyed app leaves the map as it is, but no frame runs on for it
     app.signal.addEventListener("abort", () => {
       this.pause();
-      for (const stop of this.stopFollowing.splice(0)) stop();
+      this.following?.abort();
     });
   }
 
@@ -252,6 +254,7 @@ export class ReplayAllPlayer {
       this.stop();
       return Promise.resolve(false);
     }
+    const { signal } = (this.following = new AbortController());
     const ahead = this.zoomAhead;
     if (ahead !== null && !this.aheadDrawn) {
       // Cut now, so that the camera's frames do not wait for it
@@ -263,17 +266,16 @@ export class ReplayAllPlayer {
         this.aheadDrawn = true;
         this.cut();
       });
-      this.stopFollowing.push(() => zooming.unsubscribe());
+      signal.addEventListener("abort", () => zooming.unsubscribe());
     }
     const store = app.store;
-    this.stopFollowing.push(
-      store.subscribeKeys(
-        ["threeDVisible", "terrainActive", "reliefLevel"],
-        () => this.cut(),
-      ),
-      // Another dataset is not what was asked to play
-      store.subscribe("currentData", () => this.stop()),
+    store.subscribeKeys(
+      ["threeDVisible", "terrainActive", "reliefLevel"],
+      () => this.cut(),
+      { signal },
     );
+    // Another dataset is not what was asked to play
+    store.subscribe("currentData", () => this.stop(), { signal });
     const zoomed = map.on("zoomend", () => {
       // The map's zoom is the one to follow from here on
       this.zoomAhead = null;
@@ -282,10 +284,10 @@ export class ReplayAllPlayer {
       this.cut();
     });
     const styled = map.on("styledata", () => this.place());
-    this.stopFollowing.push(
-      () => zoomed.unsubscribe(),
-      () => styled.unsubscribe(),
-    );
+    signal.addEventListener("abort", () => {
+      zoomed.unsubscribe();
+      styled.unsubscribe();
+    });
     this.place();
     const ended = new Promise<boolean>((resolve) => {
       this.settle = resolve;
@@ -331,7 +333,8 @@ export class ReplayAllPlayer {
   stop(): void {
     const wasActive = this.active;
     this.pause();
-    for (const stop of this.stopFollowing.splice(0)) stop();
+    this.following?.abort();
+    this.following = null;
     this.keep = null;
     this.zoomAhead = null;
     this.aheadDrawn = false;
@@ -657,12 +660,6 @@ function panelButton(id: string, iconName: "play" | "reset" | "close") {
   button.className = "btn-surface replay-btn";
   setControlIcon(button, iconName, 20);
   return button;
-}
-
-/** Name an icon-only button the same to the eye and the ear */
-function nameButton(button: HTMLElement, name: string): void {
-  button.title = name;
-  button.setAttribute("aria-label", name);
 }
 
 /**

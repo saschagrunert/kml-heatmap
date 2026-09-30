@@ -150,8 +150,6 @@ describe("flight profile", () => {
   afterEach(() => {
     lifetime.abort();
     resetSiteData();
-    vi.restoreAllMocks();
-    vi.unstubAllGlobals();
   });
 
   describe("the strip", () => {

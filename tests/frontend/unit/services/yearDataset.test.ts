@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach, vi } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import {
   buildDataset,
   buildDatasetInSlices,
@@ -78,8 +78,6 @@ describe("buildDataset", () => {
 });
 
 describe("buildDatasetInSlices", () => {
-  afterEach(() => vi.restoreAllMocks());
-
   it("builds the same dataset as in one go", async () => {
     // Long enough for a path to span several looks at the clock
     const decoded = decodeYear(longYear(3, 2500));

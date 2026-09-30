@@ -19,6 +19,7 @@ import {
   gotoApp,
   playUntilProgress,
   relevantConsoleErrors,
+  toastMessage,
   toggleLayer,
   togglePathSelection,
   waitForPathData,
@@ -29,6 +30,7 @@ import {
   flightsOnMap,
   segmentDetails,
 } from "./map";
+import { BASE_STYLE_UNAVAILABLE_MESSAGE } from "../../kml_heatmap/frontend/baseStyle";
 
 /** The layers of the flights, bottom to top (MAP_LAYERS in constants.ts) */
 const FLIGHT_LAYERS = [
@@ -182,6 +184,13 @@ test.describe("Base style", () => {
     ]);
     expect(flights.drawn.heat).toBeGreaterThan(0);
     expect(flights.drawn.paths).toBeGreaterThan(0);
+    // The page says why the map is dark, once, and offers to ask again. It
+    // is dismissed so it cannot stand over the segment hovered below.
+    const toast = toastMessage(page, BASE_STYLE_UNAVAILABLE_MESSAGE);
+    await expect(toast).toHaveCount(1);
+    await expect(toast.getByRole("button", { name: "Retry" })).toBeVisible();
+    await toast.getByRole("button", { name: "Dismiss" }).click();
+    await expect(toast).toHaveCount(0);
     await expectSegmentUnderPointer(page);
     await expect(attributionControl(page)).toContainText("open flightmaps");
     await toggleLayer(page, "heatmap");

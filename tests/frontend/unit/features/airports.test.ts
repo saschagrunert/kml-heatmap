@@ -7,15 +7,20 @@ import type { SiteData } from "../../../../kml_heatmap/frontend/state/siteData";
 
 type AirportsModule =
   typeof import("../../../../kml_heatmap/frontend/features/airports");
+type CountriesModule =
+  typeof import("../../../../kml_heatmap/frontend/features/countries");
 
 describe("airports feature", () => {
   let mod: AirportsModule;
+  let countries: CountriesModule;
   /** The site data of the module instance under test */
   let siteData: SiteData;
 
   beforeEach(async () => {
     vi.resetModules();
     mod = await import("../../../../kml_heatmap/frontend/features/airports");
+    countries =
+      await import("../../../../kml_heatmap/frontend/features/countries");
     ({ siteData } =
       await import("../../../../kml_heatmap/frontend/state/siteData"));
   });
@@ -213,17 +218,17 @@ describe("airports feature", () => {
 
   describe("countryDisplayName", () => {
     it("converts ISO code to full country name", () => {
-      expect(mod.countryDisplayName("DE")).toBe("Germany");
-      expect(mod.countryDisplayName("US")).toBe("United States");
-      expect(mod.countryDisplayName("FR")).toBe("France");
+      expect(countries.countryDisplayName("DE")).toBe("Germany");
+      expect(countries.countryDisplayName("US")).toBe("United States");
+      expect(countries.countryDisplayName("FR")).toBe("France");
     });
 
     it("returns a non-empty string for unknown codes and the input for invalid ones", () => {
-      const unknown = mod.countryDisplayName("ZZ");
+      const unknown = countries.countryDisplayName("ZZ");
       expect(typeof unknown).toBe("string");
       expect(unknown.length).toBeGreaterThan(0);
       // Intl throws on malformed region codes; the input is returned as is
-      expect(mod.countryDisplayName("not a code")).toBe("not a code");
+      expect(countries.countryDisplayName("not a code")).toBe("not a code");
     });
   });
 
@@ -231,21 +236,21 @@ describe("airports feature", () => {
     it("points at the flag the site published", () => {
       siteData.metadata = { available_flags: ["de", "at"] } as Metadata;
 
-      expect(mod.countryFlagSrc("DE")).toBe("flags/de.svg");
-      expect(mod.countryFlagSrc("at")).toBe("flags/at.svg");
+      expect(countries.countryFlagSrc("DE")).toBe("flags/de.svg");
+      expect(countries.countryFlagSrc("at")).toBe("flags/at.svg");
     });
 
     it("has none for a country the site did not publish", () => {
       siteData.metadata = { available_flags: ["de"] } as Metadata;
 
-      expect(mod.countryFlagSrc("FR")).toBeNull();
+      expect(countries.countryFlagSrc("FR")).toBeNull();
     });
 
     it("has none at all without the list", () => {
       // A site built from a wheel, which leaves the flag files out
       siteData.metadata = {} as Metadata;
 
-      expect(mod.countryFlagSrc("DE")).toBeNull();
+      expect(countries.countryFlagSrc("DE")).toBeNull();
     });
   });
 
@@ -261,23 +266,27 @@ describe("airports feature", () => {
     });
 
     it("countCountries returns unique country codes for given airports", () => {
-      const countries = mod.countCountries([
+      const found = countries.countCountries([
         "EDAV Halle-Oppin",
         "EDDF Frankfurt",
         "LSZH Zurich",
       ]);
-      expect([...countries].sort()).toEqual(["CH", "DE"]);
+      expect([...found].sort()).toEqual(["CH", "DE"]);
     });
 
     it("countCountries skips unknown airports and airports without country", () => {
-      expect(mod.countCountries([]).size).toBe(0);
+      expect(countries.countCountries([]).size).toBe(0);
       expect([
-        ...mod.countCountries(["EDAV Halle-Oppin", "UNKNOWN", "NOCOUNTRY"]),
+        ...countries.countCountries([
+          "EDAV Halle-Oppin",
+          "UNKNOWN",
+          "NOCOUNTRY",
+        ]),
       ]).toEqual(["DE"]);
     });
 
     it("groupByCountry groups airports by country code in first-seen order", () => {
-      const grouped = mod.groupByCountry([
+      const grouped = countries.groupByCountry([
         "LSZH Zurich",
         "EDAV Halle-Oppin",
         "EDDF Frankfurt",
@@ -291,41 +300,41 @@ describe("airports feature", () => {
     });
 
     it("groupByCountry puts unknown airports under 'Other'", () => {
-      expect(mod.groupByCountry(["UNKNOWN Airport"]).get("Other")).toEqual([
-        "UNKNOWN Airport",
-      ]);
-      expect(mod.groupByCountry([]).size).toBe(0);
+      expect(
+        countries.groupByCountry(["UNKNOWN Airport"]).get("Other"),
+      ).toEqual(["UNKNOWN Airport"]);
+      expect(countries.groupByCountry([]).size).toBe(0);
     });
 
     it("follows a replaced airport list", () => {
-      expect(mod.countCountries(["EDAV Halle-Oppin"]).size).toBe(1);
+      expect(countries.countCountries(["EDAV Halle-Oppin"]).size).toBe(1);
       siteData.airports = [];
-      expect(mod.countCountries(["EDAV Halle-Oppin"]).size).toBe(0);
+      expect(countries.countCountries(["EDAV Halle-Oppin"]).size).toBe(0);
     });
 
     it("keeps the map while the airport list stays the same", () => {
       const airports = siteData.airports!;
-      expect(mod.groupByCountry(["LSZH Zurich"]).get("CH")).toEqual([
+      expect(countries.groupByCountry(["LSZH Zurich"]).get("CH")).toEqual([
         "LSZH Zurich",
       ]);
       // A change inside the same array is not seen: the list is treated as
       // immutable once loaded, like the rest of the page treats it
       airports.push({ name: "LOWW Vienna", lat: 48, lon: 16, country: "AT" });
-      expect(mod.countCountries(["LOWW Vienna"]).size).toBe(0);
+      expect(countries.countCountries(["LOWW Vienna"]).size).toBe(0);
     });
 
     it("handles airports that have not loaded", () => {
       siteData.airports = null;
-      expect(mod.countCountries(["EDAV Halle-Oppin"]).size).toBe(0);
+      expect(countries.countCountries(["EDAV Halle-Oppin"]).size).toBe(0);
     });
 
     it("picks up airports.js when it arrives after the first lookup", () => {
       siteData.airports = null;
-      expect(mod.countCountries(["EDAV Halle-Oppin"]).size).toBe(0);
+      expect(countries.countCountries(["EDAV Halle-Oppin"]).size).toBe(0);
       siteData.airports = [
         { name: "EDAV Halle-Oppin", lat: 51, lon: 12, country: "DE" },
       ];
-      expect(mod.countCountries(["EDAV Halle-Oppin"]).size).toBe(1);
+      expect(countries.countCountries(["EDAV Halle-Oppin"]).size).toBe(1);
     });
   });
 

@@ -49,13 +49,12 @@ The detection runs in the main process of the export (see
 already; the export workers never load it.
 """
 
-from __future__ import annotations
-
 import math
 import time
 from bisect import bisect_left, bisect_right
 from dataclasses import dataclass, field
 from itertools import pairwise
+from statistics import median
 from typing import TYPE_CHECKING, NamedTuple
 
 from .airport_lookup import load_airport_database, load_runway_database
@@ -65,7 +64,7 @@ from .constants import (
     METERS_TO_FEET,
     SECONDS_PER_HOUR,
 )
-from .geometry import longitude_difference, true_bearing
+from .geometry import METRES_PER_DEGREE, planar_km, true_bearing
 from .logger import logger
 
 if TYPE_CHECKING:
@@ -132,9 +131,8 @@ MAX_VERTICAL_FT_PER_SECOND = 60.0
 
 # The grid the fields are looked up in, in degrees of latitude
 _CELL_DEGREES = 0.1
-_METRES_PER_DEGREE = 111_320.0
 # The height of a cell, and its width at the equator
-_CELL_KM = _CELL_DEGREES * _METRES_PER_DEGREE / 1000
+_CELL_KM = _CELL_DEGREES * METRES_PER_DEGREE / 1000
 # The cells around a parallel
 _COLUMNS = round(360 / _CELL_DEGREES)
 
@@ -148,15 +146,6 @@ class Field(NamedTuple):
     elevation_ft: float | None
     # The runway ends: designator and true heading, see RunwayEnd
     runways: tuple[RunwayEnd, ...] = ()
-
-
-def _planar_km(lat0: float, lon0: float, lat1: float, lon1: float) -> float:
-    """Distance in km on a plane tangent at the first point; fine for 10 km.
-
-    The short way round across the antimeridian.
-    """
-    dx = longitude_difference(lon0, lon1) * math.cos(math.radians(lat0))
-    return math.hypot(dx, lat1 - lat0) * _METRES_PER_DEGREE / 1000
 
 
 def _angle_off(a: float, b: float) -> float:
@@ -208,7 +197,7 @@ class FieldIndex:
             for d_column in range(-columns, columns + 1):
                 cell = (row + d_row, (column + d_column) % _COLUMNS)
                 for candidate in self._cells.get(cell, ()):
-                    distance = _planar_km(lat, lon, candidate.lat, candidate.lon)
+                    distance = planar_km(lat, lon, candidate.lat, candidate.lon)
                     if distance <= radius_km and (best is None or distance < best[1]):
                         best = (candidate, distance)
         return best
@@ -328,18 +317,10 @@ def _groundspeeds(fixes: Sequence[_Fix], times: Sequence[float]) -> list[float |
         if not SPEED_MIN_SECONDS <= seconds <= SPEED_MAX_SECONDS:
             speeds.append(None)
             continue
-        km = _planar_km(a.lat, a.lon, b.lat, b.lon)
+        km = planar_km(a.lat, a.lon, b.lat, b.lon)
         knots = km * KM_TO_NAUTICAL_MILES / seconds * SECONDS_PER_HOUR
         speeds.append(knots if knots <= MAX_GROUNDSPEED_KNOTS else None)
     return speeds
-
-
-def _median(values: list[float]) -> float:
-    ordered = sorted(values)
-    middle = len(ordered) // 2
-    if len(ordered) % 2:
-        return ordered[middle]
-    return (ordered[middle - 1] + ordered[middle]) / 2
 
 
 def _logger_offset_ft(
@@ -360,7 +341,7 @@ def _logger_offset_ft(
         and near is not None
         and near[0].elevation_ft is not None
     ]
-    return _median(offsets) if offsets else 0.0
+    return median(offsets) if offsets else 0.0
 
 
 def _taxi_grounds_ft(
@@ -381,7 +362,7 @@ def _taxi_grounds_ft(
             and near[0].elevation_ft is None
         ):
             altitudes.setdefault(near[0].ident, []).append(fix.alt_ft)
-    return {ident: _median(values) for ident, values in altitudes.items()}
+    return {ident: median(values) for ident, values in altitudes.items()}
 
 
 def _runway(
@@ -396,9 +377,7 @@ def _runway(
         return None
     end = fixes[touchdown]
     start = fixes[bisect_left(times, end.t - APPROACH_SECONDS, 0, touchdown)]
-    if _planar_km(start.lat, start.lon, end.lat, end.lon) * 1000 < (
-        APPROACH_MIN_METRES
-    ):
+    if planar_km(start.lat, start.lon, end.lat, end.lon) * 1000 < (APPROACH_MIN_METRES):
         return None
     track = true_bearing(start.lat, start.lon, end.lat, end.lon)
     off, designator = min(
@@ -416,6 +395,204 @@ class _Approach:
     lowest: int
 
 
+class _Detector:
+    """The state of one flight as ``detect_path_landings`` walks its fixes.
+
+    ``step`` reads one fix, handing it to the phase the flight is in: the
+    ground roll before a takeoff (``_rolling``), a touchdown that has not
+    stopped or climbed away yet (``_after_contact``), the climb that arms
+    the next touchdown, and low over a field (``_near_field``, which
+    ``_approach`` continues). ``finish`` counts a touchdown the recording
+    ended on.
+    """
+
+    def __init__(self, fixes: list[_Fix], fields: FieldIndex) -> None:
+        """Measure the fixes and tell whether the recording starts on the ground."""
+        self.fixes = fixes
+        self.times = [fix.t for fix in fixes]
+        self.speeds = _groundspeeds(fixes, self.times)
+        self.nearest = [fields.nearest(fix.lat, fix.lon) for fix in fixes]
+        self.offset = _logger_offset_ft(fixes, self.speeds, self.nearest)
+        self.taxi_grounds = _taxi_grounds_ft(fixes, self.speeds, self.nearest)
+        self.result = FlightLandings()
+        # The recording starts on the ground when it starts slow or close to
+        # the ground of a field. Either can be wrong at the first fixes of a
+        # receiver: they often share a time, and their scatter reads as
+        # speed, and the altitude may not have settled yet.
+        first = self.nearest[0]
+        first_ground = self.ground_ft(first[0]) if first is not None else None
+        first_speed = next((speed for speed in self.speeds if speed is not None), 0.0)
+        self.on_ground = first_speed < TAKEOFF_KNOTS or (
+            first_ground is not None
+            and abs(fixes[0].alt_ft - first_ground) <= CONTACT_FT
+        )
+        # Starting in the air, the logger missed the takeoff: a touchdown
+        # counts
+        self.armed = not self.on_ground
+        # The altitude the climb that arms the next touchdown is measured from
+        self.base_ft = fixes[0].alt_ft
+        # The first fix of a touchdown that has not stopped or climbed away
+        self.contact: int | None = None
+        self.contact_at: Field | None = None
+        self.approach: _Approach | None = None
+        # After a go-around, until the aircraft is above APPROACH_FT or away
+        # from the field again: the climb away passes through the approach
+        # band, and read as a new approach there it would climb away twice
+        self.climbing_away = False
+        # The field and time of the last takeoff or touch-and-go, the
+        # distance flown away from it since, for the circuits
+        self.circuit_from: tuple[Field, float] | None = None
+        self.circuit_km = 0.0
+
+    def ground_ft(self, at: Field) -> float | None:
+        """The ground of a field: its elevation plus the logger's offset."""
+        if at.elevation_ft is not None:
+            return at.elevation_ft + self.offset
+        return self.taxi_grounds.get(at.ident)
+
+    def touch_down(self, index: int, at: Field) -> None:
+        """Record a touchdown at ``at`` from the fix at ``index``."""
+        self.result.touchdowns.append(
+            (at.ident, _runway(self.fixes, self.times, index, at))
+        )
+        if (
+            self.circuit_from is not None
+            and self.circuit_from[0] is at
+            and self.fixes[index].t - self.circuit_from[1] <= CIRCUIT_MAX_SECONDS
+            and self.circuit_km <= CIRCUIT_MAX_KM
+        ):
+            self.result.circuits += 1
+        self.circuit_from = None
+
+    def start_circuit(self, index: int, at: Field | None) -> None:
+        """A takeoff or touch-and-go at ``at``, which a circuit starts from."""
+        self.circuit_from = (at, self.fixes[index].t) if at is not None else None
+        self.circuit_km = 0.0
+
+    def step(self, index: int, fix: _Fix) -> None:
+        """Read one fix."""
+        speed = self.speeds[index]
+        near = self.nearest[index]
+        at = near[0] if near is not None else None
+        ground = self.ground_ft(at) if at is not None else None
+        if self.circuit_from is not None:
+            self.circuit_km = max(
+                self.circuit_km,
+                planar_km(
+                    self.circuit_from[0].lat, self.circuit_from[0].lon, fix.lat, fix.lon
+                ),
+            )
+        if speed is None:
+            return
+        if index and abs(fix.alt_ft - self.fixes[index - 1].alt_ft) > (
+            MAX_VERTICAL_FT_PER_SECOND * max(1.0, fix.t - self.fixes[index - 1].t)
+        ):
+            self.approach = None
+            return
+        if self.on_ground:
+            self._rolling(index, fix, speed, at, ground)
+        elif self.contact is not None and self.contact_at is not None:
+            self._after_contact(index, fix, speed, self.contact, self.contact_at)
+        elif not self.armed:
+            self.armed = fix.alt_ft - self.base_ft >= ARMED_CLIMB_FT
+        elif at is None or ground is None:
+            self.approach = None
+            self.climbing_away = False
+        else:
+            self._near_field(index, speed, at, fix.alt_ft - ground)
+
+    def _rolling(
+        self,
+        index: int,
+        fix: _Fix,
+        speed: float,
+        at: Field | None,
+        ground: float | None,
+    ) -> None:
+        """On the ground: a takeoff once it is fast and climbs after."""
+        if speed < TAKEOFF_KNOTS:
+            return
+        later = bisect_left(self.times, fix.t + TAKEOFF_CHECK_SECONDS)
+        if later >= len(self.fixes):
+            return
+        reference = ground if ground is not None else fix.alt_ft
+        if self.fixes[later].alt_ft - reference >= TAKEOFF_CLIMB_FT:
+            self.on_ground = False
+            self.armed = False
+            self.base_ft = reference
+            self.approach = None
+            self.result.takeoffs += 1
+            self.start_circuit(index, at)
+
+    def _after_contact(
+        self, index: int, fix: _Fix, speed: float, contact: int, contact_at: Field
+    ) -> None:
+        """After a touchdown: a full stop, or a climb that is a touch-and-go."""
+        contact_ground = self.ground_ft(contact_at)
+        if (
+            speed < STOP_KNOTS
+            and contact_ground is not None
+            and abs(fix.alt_ft - contact_ground) <= CONTACT_FT
+        ):
+            self.result.landings += 1
+            self.touch_down(contact, contact_at)
+            self.on_ground = True
+            self.contact = self.contact_at = None
+        elif fix.alt_ft - self.fixes[contact].alt_ft >= CLIMB_AWAY_FT:
+            self.result.touch_and_goes += 1
+            self.touch_down(contact, contact_at)
+            self.start_circuit(index, contact_at)
+            self.base_ft = self.fixes[contact].alt_ft
+            self.armed = False
+            self.contact = self.contact_at = None
+
+    def _near_field(self, index: int, speed: float, at: Field, height: float) -> None:
+        """At a field, ``height`` above its ground: a touchdown or an approach."""
+        if height < -CONTACT_FT:
+            # Under the ground: the logger lost its altitude
+            self.approach = None
+            return
+        if height <= CONTACT_FT:
+            if speed < STOP_KNOTS:
+                # Down and stopped between two fixes
+                self.result.landings += 1
+                self.touch_down(index, at)
+                self.on_ground = True
+            elif speed >= CONTACT_KNOTS:
+                self.contact, self.contact_at = index, at
+            self.approach = None
+            return
+        self._approach(index, at, height)
+
+    def _approach(self, index: int, at: Field, height: float) -> None:
+        """Above a field: the lowest point of an approach, or its go-around."""
+        if height >= APPROACH_FT:
+            self.climbing_away = False
+        elif not self.climbing_away:
+            if self.approach is None or self.approach.at is not at:
+                self.approach = _Approach(at, height, index)
+            elif height < self.approach.lowest_ft:
+                self.approach.lowest_ft, self.approach.lowest = height, index
+        approach = self.approach
+        if approach is not None and height - approach.lowest_ft >= CLIMB_AWAY_FT:
+            # Low over a field is no approach unless it lines up with one of
+            # its runways, where the list has them
+            if not approach.at.runways or _runway(
+                self.fixes, self.times, approach.lowest, approach.at
+            ):
+                self.result.go_arounds += 1
+            self.approach = None
+            self.climbing_away = True
+
+    def finish(self) -> FlightLandings:
+        """What the flight did, with a touchdown the recording ended on."""
+        if self.contact is not None and self.contact_at is not None:
+            # The recording ended on the runway, before the aircraft slowed
+            self.result.landings += 1
+            self.touch_down(self.contact, self.contact_at)
+        return self.result
+
+
 def detect_path_landings(path: FlightPath, fields: FieldIndex) -> FlightLandings | None:
     """What one flight did at the fields it came to (see the module).
 
@@ -424,162 +601,10 @@ def detect_path_landings(path: FlightPath, fields: FieldIndex) -> FlightLandings
     fixes = _timed_fixes(path)
     if len(fixes) < MIN_TIMED_FIXES:
         return None
-    times = [fix.t for fix in fixes]
-    speeds = _groundspeeds(fixes, times)
-    nearest = [fields.nearest(fix.lat, fix.lon) for fix in fixes]
-    offset = _logger_offset_ft(fixes, speeds, nearest)
-    taxi_grounds = _taxi_grounds_ft(fixes, speeds, nearest)
-
-    def ground_ft(at: Field) -> float | None:
-        if at.elevation_ft is not None:
-            return at.elevation_ft + offset
-        return taxi_grounds.get(at.ident)
-
-    result = FlightLandings()
-    # The recording starts on the ground when it starts slow or close to the
-    # ground of a field. Either can be wrong at the first fixes of a
-    # receiver: they often share a time, and their scatter reads as speed,
-    # and the altitude may not have settled yet.
-    first = nearest[0]
-    first_ground = ground_ft(first[0]) if first is not None else None
-    first_speed = next((speed for speed in speeds if speed is not None), 0.0)
-    on_ground = first_speed < TAKEOFF_KNOTS or (
-        first_ground is not None and abs(fixes[0].alt_ft - first_ground) <= CONTACT_FT
-    )
-    # Starting in the air, the logger missed the takeoff: a touchdown counts
-    armed = not on_ground
-    # The altitude the climb that arms the next touchdown is measured from
-    base_ft = fixes[0].alt_ft
-    # The first fix of a touchdown that has not stopped or climbed away yet
-    contact: int | None = None
-    contact_at: Field | None = None
-    approach: _Approach | None = None
-    # After a go-around, until the aircraft is above APPROACH_FT or away
-    # from the field again: the climb away passes through the approach
-    # band, and read as a new approach there it would climb away twice
-    climbing_away = False
-    # The field and time of the last takeoff or touch-and-go, the distance
-    # flown away from it since, for the circuits
-    circuit_from: tuple[Field, float] | None = None
-    circuit_km = 0.0
-
-    def touch_down(index: int, at: Field) -> None:
-        nonlocal circuit_from
-        result.touchdowns.append((at.ident, _runway(fixes, times, index, at)))
-        if (
-            circuit_from is not None
-            and circuit_from[0] is at
-            and fixes[index].t - circuit_from[1] <= CIRCUIT_MAX_SECONDS
-            and circuit_km <= CIRCUIT_MAX_KM
-        ):
-            result.circuits += 1
-        circuit_from = None
-
-    def start_circuit(index: int, at: Field | None) -> None:
-        nonlocal circuit_from, circuit_km
-        circuit_from = (at, fixes[index].t) if at is not None else None
-        circuit_km = 0.0
-
-    for i, fix in enumerate(fixes):
-        speed = speeds[i]
-        near = nearest[i]
-        at = near[0] if near is not None else None
-        ground = ground_ft(at) if at is not None else None
-        height = fix.alt_ft - ground if ground is not None else None
-        if circuit_from is not None:
-            circuit_km = max(
-                circuit_km,
-                _planar_km(circuit_from[0].lat, circuit_from[0].lon, fix.lat, fix.lon),
-            )
-        if speed is None:
-            continue
-        if i and abs(fix.alt_ft - fixes[i - 1].alt_ft) > (
-            MAX_VERTICAL_FT_PER_SECOND * max(1.0, fix.t - fixes[i - 1].t)
-        ):
-            approach = None
-            continue
-
-        if on_ground:
-            if speed < TAKEOFF_KNOTS:
-                continue
-            later = bisect_left(times, fix.t + TAKEOFF_CHECK_SECONDS)
-            if later >= len(fixes):
-                continue
-            reference = ground if ground is not None else fix.alt_ft
-            if fixes[later].alt_ft - reference >= TAKEOFF_CLIMB_FT:
-                on_ground = False
-                armed = False
-                base_ft = reference
-                approach = None
-                result.takeoffs += 1
-                start_circuit(i, at)
-            continue
-
-        if contact is not None and contact_at is not None:
-            contact_ground = ground_ft(contact_at)
-            if (
-                speed < STOP_KNOTS
-                and contact_ground is not None
-                and abs(fix.alt_ft - contact_ground) <= CONTACT_FT
-            ):
-                result.landings += 1
-                touch_down(contact, contact_at)
-                on_ground = True
-                contact = contact_at = None
-            elif fix.alt_ft - fixes[contact].alt_ft >= CLIMB_AWAY_FT:
-                result.touch_and_goes += 1
-                touch_down(contact, contact_at)
-                start_circuit(i, contact_at)
-                base_ft = fixes[contact].alt_ft
-                armed = False
-                contact = contact_at = None
-            continue
-
-        if not armed:
-            armed = fix.alt_ft - base_ft >= ARMED_CLIMB_FT
-            continue
-        if at is None or height is None:
-            approach = None
-            climbing_away = False
-            continue
-
-        if height < -CONTACT_FT:
-            # Under the ground: the logger lost its altitude
-            approach = None
-            continue
-        if height <= CONTACT_FT:
-            if speed < STOP_KNOTS:
-                # Down and stopped between two fixes
-                result.landings += 1
-                touch_down(i, at)
-                on_ground = True
-            elif speed >= CONTACT_KNOTS:
-                contact, contact_at = i, at
-            approach = None
-            continue
-
-        if height >= APPROACH_FT:
-            climbing_away = False
-        elif not climbing_away:
-            if approach is None or approach.at is not at:
-                approach = _Approach(at, height, i)
-            elif height < approach.lowest_ft:
-                approach.lowest_ft, approach.lowest = height, i
-        if approach is not None and height - approach.lowest_ft >= CLIMB_AWAY_FT:
-            # Low over a field is no approach unless it lines up with one of
-            # its runways, where the list has them
-            if not approach.at.runways or _runway(
-                fixes, times, approach.lowest, approach.at
-            ):
-                result.go_arounds += 1
-            approach = None
-            climbing_away = True
-
-    if contact is not None and contact_at is not None:
-        # The recording ended on the runway, before the aircraft slowed down
-        result.landings += 1
-        touch_down(contact, contact_at)
-    return result
+    detector = _Detector(fixes, fields)
+    for index, fix in enumerate(fixes):
+        detector.step(index, fix)
+    return detector.finish()
 
 
 def detect_landings(

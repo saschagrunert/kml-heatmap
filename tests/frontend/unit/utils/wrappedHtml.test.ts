@@ -16,6 +16,8 @@ import type {
   FunFact,
 } from "../../../../kml_heatmap/frontend/types";
 import { icon } from "../../../../kml_heatmap/frontend/utils/icons";
+import { markup } from "../../../../kml_heatmap/frontend/utils/markup";
+import { generateFunFacts } from "../../../../kml_heatmap/frontend/features/wrapped";
 
 /**
  * The ICAO code the export writes for an airport (airports.json's `code`).
@@ -141,12 +143,12 @@ describe("wrappedHtml", () => {
       const funFacts: FunFact[] = [
         {
           category: "distance",
-          text: "You flew 10,000 miles!",
+          text: markup`You flew 10,000 miles!`,
           priority: 1,
         },
         {
           category: "altitude",
-          text: "Reached 35,000 feet",
+          text: markup`Reached 35,000 feet`,
           priority: 2,
         },
       ];
@@ -184,21 +186,42 @@ describe("wrappedHtml", () => {
       expect(html).not.toContain("fun-fact-text");
     });
 
-    it("renders fact text as trusted markup and escapes the category", () => {
+    it("renders the markup of a fact's text, and escapes the category", () => {
       const funFacts: FunFact[] = [
         {
           category: 'a"b',
-          text: "Flew <strong>far</strong>",
+          text: markup`Flew <strong>${"far"}</strong>`,
           priority: 1,
         },
       ];
 
-      const html = generateFunFactsHtml(funFacts);
+      const rendered = generateFunFactsHtml(funFacts);
 
-      // The text is markup the generator built from escaped values; the
-      // category lands in an attribute and is escaped here
-      expect(html).toContain("Flew <strong>far</strong>");
-      expect(html).toContain('data-category="a&quot;b"');
+      // The text is markup made with its values escaped; the category
+      // lands in an attribute and is escaped here
+      expect(rendered).toContain("Flew <strong>far</strong>");
+      expect(rendered).toContain('data-category="a&quot;b"');
+    });
+
+    it("writes a value of the data into a fact as text, never as markup", () => {
+      const registration = "<img src=x onerror=alert(1)>";
+      const facts = generateFunFacts({
+        total_flights: 2,
+        total_distance_nm: 100,
+        num_airports: 1,
+        airport_names: [],
+        flight_time: "1h 0m",
+        aircraft_list: [
+          { registration, type: "C172", model: "C172", flights: 2 },
+        ],
+      });
+
+      const rendered = generateFunFactsHtml(facts);
+
+      expect(rendered).toContain(
+        "Loyal to <strong>&lt;img src=x onerror=alert(1)&gt;</strong>, all 2 flights in this C172!",
+      );
+      expect(rendered).not.toContain("<img");
     });
   });
 

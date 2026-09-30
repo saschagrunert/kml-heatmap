@@ -38,7 +38,6 @@ describe("WrappedManager dialog", () => {
   afterEach(() => {
     wrappedManager.destroy();
     vi.useRealTimers();
-    vi.restoreAllMocks();
     document.body.innerHTML = "";
     resetSiteData();
   });

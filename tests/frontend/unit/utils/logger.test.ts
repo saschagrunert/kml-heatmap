@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import {
   initLogger,
   logDebug,
@@ -7,9 +7,6 @@ import {
 
 describe("logger utilities", () => {
   beforeEach(() => {
-    // Reset console spies
-    vi.restoreAllMocks();
-
     // Move the real location rather than replacing the property: redefining
     // it makes it non-configurable for the rest of the worker
     window.history.replaceState(null, "", "/");
@@ -17,11 +14,6 @@ describe("logger utilities", () => {
     // Force logger to re-initialize by calling initLogger
     // This ensures each test starts with a clean state
     initLogger();
-  });
-
-  afterEach(() => {
-    // Clean up
-    vi.restoreAllMocks();
   });
 
   describe("logDebug", () => {

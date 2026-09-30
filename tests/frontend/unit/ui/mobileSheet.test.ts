@@ -60,7 +60,6 @@ describe("MobileSheet", () => {
   afterEach(() => {
     sheet.destroy();
     document.body.replaceChildren();
-    vi.restoreAllMocks();
   });
 
   describe("mounting", () => {

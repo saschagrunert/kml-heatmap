@@ -125,7 +125,11 @@ function columnOf(row: number, lng: number): number {
 /** Width of the columns by row, in degrees: a row is met again and again */
 const columnWidths = new Map<number, number>();
 
-function cellKey(row: number, column: number): number {
+/**
+ * The key of the cell of a row and a column, for a grid of cells of any
+ * size (the hotspots use it for theirs, calculations/hotspots.ts)
+ */
+export function cellKey(row: number, column: number): number {
   return row * ROW_STRIDE + column + COLUMN_OFFSET;
 }
 

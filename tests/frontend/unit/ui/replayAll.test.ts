@@ -184,8 +184,6 @@ describe("the replay of all flights", () => {
     unmount();
     document.getElementById("replay-all-controls")?.remove();
     document.body.className = "";
-    vi.unstubAllGlobals();
-    vi.restoreAllMocks();
   });
 
   describe("the player", () => {

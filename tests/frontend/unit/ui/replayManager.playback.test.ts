@@ -43,7 +43,6 @@ describe("ReplayManager playback", () => {
   afterEach(() => {
     vi.useRealTimers();
     unmountReplayDom();
-    vi.restoreAllMocks();
   });
 
   describe("playReplay", () => {

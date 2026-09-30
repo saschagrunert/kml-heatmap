@@ -19,6 +19,7 @@ import {
   type MockApp,
 } from "../../testHelpers";
 import { resetMapLibreMock } from "../../../mocks/maplibre-gl";
+import { LIVE_REGION_DELAY_MS } from "../../../../kml_heatmap/frontend/utils/toast";
 
 /**
  * A flight of `path_id` across 8° E along `lat`, 1,000 ft above the ground
@@ -424,26 +425,33 @@ describe("the readout of the heat cloud", () => {
     expect(shown()).toBeNull();
   });
 
-  it("shows the readout of a click on a flight, and leaves saying what it selected to the app", async () => {
-    enter3D();
-    // A tap selects the flight under it (the app's click handler, which
-    // runs first) and opens its values
-    touch();
-    app.selectedPathIds = new Set([1]);
-    click(0, 0);
-    expect(shown()).toMatch(/within 1 km/);
-    // A click beside every flight clears the selection
-    map().emit("mousedown", {});
-    app.selectedPathIds = new Set();
-    click(0, 0);
-    expect(shown()).toMatch(/within 1 km/);
+  it("shows the readout of a click on a flight, and leaves saying what it selected to the app", () => {
+    // The status region speaks after LIVE_REGION_DELAY_MS, on a timer
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      enter3D();
+      // A tap selects the flight under it (the app's click handler, which
+      // runs first) and opens its values
+      touch();
+      app.selectedPathIds = new Set([1]);
+      click(0, 0);
+      expect(shown()).toMatch(/within 1 km/);
+      // A click beside every flight clears the selection
+      map().emit("mousedown", {});
+      app.selectedPathIds = new Set();
+      click(0, 0);
+      expect(shown()).toMatch(/within 1 km/);
 
-    await new Promise((resolve) => setTimeout(resolve, 100));
-    expect(status()).toBe("");
-    // One that changed nothing is read out
-    map().emit("mousedown", {});
-    click(0, 0);
-    await vi.waitFor(() => expect(status()).toMatch(/within 1 km: 2 flights/));
+      vi.advanceTimersByTime(LIVE_REGION_DELAY_MS);
+      expect(status()).toBe("");
+      // One that changed nothing is read out
+      map().emit("mousedown", {});
+      click(0, 0);
+      vi.advanceTimersByTime(LIVE_REGION_DELAY_MS);
+      expect(status()).toMatch(/within 1 km: 2 flights/);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("steps aside while the hotspot tour holds the map, and comes back with the map", () => {
@@ -482,10 +490,6 @@ describe("the readout of the heat cloud", () => {
         idle.push(work);
         return idle.length;
       });
-    });
-
-    afterEach(() => {
-      vi.unstubAllGlobals();
     });
 
     it("keeps what it worked out for moves of a few pixels, and the box follows the pointer", async () => {

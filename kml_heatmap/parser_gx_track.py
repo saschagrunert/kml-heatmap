@@ -31,6 +31,7 @@ if TYPE_CHECKING:
 
     from lxml import etree
 
+    from .aircraft import AircraftInfo
     from .types import FlightPath, FlightPathGroup, PathMetadata, PlacemarkMetadata
 
 
@@ -260,7 +261,7 @@ def process_gx_track(
     coordinates: FlightPath,
     path_groups: FlightPathGroup,
     path_metadata: list[PathMetadata],
-    aircraft_info: dict[str, str | None],
+    aircraft_info: AircraftInfo | None,
 ) -> None:
     """Process all gx:Track elements of a KML document.
 

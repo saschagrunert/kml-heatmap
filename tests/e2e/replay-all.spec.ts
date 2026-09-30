@@ -21,12 +21,20 @@ function drawn(page: Page): Promise<{ frames: number; time: number } | null> {
   });
 }
 
+/** The tilt of the map, which the replay sets while it plays */
+function pitch(page: Page): Promise<number> {
+  return page.evaluate(() => window.mapApp!.map!.getPitch());
+}
+
 test.describe("Replay all flights", () => {
   test.beforeEach(async ({ page }) => {
     await gotoApp(page);
   });
 
-  test("plays every flight at once with a running clock, and gives the page back", async ({
+  // Playing and giving the page back are two tests: as one, the twenty-odd
+  // steps of both ran out of the 30 s of a test in software WebGL on CI,
+  // at the close of the replay
+  test("plays every flight at once with a running clock, and holds the page", async ({
     page,
   }) => {
     const button = page.locator("#replay-all-btn");
@@ -51,9 +59,7 @@ test.describe("Replay all flights", () => {
       .poll(async () => (await drawn(page))?.time ?? 0, { timeout: 10000 })
       .toBeGreaterThan(0);
     // At their height on the flat map too, which it tilts so they show
-    const pitch = (): Promise<number> =>
-      page.evaluate(() => window.mapApp!.map!.getPitch());
-    await expect.poll(pitch).toBe(50);
+    await expect.poll(() => pitch(page)).toBe(50);
     const liftM = await page.evaluate(() => {
       const layer = window.mapApp!.map!.getLayer("replay-all") as
         | { implementation?: { style: () => { liftM: number } | null } }
@@ -67,6 +73,21 @@ test.describe("Replay all flights", () => {
       return location.search;
     });
     expect(search).not.toMatch(/[?&]t=/);
+  });
+
+  test("pauses with the clock held, and gives the page back as it was", async ({
+    page,
+  }) => {
+    const button = page.locator("#replay-all-btn");
+    await button.click();
+    const panel = page.locator("#replay-all-controls");
+    await expect(panel).toBeVisible({ timeout: 10000 });
+    const clock = page.locator("#replay-all-clock");
+    await expect(clock).not.toHaveText("0:00 into every flight", {
+      timeout: 10000,
+    });
+    // Tilted, so laying it flat again below is the close's doing
+    await expect.poll(() => pitch(page)).toBe(50);
 
     // Paused, the clock holds: half a second would be over a minute
     const play = page.locator("#replay-all-play-btn");
@@ -86,7 +107,7 @@ test.describe("Replay all flights", () => {
     expect(await drawn(page)).toBeNull();
     expect(await page.evaluate(() => window.mapApp!.replayActive)).toBe(false);
     // Laid flat again, as it was
-    await expect.poll(pitch).toBe(0);
+    await expect.poll(() => pitch(page)).toBe(0);
   });
 
   test("scrubs the clock with its slider, and builds the heat up behind the flights", async ({

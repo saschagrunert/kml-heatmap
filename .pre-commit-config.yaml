@@ -72,5 +72,5 @@ repos:
         name: check that the KML files are obfuscated
         entry: sh -c 'python -m kml_heatmap.obfuscate data --check && python -m kml_heatmap.obfuscate tests/fixtures/visual --check'
         language: system
-        files: (?i)^(data|tests/fixtures/visual)/.*\.kml$
+        files: (?i)^(data|tests/fixtures/visual)/.*\.km[lz]$
         pass_filenames: false

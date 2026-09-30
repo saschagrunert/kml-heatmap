@@ -4,12 +4,14 @@ import {
   generateAirportPopupHtml,
   applyMetricColors,
   generateSegmentPopupHtml,
-  markFlightTimeUnits,
   pluralFlights,
   pluralize,
-  splitAirportName,
   type SegmentPopupParams,
 } from "../../../../kml_heatmap/frontend/utils/htmlGenerators";
+import {
+  markFlightTimeUnits,
+  splitAirportName,
+} from "../../../../kml_heatmap/frontend/utils/statsFormat";
 import {
   getColorForAirspeed,
   getColorForAltitude,

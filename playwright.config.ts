@@ -44,6 +44,8 @@ export default defineConfig<object, SiteOptions>({
   // tests in CI (HEAVY in tests/e2e/fixtures.ts), where one attempt takes
   // minutes: their job passes --retries=0, and the describe of the relief
   // tests in orientation.spec.ts turns retries off in every project.
+  // failOnFlakyTests is what holds that: a run with a test that passed only
+  // on its retry fails all the same, and the retry just labels it flaky.
   retries: isCI ? 1 : 0,
   failOnFlakyTests: isCI,
   // One browser per core of the runner, each drawing WebGL in software. The
@@ -53,8 +55,17 @@ export default defineConfig<object, SiteOptions>({
   // with two browsers (--workers=2) in either engine.
   ...(isCI ? { workers: "100%" } : {}),
   // The console reporter Playwright would pick anyway, plus the HTML report
-  // that CI uploads with the traces when a run fails
-  reporter: [[isCI ? "dot" : "list"], ["html", { open: "never" }]],
+  // that CI uploads with the traces when a run fails. CI also writes the
+  // duration of every test, which it uploads from every run: the tests that
+  // creep up on their timeout show there before they time out
+  // (scripts/e2e_durations.js lists the slowest).
+  reporter: [
+    [isCI ? "dot" : "list"],
+    ["html", { open: "never" }],
+    ...(isCI
+      ? [["json", { outputFile: "test-results/e2e-timings.json" }] as const]
+      : []),
+  ],
   // A stale site is refused by a fixture every spec gets (see
   // tests/e2e/site-check.ts), not by a global setup or a setup project
   use: {

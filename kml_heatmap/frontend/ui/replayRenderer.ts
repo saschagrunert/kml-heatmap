@@ -20,12 +20,8 @@ import type { PathSegment } from "../types";
 import { domCache } from "../utils/domCache";
 import { frameCoalescer } from "../utils/frameCoalescer";
 import { generateSegmentPopupHtml } from "../utils/htmlGenerators";
-import {
-  formatNumber,
-  formatSpeed,
-  formatTime,
-  formatTrack,
-} from "../utils/formatters";
+import { formatNumber, formatTrack } from "../utils/formatters";
+import { formatSpeed, formatTime } from "../utils/replayFormatters";
 import {
   FEET_TO_METERS,
   MAP_SOURCES,

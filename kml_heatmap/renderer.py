@@ -1,12 +1,14 @@
 """The generation pipeline: parse, deduplicate, export, then package.
 
-The files the site is made of live in ``site_assets``; this module is about
-the order the stages run in and what they hand each other.
+The module keeps its old name, but it renders nothing itself: the page and
+the files the site is made of come from ``site_assets``, the data files from
+``data_exporter``. This module is about the order the stages run in, what
+they hand each other and how a failure is reported (the exceptions of
+``exceptions``, which ``cli`` turns into its exit status).
 """
 
 import contextlib
 import gc
-import logging
 import os
 import pickle  # nosec B403
 import time
@@ -20,29 +22,36 @@ from .aircraft import merge_aircraft_data
 from .airport_lookup import load_airport_database
 from .airports import deduplicate_airports
 from .data_exporter import (
-    STABLE_MTIMES_ENV,
     ExportResult,
-    SiteOutput,
+    ExportSelection,
     export_all_data,
-    is_exportable_path,
     select_exported_paths,
 )
-from .exceptions import KMLHeatmapError, KMLParseError
-from .export_writers import exported_airport_names
+from .exceptions import (
+    ExportError,
+    InvalidInputError,
+    KMLHeatmapError,
+    KMLParseError,
+    OutputRefusedError,
+)
+from .export_writers import exported_airport_names, exported_country_codes
 from .logger import logger
-from .parser import load_cached_kml, parse_kml_file
+from .parser import load_cached_kml, parse_kml_file, parse_size
 from .parser_cache import prune_stale_cache_entries
+from .path_content import is_exportable_path
 from .previews import SITE_URL_ENV, normalize_site_url, write_previews
 from .site_assets import (
     SITE_FILE_PATTERNS,
     SITE_FILES,
-    bundle_is_available,
+    available_country_flags,
+    missing_build_files,
     package_assets,
     render_html,
     warn_about_a_stale_bundle,
 )
+from .site_output import STABLE_MTIMES_ENV, SiteOutput
 from .validation import foreign_site_files, validate_kml_file, validate_output_dir
-from .workers import init_worker, parse_worker_count
+from .workers import default_worker_count, init_worker, parse_worker_count
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Iterator, Sequence
@@ -53,9 +62,11 @@ if TYPE_CHECKING:
 
 __all__ = [
     "CoordinateExtent",
+    "FlightListing",
     "ParsedFile",
     "create_progressive_heatmap",
     "foreign_output_error",
+    "list_flights",
 ]
 
 # Files that are not in the parse cache are parsed in this process up to
@@ -159,11 +170,12 @@ def _load_cached(kml_file: str) -> ParsedFile | Path | None:
     return ParsedFile(kml_file, len(coordinates), path_groups, path_metadata)
 
 
-def _load_or_parse(kml_file: str, cache_path: Path | None = None) -> ParsedFile:
+def _load_or_parse(kml_file: str, _cache_path: Path | None = None) -> ParsedFile:
     """The parse of a file, from the parse cache if it has it, in a worker.
 
-    ``cache_path`` is not used: the worker looks the entry up itself. The
-    collector is paused meanwhile, see ``_collector_paused``.
+    The second argument, the cache entry of ``_parse_in_pool``, is not used:
+    the worker looks the entry up itself. The collector is paused
+    meanwhile, see ``_collector_paused``.
     """
     enabled = gc.isenabled()
     gc.disable()
@@ -183,19 +195,20 @@ def _parse_inline(kml_file: str, cache_path: Path | None) -> ParsedFile:
         return _parse_with_error_handling(kml_file, cache_path)
     except KMLHeatmapError:
         raise
-    except Exception:
+    # A bug in the parser shows on this one file, with its traceback, and
+    # the run reports the file as failed instead of dying without a name
+    except Exception:  # noqa: BLE001
         logger.exception("Unexpected error processing %s", kml_file)
         return ParsedFile(kml_file)
 
 
 def _file_bytes(kml_files: list[str]) -> int:
-    total = 0
-    for kml_file in kml_files:
-        try:
-            total += os.path.getsize(kml_file)
-        except OSError:
-            continue
-    return total
+    """The KML the files hold, that inside a KMZ counted uncompressed.
+
+    The pool gates below are about the work and the memory a parse takes,
+    which the document decides, not the archive (see ``parse_size``).
+    """
+    return sum(parse_size(kml_file) for kml_file in kml_files)
 
 
 def _parse_in_pool(
@@ -213,14 +226,14 @@ def _parse_in_pool(
     """
     kml_files = [kml_file for kml_file, _ in uncached]
     cache_paths = dict(uncached)
-    debug = logger.isEnabledFor(logging.DEBUG)
+    level = logger.getEffectiveLevel()
     database = pickle.dumps(airports, protocol=pickle.HIGHEST_PROTOCOL)
     done: set[str] = set()
     pool_broken = False
     with ProcessPoolExecutor(
         max_workers=parse_worker_count(kml_files),
         initializer=init_worker,
-        initargs=(debug, database),
+        initargs=(level, database),
     ) as executor:
         future_to_file = {
             executor.submit(parse, f, cache_paths[f]): f for f in kml_files
@@ -238,7 +251,8 @@ def _parse_in_pool(
                 # so every other file would fail the same way
                 executor.shutdown(wait=True, cancel_futures=True)
                 raise
-            except Exception:
+            # As in _parse_inline: one file's bug, named with its traceback
+            except Exception:  # noqa: BLE001
                 kml_file = future_to_file[future]
                 logger.exception("Unexpected error processing %s", kml_file)
                 parsed = ParsedFile(kml_file)
@@ -255,7 +269,7 @@ def _parse_in_pool(
         # Still in a worker: a file that is too large to parse must not take
         # the main process down with it, and one at a time names the file
         with ProcessPoolExecutor(
-            max_workers=1, initializer=init_worker, initargs=(debug, database)
+            max_workers=1, initializer=init_worker, initargs=(level, database)
         ) as executor:
             for kml_file in remaining:
                 try:
@@ -357,9 +371,10 @@ def _parse_kml_files(
         )
 
     with _collector_paused():
-        if (os.process_cpu_count() or 1) >= POOLED_CACHE_MIN_WORKERS and _file_bytes(
-            valid_files
-        ) > POOLED_CACHE_MIN_BYTES:
+        if (
+            default_worker_count() >= POOLED_CACHE_MIN_WORKERS
+            and _file_bytes(valid_files) > POOLED_CACHE_MIN_BYTES
+        ):
             _parse_in_pool(
                 [(kml_file, None) for kml_file in valid_files],
                 record,
@@ -387,10 +402,10 @@ def _parse_kml_files(
     )
 
     if total_points == 0:
-        raise KMLHeatmapError("No coordinates found in any KML files!")
+        raise InvalidInputError("No coordinates found in any KML files!")
     failed_count = sum(1 for parsed in results if parsed.point_count == 0)
     if failed_count > 0:
-        raise KMLHeatmapError(
+        raise InvalidInputError(
             f"{failed_count} of {len(valid_files)} file(s) failed to parse "
             "(see above); fix or remove them"
         )
@@ -401,7 +416,7 @@ def _parse_kml_files(
             logger.error("%s: %s", parsed.kml_file, reason)
             without_flight += 1
     if without_flight > 0:
-        raise KMLHeatmapError(
+        raise InvalidInputError(
             f"{without_flight} of {len(valid_files)} file(s) hold no flight to "
             "export (see above); fix or remove them"
         )
@@ -475,7 +490,7 @@ def _map_extent(
         for point in path
     )
     if extent is None:
-        raise KMLHeatmapError("No flight paths with a determinable year to export")
+        raise InvalidInputError("No flight paths with a determinable year to export")
     return extent
 
 
@@ -487,6 +502,7 @@ def _export_site(
     aircraft_data: dict[str, str] | None = None,
     terrain: TileSource | None = None,
     site_url: str | None = None,
+    private: bool = False,
 ) -> ExportResult:
     """Export the data, render the page and package its assets.
 
@@ -520,6 +536,11 @@ def _export_site(
     )
     logger.info("  Found %d unique airports", len(unique_airports))
 
+    # The countries of the exported airports, and the flags the site can
+    # publish of them, which metadata.json lists
+    countries = exported_country_codes(unique_airports)
+    available_flags = available_country_flags(countries)
+
     data_dir_name = data_dir.name
     with SiteOutput(
         output_file.parent,
@@ -537,6 +558,7 @@ def _export_site(
             exportable=exportable,
             terrain=terrain,
             selection=selection,
+            available_flags=available_flags,
         )
         # The page opens on the latest year, see resolveYearSelection
         render_html(
@@ -544,12 +566,13 @@ def _export_site(
             data_dir_name,
             max(result.years, default=None),
             site_url,
+            private,
         )
         package_assets(
             site.site_stage,
             extent.as_map_bounds(),
             data_dir_name,
-            result.countries,
+            countries,
         )
         write_previews(
             site.site_stage,
@@ -564,6 +587,125 @@ def _export_site(
         site.publish(result.years)
 
     return result
+
+
+@dataclass(frozen=True)
+class FlightListing:
+    """One row of ``--list``: a path of an input file, or a file without one."""
+
+    file: str
+    year: int | None = None
+    aircraft: str = ""
+    airports: str = ""
+    points: int = 0
+    timed: bool = False
+    #: Why the site leaves it out, "" for a path it publishes
+    skipped: str = ""
+
+
+def _listed_airports(metadata: PathMetadata) -> str:
+    start, end = metadata.get("start_airport"), metadata.get("end_airport")
+    if start or end:
+        return f"{start or '?'} - {end or '?'}"
+    return metadata.get("airport_name") or ""
+
+
+def _listed_paths(
+    parsed: list[ParsedFile],
+) -> tuple[FlightPathGroup, list[PathMetadata], list[str]]:
+    """Every path of the parsed files, with the file each came from."""
+    paths: FlightPathGroup = []
+    metadata: list[PathMetadata] = []
+    files: list[str] = []
+    for entry in parsed:
+        paths.extend(entry.path_groups)
+        metadata.extend(entry.path_metadata)
+        files.extend([entry.kml_file] * len(entry.path_groups))
+    return paths, metadata, files
+
+
+def _skip_reason(
+    index: int,
+    exportable: bool,
+    selection: ExportSelection,
+    exported: set[int],
+    metadata: PathMetadata,
+) -> str:
+    """Why the path at ``index`` is not published, "" when it is."""
+    if metadata.get("year") is None:
+        return "no determinable year"
+    if not exportable:
+        return "stays on one spot"
+    if index in exported:
+        return ""
+    # Copies are only looked for within a year (see drop_duplicate_paths)
+    content = selection.contents.get(index)
+    same_year = selection.paths_by_year.get(metadata.get("year") or 0, [])
+    if content is not None and any(
+        other in exported and selection.contents.get(other) == content
+        for other in same_year
+    ):
+        return "an exact copy of another file's flight"
+    return "the same flight as another recording"
+
+
+def list_flights(kml_files: Sequence[str]) -> list[FlightListing]:
+    """What the site would hold of every file, without writing anything.
+
+    Every path gets a row with its year, aircraft, airports, points and
+    whether it has times, and the reason it would be left out; a file that
+    is invalid, does not parse or holds no path gets a row of its own. The
+    files are parsed as a build parses them (through the parse cache), and
+    the copies and second recordings are found the same way
+    (``select_exported_paths``). No elevation tile is fetched and nothing
+    is written but the parse cache.
+    """
+    rows: list[FlightListing] = []
+    parsed: list[ParsedFile] = []
+    # Once, before the files: its download messages come first, and the
+    # parse cache keys see the same database as a build
+    load_airport_database()
+    for kml_file in kml_files:
+        is_valid, error_msg = validate_kml_file(kml_file)
+        if not is_valid:
+            rows.append(FlightListing(kml_file, skipped=error_msg or "not valid"))
+            continue
+        cached = _load_cached(kml_file)
+        entry = (
+            cached
+            if isinstance(cached, ParsedFile)
+            else _parse_inline(kml_file, cached)
+        )
+        if entry.point_count == 0:
+            rows.append(FlightListing(kml_file, skipped="failed to parse"))
+        elif not entry.path_groups:
+            rows.append(FlightListing(kml_file, skipped=_no_flight_reason(entry) or ""))
+        else:
+            parsed.append(entry)
+
+    paths, metadata, files = _listed_paths(parsed)
+    exportable = [is_exportable_path(path) for path in paths]
+    selection = select_exported_paths(paths, metadata, exportable)
+    exported = set(selection.exported())
+    for index, (path, meta) in enumerate(zip(paths, metadata, strict=True)):
+        rows.append(
+            FlightListing(
+                file=files[index],
+                year=meta.get("year"),
+                aircraft=meta.get("aircraft_registration")
+                or meta.get("aircraft_type")
+                or "",
+                airports=_listed_airports(meta),
+                points=len(path),
+                timed=any(point.ts is not None for point in path),
+                skipped=_skip_reason(
+                    index, exportable[index], selection, exported, meta
+                ),
+            )
+        )
+    order = {kml_file: position for position, kml_file in enumerate(kml_files)}
+    rows.sort(key=lambda row: order.get(row.file, len(order)))
+    return rows
 
 
 def foreign_output_error(output_file: str | Path, data_dir: str | Path) -> str | None:
@@ -593,12 +735,17 @@ def create_progressive_heatmap(
     terrain: TileSource | None = None,
     force: bool = False,
     site_url: str | None = None,
-) -> bool:
-    """Create a progressive-loading heatmap with external data files.
+    private: bool = False,
+) -> ExportResult:
+    """Generate the site: the page, its assets and the data files.
 
-    Returns False (after logging the reason) when the site could not be
-    generated; a previous site in the output is then left as it was. No
-    exception escapes for the failure modes the pipeline knows about.
+    Returns what the export produced. Raises ``InvalidInputError`` for
+    inputs that cannot make a site (a missing or invalid KML file, one
+    without a flight, a relative ``site_url``), ``OutputRefusedError`` for an
+    output directory it must not write, ``ExportError`` when writing the
+    site failed on the way, and ``KMLHeatmapError`` for the rest (a missing
+    bundle, a required database or tile that is unavailable). A previous
+    site in the output is then left as it was.
 
     ``terrain`` is where the ground under the flights comes from (see
     ``kml_heatmap.terrain``). The default, None, leaves it out of the year
@@ -611,7 +758,8 @@ def create_progressive_heatmap(
     ``site_url`` is the public address of the site, which its link preview
     images are named by (see ``previews``); None takes it from
     ``KML_HEATMAP_SITE_URL``, and without either the pages go without
-    images.
+    images. ``private`` asks search engines not to index the site (a robots
+    meta tag in the page).
     """
     aircraft_files = aircraft_files or []
     try:
@@ -619,32 +767,30 @@ def create_progressive_heatmap(
             site_url if site_url is not None else os.environ.get(SITE_URL_ENV)
         )
     except ValueError as e:
-        logger.error("%s", e)
-        return False
+        raise InvalidInputError(str(e)) from None
 
     # Stage 0: Refuse output directories that overlap with the inputs, a data
     # directory the page could not reach, and a run that could only produce a
     # page without its application
     output_dir = Path(output_file).resolve().parent
     if Path(data_dir).resolve().parent != output_dir:
-        logger.error(
-            "The data directory %s must be directly inside the output directory "
-            "%s, where the page looks for it",
-            data_dir,
-            output_dir,
+        raise OutputRefusedError(
+            f"The data directory {data_dir} must be directly inside the output "
+            f"directory {output_dir}, where the page looks for it"
         )
-        return False
     is_safe, error_msg = validate_output_dir(output_dir, [*kml_files, *aircraft_files])
     if not is_safe:
-        logger.error("%s", error_msg)
-        return False
+        raise OutputRefusedError(error_msg or "Unsafe output directory")
     foreign = None if force else foreign_output_error(output_file, data_dir)
     if foreign:
-        logger.error("%s", foreign)
-        return False
+        raise OutputRefusedError(foreign)
 
-    if not bundle_is_available():
-        return False
+    missing = missing_build_files()
+    if missing:
+        raise KMLHeatmapError(
+            f"JavaScript bundle not found: {', '.join(missing)} (run 'npm run "
+            "build' to generate it)"
+        )
     warn_about_a_stale_bundle()
 
     # Stage 1: Validate and parse. A file that cannot be used fails the run:
@@ -660,30 +806,25 @@ def create_progressive_heatmap(
             valid_files.append(kml_file)
 
     if not valid_files:
-        logger.error("No valid KML files to process!")
-        return False
+        raise InvalidInputError("No valid KML files to process!")
     if len(valid_files) < len(kml_files):
-        logger.error(
-            "%d of %d input file(s) are not valid KML files (see above); "
-            "fix or remove them",
-            len(kml_files) - len(valid_files),
-            len(kml_files),
+        raise InvalidInputError(
+            f"{len(kml_files) - len(valid_files)} of {len(kml_files)} input "
+            "file(s) are not valid KML files (see above); fix or remove them"
         )
-        return False
 
     logger.info("Parsing %d KML file(s)...", len(valid_files))
 
     try:
         try:
             all_path_groups, all_path_metadata = _parse_kml_files(valid_files)
-        except (ValueError, OSError, KMLHeatmapError) as e:
-            logger.error(str(e))
-            return False
+        except (ValueError, OSError) as e:
+            raise ExportError(str(e)) from e
 
         # Stage 2: Export the data, the page and the assets
         aircraft_data = merge_aircraft_data(aircraft_files) if aircraft_files else None
         try:
-            _export_site(
+            result = _export_site(
                 all_path_groups,
                 all_path_metadata,
                 Path(output_file),
@@ -691,16 +832,17 @@ def create_progressive_heatmap(
                 aircraft_data=aircraft_data,
                 terrain=terrain,
                 site_url=site_url,
+                private=private,
             )
+        except InvalidInputError, OutputRefusedError:
+            raise
         except (ValueError, RuntimeError, OSError, KMLHeatmapError) as e:
-            logger.error("Export failed: %s", e)
-            return False
+            raise ExportError(f"Export failed: {e}") from e
 
         logger.info(
             "  Serve %s over HTTP to view it (e.g. python -m http.server)", output_file
         )
-
-        return True
+        return result
     finally:
         # The parsed flights go back to the collector (see _collector_paused)
         gc.unfreeze()

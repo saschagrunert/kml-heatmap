@@ -142,7 +142,6 @@ describe("serveRequests", () => {
 
 describe("the module", () => {
   afterEach(() => {
-    vi.unstubAllGlobals();
     vi.resetModules();
   });
 

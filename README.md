@@ -106,6 +106,8 @@ The tool reads two filename formats, and any other KML file with a track:
 - SkyDemon exports, named `N_REGISTRATION_TYPE.kml` (`1_DEHYL_DA40.kml`)
 - Charterware files, with the name they come with
   (`2026-01-12_1513h_OE-AKI_LOAV-LOAV.kml`)
+- A `.kmz` archive is read like the `.kml` file in it (unzip it before
+  committing it, since the obfuscator cannot rewrite inside an archive)
 
 The registration in the name decides which aircraft a flight belongs to, and an
 `aircraft.json` next to the files names the model of each registration. Files
@@ -156,8 +158,11 @@ KML files themselves.
 - [Privacy](doc/privacy.md): what the site carries, what the page and the build
   ask other servers for, and obfuscating the KML files
 - [Output and technical details](doc/output.md): the files a run writes and
-  their format, link previews, the data export, the airport database, the
-  elevation data and the satellite imagery
+  their format, link previews, the data export, the cache directory, the airport
+  database, the elevation data and the satellite imagery
+- [Hosting](doc/hosting.md): serving the site from any static host, in a
+  subdirectory, the cache headers and compression, link previews, a login and
+  search engines
 - [Development](DEVELOPMENT.md): the developer guide, with its pages in
   [doc/development/](doc/development/)
 

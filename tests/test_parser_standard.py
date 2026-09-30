@@ -2,6 +2,7 @@
 
 from unittest.mock import MagicMock
 
+from kml_heatmap.aircraft import AircraftInfo
 from kml_heatmap.parser_common import empty_placemark_metadata
 from kml_heatmap.parser_standard import process_standard_coordinates
 from kml_heatmap.types import FlightPath, FlightPathGroup, PathMetadata, TrackPoint
@@ -24,7 +25,7 @@ def _run(elements, metadata=None, kml_file="test.kml"):
         coordinates,
         path_groups,
         path_metadata,
-        {},
+        None,
     )
     return coordinates, path_groups, path_metadata
 
@@ -148,7 +149,7 @@ class TestProcessStandardCoordinates:
             coordinates,
             path_groups,
             path_metadata,
-            {"registration": "D-EAGJ", "type": "DA20", "format": "numbered"},
+            AircraftInfo("D-EAGJ", "DA20"),
         )
         assert path_metadata[0]["aircraft_registration"] == "D-EAGJ"
         assert path_metadata[0]["aircraft_type"] == "DA20"

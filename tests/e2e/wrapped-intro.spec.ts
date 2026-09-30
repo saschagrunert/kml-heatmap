@@ -48,16 +48,26 @@ async function openWithIntro(page: Page) {
   await expect
     .poll(
       () =>
-        page.evaluate(async (bundle) => {
+        page.evaluate(async () => {
+          // The stylesheet the app adds as it imports the feature bundle
+          // (services/stylesheet.ts). Its URL carries the build as its
+          // query, as the bundle's does (versioned in
+          // services/lazyImport.ts), and both sit next to the page. The
+          // browser's resource timing is no place to look the bundle up:
+          // it keeps 250 entries, and the tiles can push it out.
+          const link = document.querySelector<HTMLLinkElement>(
+            'link[data-href="./features.css"]',
+          );
+          if (!link) return false;
+          const { search } = new URL(link.href);
           // The module the app imports, under the same URL, so the same
           // module, run once: resolved once it has been fetched and run
-          await import(bundle);
-          // The stylesheet the app adds for it has a sheet once loaded
-          // (services/stylesheet.ts)
-          return !!document.querySelector<HTMLLinkElement>(
-            'link[data-href="./features.css"]',
-          )?.sheet;
-        }, "./features.bundle.js"),
+          await import(
+            new URL(`./features.bundle.js${search}`, link.href).href
+          );
+          // The stylesheet has a sheet once loaded
+          return !!link.sheet;
+        }),
       { timeout: 15000 },
     )
     .toBe(true);

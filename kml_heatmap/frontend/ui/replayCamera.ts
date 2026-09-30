@@ -19,10 +19,9 @@ import {
 import {
   airplaneLiftPx,
   heightAtZoomFt,
-  liftExaggeration,
-  ribbonWidthZoom,
   type GroundedHeight,
-} from "../calculations/lift";
+} from "../calculations/airplaneLift";
+import { liftExaggeration, ribbonWidthZoom } from "../calculations/lift";
 import { prefersReducedMotion } from "../utils/motion";
 import { DEGREES_TO_RADIANS, TILE_SIZE_PX, turnOf } from "../utils/geometry";
 import { ChaseCamera, dampStep, type SavedCamera } from "./chaseCamera";

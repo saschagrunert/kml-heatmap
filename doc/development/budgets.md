@@ -23,7 +23,7 @@ the gzipped sizes CI prints when a budget is close.
 | `BUDGET_FEATURES`      | `features.bundle.js`: replay, the 3D view, the imagery, the profile, the cross-section, the tour |
 | `BUDGET_WRAPPED`       | `wrapped.bundle.js`: Wrapped, the statistics panel and the flight list                           |
 | `BUDGET_WORKER`        | `yearWorker.bundle.js`, fetched next to the first year file                                      |
-| `BUDGET_MAPLIBRE`      | The vendored MapLibre GL JS modules and stylesheet                                               |
+| `BUDGET_MAPLIBRE`      | The vendored MapLibre GL JS modules and stylesheet, less the styles of controls the app lacks    |
 | `BUDGET_HTML_TO_IMAGE` | The vendored html-to-image module, loaded on the first export                                    |
 
 ## Stylesheets
@@ -34,7 +34,8 @@ regression and leaves the generator itself alone. `styles.css` is on the
 critical path of every visit; `features.css` and `wrapped.css` are fetched with
 their lazy bundles (see [Stylesheets](frontend.md#stylesheets)), so room taken
 in them is not the same as room taken in `styles.css`, and each has a budget of
-its own.
+its own, for its bytes as the site serves it and one for them gzipped at level
+9, as the bundles have.
 
 ## Raising a budget
 
@@ -59,8 +60,10 @@ The policy is written above the budgets in `build.js`:
 ## History
 
 The comment above each budget lists every raise and lowering with the sizes
-before and after, and `git log -L` on a budget line lists the commits that
-changed it and why. Where a change was sized against the budgets, its page says
-so as well, for example
+before and after (the analysis of 2026-09-30 raised the feature and Wrapped
+budgets for the exports of the first visit that moved into them, and lowered
+MapLibre's for the styles of controls the app never adds), and `git log -L` on a
+budget line lists the commits that changed it and why. Where a change was sized
+against the budgets, its page says so as well, for example
 [the heat sources in the year worker](heat.md#the-heat-sources-and-the-year-worker)
 and [the readout of the heat cloud](heat.md#no-readout-on-the-flat-map).

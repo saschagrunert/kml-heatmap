@@ -89,6 +89,7 @@ import { watchScrollEnd, type ScrollEndWatcher } from "./utils/scrollFade";
 import { loadFeatures, loadWrapped } from "./services/featureLoader";
 import {
   BASE_STYLE_RETRY_MS,
+  BASE_STYLE_UNAVAILABLE_MESSAGE,
   cartoStyleUrl,
   cartoTransformRequest,
   FALLBACK_STYLE,
@@ -256,6 +257,8 @@ export class MapApp {
   private baseStyle: "idle" | "loading" | "loaded" = "idle";
   /** Whether the one timed retry of the base style has been spent */
   private baseStyleRetried = false;
+  /** Whether its failure has been said, which happens once a page */
+  private baseStyleToast = false;
   /** Takes back `keepMarkerTapsFromZoom`, set with the map */
   private releaseMarkerTaps: (() => void) | null = null;
   /**
@@ -682,21 +685,27 @@ export class MapApp {
         this.resolveMapReady(map);
         // Only now: the swap carries over the layers that were just added
         void this.loadBaseStyle();
-        window.addEventListener(
-          "online",
-          () => {
-            // A new network is worth a full round, timed retry included
-            this.baseStyleRetried = false;
-            void this.loadBaseStyle();
-          },
-          { signal: this.signal },
-        );
+        window.addEventListener("online", this.retryBaseStyle, {
+          signal: this.signal,
+        });
       })
       // A layer the style refuses throws in here. `initialize` waits for
       // `mapReady`, so without this it would wait forever and the page would
       // show an empty map with no word of why.
       .catch((error: unknown) => this.rejectMapReady(error));
   }
+
+  /**
+   * Ask for the base style again, as the browser comes back online or the
+   * Retry of its failure is pressed: a new network is worth a full round,
+   * timed retry and toast included, so a Retry that fails again says so
+   * rather than leaving the map dark without a word
+   */
+  private readonly retryBaseStyle = (): void => {
+    this.baseStyleRetried = false;
+    this.baseStyleToast = false;
+    void this.loadBaseStyle();
+  };
 
   /**
    * Fetch CARTO's style and put it under the flights, however late it
@@ -728,11 +737,19 @@ export class MapApp {
       if (this.destroyed) return;
       this.baseStyle = "loaded";
       setBaseStyle(map, style);
+      dismissToast(BASE_STYLE_UNAVAILABLE_MESSAGE);
     } catch (error) {
       if (this.destroyed) return;
       this.baseStyle = "idle";
       const message = error instanceof Error ? error.message : String(error);
       logError(`Base map style failed to load: ${message}`);
+      if (!this.baseStyleToast) {
+        this.baseStyleToast = true;
+        showToast(BASE_STYLE_UNAVAILABLE_MESSAGE, "info", {
+          label: "Retry",
+          run: this.retryBaseStyle,
+        });
+      }
       if (this.baseStyleRetried) return;
       this.baseStyleRetried = true;
       setTimeout(() => void this.loadBaseStyle(), BASE_STYLE_RETRY_MS);

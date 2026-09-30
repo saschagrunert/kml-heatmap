@@ -53,6 +53,7 @@ updates:
           - "ruff"
           - "mypy"
           - "bandit"
+          - "zizmor"
       core:
         patterns:
           - "lxml"
@@ -68,8 +69,12 @@ updates:
     # See the cooldown of the pip entry
     cooldown:
       default-days: 7
+    # Weekly: a release waits a week for the cooldown anyway, and a daily
+    # run opened a pull request of the catch-all group below nearly every
+    # day, each a full CI run. The schedule is the ecosystem's, not a
+    # group's. Security updates do not wait for it.
     schedule:
-      interval: "daily"
+      interval: "weekly"
       time: "09:00"
     open-pull-requests-limit: 5
     labels:
@@ -98,6 +103,7 @@ updates:
         patterns:
           - "vitest*"
           - "@vitest/*"
+          - "fast-check"
       build-tools:
         patterns:
           - "esbuild"
@@ -121,14 +127,16 @@ updates:
           - "minor"
           - "patch"
 
-  # GitHub Actions
+  # GitHub Actions, pinned by commit SHA in .github/workflows. One pull
+  # request a week for all of them: most bumps are of the same few actions
+  # of GitHub's own, and each pull request is a full CI run.
   - package-ecosystem: "github-actions"
     directory: "/"
     # See the cooldown of the pip entry
     cooldown:
       default-days: 7
     schedule:
-      interval: "daily"
+      interval: "weekly"
       time: "09:00"
     open-pull-requests-limit: 3
     labels:
@@ -136,6 +144,10 @@ updates:
       - "ci"
     commit-message:
       prefix: "ci"
+    groups:
+      actions:
+        patterns:
+          - "*"
 
   # Docker base images: covers Dockerfile in the root directory. It carries a
   # tag and a digest, which Dependabot bumps together. The container job

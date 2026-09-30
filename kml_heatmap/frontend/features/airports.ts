@@ -72,9 +72,10 @@ let _airportsSource: readonly Airport[] | null = null;
  * Airports by name, from the airport list the page holds. The map follows
  * the list: airports.json may arrive after the first lookup (the loader
  * fetches it while the app starts), and a list loaded later replaces an
- * earlier one.
+ * earlier one. The countries of the airports (features/countries.ts) read
+ * the same map.
  */
-function getAirportsByName(): Map<string, Airport> {
+export function getAirportsByName(): Map<string, Airport> {
   const kmlAirports = siteData.airports;
   if (_airportsByName && kmlAirports === _airportsSource) {
     return _airportsByName;
@@ -93,61 +94,6 @@ function getAirportsByName(): Map<string, Airport> {
  */
 export function airportCode(name: string): string | undefined {
   return getAirportsByName().get(name)?.code;
-}
-
-const _displayNames =
-  typeof Intl !== "undefined"
-    ? new Intl.DisplayNames(["en"], { type: "region" })
-    : null;
-
-export function countryDisplayName(code: string): string {
-  try {
-    return _displayNames?.of(code) || code;
-  } catch {
-    return code;
-  }
-}
-
-/**
- * Path to a country's flag, relative to the page, or null when this site
- * does not carry it.
- *
- * The export lists what it published: the flags are copied per site for the
- * countries actually visited, and a build without them (the wheel leaves
- * them out) lists none, which is the caller's cue to fall back to the code.
- */
-export function countryFlagSrc(code: string): string | null {
-  const available = siteData.metadata?.available_flags;
-  const lower = code.toLowerCase();
-  return available?.includes(lower) ? `flags/${lower}.svg` : null;
-}
-
-export function countCountries(airportNames: string[]): Set<string> {
-  const countries = new Set<string>();
-  const map = getAirportsByName();
-
-  for (const name of airportNames) {
-    const country = map.get(name)?.country;
-    if (country) countries.add(country);
-  }
-  return countries;
-}
-
-export function groupByCountry(airportNames: string[]): Map<string, string[]> {
-  const map = getAirportsByName();
-  const groups = new Map<string, string[]>();
-
-  for (const name of airportNames) {
-    const key = map.get(name)?.country || "Other";
-    const list = groups.get(key);
-    if (list) {
-      list.push(name);
-    } else {
-      groups.set(key, [name]);
-    }
-  }
-
-  return groups;
 }
 
 /**

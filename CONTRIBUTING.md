@@ -7,8 +7,13 @@ setup, the checks that run in CI and the conventions used in this repository.
 
 - Python 3.14 (`.python-version`) and Node.js 26 (`.nvmrc`). CI and the
   container image use Node.js 26, and that is the only release the tests run on,
-  so `engines` in `package.json` asks for 26 or newer.
+  so `engines` in `package.json` asks for 26 or newer. Python 3.14 is required,
+  not merely recommended: the code uses its syntax. On a distribution that ships
+  an older Python, `uv venv --python 3.14 .venv` or pyenv (`pyenv install 3.14`)
+  provides it, in place of the `python -m venv` below.
 - podman or docker for `make build` and `make serve` (optional)
+- `.editorconfig` tells editors the indentation, line endings and final newline
+  that Prettier and ruff write.
 
 ```bash
 git clone https://github.com/saschagrunert/kml-heatmap.git
@@ -20,8 +25,8 @@ pip install --no-deps --no-build-isolation -e .
 npm ci
 npm run build                 # frontend bundles (gitignored)
 
-pip install pre-commit && pre-commit install
-make hooks                    # pre-push check for real flight dates
+pip install pre-commit
+make hooks                    # the pre-commit hooks and the pre-push check for real flight dates
 ```
 
 The lock files are what CI installs: `requirements-test.lock` pins the test and
@@ -52,6 +57,26 @@ needs a compiler, and the package ships that module prebuilt, so it is left
 unlisted and npm skips it with a warning there. A new dependency that needs its
 install script has to be added on purpose (`npm install-scripts approve <pkg>`).
 
+### First build
+
+A site built from the fixture flights of the visual snapshots finishes offline
+in under a minute and shows that the setup works:
+
+```bash
+npm run build && python -m kml_heatmap --no-terrain tests/fixtures/visual --output-dir out
+python -m http.server 8000 --bind 127.0.0.1 -d out   # then open http://127.0.0.1:8000/
+```
+
+`out/` is gitignored. `--no-terrain` skips the elevation tiles, and offline the
+airport database cannot be downloaded, so the log warns and the airports keep
+the names the files spell.
+
+### Windows
+
+The Makefile, the hooks and the scripts are POSIX (`sh`, `make`, `id`). On
+Windows use WSL, where the setup above works as on Linux, or the container
+commands in [Docker usage](doc/usage.md#docker-usage).
+
 ## Checks
 
 Run the same checks as CI before opening a pull request. They use the tools from
@@ -59,7 +84,7 @@ your virtual environment and `node_modules`, the same way CI does, so no
 container is involved:
 
 ```bash
-make lint            # lock files and version pins, ruff (check and format), mypy, bandit, tsc (frontend, build scripts, tests), eslint, knip, prettier, typos
+make lint            # lock files and version pins, ruff (check and format), mypy, bandit, zizmor, tsc (frontend, build scripts, tests), eslint, knip, prettier, typos
 make format          # ruff format, prettier
 make test            # npm run build, then vitest and pytest with coverage; pytest flags are in doc/development/testing.md
 npm run test:e2e     # Playwright: desktop, mobile and WebKit (see doc/development/testing.md)
@@ -88,6 +113,16 @@ here, not an oversight: adding the parentheses back is undone on the next
   for the specs that depend on it, one without. The repository's Pages source
   has to be "GitHub Actions" (Settings > Pages). Set it by hand: the workflow
   token is not allowed to change it.
+- **The other settings made by hand.** A ruleset on `main` (Settings > Rules)
+  requires the `checks` status, the last job of the `test` workflow, which
+  passes only when every test job a pull request runs did; it blocks force
+  pushes, and it sends pull requests through the merge queue (the workflow runs
+  on `merge_group` for it) or, where the merge queue is not available, requires
+  a branch to be up to date with `main` before it merges. Settings > Actions >
+  General requires every action to be pinned to a full commit SHA and allows
+  only the actions of GitHub, of verified creators, `codecov/*` and
+  `crate-ci/*`; a workflow that uses any other action fails until it is allowed
+  there.
 - **Never commit un-obfuscated KML files.** Generating a site no longer rewrites
   them: run `make obfuscate` after adding flights to `data/` (or pass
   `--obfuscate-inputs`). The pre-commit hook, `make check-obfuscation` and the

@@ -4,13 +4,16 @@ import {
   groundLevelsFt,
   aggregateAircraft,
   altitudeRangeFt,
-  filterSegmentsByPaths,
-  calculateTotalDistance,
   buildSegmentRanges,
   perPathSeconds,
   segmentRangesFor,
   segmentsForPathIds,
 } from "../../../../kml_heatmap/frontend/calculations/statistics";
+// Tested here, on the same fixtures as the slices they are made of
+import {
+  calculateTotalDistance,
+  filterSegmentsByPaths,
+} from "../../../../kml_heatmap/frontend/calculations/panelStats";
 import { METERS_TO_FEET } from "../../../../kml_heatmap/frontend/utils/constants";
 import type {
   PathInfo,

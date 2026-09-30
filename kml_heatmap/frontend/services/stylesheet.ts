@@ -1,6 +1,7 @@
 /**
  * Load the stylesheets of the lazily loaded bundles (services/featureLoader.ts)
  */
+import { versioned } from "./lazyImport";
 
 /** A stylesheet is a fraction of a year file, so it gets less time */
 const STYLESHEET_TIMEOUT_MS = 30_000;
@@ -37,7 +38,8 @@ export function loadStylesheet(
   const request = new Promise<void>((resolve, reject) => {
     const link = document.createElement("link");
     link.rel = "stylesheet";
-    link.href = url;
+    // By the build it belongs to, like its bundle
+    link.href = versioned(url);
     // Tests and debugging match on this rather than on href, which the
     // browser resolves to an absolute URL
     link.dataset["href"] = url;

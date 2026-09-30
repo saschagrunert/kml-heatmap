@@ -13,11 +13,13 @@ import { join, posix } from "node:path";
 import { runInNewContext } from "node:vm";
 import { describe, expect, it } from "vitest";
 import {
+  VENDOR_CSS_STRIPS,
   VENDOR_FILES,
   VENDOR_MODULES,
   VENDOR_PATCHES,
   LINUX_WEBKIT,
   applyVendorPatches,
+  stripControlStyles,
   stripSourceMapComment,
 } from "../../../scripts/vendor.js";
 import { HTML_TO_IMAGE_URL } from "../../../kml_heatmap/frontend/ui/uiToggles";
@@ -58,7 +60,12 @@ describe("vendored third-party files", () => {
           ),
           `${published} differs`,
         ).toBe(true);
-        if (Object.hasOwn(VENDOR_PATCHES, published)) continue;
+        if (
+          Object.hasOwn(VENDOR_PATCHES, published) ||
+          Object.hasOwn(VENDOR_CSS_STRIPS, published)
+        ) {
+          continue;
+        }
         expect(
           original.subarray(0, copied.length).equals(copied),
           `${published} is not a prefix of its original`,
@@ -279,7 +286,106 @@ describe("vendored third-party files", () => {
       );
       // A file without fixes is the very same buffer
       const css = Buffer.from("a{}");
-      expect(applyVendorPatches(css, "maplibre-gl.css")).toBe(css);
+      expect(applyVendorPatches(css, "other.css")).toBe(css);
+    });
+  });
+
+  describe("the styles of the controls the app never adds", () => {
+    const original = (): Buffer =>
+      readFileSync(
+        join(REPO_ROOT, "node_modules", VENDOR_FILES["maplibre-gl.css"]!),
+      );
+    const stripped = (): string =>
+      applyVendorPatches(original(), "maplibre-gl.css").toString("latin1");
+    /** The selectors of the rules of a minified stylesheet, nested ones too */
+    const selectors = (css: string): string[] =>
+      [...css.matchAll(/([^{}]+)\{/g)].map((match) => match[1]!.trim());
+
+    it("are left out of the vendored stylesheet, the rest kept", () => {
+      const css = stripped();
+      const { names } = VENDOR_CSS_STRIPS["maplibre-gl.css"]!;
+      // No rule of theirs alone is left; one that also styles the canvas
+      // or the attribution stays whole
+      for (const selector of selectors(css)) {
+        if (selector.startsWith("@")) continue;
+        expect(
+          selector
+            .split(",")
+            .some((one) => !names.some((name) => one.includes(name))),
+          selector,
+        ).toBe(true);
+      }
+      // What the app draws with: the map and its canvas, the attribution,
+      // the popups and the markers
+      for (const kept of [
+        ".maplibregl-map{",
+        ".maplibregl-canvas{",
+        ".maplibregl-ctrl-attrib a{",
+        ".maplibregl-popup-content{",
+        ".maplibregl-marker{",
+      ]) {
+        expect(css).toContain(kept);
+      }
+      // Every rule kept is one of the original's, whole
+      const rules = selectors(original().toString("latin1"));
+      for (const selector of selectors(css)) {
+        expect(rules).toContain(selector);
+      }
+    });
+
+    it("leave the icons of the attribution alone, and no other", () => {
+      const css = stripped();
+      const icons = [...css.matchAll(/([^{}]+)\{[^{}]*url\("data:/g)].map(
+        (match) => match[1]!.trim(),
+      );
+      expect(icons.length).toBeGreaterThan(0);
+      for (const selector of icons) {
+        expect(selector).toContain("maplibregl-ctrl-attrib");
+      }
+      // Three quarters of the stylesheet, which every visit loaded
+      expect(css.length).toBeLessThan(original().length / 4);
+    });
+
+    it("take a conditional at-rule with them once it holds nothing else", () => {
+      const names = ["ctrl-zoom-in"];
+      const strip = (css: string): string => {
+        VENDOR_CSS_STRIPS["test.css"] = { names, rules: 2 };
+        try {
+          return stripControlStyles(Buffer.from(css), "test.css").toString();
+        } finally {
+          delete VENDOR_CSS_STRIPS["test.css"];
+        }
+      };
+      expect(
+        strip(
+          "a{x:1}@media (a){.ctrl-zoom-in{y:2}}@media (b){.ctrl-zoom-in{y:2}b{z:3}}",
+        ),
+      ).toBe("a{x:1}@media (b){b{z:3}}");
+      // A rule of several selectors stays while one of them is not theirs
+      expect(
+        strip("a,.ctrl-zoom-in{x:1}.ctrl-zoom-in{y:2}.ctrl-zoom-in{}"),
+      ).toBe("a,.ctrl-zoom-in{x:1}");
+    });
+
+    it("fail loudly once MapLibre's controls have changed", () => {
+      // A control renamed, or one added: not the number of rules recorded
+      const renamed = Buffer.from(
+        original()
+          .toString("latin1")
+          .replaceAll("maplibregl-ctrl-scale", "maplibregl-ctrl-ruler"),
+        "latin1",
+      );
+      expect(() => stripControlStyles(renamed, "maplibre-gl.css")).toThrow(
+        /61 rules of maplibre-gl\.css .* not 62/,
+      );
+      const twice = Buffer.concat([original(), original()]);
+      expect(() => stripControlStyles(twice, "maplibre-gl.css")).toThrow(
+        /124 rules/,
+      );
+      // A stylesheet that is not minified rules cannot be cut by its braces
+      expect(() =>
+        stripControlStyles(Buffer.from("a{x:1"), "maplibre-gl.css"),
+      ).toThrow(/not minified rules/);
     });
   });
 

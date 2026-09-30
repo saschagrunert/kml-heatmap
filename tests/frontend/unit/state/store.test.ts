@@ -98,6 +98,85 @@ describe("AppStore", () => {
       expect(fn).not.toHaveBeenCalled();
     });
 
+    it("unsubscribes once the signal it was given aborts", () => {
+      const store = new AppStore();
+      const fn = vi.fn();
+      const keys = vi.fn();
+      const owner = new AbortController();
+      store.subscribe("selectedYear", fn, { signal: owner.signal });
+      store.subscribeKeys(["selectedYear", "heatmapVisible"], keys, {
+        signal: owner.signal,
+      });
+
+      store.set("selectedYear", "2025");
+      owner.abort();
+      store.set("selectedYear", "2024");
+      store.set("heatmapVisible", false);
+
+      expect(fn).toHaveBeenCalledTimes(1);
+      expect(keys).toHaveBeenCalledTimes(1);
+    });
+
+    it("drops the abort listener once it is unsubscribed", () => {
+      // A signal as long-lived as the app must not keep every callback
+      const store = new AppStore();
+      const owner = new AbortController();
+      const added = vi.spyOn(owner.signal, "addEventListener");
+      const removed = vi.spyOn(owner.signal, "removeEventListener");
+      const fn = vi.fn();
+      const keys = vi.fn();
+
+      store.subscribe("selectedYear", fn, { signal: owner.signal })();
+      store.subscribeKeys(["selectedYear", "heatmapVisible"], keys, {
+        signal: owner.signal,
+      })();
+
+      expect(added).toHaveBeenCalledTimes(3);
+      expect(removed).toHaveBeenCalledTimes(3);
+      for (const [type, listener] of added.mock.calls) {
+        expect(removed).toHaveBeenCalledWith(type, listener);
+      }
+      owner.abort();
+      store.set("selectedYear", "2025");
+      store.set("heatmapVisible", false);
+      expect(fn).not.toHaveBeenCalled();
+      expect(keys).not.toHaveBeenCalled();
+    });
+
+    it("an unsubscribe after the abort does no harm", () => {
+      const store = new AppStore();
+      const owner = new AbortController();
+      const fn = vi.fn();
+      const other = vi.fn();
+      const unsubscribe = store.subscribe("selectedYear", fn, {
+        signal: owner.signal,
+      });
+      store.subscribe("selectedYear", other);
+
+      owner.abort();
+      unsubscribe();
+      store.set("selectedYear", "2025");
+
+      expect(fn).not.toHaveBeenCalled();
+      expect(other).toHaveBeenCalledTimes(1);
+    });
+
+    it("subscribes nothing with a signal that has aborted already", () => {
+      const store = new AppStore();
+      const fn = vi.fn();
+      const gone = AbortSignal.abort();
+      const unsubscribe = store.subscribe("selectedYear", fn, {
+        signal: gone,
+      });
+      store.subscribeKeys(["selectedYear"], fn, { signal: gone });
+
+      store.set("selectedYear", "2025");
+
+      expect(fn).not.toHaveBeenCalled();
+      // Its unsubscribe does no harm
+      expect(unsubscribe).not.toThrow();
+    });
+
     it("does not affect other listeners on unsubscribe", () => {
       const store = new AppStore();
       const fn1 = vi.fn();

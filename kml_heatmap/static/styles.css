@@ -2544,27 +2544,3 @@ body.stats-open #left-buttons {
     color: Highlight;
   }
 }
-
-/* ==========================================================================
-   Print
-   ========================================================================== */
-@media print {
-  .control-group,
-  .color-legend,
-  #selection-chip,
-  #stats-rail,
-  #github-footer,
-  .mobile-bar,
-  .mobile-sheet,
-  .toast-notification,
-  #map-empty,
-  .skip-nav,
-  .maplibregl-ctrl-group {
-    display: none !important;
-  }
-  #map {
-    position: static;
-    width: 100%;
-    height: 100vh;
-  }
-}

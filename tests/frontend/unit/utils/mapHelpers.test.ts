@@ -105,7 +105,6 @@ describe("mapHelpers", () => {
   });
 
   afterEach(() => {
-    vi.restoreAllMocks();
     vi.useRealTimers();
     resetMapLibreMock();
     document.body.innerHTML = "";

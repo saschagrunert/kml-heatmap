@@ -40,17 +40,21 @@ import {
   type FlightProfile,
   type ProfilePoint,
 } from "../calculations/flightProfile";
-import { airplaneLiftPx, liftExaggeration } from "../calculations/lift";
+import { airplaneLiftPx } from "../calculations/airplaneLift";
+import { liftExaggeration } from "../calculations/lift";
 import { prepareReplaySegments } from "../features/replay";
 import { siteData } from "../state/siteData";
 import { domCache } from "../utils/domCache";
 import { formatDuration } from "../utils/duration";
-import { formatNumber, formatSpeed, formatTime } from "../utils/formatters";
+import { formatNumber } from "../utils/formatters";
+import { formatSpeed, formatTime } from "../utils/replayFormatters";
 import type { Coordinate } from "../utils/geometry";
 import { setControlIcon } from "../utils/icons";
 import { toLngLat } from "../utils/mapHelpers";
 import { REPLAY_PANEL_HEIGHT_VAR } from "./replayManager";
 import { crossSectionOpen, followCrossSection } from "./crossSection";
+import { element, shape } from "./crossSectionElements";
+import { heightUnit } from "./crossSectionText";
 
 /** The chart's own units: it is stretched to the strip (see the CSS) */
 const VIEW_W = 1000;
@@ -87,31 +91,6 @@ function formatX(profile: FlightProfile, value: number): string {
   return profile.timed
     ? formatTime(value - x[0]!, span)
     : formatNumber(value, span < 10 ? 1 : 0) + " km";
-}
-
-/** " ft AGL", or " ft above field" for a flight without terrain */
-function heightUnit(profile: FlightProfile): string {
-  return profile.fromTerrain ? " ft AGL" : " ft above field";
-}
-
-/** An element of the strip, with a class */
-function element<K extends keyof HTMLElementTagNameMap>(
-  tag: K,
-  className: string,
-  parent: Element,
-): HTMLElementTagNameMap[K] {
-  const el = document.createElement(tag);
-  el.className = className;
-  parent.append(el);
-  return el;
-}
-
-/** A shape of the chart, with a class */
-function shape(tag: string, className: string, parent: Element): SVGElement {
-  const el = document.createElementNS("http://www.w3.org/2000/svg", tag);
-  el.setAttribute("class", className);
-  parent.append(el);
-  return el;
 }
 
 /** Whether the strip was put away; storage may be unavailable */
@@ -254,7 +233,7 @@ export function followFlightProfile(app: MapApp): HTMLElement {
       formatNumber(Math.round(Math.max(0, feet) / 10) * 10);
     readout.textContent = [
       `${tens(altitude)} ft`,
-      tens(heightFt) + heightUnit(shown),
+      tens(heightFt) + " " + heightUnit(shown),
       ...(speed > 0 ? [formatSpeed(speed)] : []),
       formatX(shown, x),
     ].join(" · ");
@@ -313,7 +292,7 @@ export function followFlightProfile(app: MapApp): HTMLElement {
     line.setAttribute("d", path);
     ground.setAttribute("d", `${floor}L${xOf(count - 1)} ${VIEW_H}Z`);
 
-    const unit = heightUnit(profile);
+    const unit = " " + heightUnit(profile);
     const highest = `${formatNumber(profile.maxAltitudeFt)} ft`;
     const lowest = profile.lowestEnRouteFt;
     const figures = [

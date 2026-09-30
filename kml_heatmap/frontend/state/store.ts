@@ -246,20 +246,35 @@ export class AppStore {
     }
   }
 
+  /**
+   * Call `fn` on every change of `key`, until the function this returns is
+   * called or `signal` aborts, whichever comes first: its owner's life
+   * ends the listener without a teardown of its own. Nothing is
+   * subscribed with a signal that has aborted already.
+   */
   subscribe<K extends keyof StoreState>(
     key: K,
     fn: Listener<StoreState[K]>,
+    { signal }: { signal?: AbortSignal } = {},
   ): () => void {
-    if (!this.listeners.has(key)) {
-      this.listeners.set(key, []);
-    }
-    this.listeners.get(key)!.push(fn as Listener<unknown>);
-    return () => {
+    const remove = (): void => {
       const list = this.listeners.get(key);
       if (list) {
         const idx = list.indexOf(fn as Listener<unknown>);
         if (idx >= 0) list.splice(idx, 1);
       }
+    };
+    if (signal?.aborted) return remove;
+    if (!this.listeners.has(key)) {
+      this.listeners.set(key, []);
+    }
+    this.listeners.get(key)!.push(fn as Listener<unknown>);
+    signal?.addEventListener("abort", remove, { once: true });
+    // The abort listener goes as well: a signal that lives as long as the
+    // app would otherwise hold every callback it was ever given
+    return () => {
+      remove();
+      signal?.removeEventListener("abort", remove);
     };
   }
 
@@ -271,11 +286,12 @@ export class AppStore {
   /**
    * Call `fn` once per update that changes any of `keys`. A batch that
    * changes three of them would otherwise run it three times, each against
-   * the same final state.
+   * the same final state. Until `signal` aborts, as for subscribe.
    */
   subscribeKeys(
     keys: readonly (keyof StoreState)[],
     fn: () => void,
+    options: { signal?: AbortSignal } = {},
   ): () => void {
     const listener = (): void => {
       const ran = this.flushRan;
@@ -285,7 +301,9 @@ export class AppStore {
       }
       fn();
     };
-    const unsubscribes = keys.map((key) => this.subscribe(key, listener));
+    const unsubscribes = keys.map((key) =>
+      this.subscribe(key, listener, options),
+    );
     return () => {
       for (const unsubscribe of unsubscribes) unsubscribe();
     };

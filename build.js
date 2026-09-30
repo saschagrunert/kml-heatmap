@@ -8,10 +8,18 @@
 import * as esbuild from "esbuild";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
-import { readFileSync } from "fs";
+import { readFileSync, writeFileSync } from "fs";
 import { readFile } from "fs/promises";
-import { gzipSync } from "zlib";
-import ts from "typescript";
+import {
+  assertExpectedOutputs,
+  formatBytes,
+  inputDeltas,
+  largestInputs,
+  measure,
+  outputNamed,
+  parseBuildArgs,
+  tightenShaders,
+} from "./scripts/build-helpers.js";
 import {
   buildBanner as makeBanner,
   computeSourceHash,
@@ -26,7 +34,19 @@ import {
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-const isWatch = process.argv.includes("--watch");
+const STATIC_DIR = join(__dirname, "kml_heatmap/static");
+const FRONTEND_DIR = join(__dirname, "kml_heatmap/frontend");
+
+// `--metafile [path]` keeps esbuild's account of what went into each
+// bundle (bundle-meta.json in the checkout without a path, gitignored and
+// outside kml_heatmap/static, whose JSON files the wheel packages), and
+// `--compare <path>` prints what changed in each bundle since the build
+// that wrote that file (see scripts/README.md)
+const args = parseBuildArgs(
+  process.argv.slice(2),
+  join(__dirname, "bundle-meta.json"),
+);
+const isWatch = args.watch;
 const isDevelopment = process.env.NODE_ENV === "development" || isWatch;
 const minify = !isDevelopment;
 
@@ -107,48 +127,15 @@ const pureConstantsPlugin = {
 };
 
 /**
- * GLSL as a minified build ships it: `text` without its comments, and each
- * line without its indentation and the spaces around the punctuation that
- * separates tokens anyway. Not around + and -, where "a - -b" would become
- * a decrement, and not in a directive, where "#define A (b)" would become a
- * macro of a parameter. The lines stay lines, for the preprocessor and for
- * the line numbers a compiler's error names. `open` and `close` say
- * whether the text starts or ends a line rather than meets an
- * interpolation, whose value a space may separate from a word.
- * @param {string} text
- * @param {boolean} open
- * @param {boolean} close
- * @returns {string}
- */
-function tightenGlsl(text, open, close) {
-  const lines = text
-    // Whichever comment opens first, a block one as a space or the breaks
-    // of the lines it spans
-    .replace(/\/\/[^\n]*|\/\*[\s\S]*?\*\//g, (comment) =>
-      comment.startsWith("//") ? "" : comment.replace(/[^\n]+/g, " "),
-    )
-    .split("\n");
-  return lines
-    .map((line, i) => {
-      let tight = line.replace(/[ \t]+/g, " ");
-      if (!/^ ?#/.test(tight)) {
-        tight = tight.replace(/ ?([=,;(){}[\]*/<>?:&|!]) ?/g, "$1");
-      }
-      if (i > 0 || open) tight = tight.trimStart();
-      if (i < lines.length - 1 || close) tight = tight.trimEnd();
-      return tight;
-    })
-    .join("\n");
-}
-
-/**
  * Write the shaders of the custom layers (ui/*Layer.ts) as a minified
- * build ships them (tightenGlsl). esbuild leaves a template literal as it
- * is written, and their GLSL, some 12 KB of the feature bundle, was a
- * sixth indentation and spaces. A template literal is taken for GLSL where
- * its text holds "gl_" or "uniform ", and only its text is changed, never
- * the expressions it interpolates. Tests and development builds read the
- * shaders as they are written.
+ * build ships them (tightenShaders and tightenGlsl in
+ * scripts/build-helpers.js). esbuild leaves a template literal as it is
+ * written, and their GLSL, some 12 KB of the feature bundle, was a sixth
+ * indentation and spaces. A template literal is taken for GLSL where its
+ * text holds "gl_" or "uniform ", and only its text is changed, never the
+ * expressions it interpolates. Development builds read the shaders as they
+ * are written; tests/frontend/unit/glsl.test.ts checks that the tightened
+ * ones of every layer are the same tokens as written.
  * @type {import("esbuild").Plugin}
  */
 const shaderPlugin = {
@@ -156,52 +143,10 @@ const shaderPlugin = {
   setup(build) {
     build.onLoad({ filter: /[\\/]ui[\\/]\w+Layer\.ts$/ }, async (args) => {
       const source = await readFile(args.path, "utf8");
-      const file = ts.createSourceFile(
-        args.path,
-        source,
-        ts.ScriptTarget.Latest,
-      );
-      /** @type {ts.Node[]} */
-      const parts = [];
-      /** @param {ts.Node} node */
-      const visit = (node) => {
-        const literals = ts.isTemplateExpression(node)
-          ? [node.head, ...node.templateSpans.map((span) => span.literal)]
-          : ts.isNoSubstitutionTemplateLiteral(node)
-            ? [node]
-            : [];
-        if (/gl_|uniform /.test(literals.map((part) => part.text).join(""))) {
-          parts.push(...literals);
-        }
-        ts.forEachChild(node, visit);
-      };
-      visit(file);
-      // From the end, so the offsets of those before stay where they were
-      parts.sort((a, b) => b.end - a.end);
-      let contents = source;
-      for (const part of parts) {
-        const start = part.getStart(file);
-        const raw = source.slice(start, part.end);
-        // Between the backtick or the brace it opens with and the backtick
-        // or "${" it closes with
-        const close = raw.endsWith("${") ? 2 : 1;
-        const text = tightenGlsl(
-          raw.slice(1, -close),
-          raw[0] === "`",
-          close === 1,
-        );
-        contents =
-          contents.slice(0, start + 1) +
-          text +
-          contents.slice(part.end - close);
-      }
-      return { contents, loader: "ts" };
+      return { contents: tightenShaders(source, args.path), loader: "ts" };
     });
   },
 };
-
-const STATIC_DIR = join(__dirname, "kml_heatmap/static");
-const FRONTEND_DIR = join(__dirname, "kml_heatmap/frontend");
 
 // The page loads mapApp.bundle.js as a module. Replay and Wrapped are a
 // quarter of the frontend and most visits open neither, so features.ts
@@ -246,6 +191,14 @@ const buildOptions = {
   minify,
   metafile: true,
   banner: { js: buildBanner },
+  // The build the bundles belong to. The app fetches the lazy bundles and
+  // their stylesheets with it as a query (versioned in
+  // services/lazyImport.ts), so a page of a new build never runs a lazy
+  // bundle of an old one from the browser's cache. It does not keep a page
+  // open over a deploy from getting the new files: the host ignores the
+  // query. So each lazy bundle exports it as BUILD, and the app does not
+  // use one of another build (services/featureLoader.ts).
+  define: { __BUILD__: JSON.stringify(sourceHash) },
 
   // Tree shaking
   treeShaking: true,
@@ -272,29 +225,15 @@ const workerBuildOptions = {
 };
 
 /**
- * Format bytes to human-readable size
- * @param {number} bytes
- * @returns {string}
- */
-function formatBytes(bytes) {
-  if (bytes === 0) return "0 B";
-  const k = 1024;
-  const sizes = ["B", "KB", "MB", "GB"];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
-}
-
-/**
- * Analyze the composition of one output file from the metafile
+ * Analyze the composition of one output file from the metafile: its bytes
+ * by kind of module, and the modules that take the most of it
  * @param {import("esbuild").Metafile} metafile
  * @param {string} fileName
  */
 function analyzeBundleComposition(metafile, fileName) {
   console.log(`\n📊 ${fileName} Composition:`);
 
-  const outputs = Object.entries(metafile.outputs).find(([path]) =>
-    path.endsWith(`/${fileName}`),
-  )?.[1];
+  const outputs = outputNamed(metafile, fileName);
   if (!outputs || !outputs.inputs) {
     console.log("  No composition data available");
     return;
@@ -340,6 +279,38 @@ function analyzeBundleComposition(metafile, fileName) {
     console.log(
       `    ${category.padEnd(25)} ${formatBytes(bytes).padStart(10)}  (${percentage}%)`,
     );
+  }
+  console.log("  Largest modules:");
+  for (const [input, bytes] of largestInputs(outputs)) {
+    console.log(
+      `    ${formatBytes(bytes).padStart(10)}  ${input.replace(/^kml_heatmap\/frontend\//, "")}`,
+    );
+  }
+}
+
+/**
+ * Print what changed in each bundle since the build of an earlier metafile
+ * (`--compare`): the bundle's bytes, and those of each module that grew,
+ * shrank, came or went, the largest change first
+ * @param {import("esbuild").Metafile} before
+ * @param {import("esbuild").Metafile} after
+ * @param {string[]} names
+ */
+function compareBundles(before, after, names) {
+  /** @param {number} bytes */
+  const signed = (bytes) => (bytes > 0 ? "+" : "") + formatBytes(bytes);
+  console.log("\n🔀 Changes since the metafile compared with:");
+  for (const name of names) {
+    const { total, inputs } = inputDeltas(before, after, name);
+    console.log(`  ${name}: ${signed(total)}`);
+    for (const [input, delta] of inputs.slice(0, 15)) {
+      console.log(
+        `    ${signed(delta).padStart(11)}  ${input.replace(/^kml_heatmap\/frontend\//, "")}`,
+      );
+    }
+    if (inputs.length > 15) {
+      console.log(`    and ${inputs.length - 15} more`);
+    }
   }
 }
 
@@ -438,7 +409,13 @@ function analyzeBundleComposition(metafile, fileName) {
 // framing of a small flight picked from a list): 156.36 KB raw and 53.79
 // KB gzipped before, 158.01 KB raw and 54.34 KB gzipped after, in a local
 // build, 53.96 KB and 54.53 KB gzipped with the zlib of Node.js 26 that CI
-// runs.
+// runs. The exports only the lazy bundles use moved into them (the formats
+// and countries of the statistics and Wrapped, the airplane's height of the
+// replay, the flights of a selection smoothed on their ground, the hiding of
+// the controls under Wrapped), and the print styles, which printed a blank
+// map, left: room for the toast of a base map that cannot be loaded and the
+// lazy bundles fetched by the build they belong to. 158.21 KB raw and 54.43
+// KB gzipped before, 157.02 KB raw and 54 KB gzipped after, in a local build.
 const BUDGET_APP = { raw: 160 * 1024, gzip: 55 * 1024 };
 // The feature bundle is fetched only when replay is opened, the relief, the
 // heat cloud and the ribbons of a selection of the 3D view are first drawn,
@@ -524,8 +501,15 @@ const BUDGET_APP = { raw: 160 * 1024, gzip: 55 * 1024 };
 // flights on the tilted map (fitTilted in calculations/replayAll.ts):
 // 137.14 KB raw and 50.37 KB gzipped before, 138.52 KB raw and 50.98 KB
 // gzipped after, in a local build, 50.62 KB and 51.21 KB gzipped with the
-// zlib of Node.js 26 that CI runs.
-const BUDGET_FEATURES = { raw: 139 * 1024, gzip: 51.25 * 1024 };
+// zlib of Node.js 26 that CI runs. Raised from 139 KB and 51.25 KB for the
+// exports of the first visit that only this bundle used, which came here
+// (utils/replayFormatters.ts, calculations/airplaneLift.ts,
+// calculations/smoothGrounded.ts), less the helpers it carried twice, and
+// the tour paused while the tab is hidden: 138.31 KB raw and 50.95 KB
+// gzipped before, 138.42 KB raw and 51.03 KB gzipped after, in a local
+// build, which under the old budget of 51.25 KB gzipped would have left
+// about 10 B of room with the zlib of CI.
+const BUDGET_FEATURES = { raw: 140.5 * 1024, gzip: 52 * 1024 };
 
 // The Wrapped bundle is fetched only when the Wrapped dialog or the
 // statistics panel is first opened, and not with replay's code or replay
@@ -546,7 +530,13 @@ const BUDGET_FEATURES = { raw: 139 * 1024, gzip: 51.25 * 1024 };
 // flight of the year playing underneath (ui/wrappedIntro.ts): 37.07 KB raw
 // and 12.42 KB gzipped after, in a local build. Since grown to 39.98 KB raw
 // (40,941 B, 19 B under the budget) and 13.6 KB gzipped, in a local build.
-const BUDGET_WRAPPED = { raw: 40 * 1024, gzip: 14 * 1024 };
+// Raised from 40 KB and 14 KB for the exports of the first visit that only
+// this bundle used, which came here (features/countries.ts,
+// utils/statsFormat.ts, ui/wrappedChrome.ts, the distances of panelStats.ts),
+// and the facts written as markup that escapes its values (utils/markup.ts):
+// 39.99 KB raw and 13.6 KB gzipped before, 41.17 KB raw and 14.04 KB
+// gzipped after, in a local build.
+const BUDGET_WRAPPED = { raw: 43 * 1024, gzip: 15 * 1024 };
 
 // The year worker's bundle is fetched by every visit, but next to the first
 // year file rather than ahead of the app, so it holds up nothing on the page.
@@ -558,15 +548,23 @@ const BUDGET_WRAPPED = { raw: 40 * 1024, gzip: 14 * 1024 };
 const BUDGET_WORKER = { raw: 10 * 1024, gzip: 5 * 1024 };
 
 // The vendored files are copied as they are but for a few bytes of fixes
-// (VENDOR_PATCHES in scripts/vendor.js), so a budget cannot make them
-// smaller. It is there so a Dependabot bump that makes
+// (VENDOR_PATCHES in scripts/vendor.js) and the styles of the controls the
+// app never adds (VENDOR_CSS_STRIPS), so a budget cannot make them smaller.
+// It is there so a Dependabot bump that makes
 // MapLibre, which every visit loads before the map can draw, noticeably
 // larger fails the build and gets looked at instead of merged unseen. Raise
 // it in the pull request of the bump, with the new sizes here.
 // maplibre-gl 6.10.0: the three modules and the stylesheet come to
 // 1,200,360 B raw and 312,146 B gzipped, and with the fixes of
 // VENDOR_PATCHES to 1,200,570 B raw and 311,014 B gzipped in a local build.
-const BUDGET_MAPLIBRE = { raw: 1184 * 1024, gzip: 307 * 1024 };
+// Lowered from 1184 KB and 307 KB when the stylesheet lost the styles of the
+// controls the app never adds, 76 % of it their icons as data: URIs (83,195
+// B raw and 10,474 B gzipped before, 10,429 B and 2,042 B after): the four
+// files come to 1,127,847 B raw and 302,600 B gzipped in a local build.
+// maplibre-gl 6.11.0: 1,131,419 B raw and 303,389 B gzipped with the fixes
+// and the strip. Set to leave a minor release about 1 % of room each way, as
+// the old budget did.
+const BUDGET_MAPLIBRE = { raw: 1120 * 1024, gzip: 300 * 1024 };
 // html-to-image 1.11.13, bundled into one module: 13,667 B raw and 5.3 KB
 // gzipped. Loaded on the first export only.
 const BUDGET_HTML_TO_IMAGE = { raw: 14 * 1024, gzip: 5.5 * 1024 };
@@ -576,19 +574,6 @@ const FEATURES_BUNDLE = "features.bundle.js";
 const WRAPPED_BUNDLE = "wrapped.bundle.js";
 const SHARED_BUNDLE = "shared.bundle.js";
 const WORKER_BUNDLE = "yearWorker.bundle.js";
-
-/**
- * Size of a file as written and gzipped at the highest level
- * @param {string} path
- * @returns {{raw: number, gzip: number}}
- */
-function measure(path) {
-  const content = readFileSync(path);
-  return {
-    raw: content.length,
-    gzip: gzipSync(content, { level: 9 }).length,
-  };
-}
 
 /**
  * Print bundle size analysis and check it against the budget
@@ -659,37 +644,6 @@ function analyzeBundleSizes() {
   return !budgetExceeded;
 }
 
-/**
- * Fail the build when it wrote anything but the five bundles.
- *
- * The site publishes them by name (SITE_FILES in kml_heatmap/site_assets.py)
- * and the page preloads the shared chunk by name. A module the lazy entry
- * points share without the app, another entry point or a second dynamic
- * import would make esbuild write further chunks, all called
- * shared.bundle.js; that has to be a decision about naming, not a surprise.
- * @param {(import("esbuild").Metafile | undefined)[]} metafiles
- */
-function assertExpectedOutputs(metafiles) {
-  const written = metafiles
-    .flatMap((metafile) => Object.keys(metafile?.outputs ?? {}))
-    .filter((path) => path.endsWith(".js"))
-    .map((path) => path.slice(path.lastIndexOf("/") + 1))
-    .sort();
-  const expected = [
-    APP_BUNDLE,
-    FEATURES_BUNDLE,
-    WRAPPED_BUNDLE,
-    SHARED_BUNDLE,
-    WORKER_BUNDLE,
-  ].sort();
-  if (written.join() !== expected.join()) {
-    throw new Error(
-      `the build wrote ${written.join(", ")} but the site publishes ` +
-        `${expected.join(", ")}; see chunkNames in build.js`,
-    );
-  }
-}
-
 async function build() {
   try {
     const mode = isDevelopment ? "development" : "production";
@@ -719,16 +673,38 @@ async function build() {
         esbuild.build(buildOptions),
         esbuild.build(workerBuildOptions),
       ]);
-      assertExpectedOutputs([result.metafile, workerResult.metafile]);
+      // The site publishes the five by name (see assertExpectedOutputs)
+      assertExpectedOutputs(
+        [result.metafile, workerResult.metafile],
+        [
+          APP_BUNDLE,
+          FEATURES_BUNDLE,
+          WRAPPED_BUNDLE,
+          SHARED_BUNDLE,
+          WORKER_BUNDLE,
+        ],
+      );
 
       console.log("✅ Build complete!");
 
       // Analyze bundle size and composition
       const withinBudget = analyzeBundleSizes();
 
+      const composed = [SHARED_BUNDLE, FEATURES_BUNDLE, WRAPPED_BUNDLE];
       if (result.metafile) {
-        for (const name of [SHARED_BUNDLE, FEATURES_BUNDLE, WRAPPED_BUNDLE]) {
+        for (const name of composed) {
           analyzeBundleComposition(result.metafile, name);
+        }
+        if (args.compare) {
+          compareBundles(
+            JSON.parse(readFileSync(args.compare, "utf8")),
+            result.metafile,
+            [...composed, APP_BUNDLE],
+          );
+        }
+        if (args.metafile) {
+          writeFileSync(args.metafile, JSON.stringify(result.metafile));
+          console.log(`\n🧾 Wrote the metafile to ${args.metafile}`);
         }
       }
 

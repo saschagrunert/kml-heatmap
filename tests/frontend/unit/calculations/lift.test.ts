@@ -6,10 +6,8 @@ import {
   LIFT_STEP_FT,
   RELIEF_MAX_LEVEL,
   TERRAIN_TILE_MAX_ZOOM,
-  airplaneLiftPx,
   followsLevel,
   groundOffsetFt,
-  heightAtZoomFt,
   heightOnReliefFt,
   isLiftedAt,
   liftExaggeration,
@@ -20,6 +18,11 @@ import {
   ribbonId,
   switchesExaggeration,
 } from "../../../../kml_heatmap/frontend/calculations/lift";
+import {
+  airplaneLiftPx,
+  heightAtZoomFt,
+} from "../../../../kml_heatmap/frontend/calculations/airplaneLift";
+import { smoothGrounded } from "../../../../kml_heatmap/frontend/calculations/smoothGrounded";
 import {
   smoothFlights,
   smoothLine,
@@ -32,7 +35,6 @@ import {
   heldGroundedFlights,
   releaseGroundedFlights,
   releaseGroundProfiles,
-  smoothGrounded,
 } from "../../../../kml_heatmap/frontend/calculations/groundProfile";
 import {
   groundOffsetStepFt,

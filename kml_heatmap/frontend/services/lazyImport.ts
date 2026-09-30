@@ -10,6 +10,8 @@
  * modules with the app through shared.bundle.js, or to a vendored module)
  * and leaves the computed one of a retry alone. Every bundle sits next to
  * this one, so `file` resolves the same from whichever holds this module.
+ * A file named with a query (see `versioned`) is imported by that name on
+ * the first attempt as well.
  * @param first - The first attempt, an import() with a literal specifier
  * @param file - What the build names the file, relative to the bundles
  * @param failedImports - Imports that were rejected before this one
@@ -19,9 +21,32 @@ export function importWithRetry<T>(
   file: string,
   failedImports: number,
 ): Promise<T> {
-  return failedImports === 0
+  const query = file.includes("?");
+  return failedImports === 0 && !query
     ? first()
     : (import(
-        new URL(`${file}?retry=${failedImports}`, import.meta.url).href
+        new URL(
+          failedImports
+            ? `${file}${query ? "&" : "?"}retry=${failedImports}`
+            : file,
+          import.meta.url,
+        ).href
       ) as Promise<T>);
+}
+
+/**
+ * `url` with the build it belongs to (the source hash build.js stamps into
+ * the bundles), for the files the app fetches long after the page. The
+ * query keeps a page of a new build from running a lazy bundle or its
+ * stylesheet of an old one out of the browser's cache, since the cache
+ * holds them under another URL. It does not keep an old page from getting
+ * the new files after a deploy: the host serves the file it has, whatever
+ * the query. Versioning shared.bundle.js as well would give the page a
+ * second copy of the app's modules, each with its own state, so the app
+ * compares the build a lazy bundle exports with its own instead (see
+ * services/featureLoader.ts). As it is when there is no build, in tests
+ * and in the sources.
+ */
+export function versioned(url: string): string {
+  return typeof __BUILD__ === "string" ? `${url}?v=${__BUILD__}` : url;
 }

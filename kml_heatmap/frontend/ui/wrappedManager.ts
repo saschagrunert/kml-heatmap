@@ -4,7 +4,8 @@
 import type { FitBoundsOptions, LngLatBoundsLike } from "maplibre-gl";
 import type { MapApp } from "../mapApp";
 import type { Airport, MapCenter } from "../types";
-import { domCache, hideControls, restoreControls } from "../utils/domCache";
+import { domCache } from "../utils/domCache";
+import { hideControls, restoreControls } from "./wrappedChrome";
 import { toLngLat } from "../utils/mapHelpers";
 import { prefersReducedMotion } from "../utils/motion";
 import {
@@ -12,13 +13,12 @@ import {
   TOAST_STACK_ID,
   TOAST_STATUS_ID,
 } from "../utils/toast";
+import { airportCode, findHomeBase } from "../features/airports";
 import {
-  airportCode,
   countryDisplayName,
   countryFlagSrc,
-  findHomeBase,
   groupByCountry,
-} from "../features/airports";
+} from "../features/countries";
 import {
   calculateYearStats,
   findFurthestAirport,

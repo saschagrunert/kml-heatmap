@@ -16,6 +16,8 @@ so room taken there is not the same as room taken in features.css or
 wrapped.css.
 """
 
+import gzip
+
 import pytest
 
 from kml_heatmap.site_assets import CSS_FILES, STATIC_DIR, _copy_and_minify_css
@@ -61,17 +63,36 @@ STYLESHEET_BUDGET_BYTES = {
     "wrapped.css": 36 * 1024,
 }
 
+# The same sheets gzipped at level 9, as build.js measures the bundles: the
+# raw budget rewards what saves bytes by compressing worse, and a visit
+# downloads the compressed sheet. The policy is build.js's, in the same
+# shape: about 5 % of room over the size when a budget is set, raised on
+# purpose in the change that needs it, with the sizes before and after
+# here. Set at 7,672 B (styles.css), 3,777 B (features.css) and 5,878 B
+# (wrapped.css), with the print styles taken out of the first two.
+STYLESHEET_GZIP_BUDGET_BYTES = {
+    "styles.css": int(7.875 * 1024),
+    "features.css": int(3.875 * 1024),
+    "wrapped.css": int(6.125 * 1024),
+}
+
 
 @pytest.fixture(scope="module")
-def stylesheet_sizes(tmp_path_factory):
+def minified_stylesheets(tmp_path_factory):
     out = tmp_path_factory.mktemp("site")
     _copy_and_minify_css(out, STATIC_DIR)
-    return {name: (out / name).stat().st_size for name in CSS_FILES}
+    return {name: (out / name).read_bytes() for name in CSS_FILES}
+
+
+@pytest.fixture(scope="module")
+def stylesheet_sizes(minified_stylesheets):
+    return {name: len(css) for name, css in minified_stylesheets.items()}
 
 
 def test_every_stylesheet_has_a_budget():
     """A new stylesheet is measured rather than quietly shipping unbounded."""
     assert set(CSS_FILES) == set(STYLESHEET_BUDGET_BYTES)
+    assert set(CSS_FILES) == set(STYLESHEET_GZIP_BUDGET_BYTES)
 
 
 @pytest.mark.parametrize("name", CSS_FILES)
@@ -82,4 +103,14 @@ def test_stylesheet_is_within_budget(name, stylesheet_sizes):
     assert size <= budget, (
         f"{name} minifies to {size:,} bytes, over the {budget:,} byte "
         f"budget in {__file__}"
+    )
+
+
+@pytest.mark.parametrize("name", CSS_FILES)
+def test_stylesheet_is_within_gzip_budget(name, minified_stylesheets):
+    size = len(gzip.compress(minified_stylesheets[name], compresslevel=9))
+    budget = STYLESHEET_GZIP_BUDGET_BYTES[name]
+
+    assert size <= budget, (
+        f"{name} gzips to {size:,} bytes, over the {budget:,} byte budget in {__file__}"
     )

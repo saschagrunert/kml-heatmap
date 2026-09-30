@@ -23,6 +23,7 @@ import {
   watchPopupRemovals,
   zoomControl,
 } from "./map";
+import { DOUBLE_TAP_MS } from "../../kml_heatmap/frontend/utils/mapHelpers";
 
 /**
  * Two airports with flights, as far apart as the data allows, so that the
@@ -46,8 +47,12 @@ async function twoAirports(page: Page): Promise<[string, string]> {
   });
 }
 
-/** Longer than the double tap time of Chrome (300 ms) and Safari */
-const DOUBLE_TAP_MS = 500;
+/**
+ * Past the double tap time of the page (DOUBLE_TAP_MS in
+ * utils/mapHelpers.ts), which is longer than the one of Chrome (300 ms)
+ * and Safari, with a margin for the page's clock against the test's
+ */
+const PAST_DOUBLE_TAP_MS = DOUBLE_TAP_MS + 100;
 
 /**
  * Two taps on an airport's marker that the browser counts as a double tap.
@@ -400,7 +405,7 @@ test.describe("Core", () => {
       marker: Locator,
       hasTouch: boolean,
     ): Promise<void> {
-      await page.waitForTimeout(DOUBLE_TAP_MS);
+      await page.waitForTimeout(PAST_DOUBLE_TAP_MS);
       await (hasTouch ? marker.tap() : marker.click());
     }
 

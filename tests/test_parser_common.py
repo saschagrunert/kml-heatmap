@@ -273,7 +273,11 @@ class TestExtractCharterwareTimestamp:
 
     @settings(max_examples=100, deadline=None)
     @given(
-        st.datetimes(min_value=datetime(2000, 1, 1), max_value=datetime(2099, 12, 31)),
+        # A local date and time of a description, which has no time zone
+        st.datetimes(
+            min_value=datetime(2000, 1, 1),  # noqa: DTZ001
+            max_value=datetime(2099, 12, 31),  # noqa: DTZ001
+        ),
         st.booleans(),
     )
     def test_round_trip(self, dt, long_month):

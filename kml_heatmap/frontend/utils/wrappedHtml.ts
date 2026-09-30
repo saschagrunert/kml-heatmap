@@ -6,13 +6,8 @@
 import type { FilteredStatistics, FunFact, YearStats } from "../types";
 import { METERS_TO_FEET } from "./constants";
 import { formatNumber } from "./formatters";
-import {
-  escapeHtml,
-  markFlightTimeUnits,
-  pluralFlights,
-  splitAirportName,
-  type AirportCount,
-} from "./htmlGenerators";
+import { escapeHtml, pluralFlights, type AirportCount } from "./htmlGenerators";
+import { markFlightTimeUnits, splitAirportName } from "./statsFormat";
 import { icon, type IconName } from "./icons";
 
 /** Section heading for a Wrapped card: line icon plus label */
@@ -128,7 +123,7 @@ export function generateFunFactsHtml(funFacts: FunFact[]): string {
   let html = wrappedSectionTitle("fun-facts-title", "wrapped", "Facts");
   for (const fact of funFacts) {
     const factIcon = fact.icon ?? FACT_ICONS[fact.category] ?? "wrapped";
-    html += `<div class="fun-fact" data-category="${escapeHtml(fact.category)}"><span class="fun-fact-icon">${icon(factIcon, 20)}</span><span class="fun-fact-text">${fact.text}</span></div>`;
+    html += `<div class="fun-fact" data-category="${escapeHtml(fact.category)}"><span class="fun-fact-icon">${icon(factIcon, 20)}</span><span class="fun-fact-text">${fact.text.html}</span></div>`;
   }
   return html;
 }

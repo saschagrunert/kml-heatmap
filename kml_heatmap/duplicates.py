@@ -26,16 +26,14 @@ of one field is the same for every flight from it), and the two have to be
 closer to each other (``_LINED_UP_DISTANCE_KM``).
 """
 
-from __future__ import annotations
-
 from bisect import bisect_right
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from math import ceil, cos, floor, pi, radians, sqrt
+from math import ceil, cos, floor, radians, sqrt
 from typing import TYPE_CHECKING, NamedTuple
 
 from .date_tokens import near_jan_first
-from .geometry import EARTH_RADIUS_KM, haversine_distance
+from .geometry import KM_PER_DEGREE, haversine_distance
 from .logger import logger
 
 if TYPE_CHECKING:
@@ -60,11 +58,10 @@ DUPLICATE_DISTANCE_KM = 0.3
 _MOMENTS = 20
 _MAX_APART = _MOMENTS // 10
 
-_KM_PER_DEGREE = EARTH_RADIUS_KM * pi / 180
 # DUPLICATE_DISTANCE_KM in degrees of latitude, the size of the cells the
 # lines between the fixes of a recording are indexed in, at points along
 # them half a cell apart (see _index_lines)
-_CELL_DEGREES = DUPLICATE_DISTANCE_KM / _KM_PER_DEGREE
+_CELL_DEGREES = DUPLICATE_DISTANCE_KM / KM_PER_DEGREE
 _SAMPLE_DEGREES = _CELL_DEGREES / 2
 # A line that comes this close to a place (225 m) has one of those points
 # in the cell of the place or in one of its eight neighbours, however far
@@ -185,7 +182,7 @@ class _Timed:
 
     def _find_moving(self) -> _Timed | None:
         times, lats, lons = self.times, self.lats, self.lons
-        speed = _MOVING_KM_PER_S / _KM_PER_DEGREE
+        speed = _MOVING_KM_PER_S / KM_PER_DEGREE
         first = last = None
         later = 0
         for index, time in enumerate(times):

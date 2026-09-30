@@ -10,7 +10,7 @@ import {
   generateFunFacts,
   selectDiverseFacts,
 } from "../../../../kml_heatmap/frontend/features/wrapped";
-import * as airports from "../../../../kml_heatmap/frontend/features/airports";
+import * as countries from "../../../../kml_heatmap/frontend/features/countries";
 import { calculateFilteredStatistics } from "../../../../kml_heatmap/frontend/calculations/panelStats";
 import type {
   FunFact,
@@ -19,6 +19,7 @@ import type {
   YearStats,
 } from "../../../../kml_heatmap/frontend/types";
 import { segmentOf } from "../../testHelpers";
+import { markup } from "../../../../kml_heatmap/frontend/utils/markup";
 
 describe("wrapped feature", () => {
   const mockPathInfo: PathInfo[] = [
@@ -410,7 +411,7 @@ describe("wrapped feature", () => {
       );
 
       const landings = facts.filter((f) => f.category === "landings");
-      expect(landings.map((f) => f.text)).toEqual([
+      expect(landings.map((f) => f.text.html)).toEqual([
         "<strong>179 touch-and-goes</strong> in 2025, <strong>16</strong> of them in one flight.",
         "Favourite runway: <strong>RWY 29</strong> at EDAQ, 65% of the touchdowns there.",
       ]);
@@ -428,7 +429,7 @@ describe("wrapped feature", () => {
       });
 
       const landings = facts.filter((f) => f.category === "landings");
-      expect(landings.map((f) => f.text)).toEqual([
+      expect(landings.map((f) => f.text.html)).toEqual([
         "<strong>7 touch-and-goes</strong> in total.",
       ]);
     });
@@ -466,7 +467,7 @@ describe("wrapped feature", () => {
       });
 
       const time = facts.find((f) => f.category === "time");
-      expect(time?.text).toContain("27 hours");
+      expect(time?.text.html).toContain("27 hours");
     });
 
     it("gives a flight time under an hour in minutes", () => {
@@ -475,8 +476,8 @@ describe("wrapped feature", () => {
       });
 
       const time = facts.find((f) => f.category === "time");
-      expect(time?.text).toContain("0h 45m");
-      expect(time?.text).not.toContain("0 hours");
+      expect(time?.text.html).toContain("0h 45m");
+      expect(time?.text.html).not.toContain("0 hours");
     });
 
     it("generates speed facts when provided", () => {
@@ -495,8 +496,8 @@ describe("wrapped feature", () => {
       const fact = generateFunFacts(yearStats, null, "2025", 1240).find(
         (f) => f.category === "explore",
       );
-      expect(fact?.text).toContain("<strong>1,240 km²</strong>");
-      expect(fact?.text).toContain("in 2025");
+      expect(fact?.text.html).toContain("<strong>1,240 km²</strong>");
+      expect(fact?.text.html).toContain("in 2025");
       // Nothing new is no fact
       expect(
         generateFunFacts(yearStats, null, "2025", 0).some(
@@ -515,7 +516,7 @@ describe("wrapped feature", () => {
       const facts = generateFunFacts(yearStats);
 
       facts.forEach((fact) => {
-        expect(fact.text).toBeDefined();
+        expect(fact.text.html).toBeDefined();
         expect(fact.category).toBeDefined();
         expect(fact.priority).toBeDefined();
       });
@@ -546,7 +547,7 @@ describe("wrapped feature", () => {
 
       expect(facts.length).toBeGreaterThan(0);
       facts.forEach((fact) => {
-        expect(fact.text).not.toMatch(/\p{Extended_Pictographic}/u);
+        expect(fact.text.html).not.toMatch(/\p{Extended_Pictographic}/u);
       });
     });
 
@@ -562,7 +563,7 @@ describe("wrapped feature", () => {
         join(cwd(), "kml_heatmap/frontend/features/wrapped.ts"),
         "utf8",
       );
-      const texts = [...source.matchAll(/^\s*text: `(.*)`,$/gm)].map(
+      const texts = [...source.matchAll(/^\s*text: markup`(.*)`,$/gm)].map(
         (match) => match[1]!,
       );
 
@@ -579,7 +580,9 @@ describe("wrapped feature", () => {
         total_distance_nm: 20000,
       });
 
-      expect(facts.some((f) => f.text.includes("around the Earth"))).toBe(true);
+      expect(facts.some((f) => f.text.html.includes("around the Earth"))).toBe(
+        true,
+      );
     });
 
     it("generates Everest fact for high altitude gain", () => {
@@ -587,15 +590,17 @@ describe("wrapped feature", () => {
         total_altitude_gain_ft: 60000,
       });
 
-      expect(facts.some((f) => f.text.includes("Everest"))).toBe(true);
+      expect(facts.some((f) => f.text.html.includes("Everest"))).toBe(true);
     });
 
     it("compares the longest journey with the closest reference distance", () => {
       const facts = generateFunFacts(yearStats, { longest_flight_nm: 280 });
 
-      const longest = facts.find((f) => f.text.includes("longest journey"));
-      expect(longest?.text).toContain("<strong>280.0 nm</strong>");
-      expect(longest?.text).toContain(
+      const longest = facts.find((f) =>
+        f.text.html.includes("longest journey"),
+      );
+      expect(longest?.text.html).toContain("<strong>280.0 nm</strong>");
+      expect(longest?.text.html).toContain(
         "about the distance from Berlin to Munich.",
       );
     });
@@ -603,8 +608,10 @@ describe("wrapped feature", () => {
     it("omits the comparison when no reference distance is close", () => {
       const facts = generateFunFacts(yearStats, { longest_flight_nm: 30 });
 
-      const longest = facts.find((f) => f.text.includes("longest journey"));
-      expect(longest?.text).toBe(
+      const longest = facts.find((f) =>
+        f.text.html.includes("longest journey"),
+      );
+      expect(longest?.text.html).toBe(
         "Your longest journey: <strong>30.0 nm</strong>.",
       );
     });
@@ -619,7 +626,7 @@ describe("wrapped feature", () => {
       const facts = generateFunFacts(singleAircraftStats);
 
       const loyal = facts.find((f) => f.category === "aircraft");
-      expect(loyal?.text).toBe(
+      expect(loyal?.text.html).toBe(
         "Loyal to <strong>D-EAGJ</strong>, all 10 flights in this DA40!",
       );
     });
@@ -636,10 +643,10 @@ describe("wrapped feature", () => {
       const facts = generateFunFacts(stats);
 
       const fact = facts.find((f) => f.category === "aircraft");
-      expect(fact?.text).toBe(
+      expect(fact?.text.html).toBe(
         "<strong>D-EAGJ</strong> took you on 2 flights in this DA40.",
       );
-      expect(fact?.text).not.toContain("Loyal");
+      expect(fact?.text.html).not.toContain("Loyal");
     });
 
     it("escapes the registration and model of the single aircraft", () => {
@@ -653,13 +660,13 @@ describe("wrapped feature", () => {
 
       const facts = generateFunFacts(stats);
 
-      expect(facts.find((f) => f.category === "aircraft")?.text).toBe(
+      expect(facts.find((f) => f.category === "aircraft")?.text.html).toBe(
         "Loyal to <strong>D-&lt;b&gt;</strong>, all 1 flight in this C172 &amp; co!",
       );
     });
 
     it("generates country fact for 3+ countries", () => {
-      vi.spyOn(airports, "countCountries").mockReturnValue(
+      vi.spyOn(countries, "countCountries").mockReturnValue(
         new Set(["DE", "CH", "CZ"]),
       );
       const stats = { ...yearStats, airport_names: ["A", "B", "C"] };
@@ -667,12 +674,11 @@ describe("wrapped feature", () => {
       const facts = generateFunFacts(stats);
 
       expect(facts.some((f) => f.category === "countries")).toBe(true);
-      expect(facts.some((f) => f.text.includes("3 countries"))).toBe(true);
-      vi.restoreAllMocks();
+      expect(facts.some((f) => f.text.html.includes("3 countries"))).toBe(true);
     });
 
     it("generates country fact for 2 countries", () => {
-      vi.spyOn(airports, "countCountries").mockReturnValue(
+      vi.spyOn(countries, "countCountries").mockReturnValue(
         new Set(["DE", "CH"]),
       );
       const stats = { ...yearStats, airport_names: ["A", "B"] };
@@ -680,18 +686,16 @@ describe("wrapped feature", () => {
       const facts = generateFunFacts(stats);
 
       expect(facts.some((f) => f.category === "countries")).toBe(true);
-      expect(facts.some((f) => f.text.includes("2 countries"))).toBe(true);
-      vi.restoreAllMocks();
+      expect(facts.some((f) => f.text.html.includes("2 countries"))).toBe(true);
     });
 
     it("does not generate country fact for 1 country", () => {
-      vi.spyOn(airports, "countCountries").mockReturnValue(new Set(["DE"]));
+      vi.spyOn(countries, "countCountries").mockReturnValue(new Set(["DE"]));
       const stats = { ...yearStats, airport_names: ["A"] };
 
       const facts = generateFunFacts(stats);
 
       expect(facts.some((f) => f.category === "countries")).toBe(false);
-      vi.restoreAllMocks();
     });
 
     it("names the selected year rather than this year", () => {
@@ -702,7 +706,7 @@ describe("wrapped feature", () => {
       };
 
       const texts = generateFunFacts(twoAircraft, null, "2023").map(
-        (f) => f.text,
+        (f) => f.text.html,
       );
 
       expect(texts).toContain(
@@ -722,7 +726,7 @@ describe("wrapped feature", () => {
       };
 
       const texts = generateFunFacts(twoAircraft, null, "all").map(
-        (f) => f.text,
+        (f) => f.text.html,
       );
 
       expect(texts).toContain(
@@ -746,9 +750,9 @@ describe("wrapped feature", () => {
 
       const facts = generateFunFacts(manyAircraftStats);
 
-      expect(facts.some((f) => f.text.includes("different aircraft"))).toBe(
-        true,
-      );
+      expect(
+        facts.some((f) => f.text.html.includes("different aircraft")),
+      ).toBe(true);
     });
 
     it("returns 4-6 facts with comprehensive data", () => {
@@ -807,13 +811,13 @@ describe("wrapped feature", () => {
 
   describe("selectDiverseFacts", () => {
     const allFacts: FunFact[] = [
-      { category: "distance", priority: 10, text: "Fact 1" },
-      { category: "distance", priority: 9, text: "Fact 2" },
-      { category: "distance", priority: 8, text: "Fact 3" },
-      { category: "altitude", priority: 9, text: "Fact 4" },
-      { category: "altitude", priority: 7, text: "Fact 5" },
-      { category: "time", priority: 8, text: "Fact 6" },
-      { category: "speed", priority: 7, text: "Fact 7" },
+      { category: "distance", priority: 10, text: markup`Fact 1` },
+      { category: "distance", priority: 9, text: markup`Fact 2` },
+      { category: "distance", priority: 8, text: markup`Fact 3` },
+      { category: "altitude", priority: 9, text: markup`Fact 4` },
+      { category: "altitude", priority: 7, text: markup`Fact 5` },
+      { category: "time", priority: 8, text: markup`Fact 6` },
+      { category: "speed", priority: 7, text: markup`Fact 7` },
     ];
 
     it("selects up to 6 facts", () => {
@@ -835,7 +839,7 @@ describe("wrapped feature", () => {
     it("limits facts per category to 3", () => {
       const manyDistance: FunFact[] = [
         ...allFacts,
-        { category: "distance", priority: 6, text: "Fact 8" },
+        { category: "distance", priority: 6, text: markup`Fact 8` },
       ];
 
       const selected = selectDiverseFacts(manyDistance);
@@ -859,8 +863,8 @@ describe("wrapped feature", () => {
 
     it("handles fewer than 4 facts", () => {
       const fewFacts: FunFact[] = [
-        { category: "distance", priority: 10, text: "Fact 1" },
-        { category: "altitude", priority: 9, text: "Fact 2" },
+        { category: "distance", priority: 10, text: markup`Fact 1` },
+        { category: "altitude", priority: 9, text: markup`Fact 2` },
       ];
 
       expect(selectDiverseFacts(fewFacts)).toHaveLength(2);

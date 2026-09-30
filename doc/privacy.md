@@ -18,9 +18,21 @@ it was built from, and the statistics panel shows both. A site built right after
 a flight therefore hints at the day of that flight, but not at its time. Set
 `SOURCE_DATE_EPOCH` to stamp a different day. The commit is `KML_HEATMAP_COMMIT`
 (with its remote in `KML_HEATMAP_REPOSITORY`, which `make build` sets from your
-checkout), else `GITHUB_SHA` on GitHub Actions, else `HEAD` of the checkout the
-tool runs from. The hash links to the commit on GitHub only when the repository
-is known.
+checkout), else `GITHUB_SHA` on GitHub Actions (in the repository
+`GITHUB_REPOSITORY` names, on the server `GITHUB_SERVER_URL` names, which is
+`https://github.com` unless the workflow runs on GitHub Enterprise, so the link
+is right on a fork as well), else `HEAD` of the checkout the tool runs from. The
+hash links to the commit only when the repository is known.
+
+That is the site. A repository the KML files are committed to keeps its own
+dates: a public one dates every committed flight to the day of its commit, in
+the commit itself, in the Actions run it started and in the Pages deployment
+that followed, however well the files are obfuscated. Whoever publishes their
+flights in a public repository should therefore commit them in batches, some
+time after the last of them, or with coarse commit dates (`GIT_AUTHOR_DATE` and
+`GIT_COMMITTER_DATE` set to the first of the month, say), so that no commit
+dates a flight. The pre-push hook (`make hooks`) warns when a push adds a single
+flight.
 
 ## Your input files
 
@@ -90,7 +102,9 @@ time of day either (`1513h`, `1513H`, `15h13`, `0930Z`, `0930z`, `0930UTC`,
 `15:13`, `3pm`, `1430 GMT`, `1430 Zulu`, `14:30 EST`, `1430 local`,
 `0930 hours`, `14.30Z`, `0930Z-1045Z`, `14:30 +02:00`, `1430+0200`), except for
 the sequence number in the time slot of an obfuscated Charterware name, and
-neither do its names and descriptions, nor a Unix time in a data value. A
+neither do its names and descriptions, nor a Unix time of a past day in the text
+of an element (see
+[Troubleshooting](usage.md#make-check-obfuscation-or-the-commit-hook-fails)). A
 comment or processing instruction inside a text hides nothing from the check
 (`16<!-- -->.08.2026`). Timestamps within one Placemark, or no more than 12
 hours apart, count as one flight and are never split; a recording that runs

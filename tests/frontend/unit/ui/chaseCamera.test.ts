@@ -270,7 +270,6 @@ describe("ChaseCamera", () => {
 
   afterEach(() => {
     document.getElementById("replay-controls")?.remove();
-    vi.unstubAllGlobals();
   });
 
   it("keeps the airplane above the replay panel after the map resizes", () => {

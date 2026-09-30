@@ -26,7 +26,7 @@ import {
   type Coordinate,
 } from "../utils/geometry";
 import { formatDuration } from "../utils/duration";
-import { heatWeight, type SegmentWeight } from "./heatLines";
+import { cellKey, heatWeight, type SegmentWeight } from "./heatLines";
 
 /** Edge of a cell of the grid the heat is added up in, in metres */
 const HOTSPOT_CELL_M = 1000;
@@ -90,14 +90,6 @@ const SEED_CELLS = 2;
 
 /** Degrees of latitude a row of cells spans */
 const ROW_DEGREES = HOTSPOT_CELL_M / METRES_PER_DEGREE;
-
-/** Rows are numbered into one key with their column */
-const ROW_STRIDE = 2 ** 22;
-
-/** The key of the cell of a row and a column */
-function cellKey(row: number, column: number): number {
-  return row * ROW_STRIDE + column + ROW_STRIDE / 2;
-}
 
 /** The row and the column of the cell a `[lat, lng]` point lies in */
 function cellOf([lat, lng]: Readonly<Coordinate>): [number, number] {

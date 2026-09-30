@@ -149,6 +149,33 @@ class TestCheck:
         assert run_check(repo, lines) == 0
 
 
+class TestSingleFlightWarning:
+    def test_warns_when_one_flight_is_added(self, repo, capsys):
+        sha = commit(repo, {"data/2.kml": CLEAN_KML})
+        assert run_check(repo, push_of(sha)) == 0
+        err = capsys.readouterr().err
+        assert err.count("\n") == 1
+        assert "adds one flight (data/2.kml)" in err
+
+    def test_no_warning_for_several_flights(self, repo, capsys):
+        commit(repo, {"data/2.kml": CLEAN_KML})
+        sha = commit(repo, {"data/3.kml": CLEAN_KML})
+        assert run_check(repo, push_of(sha)) == 0
+        assert capsys.readouterr().err == ""
+
+    def test_no_warning_for_a_changed_flight_or_one_elsewhere(self, repo, capsys):
+        commit(repo, {"data/1.kml": CLEAN_KML.replace("00:01", "00:02")})
+        sha = commit(repo, {"tests/fixtures/x.kml": CLEAN_KML})
+        assert run_check(repo, push_of(sha)) == 0
+        assert capsys.readouterr().err == ""
+
+    def test_a_kmz_is_checked_and_refused(self, repo, capsys):
+        """The check cannot read into the archive, so it cannot pass it."""
+        sha = commit(repo, {"data/2.kmz": "PK"})
+        assert run_check(repo, push_of(sha)) == 1
+        assert "KMZ archive" in capsys.readouterr().err
+
+
 class TestMain:
     def test_fails_closed_when_it_cannot_check(self, monkeypatch, capsys):
         def broken(*_args):
@@ -178,6 +205,7 @@ class TestInstalledHook:
             cwd=repo,
             capture_output=True,
             text=True,
+            check=False,
         )
         assert refused.returncode != 0
         assert "Push refused" in refused.stderr

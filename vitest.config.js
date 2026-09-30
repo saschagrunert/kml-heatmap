@@ -10,6 +10,12 @@ export default defineConfig({
     // setup, which otherwise dominated the run. It needs window.location to
     // stay configurable, so tests move the location through history.
     pool: "vmThreads",
+    // Every spy, stubbed global and stubbed variable is put back before the
+    // next test, so no file has to remember an afterEach for it and a spy
+    // cannot leak into the tests after the one that made it
+    restoreMocks: true,
+    unstubGlobals: true,
+    unstubEnvs: true,
     include: [
       "tests/frontend/unit/**/*.test.ts",
       "tests/frontend/contract/**/*.test.ts",

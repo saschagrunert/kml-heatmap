@@ -44,7 +44,6 @@ vi.mock("../../../../kml_heatmap/frontend/utils/logger", () => ({
 
 describe("fetchJson", () => {
   afterEach(() => {
-    vi.unstubAllGlobals();
     vi.useRealTimers();
   });
 
@@ -145,7 +144,6 @@ describe("fetchJson with a progress callback", () => {
   });
 
   afterEach(() => {
-    vi.unstubAllGlobals();
     vi.useRealTimers();
   });
 
@@ -1538,10 +1536,6 @@ describe("DataLoader", () => {
   });
 
   describe("default options", () => {
-    afterEach(() => {
-      vi.unstubAllGlobals();
-    });
-
     it("fetches from the data directory next to the page by default", async () => {
       const fetchMock = vi
         .fn<typeof fetch>()
