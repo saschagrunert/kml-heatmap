@@ -33,7 +33,7 @@
   "dependencies": {
     "html-to-image": "1.11.13",
     "lucide": "1.47.0",
-    "maplibre-gl": "6.10.0"
+    "maplibre-gl": "6.11.0"
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.13.0",
