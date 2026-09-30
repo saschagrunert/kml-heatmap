@@ -5,7 +5,7 @@
 # line itself. Do not restate the tag in a comment: it drifts silently.
 
 # Stage 1: build the JavaScript bundles
-FROM docker.io/library/node:26-slim@sha256:3a771f83944bb763050c23c0225c260638c4b7899e7a72485ef75e5e570499e5 AS js-builder
+FROM docker.io/library/node:26-slim@sha256:ec7758ee051e457b468b32bde57b0879010b325bb9862718e9615225ce4aaae1 AS js-builder
 
 WORKDIR /build
 
