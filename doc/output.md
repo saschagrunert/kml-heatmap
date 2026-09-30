@@ -40,9 +40,9 @@ output-dir/
 │   ├── maplibre-gl.css
 │   └── html-to-image.mjs        # Imported on the first image export
 ├── flags/                 # One SVG per country the flights touched
-├── preview.png            # Link preview of the site (with --site-url)
-├── y/                     # Link preview of each year: 2025.html, 2025.png
-├── f/                     # Link preview of each flight, by its id
+├── preview.png            # Link preview image of the site, only with --site-url
+├── y/                     # Link preview page of each year (2025.html), and with --site-url its image (2025.png)
+├── f/                     # The same for each flight, by its id
 └── data/
     ├── airports.json      # Airport markers
     ├── metadata.json      # Years, file sizes, speed range, models, flags
@@ -130,12 +130,12 @@ The images are 1200 by 630 pixels: the tracks as a glow, brighter where more
 time was spent, in the colours of the 3D view's heat cloud, exposed so that the
 busiest half percent of the lit pixels are white. They are drawn in Python
 alone, without a browser, and only with `--site-url`, since an `og:image` has to
-be an absolute URL. A flight's image depends on nothing but its track, and the
-images are kept in `previews/` of the cache directory (see
-[Airport database](#airport-database)) under a hash of what they draw, so a run
-draws only what changed; entries unused for 30 days are removed. The images show
-no text, no dates and no build stamp, only exported flights are drawn, and the
-page and image of a flight that left the input are removed with it.
+be an absolute URL (see [Hosting](hosting.md#link-previews-need---site-url)). A
+flight's image depends on nothing but its track, and the images are kept in the
+[cache directory](#cache-directory) under a hash of what they draw, so a run
+draws only what changed. The images show no text, no dates and no build stamp,
+only exported flights are drawn, and the page and image of a flight that left
+the input are removed with it.
 
 ## Data export
 
@@ -177,13 +177,7 @@ other aviation apps.
 
 Airport names and coordinates come from the
 [OurAirports](https://ourairports.com/) CSV, which is downloaded on the first
-run and cached for 30 days in `~/.cache/kml-heatmap` (override with
-`KML_HEATMAP_CACHE_DIR`; the container image uses `/cache`). Mount the cache
-directory as the `Makefile` does (`-v ~/.cache/kml-heatmap:/cache`) to avoid
-downloading it, and the elevation tiles, on every container run. The same
-directory holds a per-file parse cache (`kml/`) keyed by file name and content,
-the parser code and the airport database, so unchanged KML files are not parsed
-again; entries unused for 30 days are removed.
+run and kept in the [cache directory](#cache-directory) for 30 days.
 
 The runways of the same database (`runways.csv`, cached the same way) name the
 runway of every touchdown. The build reads the landings from the logs at their
@@ -216,16 +210,16 @@ measured against and the ground it is drawn on are the same model. Zoomed out
 the map draws it from the tiles of a coarser level, and the page smooths the
 sampled ground along each flight as much before it stands the flight on it.
 
-The tiles are downloaded on the first run, eight at a time, and kept in
-`terrain/` of the cache directory (see [Airport database](#airport-database)),
-about 100 KB each: the flights of `data/` touch 389 of them, 44 MB, and the
-decoded pixels of each are kept next to it, about as much again. A tile never
-changes, so it is never fetched again. A download that fails is tried again a
-few times. Offline, or when a tile cannot be fetched, the build goes on without
-it: a flight with a position under a missing tile gets no ground and stands on
-the line between its airfields, and one warning says how many flights that
-affects. Set `KML_HEATMAP_REQUIRE_TERRAIN=1` to fail instead, as CI does for the
-published site. `--no-terrain` skips the tiles altogether.
+The tiles are downloaded on the first run, eight at a time, and kept in the
+[cache directory](#cache-directory); how many the flights in this repository
+take is in
+[Elevation tiles at build time](development/data.md#elevation-tiles-at-build-time).
+A tile never changes, so it is never fetched again. A download that fails is
+tried again a few times. Offline, or when a tile cannot be fetched, the build
+goes on without it: a flight with a position under a missing tile gets no ground
+and stands on the line between its airfields, and one warning says how many
+flights that affects. Set `KML_HEATMAP_REQUIRE_TERRAIN=1` to fail instead, as CI
+does for the published site. `--no-terrain` skips the tiles altogether.
 
 ### Attribution
 
@@ -254,6 +248,26 @@ from several sources, which ask for this
   right 2015. All rights reserved;
 - United States 3DEP (formerly NED) and global GMTED2010 and SRTM terrain data
   courtesy of the U.S. Geological Survey.
+
+## Cache directory
+
+What a run downloads or computes and can use again is kept in one cache
+directory: `~/.cache/kml-heatmap` by default, or `KML_HEATMAP_CACHE_DIR` when it
+is set. The container image sets it to `/cache`, which `make build` mounts from
+`CACHE_DIR` (see [Makefile variables](usage.md#makefile-variables-and-targets)),
+and `--cache-dir` names one for a run (see
+[Command-line options](usage.md#command-line-options)). Without a home directory
+(no `HOME` and no entry in the password database, as in a container run under a
+foreign user id) it is `kml-heatmap-cache` in the temp directory instead.
+Anything in it can be deleted at any time; the next run fetches or computes it
+again.
+
+| Entry                         | What it holds                                                                                                                                                                                                                                                                  | How long                                                                                                                                                                                                                                                 | Delete it to                                                                                                               |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `terrain/`                    | The elevation tiles under the flights, `10-<x>-<y>.png` of about 100 KB each, and next to each its decoded pixels (`.pixels`, about as much again); by far the largest part, tens of megabytes for a few years of flights                                                      | For good: a tile never changes, so it is never fetched again                                                                                                                                                                                             | Free the space; the next run downloads the tiles under its flights again                                                   |
+| `airports.csv`, `runways.csv` | The OurAirports airports (about 13 MB) and runways (about 4 MB)                                                                                                                                                                                                                | Downloaded again once 30 days old. `airports.lock` and `runways.lock` order the download among the processes of a run, and `airports.download-failed` or `runways.download-failed` marks a download that failed, which is not tried again within an hour | Download the database anew (or pass `--refresh-airports`); delete a `.download-failed` marker to try again within the hour |
+| `kml/`                        | The parse result of every input file, one zstd-compressed JSON each (`.json.zst`), named by the file's content and name, the cache format, the parser code and the airport database, so a change to any of them misses the cache; about a seventh of the size of the KML files | Entries unused for 30 days are removed at the start of a run, and entries of another parser, format or database at once                                                                                                                                  | Parse every file again                                                                                                     |
+| `previews/`                   | The link preview images, one PNG under a hash of the tracks it draws and of the code that drew it                                                                                                                                                                              | Images unused for 30 days are removed                                                                                                                                                                                                                    | Draw every image again                                                                                                     |
 
 ## Satellite imagery
 

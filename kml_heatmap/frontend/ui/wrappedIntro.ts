@@ -51,6 +51,7 @@ import { logError } from "../utils/logger";
 import { segmentBounds, type Coordinate } from "../utils/geometry";
 import { REPLAY_CAMERA_MOVE, toBounds, toLngLat } from "../utils/mapHelpers";
 import { prefersReducedMotion } from "../utils/motion";
+import { whenIdle } from "../utils/whenIdle";
 
 /** Padding in pixels around the data when the dialog fits the map to it */
 export const FIT_PADDING = 80;
@@ -177,25 +178,6 @@ export function overviewBounds(app: MapApp): LngLatBoundsLike {
   }
   const view = datasetIndex(currentData).filter(selectedYear, selectedAircraft);
   return toBounds(segmentBounds(view.segments()) ?? app.config.bounds);
-}
-
-/**
- * Longest a cut ahead of time waits for the page to have a moment
- * (whenIdle)
- */
-const PREPARE_IDLE_MS = 500;
-
-/**
- * Run `work` in a task of its own once the page has a moment, as far as
- * the browser tells (requestIdleCallback, which Safari lacks), and not in
- * the task of the event that asked for it
- */
-function whenIdle(work: () => void): void {
-  if (typeof requestIdleCallback === "function") {
-    requestIdleCallback(work, { timeout: PREPARE_IDLE_MS });
-  } else {
-    setTimeout(work, 0);
-  }
 }
 
 /**

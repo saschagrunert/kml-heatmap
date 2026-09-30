@@ -20,7 +20,6 @@ describe("showToast", () => {
 
   afterEach(() => {
     vi.useRealTimers();
-    vi.restoreAllMocks();
     for (const id of [TOAST_STACK_ID, TOAST_STATUS_ID, TOAST_ALERT_ID]) {
       document.getElementById(id)?.remove();
     }

@@ -8,13 +8,17 @@
  * without its stylesheet is worse than the toast a failed load produces.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import {
   FEATURES_CSS_URL,
+  SITE_UPDATED_MESSAGE,
   WRAPPED_CSS_URL,
   loadFeatures,
   loadWrapped,
   resetFeatureLoader,
   resetWrappedLoader,
+  wasSiteUpdated,
 } from "../../../../kml_heatmap/frontend/services/featureLoader";
 import type { FeatureModule } from "../../../../kml_heatmap/frontend/features";
 import type { WrappedModule } from "../../../../kml_heatmap/frontend/wrapped";
@@ -265,4 +269,98 @@ describe("loadWrapped", () => {
     await loadFeatures();
     expect(importFeatures.mock.calls).toEqual([[0]]);
   });
+});
+
+describe("a bundle of another build", () => {
+  /** What a lazy bundle exports: the build it belongs to */
+  const of = <T extends object>(module: T, build: string): T => ({
+    ...module,
+    BUILD: build,
+  });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    resetFeatureLoader(importFeatures);
+    resetWrappedLoader(importWrapped);
+    loadStylesheet.mockResolvedValue(undefined);
+    document.body.innerHTML = "";
+    vi.stubGlobal("__BUILD__", "0123456789ab");
+    // A toast that is replaced leaves after its transition
+    vi.useFakeTimers({ toFake: ["setTimeout"] });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  /** The toasts on screen that say the site was updated */
+  const notices = (): HTMLElement[] =>
+    [...document.querySelectorAll<HTMLElement>(".toast-notification")].filter(
+      (toast) => toast.dataset["message"] === SITE_UPDATED_MESSAGE,
+    );
+
+  it("uses a bundle of the page's build", async () => {
+    const module = of(features, "0123456789ab");
+    importFeatures.mockResolvedValue(module);
+
+    await expect(loadFeatures()).resolves.toBe(module);
+
+    expect(wasSiteUpdated()).toBe(false);
+    expect(notices()).toHaveLength(0);
+  });
+
+  it("does not use a bundle a deploy replaced, and offers the reload once", async () => {
+    // A page opened before the deploy, whose shared.bundle.js is older
+    importFeatures.mockResolvedValue(of(features, "fedcba987654"));
+    importWrapped.mockResolvedValue(of(wrapped, "fedcba987654"));
+
+    const [first, second] = await Promise.all([loadFeatures(), loadFeatures()]);
+    expect(first).toBeNull();
+    expect(second).toBeNull();
+    // Every later use finds it so without asking the server again
+    await expect(loadFeatures()).resolves.toBeNull();
+    await expect(loadWrapped()).resolves.toBeNull();
+    expect(importFeatures).toHaveBeenCalledTimes(1);
+
+    // Callers see it unavailable, without the failure's toast
+    vi.advanceTimersByTime(1000);
+    expect(wasSiteUpdated()).toBe(true);
+    expect(logError).not.toHaveBeenCalled();
+    const [notice, ...more] = notices();
+    expect(more).toHaveLength(0);
+    expect(notice!.classList.contains("toast-info")).toBe(true);
+    expect(notice!.textContent).toContain(SITE_UPDATED_MESSAGE);
+    const reload = [...notice!.querySelectorAll("button")].find(
+      (button) => button.textContent === "Reload",
+    );
+    // jsdom cannot reload, nor can its reload be watched
+    expect(reload).toBeDefined();
+  });
+
+  it("keeps a failed import an ordinary failure", async () => {
+    // Exports the new bundle asks of the old shared.bundle.js and that it
+    // lacks fail the import itself
+    importFeatures.mockRejectedValue(
+      new SyntaxError("does not provide an export named 'x'"),
+    );
+
+    await expect(loadFeatures()).resolves.toBeNull();
+
+    expect(wasSiteUpdated()).toBe(false);
+    expect(logError).toHaveBeenCalled();
+    expect(notices()).toHaveLength(0);
+  });
+
+  it.each(["features.ts", "wrapped.ts"])(
+    "is told by the build %s exports",
+    (entry) => {
+      const source = readFileSync(
+        resolve(__dirname, "../../../../kml_heatmap/frontend", entry),
+        "utf8",
+      );
+      expect(source).toMatch(
+        /^export const BUILD = typeof __BUILD__ === "string" \? __BUILD__ : undefined;$/m,
+      );
+    },
+  );
 });

@@ -7,6 +7,7 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from kml_heatmap.aircraft import (
+    AircraftInfo,
     load_aircraft_data,
     merge_aircraft_data,
     normalize_registration,
@@ -87,44 +88,47 @@ class TestNormalizeRegistrationProperties:
         assert result.count("-") <= 1
 
 
+def _parsed(name: str) -> AircraftInfo:
+    """What a file name says about the aircraft, where it says anything."""
+    result = parse_aircraft_from_filename(name)
+    assert result is not None
+    return result
+
+
 class TestParseAircraftFromFilenameNumbered:
     def test_numbered_format(self):
-        result = parse_aircraft_from_filename("1_DEHYL_DA40.kml")
-        assert result == {
-            "registration": "D-EHYL",
-            "type": "DA40",
-            "format": "numbered",
-        }
+        result = _parsed("1_DEHYL_DA40.kml")
+        assert result == AircraftInfo("D-EHYL", "DA40", None, "numbered")
 
     def test_uppercase_extension(self):
-        result = parse_aircraft_from_filename("23_DEHYL_DA40.KML")
-        assert result["type"] == "DA40"
-        assert result["registration"] == "D-EHYL"
+        result = _parsed("23_DEHYL_DA40.KML")
+        assert result.type == "DA40"
+        assert result.registration == "D-EHYL"
 
     def test_large_number(self):
-        result = parse_aircraft_from_filename("87_DESST_C172.kml")
-        assert result["registration"] == "D-ESST"
-        assert result["type"] == "C172"
+        result = _parsed("87_DESST_C172.kml")
+        assert result.registration == "D-ESST"
+        assert result.type == "C172"
 
     def test_without_extension(self):
-        result = parse_aircraft_from_filename("42_DELGD_C182")
-        assert result["registration"] == "D-ELGD"
-        assert result["type"] == "C182"
+        result = _parsed("42_DELGD_C182")
+        assert result.registration == "D-ELGD"
+        assert result.type == "C182"
 
     def test_non_german_registration(self):
-        result = parse_aircraft_from_filename("5_OE-AKI_PA28.kml")
-        assert result["registration"] == "OE-AKI"
-        assert result["type"] == "PA28"
+        result = _parsed("5_OE-AKI_PA28.kml")
+        assert result.registration == "OE-AKI"
+        assert result.type == "PA28"
 
     def test_austrian_registration_without_hyphen(self):
-        result = parse_aircraft_from_filename("5_OEAKI_PA28.kml")
-        assert result["registration"] == "OE-AKI"
+        result = _parsed("5_OEAKI_PA28.kml")
+        assert result.registration == "OE-AKI"
 
     def test_extra_underscore_still_parses_first_three_parts(self):
-        result = parse_aircraft_from_filename("7_DEAGJ_DA20_copy.kml")
-        assert result["registration"] == "D-EAGJ"
-        assert result["type"] == "DA20"
-        assert result["format"] == "numbered"
+        result = _parsed("7_DEAGJ_DA20_copy.kml")
+        assert result.registration == "D-EAGJ"
+        assert result.type == "DA20"
+        assert result.format == "numbered"
 
 
 class TestNotARegistration:
@@ -140,7 +144,7 @@ class TestNotARegistration:
         ],
     )
     def test_no_aircraft(self, name):
-        assert parse_aircraft_from_filename(name) == {}
+        assert parse_aircraft_from_filename(name) is None
 
     @pytest.mark.parametrize(
         ("name", "registration"),
@@ -155,7 +159,7 @@ class TestNotARegistration:
         ],
     )
     def test_registrations(self, name, registration):
-        assert parse_aircraft_from_filename(name)["registration"] == registration
+        assert _parsed(name).registration == registration
 
     @pytest.mark.parametrize(
         ("name", "aircraft_type"),
@@ -168,65 +172,97 @@ class TestNotARegistration:
     )
     def test_a_date_is_no_registration(self, name, aircraft_type, caplog):
         """The registration is published with every path, a date must not be."""
-        result = parse_aircraft_from_filename(name)
-        assert result["registration"] is None
+        result = _parsed(name)
+        assert result.registration is None
         # The type and the route are still what the name says
-        assert result["type"] == aircraft_type
+        assert result.type == aircraft_type
         assert "it holds a date" in caplog.text
 
 
 class TestParseAircraftFromFilenameCharterware:
     def test_charterware_format(self):
-        result = parse_aircraft_from_filename("2026-01-12_1513h_OE-AKI_LOAV-LOAV.kml")
-        assert result == {
-            "registration": "OE-AKI",
-            "type": None,
-            "route": "LOAV-LOAV",
-            "format": "charterware",
-        }
+        result = _parsed("2026-01-12_1513h_OE-AKI_LOAV-LOAV.kml")
+        assert result == AircraftInfo("OE-AKI", None, "LOAV-LOAV", "charterware")
 
     def test_different_route(self):
-        result = parse_aircraft_from_filename("2026-01-15_1000h_D-EXYZ_EDDF-EDDM.kml")
-        assert result["registration"] == "D-EXYZ"
-        assert result["route"] == "EDDF-EDDM"
+        result = _parsed("2026-01-15_1000h_D-EXYZ_EDDF-EDDM.kml")
+        assert result.registration == "D-EXYZ"
+        assert result.route == "EDDF-EDDM"
 
     def test_without_extension(self):
-        result = parse_aircraft_from_filename("2026-01-12_1513h_OE-AKI_LOAV-LOAV")
-        assert result["registration"] == "OE-AKI"
+        result = _parsed("2026-01-12_1513h_OE-AKI_LOAV-LOAV")
+        assert result.registration == "OE-AKI"
 
     def test_invalid_calendar_date_rejected(self):
-        assert parse_aircraft_from_filename("2026-02-30_1513h_OE-AKI_LOAV.kml") == {}
+        assert parse_aircraft_from_filename("2026-02-30_1513h_OE-AKI_LOAV.kml") is None
 
     def test_malformed_date_rejected(self):
-        assert parse_aircraft_from_filename("2026-1-2_1513h_OE-AKI_LOAV.kml") == {}
+        assert parse_aircraft_from_filename("2026-1-2_1513h_OE-AKI_LOAV.kml") is None
 
     @pytest.mark.parametrize("registration", ["constructor", "x", "12345", "D-EHYLXYZ"])
     def test_no_registration_keeps_the_route(self, registration):
         """The same rules as for a numbered name decide what a registration is."""
         name = f"2026-01-12_1513h_{registration}_LOAV-LOAV.kml"
-        assert parse_aircraft_from_filename(name) == {
-            "registration": None,
-            "type": None,
-            "route": "LOAV-LOAV",
-            "format": "charterware",
-        }
+        assert parse_aircraft_from_filename(name) == AircraftInfo(
+            None, None, "LOAV-LOAV", "charterware"
+        )
 
     @pytest.mark.parametrize("time_part", ["1513", "2513h", "1575h", "abcdh"])
     def test_invalid_time_rejected(self, time_part):
         name = f"2026-01-12_{time_part}_OE-AKI_LOAV-LOAV.kml"
-        assert parse_aircraft_from_filename(name) == {}
+        assert parse_aircraft_from_filename(name) is None
 
 
 class TestParseAircraftFromFilenameUnrecognized:
     @pytest.mark.parametrize("name", ["flight_log.kml", "", "track.kml", "a_b.kml"])
     def test_unrecognized_returns_empty(self, name):
-        assert parse_aircraft_from_filename(name) == {}
+        assert parse_aircraft_from_filename(name) is None
+
+
+class TestMorePrefixes:
+    @pytest.mark.parametrize(
+        ("raw", "expected"),
+        [
+            ("TFABC", "TF-ABC"),
+            ("9HABC", "9H-ABC"),
+            ("5BCKA", "5B-CKA"),
+            ("URPSA", "UR-PSA"),
+            ("EW123PA", "EW-123PA"),
+            ("Z3MKD", "Z3-MKD"),
+            ("E7ABC", "E7-ABC"),
+            ("ZAABC", "ZA-ABC"),
+            ("4OABC", "4O-ABC"),
+            ("2GIGI", "2-GIGI"),
+            ("MABCD", "M-ABCD"),
+        ],
+    )
+    def test_the_hyphen_is_restored(self, raw, expected):
+        assert normalize_registration(raw) == expected
+
+    @pytest.mark.parametrize(
+        ("name", "registration"),
+        [
+            ("1_9HABC_C172.kml", "9H-ABC"),
+            ("2_2GIGI_PA28.kml", "2-GIGI"),
+            ("3_M-ABCD_SR22.kml", "M-ABCD"),
+            ("4_TFABC_C152.kml", "TF-ABC"),
+        ],
+    )
+    def test_in_a_file_name(self, name, registration):
+        assert _parsed(name).registration == registration
 
 
 class TestLoadAircraftData:
     def test_loads_mapping(self, tmp_path):
         path = tmp_path / "aircraft.json"
         path.write_text(json.dumps({"D-EAGJ": "Diamond DA-20A-1 Katana"}))
+        assert load_aircraft_data(path) == {"D-EAGJ": "Diamond DA-20A-1 Katana"}
+
+    @pytest.mark.parametrize("key", ["d-eagj", "deagj", " D-EAGJ ", "Deagj"])
+    def test_keys_are_read_in_capitals(self, tmp_path, key):
+        """The file names are in capitals, and so is the registration they give."""
+        path = tmp_path / "aircraft.json"
+        path.write_text(json.dumps({key: "Diamond DA-20A-1 Katana"}))
         assert load_aircraft_data(path) == {"D-EAGJ": "Diamond DA-20A-1 Katana"}
 
     def test_corrupt_json_returns_empty(self, tmp_path):

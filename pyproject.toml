@@ -42,6 +42,8 @@ dev = [
     "mypy>=2.3.1",
     "bandit>=1.9.4",
     "pip-audit>=2.10.1",
+    # The audit of .github/workflows (make lint and the CI lint job)
+    "zizmor>=1.30.1",
     # scripts/check_locks.py
     "packaging>=26.3",
 ]
@@ -137,6 +139,7 @@ target-version = "py314"
 select = [
     "E", "F", "W", "UP", "B", "SIM", "I", "PLR", "S", "PT", "RUF",
     "C4", "PERF", "ISC", "PIE", "TC", "RET", "ERA", "N",
+    "C90", "PLW", "PLC", "PLE", "DTZ", "BLE", "ARG", "TRY300", "TRY301", "FURB",
 ]
 ignore = [
     "PLR2004",
@@ -148,6 +151,14 @@ ignore = [
     "PT006",
 ]
 
+[tool.ruff.lint.mccabe]
+# One exemption, with its reason next to it: terrain._unfilter
+max-complexity = 15
+
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["S101", "S314"]
+# ARG: a fixture asked for its side effect and a stand-in that keeps the
+# signature of what it replaces take arguments they do not use. PLC0415: a
+# test imports inside itself to see a module as a monkeypatch left it, or
+# the way the package's lazy imports load it.
+"tests/**" = ["S101", "S314", "ARG", "PLC0415"]
 "scripts/**" = ["S311"]

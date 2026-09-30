@@ -4,8 +4,9 @@
  *
  * The heatmap draws a point per fix, 135,000 of them for all years of the
  * sample flights (116,000 with those of one pixel merged, see mergedPoints).
- * Handed to MapLibre as objects, a feature each, they cost the main thread about 120 ms on a desktop (in Chrome: 70 ms for MapLibre's own
- * copy of them and 45 ms for the structured clone to its worker) and three to
+ * Handed to MapLibre as objects, a feature each, they cost the main thread
+ * about 120 ms on a desktop (in Chrome: 70 ms for MapLibre's own copy of
+ * them and 45 ms for the structured clone to its worker) and three to
  * four times that with the CPU slowed down as for a phone, on every change of
  * the year, the aircraft or the weighing, on top of the objects themselves and
  * the exposure (see doc/development/heat.md). A source that is given a URL
@@ -16,9 +17,12 @@
  * drawn and writes the text into a Blob, and the page gives the source a URL of
  * that Blob.
  *
- * The text is the one JSON.stringify writes for the same features, so the
- * map is given exactly what it was before. The heat lines the heatmap
- * hands over to take the same way, packed by flatLines.
+ * The text is the one JSON.stringify writes for the same features, with the
+ * coordinates of the heat points to 5 decimals (about 1.1 m, drawn up to
+ * zoom 12.75), those of the heat lines to 7 (about 1 cm, drawn up to the
+ * map's last zoom) and the heat of the points to 4 significant digits. The
+ * heat lines the heatmap hands over to take the same way, packed by
+ * flatLines.
  *
  * Like everything else in yearWorker.bundle.js this is no part of what a
  * first visit downloads. The packing runs on the page, from the same bundle
@@ -87,6 +91,20 @@ const FEATURES_PER_PART = 1024;
 function json(value: number): string {
   return Number.isFinite(value) ? String(value) : "null";
 }
+
+/**
+ * A longitude or latitude to `1 / scale` degrees. A double written whole
+ * takes 17 digits, a third of the text. The points, merged in a pixel of
+ * the heatmap's last zoom (about 10 m), need no finer than 5 decimals,
+ * 1.1 m. The heat lines are drawn up to the map's last zoom, where a metre
+ * is several pixels and 1.1 m would kink a traffic pattern or a taxi line,
+ * so they get 7, about 1 cm.
+ */
+const degrees = (value: number, scale = 1e5): string =>
+  json(Math.round(value * scale) / scale);
+
+/** A heat to 4 significant digits, finer than the heatmap can draw */
+const weight = (value: number): string => json(+value.toPrecision(4));
 
 /** A Blob of the text of a FeatureCollection of `count` features */
 function collection(count: number, feature: (index: number) => string): Blob {
@@ -180,12 +198,12 @@ export function drawHeat(heat: Float64Array): DrawnHeat {
     const fixes = points[4 * index + 3]!;
     return (
       '{"type":"Feature","properties":{"w":' +
-      json(points[4 * index + 2]!) +
+      weight(points[4 * index + 2]!) +
       (fixes > 1 ? ',"n":' + fixes : "") +
       '},"geometry":{"type":"Point","coordinates":[' +
-      json(points[4 * index + 1]!) +
+      degrees(points[4 * index + 1]!) +
       "," +
-      json(points[4 * index]!) +
+      degrees(points[4 * index]!) +
       "]}}"
     );
   });
@@ -203,9 +221,9 @@ export function linesSource(lines: FlatLines): Blob {
     for (let at = index > 0 ? ends[index - 1]! : 0; at < ends[index]!; at++) {
       line +=
         (line ? ",[" : "[") +
-        json(coordinates[2 * at]!) +
+        degrees(coordinates[2 * at]!, 1e7) +
         "," +
-        json(coordinates[2 * at + 1]!) +
+        degrees(coordinates[2 * at + 1]!, 1e7) +
         "]";
     }
     return (

@@ -7,6 +7,7 @@ import type { Coordinate } from "./utils/geometry";
 import type { IconName } from "./utils/icons";
 import type { RibbonProperties } from "./calculations/ribbons";
 import type { ToggleFlags } from "./state/toggles";
+import type { Markup } from "./utils/markup";
 
 /**
  * Path information from KML data.
@@ -396,10 +397,10 @@ export interface FunFact {
    */
   icon?: IconName;
   /**
-   * Trusted markup, rendered as is. The generator escapes every value it
-   * takes from the data (registrations, models) before building the text.
+   * The text, as markup whose values were escaped as it was made (markup
+   * in utils/markup.ts): a registration or an airport's name is text in it
    */
-  text: string;
+  text: Markup;
   priority: number;
 }
 

@@ -132,23 +132,30 @@ without a code shows none.
 ## Elevation tiles at build time
 
 The tiles (zoom 10, about 100 KB each) are cached as PNGs in `terrain/` of the
-cache directory (`KML_HEATMAP_CACHE_DIR`, by default `~/.cache/kml-heatmap`) and
-decoded by a small pure-Python PNG reader in a process pool; `data/` needs 389
-of them, 44 MB. The decoded pixels of a tile are kept next to its PNG
-(`<tile>.pixels`, a little smaller than the PNG, checked against its CRC), so a
-later build reads them in a fraction of a millisecond instead of decoding the
-PNG again. A failed request or a server error is tried again three times, with
-pauses of 1, 2 and 4 s, before the host is given up for the run. Offline, or for
-a tile that cannot be fetched, the build goes on and the flights under it get no
-ground; one warning says how many. `KML_HEATMAP_REQUIRE_TERRAIN=1` fails it
-instead, which the CI job that deploys the site sets. The ground is sampled once
-in the main process and kept as one array of elevations per path, aligned with
-its points (`sample_path_elevations`), which is what the export chunks are
-handed: a million points take tens of megabytes this way, where a mapping of
-coordinates took more than a gigabyte. `--no-terrain` skips the tiles
-altogether, which `scripts/build_visual_site.py` does: its snapshots show no 3D
-view. The CI jobs that build from `data/` restore the tile cache with
-`actions/cache`.
+[cache directory](../output.md#cache-directory) and decoded by a small
+pure-Python PNG reader in a process pool; `data/` needs 389 of them, 44 MB. The
+decoded pixels of a tile are kept next to its PNG (`<tile>.pixels`, compressed
+with zstd, checked against its CRC), so a later build reads them in a fraction
+of a millisecond instead of decoding the PNG again. A tile is only cached once
+its every chunk checks out, so a download cut short is fetched again rather than
+kept. A failed request or a server error is tried again three times, with pauses
+of 1, 2 and 4 s. When the last attempt could not reach the host at all, the host
+is given up for the run. A server error only costs that tile, unless three tiles
+in a row (across the fetch threads, without a tile that got through between
+them) used up their attempts on server errors: then the host is given up as
+well, rather than every tile of the run spending its attempts and pauses. Each
+fetch thread keeps one connection to the host, through the proxy that
+`HTTPS_PROXY` names unless `NO_PROXY` exempts the host, and a redirect away from
+the host or from https is refused. Offline, or for a tile that cannot be
+fetched, the build goes on and the flights under it get no ground; one warning
+says how many. `KML_HEATMAP_REQUIRE_TERRAIN=1` fails it instead, which the CI
+job that deploys the site sets. The ground is sampled once in the main process
+and kept as one array of elevations per path, aligned with its points
+(`sample_path_elevations`), which is what the export chunks are handed: a
+million points take tens of megabytes this way, where a mapping of coordinates
+took more than a gigabyte. `--no-terrain` skips the tiles altogether, which
+`scripts/build_visual_site.py` does: its snapshots show no 3D view. The CI jobs
+that build from `data/` restore the tile cache with `actions/cache`.
 
 ## The year worker
 

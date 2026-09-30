@@ -18,6 +18,7 @@ text ("Flight with Anna", "Untitled Path"), and its start gets no marker
 
 import math
 import re
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, NamedTuple
 
 from .airport_lookup import (
@@ -39,15 +40,17 @@ from .constants import (
     PATH_SAMPLE_MIN_SIZE,
 )
 from .date_tokens import strip_dates
-from .geometry import EARTH_RADIUS_KM, haversine_distance
+from .geometry import KM_PER_DEGREE, haversine_distance
 from .logger import logger
 
 if TYPE_CHECKING:
-    from .types import AirportData, FlightPath, FlightPathGroup, PathMetadata
+    from .types import FlightPath, FlightPathGroup, PathMetadata
 
 __all__ = [
     "POINT_MARKERS",
+    "AirportData",
     "AirportDeduplicator",
+    "AltitudeSample",
     "airport_elevation",
     "deduplicate_airports",
     "extract_airport_name",
@@ -66,12 +69,47 @@ POINT_MARKERS = ["Log Start", "Log Stop", "Takeoff", "Landing"]
 _POINT_MARKER_PATTERN = re.compile(
     "(?:" + "|".join(map(re.escape, POINT_MARKERS)) + ")(?::|$)"
 )
-_KM_PER_DEGREE = math.radians(EARTH_RADIUS_KM)
+
+
+class AltitudeSample(NamedTuple):
+    """The altitudes at one end of a path (see ``sample_path_altitudes``)."""
+
+    min: float
+    max: float
+    variation: float
+
+
+@dataclass(slots=True)
+class AirportData:
+    """An airport a path starts or ends at, as ``deduplicate_airports`` merges them.
+
+    ``name`` is the placemark name the airport was first seen under (a route
+    or a single airport), ``path_index`` and ``is_at_path_end`` where.
+    """
+
+    lat: float
+    lon: float
+    name: str | None
+    path_index: int | None = None
+    is_at_path_end: bool = False
+
+    def prefer_name(self, name: str | None) -> None:
+        """Take ``name`` over the one held when it says more.
+
+        A route name wins over a point marker's, and anything over no name;
+        otherwise the first name stays, so the marker reads the same however
+        the entries were ordered.
+        """
+        current = self.name or ""
+        if name and (
+            not current or (is_point_marker(current) and not is_point_marker(name))
+        ):
+            self.name = name
 
 
 def sample_path_altitudes(
     path: FlightPath, from_end: bool = False
-) -> dict[str, float] | None:
+) -> AltitudeSample | None:
     """Extract altitude statistics from a path sample."""
     if len(path) <= 10:
         return None
@@ -84,7 +122,7 @@ def sample_path_altitudes(
     alts = [point.alt for point in sample if point.alt is not None]
     if not alts:
         return None
-    return {"min": min(alts), "max": max(alts), "variation": max(alts) - min(alts)}
+    return AltitudeSample(min(alts), max(alts), max(alts) - min(alts))
 
 
 def airport_elevation(name: str | None, is_at_path_end: bool) -> float | None:
@@ -140,7 +178,7 @@ def is_mid_flight_start(
     # - AND altitude variation in first part is small (not climbing/descending much)
     is_mid_flight = (
         start_alt - reference_alt > MID_FLIGHT_MIN_ALTITUDE_M
-        and sample["variation"] < MID_FLIGHT_MAX_VARIATION_M
+        and sample.variation < MID_FLIGHT_MAX_VARIATION_M
     )
 
     if is_mid_flight:
@@ -149,7 +187,7 @@ def is_mid_flight_start(
             "variation: %.0fm)",
             start_alt,
             start_alt - reference_alt,
-            sample["variation"],
+            sample.variation,
         )
 
     return is_mid_flight
@@ -171,7 +209,7 @@ def is_valid_landing(
 
     # Valid landing: either descending significantly OR stable at low variation
     # Also accept any endpoint if variation at end is small - indicates stable landing
-    return sample["variation"] < LANDING_MAX_VARIATION_M or (
+    return sample.variation < LANDING_MAX_VARIATION_M or (
         height is not None and height < LANDING_MAX_ALTITUDE_M
     )
 
@@ -278,7 +316,7 @@ class AirportDeduplicator:
         a single neighbor cell is not enough. The pole side of the search
         radius is the narrowest, so its width decides.
         """
-        cell_km = self.grid_size * _KM_PER_DEGREE
+        cell_km = self.grid_size * KM_PER_DEGREE
         lat_cells = math.ceil(AIRPORT_DISTANCE_THRESHOLD_KM / cell_km)
         edge_lat = min(90.0, abs(lat) + lat_cells * self.grid_size)
         lon_cell_km = cell_km * math.cos(math.radians(edge_lat))
@@ -303,7 +341,7 @@ class AirportDeduplicator:
                 neighbor_key = (grid_key[0] + dlat, lon_key)
                 for apt_idx in self.spatial_grid.get(neighbor_key, ()):
                     airport = self.unique_airports[apt_idx]
-                    dist = haversine_distance(lat, lon, airport["lat"], airport["lon"])
+                    dist = haversine_distance(lat, lon, airport.lat, airport.lon)
                     if dist < AIRPORT_DISTANCE_THRESHOLD_KM:
                         return apt_idx
         return None
@@ -358,27 +396,12 @@ class AirportDeduplicator:
                 apt_idx = self._find_nearby_airport(corrected_lat, corrected_lon)
 
         if apt_idx is not None:
-            airport = self.unique_airports[apt_idx]
-
-            # Prefer route names over marker names
-            current_name = airport.get("name", "")
-            if name and (
-                not current_name
-                or (is_point_marker(current_name) and not is_point_marker(name))
-            ):
-                airport["name"] = name
-
+            self.unique_airports[apt_idx].prefer_name(name)
             return apt_idx
 
         new_idx = len(self.unique_airports)
         self.unique_airports.append(
-            {
-                "lat": corrected_lat,
-                "lon": corrected_lon,
-                "name": name,
-                "path_index": path_index,
-                "is_at_path_end": is_at_path_end,
-            }
+            AirportData(corrected_lat, corrected_lon, name, path_index, is_at_path_end)
         )
         self._add_to_grid(corrected_lat, corrected_lon, new_idx)
         if icao_code:

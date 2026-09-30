@@ -1,11 +1,12 @@
 """Tests for logger module."""
 
+import io
 import logging
 import sys
 
 import pytest
 
-from kml_heatmap.logger import logger, set_debug_mode, setup_logger
+from kml_heatmap.logger import logger, set_debug_mode, set_log_level, setup_logger
 
 
 @pytest.fixture(autouse=True)
@@ -101,3 +102,46 @@ class TestSetDebugMode:
         assert logger.level == logging.INFO
         assert logger.handlers[0].level == logging.INFO
         assert logger.handlers[1].level == logging.WARNING
+
+
+class TestSetLogLevel:
+    def test_quiet_hides_the_info_lines(self, capsys):
+        set_log_level(logging.WARNING)
+        logger.info("progress")
+        logger.warning("problem")
+        captured = capsys.readouterr()
+        assert captured.out == ""
+        assert captured.err == "WARNING: problem\n"
+        # The stdout handler stays ready for INFO once the level is back
+        assert logger.handlers[0].level == logging.INFO
+
+
+class TestSymbols:
+    def test_ascii_where_the_stream_is_no_terminal(self, capsys):
+        logger.info("✓ Loaded 3 points; ⚠ no model; ✗ failed")
+        assert capsys.readouterr().out == (
+            "INFO: [ok] Loaded 3 points; [!] no model; [x] failed\n"
+        )
+
+    def test_as_they_are_on_a_terminal(self, monkeypatch):
+        stream = io.StringIO()
+        monkeypatch.setattr(stream, "isatty", lambda: True, raising=False)
+        monkeypatch.setattr(sys, "stdout", stream)
+        logger.info("✓ Loaded")
+        assert stream.getvalue() == "INFO: ✓ Loaded\n"
+
+    def test_a_stream_without_isatty_counts_as_none(self, monkeypatch):
+        class Plain:
+            def __init__(self):
+                self.text = ""
+
+            def write(self, text):
+                self.text += text
+
+            def flush(self):
+                pass
+
+        stream = Plain()
+        monkeypatch.setattr(sys, "stdout", stream)
+        logger.info("✓ Loaded")
+        assert stream.text == "INFO: [ok] Loaded\n"

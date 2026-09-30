@@ -46,7 +46,11 @@ function trackCssRequests(page: Page, name: string): string[] {
   const requested: string[] = [];
   page.on("request", (request) => {
     // A bundle's source map may carry the name as well, so match the end
-    if (request.url().endsWith(`/${name}`)) requested.push(request.url());
+    // of the path, which the build it belongs to follows as a query
+    // (versioned in services/lazyImport.ts)
+    if (new URL(request.url()).pathname.endsWith(`/${name}`)) {
+      requested.push(request.url());
+    }
   });
   return requested;
 }

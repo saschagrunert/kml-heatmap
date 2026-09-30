@@ -4,15 +4,7 @@
  * pulses, the marks of the way flown that take over from them, and its
  * exposure.
  */
-import {
-  describe,
-  it,
-  expect,
-  beforeEach,
-  afterEach,
-  vi,
-  type Mock,
-} from "vitest";
+import { describe, it, expect, beforeEach, vi, type Mock } from "vitest";
 import type { CustomRenderMethodInput, Map as MapLibreMap } from "maplibre-gl";
 import {
   CLOUD_STOPS,
@@ -265,10 +257,6 @@ describe("the heat cloud's layer", () => {
     now = 1000;
     vi.spyOn(performance, "now").mockImplementation(() => now);
     layer = new HeatCloudLayer(() => style, failed);
-  });
-
-  afterEach(() => {
-    vi.restoreAllMocks();
   });
 
   /** The sources of the shaders compiled last */

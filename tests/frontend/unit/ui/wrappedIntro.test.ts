@@ -107,7 +107,6 @@ describe("Wrapped's intro", () => {
   afterEach(() => {
     wrappedManager.destroy();
     vi.useRealTimers();
-    vi.restoreAllMocks();
     document.body.innerHTML = "";
     resetSiteData();
   });

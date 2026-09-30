@@ -1,20 +1,42 @@
 /**
  * The flight under the pointer, found among the layers and runs the layer
- * manager hands over (DrawnRuns), without a layer manager
+ * manager hands over (DrawnRuns), without a layer manager; then the
+ * tooltip of a hover, through the LayerManager that listens to the map
  */
-import { describe, it, expect, afterEach } from "vitest";
-import type { Map as MapLibreMap, Point } from "maplibre-gl";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import type { LngLat, Map as MapLibreMap, Point } from "maplibre-gl";
 import {
   PathHover,
   type HoverRun,
   type RunsOnLayer,
 } from "../../../../kml_heatmap/frontend/ui/pathHover";
+import type { LayerManager } from "../../../../kml_heatmap/frontend/ui/layerManager";
 import type {
+  PathHit,
   PathRunProperties,
   PathSegment,
 } from "../../../../kml_heatmap/frontend/types";
-import { createMapLibreMock, segmentOf } from "../../testHelpers";
-import { resetMapLibreMock } from "../../../mocks/maplibre-gl";
+import { getColorForAltitude } from "../../../../kml_heatmap/frontend/utils/colors";
+import * as statistics from "../../../../kml_heatmap/frontend/calculations/statistics";
+import {
+  createDataset,
+  createMapLibreMock,
+  createSegment,
+  segmentOf,
+  type MockApp,
+} from "../../testHelpers";
+import {
+  resetMapLibreMock,
+  type Popup as MockPopup,
+} from "../../../mocks/maplibre-gl";
+import {
+  ALTITUDE,
+  ALTITUDE_SELECTED,
+  drawMode,
+  layerManagerHelpers,
+  setupLayerManager,
+  teardownLayerManager,
+} from "./layerManagerTestSetup";
 
 describe("PathHover", () => {
   afterEach(() => resetMapLibreMock());
@@ -141,5 +163,296 @@ describe("PathHover", () => {
     expect(segmentHit()).toBe(copies[1]);
     map.renderedFeatures.reverse();
     expect(segmentHit()).toBe(copies[1]);
+  });
+});
+
+const popups = vi.hoisted((): unknown[] => []);
+vi.mock("maplibre-gl", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../../mocks/maplibre-gl")>();
+  class Popup extends actual.Popup {
+    constructor(options: Record<string, unknown> = {}) {
+      super(options);
+      popups.push(this);
+    }
+  }
+  return { ...actual, Popup, default: { ...actual.default, Popup } };
+});
+
+describe("PathHover through the LayerManager", () => {
+  let layerManager: LayerManager;
+  let mockApp: MockApp;
+  /** Callbacks waiting for the next animation frame, by their handle */
+  let frames: Map<number, FrameRequestCallback>;
+  const { runFrames, rendered, pointAt, moveTo, tooltips } =
+    layerManagerHelpers({
+      get layerManager() {
+        return layerManager;
+      },
+      get mockApp() {
+        return mockApp;
+      },
+      get frames() {
+        return frames;
+      },
+      popups,
+    });
+
+  beforeEach(() => {
+    popups.length = 0;
+    ({ layerManager, mockApp, frames } = setupLayerManager());
+  });
+
+  afterEach(() => teardownLayerManager(layerManager));
+
+  describe("hover tooltip", () => {
+    beforeEach(() => {
+      mockApp.currentData = createDataset(
+        [{ id: 1, year: 2025 }],
+        [
+          createSegment({
+            path_id: 1,
+            altitude_ft: 3000,
+            groundspeed_knots: 90,
+            coords: [
+              [48, 16],
+              [48.1, 16.1],
+            ],
+          }),
+          createSegment({
+            path_id: 1,
+            altitude_ft: 3000,
+            groundspeed_knots: 120,
+            coords: [
+              [48.1, 16.1],
+              [48.2, 16.2],
+            ],
+          }),
+        ],
+      );
+      mockApp.altitudeLayer.setVisible(true);
+      mockApp.altitudeVisible = true;
+      drawMode(layerManager, "altitude");
+      mockApp.map!.renderedFeatures = [rendered(ALTITUDE, { r: 0, g: 1 })];
+    });
+
+    function content(popup: MockPopup): string {
+      return popup.getElement().querySelector(".maplibregl-popup-content")!
+        .innerHTML;
+    }
+
+    it("keeps the tooltip while the tiles only answer with stale features", () => {
+      moveTo(pointAt(48.19, 16.19));
+      const tooltip = tooltips()[0]!;
+      // Drawn again: generation 2, and the tiles still hold generation 1
+      drawMode(layerManager, "altitude");
+
+      moveTo(pointAt(48.18, 16.18));
+
+      expect(tooltip.isOpen()).toBe(true);
+      expect(content(tooltip)).toContain("120 kt");
+    });
+
+    it("opens one popup that tracks the pointer, with the segment's values", () => {
+      const point = pointAt(48.19, 16.19);
+      moveTo(point);
+
+      expect(tooltips()).toHaveLength(1);
+      const tooltip = tooltips()[0]!;
+      expect(tooltip.options).toMatchObject({
+        closeButton: false,
+        closeOnClick: false,
+        className: "segment-details segment-tooltip",
+        maxWidth: "none",
+        offset: 10,
+      });
+      expect(tooltip.isOpen()).toBe(true);
+      expect(tooltip.map).toBe(mockApp.map);
+      // Placed under the pointer first: a tracking popup has no position
+      // of its own until the pointer moves again
+      expect(tooltip.getLngLat()).toEqual(mockApp.map!.unproject(point));
+      expect(tooltip.tracksPointer).toBe(true);
+      expect(content(tooltip)).toContain("120 kt");
+      expect(mockApp.map!.getCanvas().style.cursor).toBe("pointer");
+    });
+
+    it("looks under the pointer once per frame", () => {
+      mockApp.map!.emit("mousemove", { point: pointAt(48.19, 16.19) });
+      mockApp.map!.emit("mousemove", { point: pointAt(48.18, 16.18) });
+      mockApp.map!.emit("mousemove", { point: pointAt(48.01, 16.01) });
+
+      expect(requestAnimationFrame).toHaveBeenCalledOnce();
+      expect(mockApp.map!.queryRenderedFeatures).not.toHaveBeenCalled();
+
+      runFrames();
+
+      expect(mockApp.map!.queryRenderedFeatures).toHaveBeenCalledOnce();
+      // The last position counts
+      expect(content(tooltips()[0]!)).toContain("90 kt");
+    });
+
+    it("works the selection's colour ranges out once, not for every segment it shows", () => {
+      const slices = vi.spyOn(statistics, "segmentsForPathIds");
+      mockApp.selectedPathIds.add(1);
+      layerManager.updateSelectionStyles();
+      // The altitude range, which the selection's runs are cut on
+      expect(slices).toHaveBeenCalledOnce();
+
+      moveTo(pointAt(48.19, 16.19));
+      moveTo(pointAt(48.01, 16.01));
+      moveTo(pointAt(48.19, 16.19));
+      // The speed range, once, for the first segment the tooltip showed
+      expect(slices).toHaveBeenCalledTimes(2);
+
+      // Another selection has ranges of its own
+      mockApp.selectedPathIds.delete(1);
+      mockApp.selectedPathIds.add(2);
+      layerManager.updateSelectionStyles();
+      expect(slices).toHaveBeenCalledTimes(3);
+    });
+
+    it("sets the content only when the nearest segment changes", () => {
+      moveTo(pointAt(48.19, 16.19));
+      const tooltip = tooltips()[0]!;
+      expect(tooltip.setHTML).toHaveBeenCalledOnce();
+
+      // Same nearest segment: no content update
+      moveTo(pointAt(48.18, 16.18));
+      expect(tooltip.setHTML).toHaveBeenCalledOnce();
+      expect(tooltip.addTo).toHaveBeenCalledOnce();
+
+      moveTo(pointAt(48.01, 16.01));
+      expect(tooltip.setHTML).toHaveBeenCalledTimes(2);
+      expect(content(tooltip)).toContain("90 kt");
+      expect(tooltips()).toHaveLength(1);
+    });
+
+    it("closes beside every flight and reuses the popup on the next one", () => {
+      moveTo(pointAt(48.19, 16.19));
+      const tooltip = tooltips()[0]!;
+
+      mockApp.map!.renderedFeatures = [];
+      moveTo(pointAt(40, 10));
+
+      expect(tooltip.isOpen()).toBe(false);
+      expect(mockApp.map!.getCanvas().style.cursor).toBe("");
+
+      mockApp.map!.renderedFeatures = [rendered(ALTITUDE, { r: 0, g: 1 })];
+      moveTo(pointAt(48.19, 16.19));
+
+      expect(tooltips()).toHaveLength(1);
+      expect(tooltip.isOpen()).toBe(true);
+      expect(tooltip.tracksPointer).toBe(true);
+      expect(content(tooltip)).toContain("120 kt");
+    });
+
+    it("closes when the pointer leaves the map", () => {
+      moveTo(pointAt(48.19, 16.19));
+
+      mockApp.map!.emit("mouseout");
+
+      expect(tooltips()[0]!.isOpen()).toBe(false);
+    });
+
+    it("tells the flight profile the segment it comes to describe", () => {
+      const told: (PathSegment | null)[] = [];
+      layerManager.pathHover.onHover = (segment) => told.push(segment);
+
+      moveTo(pointAt(48.19, 16.19));
+      // The same segment again: nothing new to tell
+      moveTo(pointAt(48.18, 16.18));
+      mockApp.map!.emit("mouseout");
+
+      const segments = mockApp.currentData!.path_segments;
+      expect(told).toEqual([segments[1], null]);
+    });
+
+    it("colours the tooltip chips on the range the runs use", () => {
+      // Path 2 is selected: its range, not the full one, colours the map
+      mockApp.currentData!.path_info.push({
+        id: 2,
+        year: 2025,
+        min_altitude_ft: 1000,
+        max_altitude_ft: 1000,
+      });
+      mockApp.currentData!.path_segments.push(
+        createSegment({
+          path_id: 2,
+          altitude_ft: 1000,
+          groundspeed_knots: 50,
+          coords: [
+            [47, 15],
+            [47.5, 15.5],
+          ],
+        }),
+      );
+      mockApp.selectedPathIds.add(2);
+      drawMode(layerManager, "altitude");
+      mockApp.map!.renderedFeatures = [rendered(ALTITUDE, { r: 0, g: 2 })];
+
+      moveTo(pointAt(48.19, 16.19));
+
+      const html = content(tooltips()[0]!);
+      const chip = (color: string): string => {
+        const probe = document.createElement("span");
+        probe.style.color = color;
+        return probe.style.color;
+      };
+      expect(html).toContain("3,000 ft");
+      expect(
+        [
+          getColorForAltitude(3000, 1000, 1000),
+          chip(getColorForAltitude(3000, 1000, 1000)),
+        ].some((color) => html.includes(color)),
+      ).toBe(true);
+      expect(html).not.toContain(getColorForAltitude(3000, 0, 5000));
+    });
+
+    it("shows no hover tooltip on touch devices", () => {
+      (window as { ontouchstart?: unknown }).ontouchstart = null;
+
+      moveTo(pointAt(48.19, 16.19));
+
+      expect(tooltips()).toHaveLength(0);
+    });
+
+    it("follows the run that replaces the hovered one after a selection", () => {
+      // Selecting rebuilds the runs of the path, and the tiles answer with
+      // the old ones until the map has drawn the new data
+      mockApp.pathSelection.togglePathSelection.mockImplementation(
+        (id: number) => {
+          mockApp.selectedPathIds.add(id);
+          layerManager.updateSelectionStyles();
+        },
+      );
+      const point = pointAt(48.19, 16.19);
+      moveTo(point);
+      const tooltip = tooltips()[0]!;
+      const hit = layerManager.hitTest(point) as PathHit;
+      mockApp.map!.queryRenderedFeatures.mockClear();
+
+      layerManager.onPathClick(hit, mockApp.map!.unproject(point) as LngLat);
+
+      expect(mockApp.map!.listenerCount("idle")).toBe(1);
+      expect(mockApp.map!.queryRenderedFeatures).not.toHaveBeenCalled();
+
+      mockApp.map!.renderedFeatures = [
+        rendered(ALTITUDE_SELECTED, { r: 0, g: 1 }),
+      ];
+      mockApp.map!.emit("idle");
+
+      expect(mockApp.map!.queryRenderedFeatures).toHaveBeenCalledOnce();
+      expect(tooltip.isOpen()).toBe(true);
+      // Written again: the range the chips are coloured on has changed
+      expect(tooltip.setHTML).toHaveBeenCalledTimes(2);
+      expect(mockApp.map!.listenerCount("idle")).toBe(0);
+    });
+
+    it("does not wait for idle without a pointer on the map", () => {
+      mockApp.selectedPathIds.add(1);
+      layerManager.updateSelectionStyles();
+
+      expect(mockApp.map!.listenerCount("idle")).toBe(0);
+    });
   });
 });

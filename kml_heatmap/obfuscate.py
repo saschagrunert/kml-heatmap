@@ -84,6 +84,8 @@ UTC_OFFSET_PATTERN = re.compile(r"[+-]\d{2}:?\d{2}$")
 # Valid KML timestamps without a time: xsd:date and xsd:gYearMonth
 DATE_ONLY_PATTERN = re.compile(r"(\d{4})-\d{2}-\d{2}(Z|[+-]\d{2}:\d{2})?")
 YEAR_MONTH_PATTERN = re.compile(r"(\d{4})-(\d{2})(Z|[+-]\d{2}:\d{2})?")
+# xsd:gYear: a year alone gives nothing away the export does not keep
+YEAR_ONLY_PATTERN = re.compile(r"\d{4}(?:Z|[+-]\d{2}:\d{2})?")
 
 # SkyDemon marker: "Takeoff: 03 Mar 2025 08:31 Z", with or without seconds
 _MARKER_DATE_RE = r"(Log Start|Takeoff|Landing|Log Stop):\s*\d{1,2}\s+\w{3}\s+"
@@ -330,6 +332,9 @@ class _Timestamps(NamedTuple):
     # A timestamp not written the way the rewrite writes it (CDATA, a space
     # instead of the "T"): rewritten so the parsers read it like the check
     has_loose_text: bool
+    # Timestamps neither a full one nor a date: the rewrite cannot move them
+    # ("1710406320", "14.03.2024 09:12"), so they would keep what they hold
+    not_understood: list[str]
 
 
 def _scan_timestamps(content: str) -> _Timestamps:
@@ -337,6 +342,7 @@ def _scan_timestamps(content: str) -> _Timestamps:
     has_utc_offset = False
     has_loose_text = False
     dates_to_move: list[str] = []
+    not_understood: list[str] = []
     spans = [match.span() for match in PLACEMARK_PATTERN.finditer(content)]
     span_starts = [start for start, _ in spans]
     placemarks: list[list[datetime]] = [[] for _ in spans]
@@ -352,11 +358,19 @@ def _scan_timestamps(content: str) -> _Timestamps:
             index = bisect_right(span_starts, match.start()) - 1
             if index >= 0 and match.start() < spans[index][1]:
                 placemarks[index].append(dt)
-        elif _date_only_on_jan_first(text) not in (None, text):
-            dates_to_move.append(text)
+        elif (moved := _date_only_on_jan_first(text)) is not None:
+            if moved != text:
+                dates_to_move.append(text)
+        elif text and not YEAR_ONLY_PATTERN.fullmatch(text):
+            not_understood.append(text)
     groups = _timestamp_groups(first_text, placemarks)
     return _Timestamps(
-        first_text, groups, has_utc_offset, dates_to_move, has_loose_text
+        first_text,
+        groups,
+        has_utc_offset,
+        dates_to_move,
+        has_loose_text,
+        not_understood,
     )
 
 
@@ -452,6 +466,16 @@ def _write_atomic(filepath: Path, content: str) -> bool:
     return True
 
 
+KMZ_REFUSAL = (
+    "the obfuscator cannot check or rewrite the dates inside a zip archive; "
+    "unzip it and keep the .kml file instead"
+)
+
+
+def _is_kmz(filepath: Path) -> bool:
+    return filepath.suffix.lower() == ".kmz"
+
+
 def obfuscate_kml_file(filepath: Path) -> bool:
     """Obfuscate a KML file in place.
 
@@ -461,6 +485,11 @@ def obfuscate_kml_file(filepath: Path) -> bool:
     """
     if filepath.is_symlink():
         logger.warning("Skipping %s: symlinks are not allowed", filepath)
+        return False
+    if _is_kmz(filepath):
+        # Rewriting a member of a zip archive in place is not worth the risk
+        # of a broken archive; the check keeps failing until it is unzipped
+        logger.error("Cannot obfuscate %s: %s", filepath, KMZ_REFUSAL)
         return False
 
     try:
@@ -495,7 +524,9 @@ def obfuscate_kml_files(filepaths: Iterable[Path]) -> int:
         except OSError as e:
             # Expected (a read-only or vanished file): no traceback needed
             logger.error("Failed to obfuscate %s: %s", filepath, e)
-        except Exception:
+        # One file's failure must not stop the others from being scrubbed;
+        # the check afterwards fails on the file that is left
+        except Exception:  # noqa: BLE001
             logger.exception("Failed to obfuscate %s", filepath)
     return modified
 
@@ -572,6 +603,10 @@ def rename_charterware_files(filepaths: Iterable[Path]) -> list[Path]:
     # The part after the time of every file to rename, by directory and year
     groups: dict[tuple[Path, str], dict[Path, str]] = {}
     for path in paths:
+        # An archive is refused with its dates inside it: a new name would
+        # only hide which file the refusal is about
+        if _is_kmz(path):
+            continue
         match = _charterware_name(path)
         if match is None or _has_jan_first_date(match) or path.is_symlink():
             continue
@@ -656,16 +691,42 @@ def _obfuscate_listed_files(kml_files: list[Path]) -> int:
 
 
 # Date shapes that may appear anywhere in a document written by another tool
-# are those of date_tokens, plus one only data values hold:
-# Unix time (seconds or milliseconds) in a data value: "<value>1710406320</value>"
-_EPOCH_VALUE_PATTERN = re.compile(
+# are those of date_tokens, plus Unix time (seconds or milliseconds), in a
+# data value ("<value>1710406320</value>"), a name ("Flight 1710406320") or
+# anywhere else in the text but the coordinates, which the check leaves out
+# first: ten or thirteen digits that are no part of a longer number. The
+# fraction of a decimal number (12.1710406320) is none either, but a dot
+# after a word ("log.1710406320") is only a separator.
+_EPOCH_PATTERN = re.compile(r"(?<!\d)(?<!\d\.)(\d{13}|\d{10})(?:\.\d+)?(?!\d)")
+# Before 2000 a ten-digit number is no time a flight log would hold
+_EPOCH_START = datetime(2000, 1, 1, tzinfo=UTC).timestamp()
+# The latest a recorded flight can be: its time is never in the future. A
+# day of slack covers a clock ahead of UTC.
+_EPOCH_SLACK = timedelta(days=1)
+# A start or end tag with its attributes. Attribute values are ids and
+# references (a 13-digit style id), and the dates in them are checked by the
+# date patterns, so the Unix time scan reads the text between the tags only.
+# A quoted value may hold a ">".
+_TAG_PATTERN = re.compile(
+    r"""</?[A-Za-z_][^<>"']*(?:(?:"[^"]*"|'[^']*')[^<>"']*)*/?>"""
+)
+# The numbers of a view or an extent (a LookAt 1234567890 m away): distances,
+# angles and positions, never a time
+_VIEW_NUMBER_PATTERN = re.compile(
     r"<("
     + _PREFIX
-    + r"(?:value|SimpleData))\b[^>]*>\s*(\d{10}|\d{13})(?:\.\d+)?\s*</\1\s*>"
+    + r"(?:range|altitude|heading|tilt|roll|longitude|latitude|north|south|east"
+    r"|west|rotation|minAltitude|maxAltitude))\b[^>]*>[^<]*</\1\s*>"
 )
-_EPOCH_RANGE = (
-    datetime(2000, 1, 1, tzinfo=UTC).timestamp(),
-    datetime(2100, 1, 1, tzinfo=UTC).timestamp(),
+# The elements of KML 2.2 whose text is a reference (an anyURI): a style
+# ("#1712345678901" or "styles.kml#1712345678901"), a link, an Update's
+# target and a Model's texture. The fragment after "#" names an id, which
+# the attribute strip already lets pass where it is declared and which the
+# obfuscator cannot rewrite either, so the scan drops it here as well. The
+# path before it is still read. targetId and schemaUrl are attributes in
+# KML 2.2, so the tag strip covers them.
+_REFERENCE_PATTERN = re.compile(
+    r"<(" + _PREFIX + r"(?:styleUrl|href|targetHref|sourceHref))\b[^>]*>([^<]*)</\1\s*>"
 )
 
 
@@ -676,8 +737,9 @@ def _epoch_is_obfuscated(value: str) -> bool:
     January 1st or the days a flight runs into after it.
     """
     seconds = int(value) / (1000 if len(value) == 13 else 1)
-    if not _EPOCH_RANGE[0] <= seconds < _EPOCH_RANGE[1]:
-        # Not a time of this era: some other number
+    latest = (datetime.now(UTC) + _EPOCH_SLACK).timestamp()
+    if not _EPOCH_START <= seconds < latest:
+        # Not the time of a past flight: a phone number, a serial number
         return True
     dt = datetime.fromtimestamp(seconds, tz=UTC)
     return near_jan_first(dt.month, dt.day) and dt.time() == time()
@@ -705,21 +767,49 @@ def _with_unescaped(content: str) -> str:
     return content
 
 
+def _epoch_text(content: str) -> str:
+    """The text of ``content`` the Unix time scan reads.
+
+    Without the tags and their attributes, both those of the document and
+    those of an escaped HTML description, without the numbers of a view and
+    without the id a reference points to.
+    """
+    text = _REFERENCE_PATTERN.sub(
+        lambda match: " " + html.unescape(match.group(2)).partition("#")[0] + " ",
+        _VIEW_NUMBER_PATTERN.sub(" ", content),
+    )
+    text = _TAG_PATTERN.sub(" ", text)
+    if "&" in text:
+        text = _TAG_PATTERN.sub(" ", html.unescape(text))
+    return text
+
+
 def _find_stray_epochs(content: str) -> list[str]:
-    """The Unix times in data values that are not midnight near January 1st."""
+    """The Unix times of past flights that are not midnight near January 1st.
+
+    Anywhere in the text of ``content``: the caller strips the coordinates,
+    whose digits are no times.
+    """
     return [
-        match.group(2)
-        for match in _EPOCH_VALUE_PATTERN.finditer(content)
-        if not _epoch_is_obfuscated(match.group(2))
+        match.group(1)
+        for match in _EPOCH_PATTERN.finditer(_epoch_text(content))
+        if not _epoch_is_obfuscated(match.group(1))
     ]
+
+
+def _stray_dates_of(unescaped: str, epochs: list[str]) -> list[str]:
+    """The stray dates of content that ``_with_unescaped`` has prepared.
+
+    ``epochs`` are its stray Unix times, which the caller has already
+    scanned for: the scan strips the tags twice and is the slow part.
+    """
+    return find_date_tokens(unescaped, skip_near_jan_first=True) + epochs
 
 
 def _find_stray_dates(content: str) -> list[str]:
     """Return date-like tokens that are not within the days after January 1st."""
-    content = _with_unescaped(content)
-    return find_date_tokens(content, skip_near_jan_first=True) + _find_stray_epochs(
-        content
-    )
+    unescaped = _with_unescaped(content)
+    return _stray_dates_of(unescaped, _find_stray_epochs(unescaped))
 
 
 def _find_stray_times(content: str, stray_dates: list[str]) -> list[str]:
@@ -760,6 +850,12 @@ def _timestamp_violations(content: str) -> list[str]:
     violations.extend(
         f"Timestamp not on Jan 1: {text}" for text in timestamps.dates_to_move
     )
+    # Neither the parser nor the rewrite reads it, so it is left as it is:
+    # a Unix time, or a local format, still holds the date and the time
+    violations.extend(
+        f"Timestamp not understood, remove or fix it: {text}"
+        for text in timestamps.not_understood
+    )
     return violations
 
 
@@ -769,6 +865,10 @@ def check_kml_obfuscated(filepath: Path) -> list[str]:
     Returns a list of violation descriptions (empty means the file is clean).
     """
     violations: list[str] = []
+    if _is_kmz(filepath):
+        # Its dates are inside a compressed member, which neither the
+        # rewrite nor this check reads
+        return [f"KMZ archive: {KMZ_REFUSAL}"]
     try:
         content = filepath.read_text(encoding="utf-8")
     except (UnicodeDecodeError, OSError) as e:
@@ -829,12 +929,14 @@ def check_kml_obfuscated(filepath: Path) -> list[str]:
     # Coordinates cannot hold a date the parser would accept, and skipping
     # them saves most of the time the patterns take on a track
     without_coordinates = _with_markup_dropped(COORDINATES_PATTERN.sub("", content))
-    stray_dates = _find_stray_dates(without_coordinates)
+    unescaped = _with_unescaped(without_coordinates)
+    epochs = _find_stray_epochs(unescaped)
+    stray_dates = _stray_dates_of(unescaped, epochs)
     # A Unix time on January 1st fails for its time of day
-    epochs = set(_find_stray_epochs(_with_unescaped(without_coordinates)))
+    epoch_set = set(epochs)
     violations.extend(
         f"Unix time not at midnight on Jan 1, remove it: {text}"
-        if text in epochs
+        if text in epoch_set
         else f"Date not on Jan 1: {text}"
         for text in stray_dates
     )
@@ -842,7 +944,7 @@ def check_kml_obfuscated(filepath: Path) -> list[str]:
     # takes one out: it has to go by hand
     violations.extend(
         f"Weekday gives the day of the flight away, remove it: {text}"
-        for text in find_weekday_tokens(_with_unescaped(without_coordinates))
+        for text in find_weekday_tokens(unescaped)
     )
     violations.extend(
         f"Time of day gives the flight away, remove it: {text}"

@@ -24,8 +24,14 @@ export function formatKm(metres: number): string {
   return `${formatNumber(km, km < 10 ? 1 : 0)} km`;
 }
 
-/** The unit of the heights of a section */
-export function heightUnit(section: CrossSection): string {
+/**
+ * The unit of the heights of a section, or of a flight profile
+ * (ui/flightProfile.ts), which are above the ground always
+ */
+export function heightUnit(
+  section: Pick<CrossSection, "fromTerrain"> &
+    Partial<Pick<CrossSection, "reference">>,
+): string {
   if (section.reference === "msl") return "ft MSL";
   return section.fromTerrain ? "ft AGL" : "ft above field";
 }

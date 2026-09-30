@@ -1,15 +1,19 @@
 """Tests for the parser module (end-to-end KML parsing)."""
 
 import logging
+import zipfile
+from pathlib import Path
 
 import pytest
 
 from kml_heatmap.exceptions import KMLParseError
 from kml_heatmap.helpers import parse_timestamp_epoch
-from kml_heatmap.parser import _parse_kml_tree
+from kml_heatmap.parser import _parse_kml_tree, parse_size
 from kml_heatmap.parser_cache import get_cache_key
 from kml_heatmap.types import TrackPoint
 from tests.conftest import parse_kml_coordinates
+
+MB = 1024 * 1024
 
 KML_HEADER = (
     '<?xml version="1.0" encoding="UTF-8"?>\n'
@@ -127,7 +131,7 @@ class TestParseKmlCoordinates:
         cache_path.write_text("{not json", encoding="utf-8")
         assert parse_kml_coordinates(kml_file) == first
         assert get_cache_key(kml_file) == (cache_path, True)
-        assert cache_path.read_text(encoding="utf-8").startswith("{")
+        assert cache_path.read_bytes().startswith(b"\x28\xb5\x2f\xfd")
         assert parse_kml_coordinates(kml_file) == first
 
     def test_invalid_xml_raises(self, tmp_path):
@@ -310,7 +314,8 @@ class TestParseKmlCoordinates:
             '<?xml version="1.0"?><!DOCTYPE kml [<!ENTITY lol0 "lol">'
             f"{entities}]><kml><name>&lol9;</name></kml>"
         )
-        with pytest.raises(KMLParseError, match="XML parsing error"):
+        # libxml2 stops it itself, or the declarations are refused after
+        with pytest.raises(KMLParseError, match=r"XML parsing error|Entity"):
             parse_kml_coordinates(_write(tmp_path, "lol.kml", kml))
 
     def test_external_entities_are_not_resolved(self, tmp_path):
@@ -323,8 +328,30 @@ class TestParseKmlCoordinates:
             "<coordinates>8.5,50.0,300 9.0,51.0,400</coordinates>"
             "</LineString></Placemark></kml>"
         )
-        _, _, metadata = parse_kml_coordinates(_write(tmp_path, "xxe.kml", kml))
-        assert "do not read" not in str(metadata)
+        with pytest.raises(KMLParseError, match="Entity declarations") as failure:
+            parse_kml_coordinates(_write(tmp_path, "xxe.kml", kml))
+        assert "do not read" not in str(failure.value)
+
+    def test_any_entity_declaration_is_refused(self, tmp_path):
+        """Not left to the limits of whichever libxml2 lxml was built with."""
+        kml = (
+            '<?xml version="1.0"?><!DOCTYPE kml [<!ENTITY field "EDAQ">]>'
+            "<kml><Placemark><name>&field;</name><LineString>"
+            "<coordinates>8.5,50.0,300 9.0,51.0,400</coordinates>"
+            "</LineString></Placemark></kml>"
+        )
+        with pytest.raises(KMLParseError, match="Entity declarations"):
+            parse_kml_coordinates(_write(tmp_path, "entity.kml", kml))
+
+    def test_a_doctype_without_entities_is_read(self, tmp_path):
+        kml = (
+            '<?xml version="1.0"?><!DOCTYPE kml [<!ELEMENT kml ANY>]>'
+            "<kml><Placemark><name>EDAQ</name><LineString>"
+            "<coordinates>8.5,50.0,300 9.0,51.0,400</coordinates>"
+            "</LineString></Placemark></kml>"
+        )
+        coordinates, _, _ = parse_kml_coordinates(_write(tmp_path, "dtd.kml", kml))
+        assert len(coordinates) == 2
 
     def test_filename_is_parsed_once_per_file(self, tmp_path, capsys):
         kml = LINESTRING_KML.replace(
@@ -812,3 +839,214 @@ class TestMultiTrackFile:
         assert [len(path) for path in paths] == [6]
         assert metadata[0]["timestamp"] == "2026-05-01T10:00:00Z"
         assert metadata[0]["end_timestamp"] == "2026-05-01T11:02:00Z"
+
+
+KMZ_TRACK = (
+    '<?xml version="1.0"?><kml xmlns="http://www.opengis.net/kml/2.2">'
+    "<Placemark><name>EDAQ - EDAQ</name><TimeStamp><when>2025-01-01T00:00:00Z"
+    "</when></TimeStamp><LineString><coordinates>"
+    "12.05,51.55,110 12.10,51.60,500 12.15,51.65,900"
+    "</coordinates></LineString></Placemark></kml>"
+)
+
+
+def _kmz(path, members):
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
+        for name, data in members.items():
+            archive.writestr(name, data)
+    return str(path)
+
+
+class TestKmz:
+    def test_reads_the_kml_member(self, tmp_path):
+        kmz = _kmz(
+            tmp_path / "1_DEAGJ_DA20.kmz",
+            {"files/icon.png": b"png", "doc.kml": KMZ_TRACK},
+        )
+
+        coordinates, paths, metadata = parse_kml_coordinates(kmz)
+
+        assert len(coordinates) == 3
+        assert len(paths) == 1
+        assert metadata[0]["aircraft_registration"] == "D-EAGJ"
+        assert metadata[0]["filename"] == "1_DEAGJ_DA20.kmz"
+
+    def test_the_same_as_the_kml_itself(self, tmp_path):
+        kml = _write(tmp_path, "track.kml", KMZ_TRACK)
+        kmz = _kmz(tmp_path / "track.kmz", {"doc.kml": KMZ_TRACK})
+
+        assert parse_kml_coordinates(kmz)[:2] == parse_kml_coordinates(kml)[:2]
+
+    def test_an_archive_without_a_kml_file_is_refused(self, tmp_path):
+        kmz = _kmz(tmp_path / "empty.kmz", {"readme.txt": "nothing"})
+        with pytest.raises(KMLParseError, match=r"holds no \.kml file"):
+            _parse_kml_tree(kmz)
+
+    def test_a_nested_archive_is_refused(self, tmp_path):
+        inner = _kmz(tmp_path / "inner.kmz", {"doc.kml": KMZ_TRACK})
+        kmz = _kmz(
+            tmp_path / "outer.kmz",
+            {"doc.kml": KMZ_TRACK, "inner.kmz": Path(inner).read_bytes()},
+        )
+        with pytest.raises(KMLParseError, match="another archive"):
+            _parse_kml_tree(kmz)
+
+    def test_a_member_too_large_is_refused_before_it_is_read(
+        self, tmp_path, monkeypatch
+    ):
+        monkeypatch.setattr("kml_heatmap.parser.MAX_KML_FILE_SIZE", 100)
+        kmz = _kmz(tmp_path / "big.kmz", {"doc.kml": KMZ_TRACK})
+        with pytest.raises(KMLParseError, match="too large"):
+            _parse_kml_tree(kmz)
+
+    def test_a_member_larger_than_it_claims_is_refused(self, tmp_path, monkeypatch):
+        """The size in the directory is the archive's word, not a limit."""
+        monkeypatch.setattr("kml_heatmap.parser.MAX_KML_FILE_SIZE", 100)
+        kmz = _kmz(tmp_path / "liar.kmz", {"doc.kml": KMZ_TRACK})
+        real = zipfile.ZipFile.infolist
+
+        def claim_small(archive):
+            infos = real(archive)
+            for info in infos:
+                info.file_size = 10
+            return infos
+
+        monkeypatch.setattr(zipfile.ZipFile, "infolist", claim_small)
+        with pytest.raises(KMLParseError, match=r"larger than it claims|KMZ"):
+            _parse_kml_tree(kmz)
+
+    def test_skips_the_files_macos_adds(self, tmp_path):
+        """Finder zips a folder with a resource fork per file: a few bytes of
+        its own data under the name of the real file."""
+        kmz = _kmz(
+            tmp_path / "track.kmz",
+            {
+                "__MACOSX/._doc.kml": b"\x00\x05\x16\x07",
+                "._doc.kml": b"\x00\x05\x16\x07",
+                "track/._flight.kml": b"\x00\x05\x16\x07",
+                "__MACOSX/old.kmz": b"",
+                "track/flight.kml": KMZ_TRACK,
+            },
+        )
+
+        assert len(parse_kml_coordinates(kmz)[1]) == 1
+
+    def test_prefers_the_doc_kml_at_the_root(self, tmp_path):
+        kmz = _kmz(
+            tmp_path / "track.kmz",
+            {
+                "files/other.kml": "<kml/>",
+                "files/doc.kml": "<kml/>",
+                "doc.kml": KMZ_TRACK,
+            },
+        )
+
+        assert len(parse_kml_coordinates(kmz)[1]) == 1
+
+    def test_an_encrypted_member_is_refused(self, tmp_path):
+        kmz = Path(_kmz(tmp_path / "locked.kmz", {"doc.kml": KMZ_TRACK}))
+        data = bytearray(kmz.read_bytes())
+        # The flag of a member that needs a password, in its local header and
+        # in the central directory
+        data[6] |= 0x1
+        data[data.index(b"PK\x01\x02") + 8] |= 0x1
+        kmz.write_bytes(bytes(data))
+
+        with pytest.raises(KMLParseError, match="is encrypted"):
+            _parse_kml_tree(str(kmz))
+
+    def test_an_unknown_compression_is_refused(self, tmp_path, monkeypatch):
+        kmz = _kmz(tmp_path / "deflate64.kmz", {"doc.kml": KMZ_TRACK})
+        real = zipfile.ZipFile.infolist
+
+        def deflate64(archive):
+            infos = real(archive)
+            for info in infos:
+                info.compress_type = 9
+            return infos
+
+        monkeypatch.setattr(zipfile.ZipFile, "infolist", deflate64)
+        with pytest.raises(KMLParseError, match="uses a compression"):
+            _parse_kml_tree(kmz)
+
+    def test_a_damaged_member_is_refused(self, tmp_path):
+        kmz = Path(_kmz(tmp_path / "damaged.kmz", {"doc.kml": KMZ_TRACK}))
+        with zipfile.ZipFile(kmz) as archive:
+            info = archive.infolist()[0]
+        data = bytearray(kmz.read_bytes())
+        # Past the local header: a deflate block of the reserved type
+        start = info.header_offset + 30 + len(info.filename) + len(info.extra)
+        data[start : start + 3] = b"\xff\xff\xff"
+        kmz.write_bytes(bytes(data))
+
+        with pytest.raises(KMLParseError, match="Not a valid KMZ archive"):
+            _parse_kml_tree(str(kmz))
+
+    def test_not_a_zip_archive(self, tmp_path):
+        kmz = _write(tmp_path, "fake.kmz", KMZ_TRACK)
+        with pytest.raises(KMLParseError, match="Not a valid KMZ archive"):
+            _parse_kml_tree(kmz)
+
+    def test_the_cache_key_covers_the_archive(self, tmp_path):
+        """The key hashes the file itself: another archive, another entry."""
+        first = _kmz(tmp_path / "a.kmz", {"doc.kml": KMZ_TRACK})
+        second = _kmz(tmp_path / "b.kmz", {"doc.kml": KMZ_TRACK})
+        (tmp_path / "c").mkdir()
+        # The name of the first, the content of neither
+        changed = _kmz(
+            tmp_path / "c" / "a.kmz", {"doc.kml": KMZ_TRACK.replace("900", "950")}
+        )
+        cache = tmp_path / "cache"
+        keys = {str(get_cache_key(path, cache)[0]) for path in (first, second, changed)}
+        assert len(keys) == 3
+
+
+class TestParseSize:
+    """The KML a parse reads, which the pool sizing and gates count."""
+
+    def test_a_kml_file_counts_with_its_size(self, tmp_path):
+        kml = _write(tmp_path, "track.kml", KMZ_TRACK)
+        assert parse_size(kml) == Path(kml).stat().st_size
+
+    def test_a_missing_file_counts_as_empty(self, tmp_path):
+        assert parse_size(str(tmp_path / "missing.kmz")) == 0
+
+    def test_a_kmz_counts_with_its_document_uncompressed(self, tmp_path, monkeypatch):
+        # A megabyte of KML compresses to a few kilobytes
+        kmz = _kmz(tmp_path / "track.kmz", {"doc.kml": b" " * MB})
+        assert Path(kmz).stat().st_size < MB // 100
+        # Only the central directory is read, no member is decompressed
+        monkeypatch.setattr(
+            zipfile.ZipFile, "open", lambda *_: pytest.fail("decompressed")
+        )
+        assert parse_size(kmz) == MB
+
+    def test_the_member_the_parser_picks(self, tmp_path):
+        kmz = _kmz(
+            tmp_path / "track.kmz",
+            {
+                "__MACOSX/._doc.kml": b"x" * 10,
+                "other.kml": b"x" * 20,
+                "files/icon.png": b"x" * 40,
+                "doc.kml": b"x" * 30,
+            },
+        )
+        assert parse_size(kmz) == 30
+
+    def test_capped_at_the_largest_document_the_parse_reads(
+        self, tmp_path, monkeypatch
+    ):
+        monkeypatch.setattr("kml_heatmap.parser.MAX_KML_FILE_SIZE", 100)
+        kmz = _kmz(tmp_path / "big.kmz", {"doc.kml": b"x" * 1000})
+        assert parse_size(kmz) == 100
+
+    @pytest.mark.parametrize(
+        "members", [None, {"readme.txt": "nothing"}], ids=["not a zip", "no kml"]
+    )
+    def test_an_archive_the_parse_refuses_counts_with_its_size(self, tmp_path, members):
+        path = tmp_path / "broken.kmz"
+        if members is None:
+            path.write_bytes(b"not a zip archive")
+        else:
+            _kmz(path, members)
+        assert parse_size(str(path)) == path.stat().st_size

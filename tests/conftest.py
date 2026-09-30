@@ -61,7 +61,8 @@ class FlatTiles:
 
 def pytest_configure(config):
     """Point the cache at a private directory before kml_heatmap is imported."""
-    global _TEST_CACHE_DIR
+    # Set once per session, before any test runs, and read at its end
+    global _TEST_CACHE_DIR  # noqa: PLW0603
     _TEST_CACHE_DIR = Path(tempfile.mkdtemp(prefix="kml_heatmap_test_"))
     os.environ["KML_HEATMAP_CACHE_DIR"] = str(_TEST_CACHE_DIR)
 
@@ -69,7 +70,7 @@ def pytest_configure(config):
 def missing_frontend_build():
     """The files of `npm run build` that kml_heatmap/static/ lacks.
 
-    Read at call time, from the module, like ``bundle_is_available`` does.
+    Read at call time, from the module, like ``missing_build_files`` does.
     """
     from kml_heatmap import site_assets
 
@@ -135,10 +136,11 @@ def no_network(monkeypatch):
     """
 
     def _refuse(*args, **kwargs):
-        raise AssertionError("Unexpected network access through urlopen in tests")
+        raise AssertionError("Unexpected network access in tests")
 
     monkeypatch.setattr("kml_heatmap.airport_lookup.urlopen", _refuse)
-    monkeypatch.setattr("kml_heatmap.terrain.urlopen", _refuse)
+    # The tiles are fetched over a connection of http.client, not urlopen
+    monkeypatch.setattr("kml_heatmap.terrain.HTTPSConnection", _refuse)
 
 
 @pytest.fixture(autouse=True)
@@ -173,8 +175,7 @@ def reset_airport_cache():
     import kml_heatmap.airport_lookup as airport_lookup_module
 
     def reset():
-        airport_lookup_module._airport_cache = None
-        airport_lookup_module._runway_cache = None
+        airport_lookup_module.databases.reset()
         airport_lookup_module._clear_download_failure()
         airport_lookup_module._clear_download_failure(
             airport_lookup_module._runways_csv()

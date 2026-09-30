@@ -27,9 +27,7 @@ The files are written into the staging directories of a ``SiteOutput`` (see
 """
 
 import json
-import logging
 import math
-import os
 import shutil
 from concurrent.futures import (
     FIRST_COMPLETED,
@@ -52,59 +50,46 @@ from .export_writers import (
     export_airports_data,
     export_metadata,
     exported_airport_names,
-    exported_country_codes,
 )
 from .landings import detect_landings
 from .logger import logger
 from .path_content import (
-    PATH_ID_BITS,
     assign_path_ids,
     drop_duplicate_paths,
     exported_contents,
     is_exportable_path,
-    path_content_id,
 )
-from .segment_codec import FORMAT_VERSION, encode_ground, encode_rows, encode_start
-from .site_assets import available_country_flags
-from .site_output import STABLE_MTIMES_ENV, STAGING_PREFIX, YEAR_FILE, SiteOutput
+from .segment_codec import (
+    FORMAT_VERSION,
+    SPEED,
+    encode_ground,
+    encode_rows,
+    encode_start,
+)
+from .site_output import YEAR_FILE
 from .terrain import (
     elevations_by_coordinate,
     ground_profile_ft,
     sample_path_elevations,
 )
-from .workers import init_worker
+from .workers import default_worker_count, init_worker
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
+    from .airports import AirportData
     from .landings import FlightLandings
     from .terrain import PointElevations, TileSource
-    from .types import (
-        AirportData,
-        FlightPathGroup,
-        PathMetadata,
-        YearFileHeader,
-    )
+    from .types import FlightPathGroup, PathMetadata, YearFileHeader
 
-# What moved to path_content and site_output is exported here as well, for
-# the callers that import it from here
 __all__ = [
     "MIN_PATHS_PER_CHUNK",
-    "PATH_ID_BITS",
-    "STABLE_MTIMES_ENV",
-    "STAGING_PREFIX",
     "ChunkResult",
     "ExportResult",
     "ExportSelection",
     "GroundspeedRange",
-    "SiteOutput",
     "YearExportResult",
-    "assign_path_ids",
-    "drop_duplicate_paths",
     "export_all_data",
-    "exported_contents",
-    "is_exportable_path",
-    "path_content_id",
     "process_year_chunk",
     "select_exported_paths",
 ]
@@ -115,8 +100,6 @@ MIN_PATHS_PER_CHUNK = 50
 # Chunks handed to the process pool ahead of time, per worker
 MAX_QUEUED_CHUNKS_PER_WORKER = 2
 JSON_SEPARATORS = (",", ":")
-# Segment row layout: [lat, lon, altitude_ft, groundspeed_knots, time?]
-SEGMENT_SPEED_INDEX = 3
 
 
 @dataclass
@@ -168,9 +151,6 @@ class ExportResult:
     """Everything ``export_all_data`` produced."""
 
     years: list[int]
-    #: ISO codes of the countries the exported airports are in, for the
-    #: flags the site publishes
-    countries: list[str] = field(default_factory=list)
     #: The id of every exported path, by its index in the input (see
     #: ``assign_path_ids``), for the link previews
     path_ids: dict[int, int] = field(default_factory=dict)
@@ -324,9 +304,7 @@ def process_year_chunk(
                 + json.dumps(segments, separators=JSON_SEPARATORS)
             )
 
-            speeds = [
-                row[SEGMENT_SPEED_INDEX] for row in rows if row[SEGMENT_SPEED_INDEX] > 0
-            ]
+            speeds = [row[SPEED] for row in rows if row[SPEED] > 0]
             if speeds:
                 groundspeed.include(min(speeds), max(speeds))
             path_count += 1
@@ -481,24 +459,131 @@ def _plan_chunks(
     return plans
 
 
-def _run_chunk(
+# The arguments of process_year_chunk, in its order
+type _ChunkArguments = tuple[
+    int,
+    FlightPathGroup,
+    list[PathMetadata],
+    list[int | None],
+    str,
+    int,
+    frozenset[str] | None,
+    list[PointElevations | None],
+    list[FlightLandings | None],
+]
+
+
+@dataclass
+class _ChunkJob:
+    """What every chunk of one export shares: the paths and where they go."""
+
+    all_path_groups: FlightPathGroup
+    all_path_metadata: list[PathMetadata]
+    output_dir: str
+    airport_names: frozenset[str] | None
+    #: The chunk indices of every year, for the file names and the cleanup
+    parts_per_year: dict[int, list[int]]
+
+    def arguments(self, plan: _ChunkPlan) -> _ChunkArguments:
+        """The arguments of ``process_year_chunk`` for ``plan``."""
+        return (
+            plan.year,
+            [self.all_path_groups[i] for i in plan.path_indices],
+            [self.all_path_metadata[i] for i in plan.path_indices],
+            plan.path_ids,
+            self.output_dir,
+            plan.index,
+            self.airport_names,
+            plan.elevations,
+            plan.landings,
+        )
+
+    def describe(self, plan: _ChunkPlan) -> str:
+        """The chunk as the progress lines name it."""
+        parts = len(self.parts_per_year[plan.year])
+        if parts == 1:
+            return f"Year {plan.year}"
+        return f"Year {plan.year} (part {plan.index + 1}/{parts})"
+
+
+def _fail(
+    job: _ChunkJob,
     plan: _ChunkPlan,
-    all_path_groups: FlightPathGroup,
-    all_path_metadata: list[PathMetadata],
-    output_dir: str,
-    airport_names: frozenset[str] | None,
-) -> ChunkResult:
-    return process_year_chunk(
-        plan.year,
-        [all_path_groups[i] for i in plan.path_indices],
-        [all_path_metadata[i] for i in plan.path_indices],
-        plan.path_ids,
-        output_dir,
-        plan.index,
-        airport_names,
-        plan.elevations,
-        plan.landings,
+    exc: Exception,
+    executor: Executor | None = None,
+) -> RuntimeError:
+    """Clean up after a chunk that failed; the error to raise for it."""
+    if executor is not None:
+        # Chunks that are still running (or already handed to a worker)
+        # would write their fragments after the cleanup below
+        executor.shutdown(wait=True, cancel_futures=True)
+    for year, indices in job.parts_per_year.items():
+        _remove_parts(job.output_dir, year, indices)
+    if isinstance(exc, OSError | KMLHeatmapError | BrokenProcessPool):
+        # Expected failures (a full disk, a worker killed for running out
+        # of memory) are reported in one line
+        logger.debug("Error processing year %s", plan.year, exc_info=exc)
+    else:
+        logger.exception("  Error processing year %s", plan.year)
+    return RuntimeError(f"Failed to process year {plan.year}: {exc}")
+
+
+def _run_single(job: _ChunkJob, plan: _ChunkPlan) -> list[ChunkResult]:
+    """Run the only chunk of an export in this process."""
+    try:
+        result = process_year_chunk(*job.arguments(plan))
+    except Exception as exc:
+        raise _fail(job, plan, exc) from exc
+    logger.info(
+        "  [1/1] %s: %s points", job.describe(plan), f"{result.original_points:,}"
     )
+    return [result]
+
+
+def _run_pooled(
+    job: _ChunkJob, plans: list[_ChunkPlan], max_workers: int
+) -> list[ChunkResult]:
+    """Run the chunks in a process pool, a few of them queued at a time."""
+    chunk_results: list[ChunkResult] = []
+    workers = max(1, min(len(plans), max_workers))
+    with ProcessPoolExecutor(
+        max_workers=workers,
+        initializer=init_worker,
+        initargs=(logger.getEffectiveLevel(),),
+    ) as executor:
+        # Submitting every chunk at once would pickle the whole dataset into
+        # the executor's queue while the main process still holds it; a
+        # bounded number of chunks is in flight at any time
+        pending: dict[Future[ChunkResult], _ChunkPlan] = {}
+        queued = iter(plans)
+
+        def submit_next() -> None:
+            plan = next(queued, None)
+            if plan is not None:
+                pending[executor.submit(process_year_chunk, *job.arguments(plan))] = (
+                    plan
+                )
+
+        for _ in range(workers * MAX_QUEUED_CHUNKS_PER_WORKER):
+            submit_next()
+        while pending:
+            done, _ = wait(pending, return_when=FIRST_COMPLETED)
+            for future in done:
+                plan = pending.pop(future)
+                try:
+                    result = future.result()
+                except Exception as exc:
+                    raise _fail(job, plan, exc, executor) from exc
+                chunk_results.append(result)
+                logger.info(
+                    "  [%d/%d] %s: %s points",
+                    len(chunk_results),
+                    len(plans),
+                    job.describe(plan),
+                    f"{result.original_points:,}",
+                )
+                submit_next()
+    return chunk_results
 
 
 def _export_chunks(
@@ -514,96 +599,16 @@ def _export_chunks(
     parts_per_year: dict[int, list[int]] = {}
     for plan in plans:
         parts_per_year.setdefault(plan.year, []).append(plan.index)
+    job = _ChunkJob(
+        all_path_groups, all_path_metadata, output_dir, airport_names, parts_per_year
+    )
 
-    def describe(plan: _ChunkPlan) -> str:
-        parts = len(parts_per_year[plan.year])
-        if parts == 1:
-            return f"Year {plan.year}"
-        return f"Year {plan.year} (part {plan.index + 1}/{parts})"
-
-    def fail(
-        plan: _ChunkPlan, exc: Exception, executor: Executor | None = None
-    ) -> RuntimeError:
-        if executor is not None:
-            # Chunks that are still running (or already handed to a worker)
-            # would write their fragments after the cleanup below
-            executor.shutdown(wait=True, cancel_futures=True)
-        for year, indices in parts_per_year.items():
-            _remove_parts(output_dir, year, indices)
-        if isinstance(exc, OSError | KMLHeatmapError | BrokenProcessPool):
-            # Expected failures (a full disk, a worker killed for running out
-            # of memory) are reported in one line
-            logger.debug("Error processing year %s", plan.year, exc_info=exc)
-        else:
-            logger.exception("  Error processing year %s", plan.year)
-        return RuntimeError(f"Failed to process year {plan.year}: {exc}")
-
-    chunk_results: list[ChunkResult] = []
     if len(plans) == 1:
-        plan = plans[0]
-        try:
-            result = _run_chunk(
-                plan, all_path_groups, all_path_metadata, output_dir, airport_names
-            )
-        except Exception as exc:
-            raise fail(plan, exc) from exc
-        chunk_results.append(result)
-        logger.info(
-            "  [1/1] %s: %s points", describe(plan), f"{result.original_points:,}"
-        )
+        chunk_results = _run_single(job, plans[0])
     elif plans:
-        debug = logger.isEnabledFor(logging.DEBUG)
-        workers = max(1, min(len(plans), max_workers))
-        with ProcessPoolExecutor(
-            max_workers=workers,
-            initializer=init_worker,
-            initargs=(debug,),
-        ) as executor:
-            # Submitting every chunk at once would pickle the whole dataset
-            # into the executor's queue while the main process still holds
-            # it; a bounded number of chunks is in flight at any time
-            pending: dict[Future[ChunkResult], _ChunkPlan] = {}
-            queued = iter(plans)
-
-            def submit_next() -> None:
-                plan = next(queued, None)
-                if plan is not None:
-                    pending[
-                        executor.submit(
-                            process_year_chunk,
-                            plan.year,
-                            [all_path_groups[i] for i in plan.path_indices],
-                            [all_path_metadata[i] for i in plan.path_indices],
-                            plan.path_ids,
-                            output_dir,
-                            plan.index,
-                            airport_names,
-                            plan.elevations,
-                            plan.landings,
-                        )
-                    ] = plan
-
-            for _ in range(workers * MAX_QUEUED_CHUNKS_PER_WORKER):
-                submit_next()
-            completed = 0
-            while pending:
-                done, _ = wait(pending, return_when=FIRST_COMPLETED)
-                for future in done:
-                    plan = pending.pop(future)
-                    try:
-                        result = future.result()
-                    except Exception as exc:
-                        raise fail(plan, exc, executor) from exc
-                    chunk_results.append(result)
-                    completed += 1
-                    logger.info(
-                        "  [%d/%d] %s: %s points",
-                        completed,
-                        len(plans),
-                        describe(plan),
-                        f"{result.original_points:,}",
-                    )
-                    submit_next()
+        chunk_results = _run_pooled(job, plans, max_workers)
+    else:
+        chunk_results = []
 
     year_results = []
     for year in sorted(parts_per_year):
@@ -621,6 +626,8 @@ def export_all_data(
     exportable: Sequence[bool] | None = None,
     terrain: TileSource | None = None,
     selection: ExportSelection | None = None,
+    *,
+    available_flags: Sequence[str],
 ) -> ExportResult:
     """Write the data files into ``output_dir``.
 
@@ -631,7 +638,12 @@ def export_all_data(
     them already; ``unique_airports`` should come from the paths of that
     selection. ``terrain`` is where the ground under the flights comes from
     (see ``kml_heatmap.terrain``); without it the year files carry no ground
-    and the page takes it from the airfields.
+    and the page takes it from the airfields. ``available_flags`` are the
+    countries the site publishes a flag for (see
+    ``site_assets.available_country_flags``), which metadata.json lists.
+    They have no default: without them the stats and Wrapped show country
+    codes where the site has flags, and a caller that forgot them would not
+    notice.
     """
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
@@ -664,7 +676,7 @@ def export_all_data(
         if path_ids
         else {}
     )
-    max_workers = os.process_cpu_count() or 4
+    max_workers = default_worker_count()
     plans = _plan_chunks(paths_by_year, path_ids, max_workers, elevations, landings)
 
     logger.info(
@@ -693,7 +705,6 @@ def export_all_data(
 
     years = [result.year for result in year_results]
     _, airports_bytes = export_airports_data(unique_airports, str(output_path))
-    countries = exported_country_codes(unique_airports)
     _, metadata_bytes = export_metadata(
         groundspeed.min_knots or 0.0,
         groundspeed.max_knots,
@@ -701,10 +712,10 @@ def export_all_data(
         year_file_bytes,
         aircraft_models,
         str(output_path),
-        available_country_flags(countries),
+        list(available_flags),
     )
 
     total_size = airports_bytes + metadata_bytes + sum(year_file_bytes.values())
     logger.info("  Total data size: %.1f KB", total_size / 1024)
 
-    return ExportResult(years=years, countries=countries, path_ids=path_ids)
+    return ExportResult(years=years, path_ids=path_ids)

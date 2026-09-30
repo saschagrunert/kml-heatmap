@@ -24,13 +24,10 @@ tracks always give the same bytes, so an image is cached under a hash of
 what it draws and of this module (see ``PreviewJob.key``).
 """
 
-from __future__ import annotations
-
 import contextlib
 import hashlib
 import heapq
 import html
-import logging
 import math
 import os
 import struct
@@ -49,8 +46,10 @@ from urllib.parse import quote, urlsplit
 
 from .cache import CACHE_DIR, atomic_bytes_write
 from .export_pipeline import build_path_info
+from .geometry import web_mercator
 from .logger import logger
-from .workers import init_worker
+from .png import PNG_SIGNATURE, chunk
+from .workers import default_worker_count, init_worker
 
 if TYPE_CHECKING:
     from collections.abc import Collection, Iterable, Mapping, Sequence
@@ -133,8 +132,6 @@ MAX_FIX_GAP_S = 60.0
 #: A cruise of 100 kt, the pace of a stretch without a usable time
 REFERENCE_SPEED_MS = 51.4
 EARTH_CIRCUMFERENCE_M = 40_075_016.686
-#: Web Mercator ends here
-MAX_LATITUDE = 85.051129
 #: Heat is added up in whole milliseconds per pixel, which keeps the blur
 #: exact
 HEAT_UNIT = 1000
@@ -146,7 +143,6 @@ TRACK_STRIDE = 3
 CACHE_MAX_AGE_DAYS = 30
 PREVIEW_CACHE_DIR = CACHE_DIR / "previews"
 
-_PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 _PALETTE_SIZE = 256
 
 
@@ -187,14 +183,6 @@ def encode_path_id(path_id: int) -> str:
             return text
 
 
-def _mercator(lat: float, lon: float) -> tuple[float, float]:
-    phi = math.radians(max(-MAX_LATITUDE, min(MAX_LATITUDE, lat)))
-    return (
-        (lon + 180.0) / 360.0,
-        (1.0 - math.log(math.tan(math.pi / 4 + phi / 2)) / math.pi) / 2.0,
-    )
-
-
 def track_of(path: FlightPath) -> array[float]:
     """A path as the images draw it (see ``TRACK_STRIDE``).
 
@@ -204,7 +192,7 @@ def track_of(path: FlightPath) -> array[float]:
     track: array[float] = array("d")
     previous: tuple[float, float, float | None] | None = None
     for point in path:
-        x, y = _mercator(point.lat, point.lon)
+        x, y = web_mercator(point.lat, point.lon)
         seconds = 0.0
         if previous is not None:
             x0, y0, ts0 = previous
@@ -389,15 +377,6 @@ def _indices(rows: Sequence[Sequence[int]]) -> list[bytes]:
     return [bytes(map(entry_of, row)) if any(row) else blank for row in rows]
 
 
-def _chunk(kind: bytes, data: bytes) -> bytes:
-    return (
-        struct.pack(">I", len(data))
-        + kind
-        + data
-        + struct.pack(">I", zlib.crc32(kind + data))
-    )
-
-
 def _encode_png(rows: Sequence[bytes]) -> bytes:
     """An 8-bit palette PNG of the rows; no time, text or other chunk."""
     header = struct.pack(">IIBBBBB", PREVIEW_WIDTH, PREVIEW_HEIGHT, 8, 3, 0, 0, 0)
@@ -405,11 +384,11 @@ def _encode_png(rows: Sequence[bytes]) -> bytes:
     raw = b"".join(b"\x00" + row for row in rows)
     return b"".join(
         (
-            _PNG_SIGNATURE,
-            _chunk(b"IHDR", header),
-            _chunk(b"PLTE", _palette()),
-            _chunk(b"IDAT", zlib.compress(raw, 9)),
-            _chunk(b"IEND", b""),
+            PNG_SIGNATURE,
+            chunk(b"IHDR", header),
+            chunk(b"PLTE", _palette()),
+            chunk(b"IDAT", zlib.compress(raw, 9)),
+            chunk(b"IEND", b""),
         )
     )
 
@@ -463,7 +442,7 @@ def _cached(entry: Path) -> bytes | None:
         return None
     with contextlib.suppress(OSError):
         os.utime(entry)
-    return data if data.startswith(_PNG_SIGNATURE) else None
+    return data if data.startswith(PNG_SIGNATURE) else None
 
 
 def _store(entry: Path, data: bytes) -> None:
@@ -499,7 +478,7 @@ def _draw(missing: Mapping[Path, list[PreviewJob]], site_dir: Path) -> None:
     RuntimeError when an image cannot be drawn.
     """
     order = sorted(missing, key=lambda entry: missing[entry][0].points, reverse=True)
-    workers = min(len(order), os.process_cpu_count() or 4)
+    workers = min(len(order), default_worker_count())
 
     def finish(entry: Path, data: bytes) -> None:
         _store(entry, data)
@@ -522,7 +501,7 @@ def _draw(missing: Mapping[Path, list[PreviewJob]], site_dir: Path) -> None:
     with ProcessPoolExecutor(
         max_workers=workers,
         initializer=init_worker,
-        initargs=(logger.isEnabledFor(logging.DEBUG),),
+        initargs=(logger.getEffectiveLevel(),),
     ) as executor:
         futures = [
             (entry, executor.submit(render_preview, missing[entry][0].tracks))

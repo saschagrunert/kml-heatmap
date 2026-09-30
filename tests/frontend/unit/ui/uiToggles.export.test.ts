@@ -100,7 +100,6 @@ describe("UIToggles export and share", () => {
     deleteNavigatorProperty("share");
     deleteNavigatorProperty("canShare");
     deleteNavigatorProperty("clipboard");
-    vi.restoreAllMocks();
     vi.useRealTimers();
   });
 

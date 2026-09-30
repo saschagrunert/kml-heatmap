@@ -71,7 +71,7 @@ class TestGenerateTestData:
         # A <TimeStamp> alone gave every flight a start and no end, so no
         # duration, and the speed layer had no path average to fall back on
         name = generate_test_data.generate_kml_file(
-            1, "EDDF", "EDDM", "D-ABCD", "DA40", tmp_path
+            1, "EDDF", "EDDM", "D-ABCD", "DA40", tmp_path, "linestring"
         )
 
         _, paths, metadata = parse_kml_file(str(tmp_path / name))
@@ -94,6 +94,64 @@ class TestGenerateTestData:
         assert calculate_fallback_groundspeed(
             middle, distance_nm / KM_TO_NAUTICAL_MILES, seconds
         ) == pytest.approx(distance_nm / (seconds / 3600))
+
+    def test_a_gx_track_has_a_time_for_every_point(self, tmp_path):
+        """The default format, as SkyDemon writes it."""
+        name = generate_test_data.generate_kml_file(
+            1, "EDDF", "EDDM", "D-ABCD", "DA40", tmp_path
+        )
+
+        coordinates, paths, metadata = parse_kml_file(str(tmp_path / name))
+        assert len(coordinates) == 50
+        [path] = paths
+        times = [point.ts for point in path if point.ts is not None]
+        assert len(times) == len(path)
+        gaps = [b - a for a, b in pairwise(times)]
+        # Tens of seconds apart, at the groundspeed of a light aircraft
+        assert all(0 < gap < 300 for gap in gaps)
+        distance_nm = (
+            sum(
+                haversine_distance(a.lat, a.lon, b.lat, b.lon)
+                for a, b in pairwise(path)
+            )
+            * KM_TO_NAUTICAL_MILES
+        )
+        low, high = generate_test_data.GROUNDSPEED_KNOTS
+        knots = distance_nm / ((times[-1] - times[0]) / 3600)
+        assert low - 1 <= knots <= high + 1
+        assert metadata[0]["year"] == 2026
+
+    @pytest.mark.parametrize("kml_format", generate_test_data.FORMATS)
+    def test_the_same_seed_writes_the_same_files(
+        self, tmp_path, monkeypatch, kml_format
+    ):
+        contents = []
+        for run, seed in enumerate(("5", "5", "6")):
+            output = tmp_path / str(run)
+            monkeypatch.setattr(
+                sys,
+                "argv",
+                [
+                    "generate_test_data.py",
+                    "2",
+                    "-o",
+                    str(output),
+                    "--seed",
+                    seed,
+                    "--format",
+                    kml_format,
+                ],
+            )
+            generate_test_data.main()
+            contents.append([path.read_text() for path in sorted(output.iterdir())])
+        assert contents[0] == contents[1]
+        assert contents[0] != contents[2]
+
+    def test_an_unknown_format_is_refused(self, tmp_path):
+        with pytest.raises(ValueError, match="unknown format"):
+            generate_test_data.generate_kml_file(
+                1, "EDDF", "EDDM", "D-ABCD", "DA40", tmp_path, "csv"
+            )
 
     def test_reports_progress_every_thousand_files(self, tmp_path, monkeypatch, capsys):
         written = []

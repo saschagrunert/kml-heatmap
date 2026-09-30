@@ -6,8 +6,6 @@ writing leaves the previous site as it was. One run at a time writes to an
 output directory.
 """
 
-from __future__ import annotations
-
 import contextlib
 import errno
 import hashlib

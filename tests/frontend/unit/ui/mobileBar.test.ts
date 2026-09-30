@@ -185,7 +185,6 @@ describe("MobileBar", () => {
     document.body.replaceChildren();
     document.body.className = "";
     setWidth(1024);
-    vi.restoreAllMocks();
   });
 
   describe("mounting", () => {

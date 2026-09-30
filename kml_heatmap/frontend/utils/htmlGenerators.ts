@@ -48,30 +48,6 @@ export function pluralFlights(count: number): string {
   return pluralize(count, "flight");
 }
 
-/** An airport label split into its ICAO code and its name */
-export interface AirportLabel {
-  /** ICAO/IATA style code, empty when the label carries none */
-  code: string;
-  /** Airport name without the leading code */
-  name: string;
-}
-
-/**
- * Split a label such as "EDAQ Halle-Oppin" into its code and its name so the
- * two can be typeset differently. The code is the airport's own, which the
- * export writes (see airportCode in features/airports.ts) rather than one
- * guessed from the label here. A label that does not lead with it, or is
- * nothing else, keeps its full text as the name.
- */
-export function splitAirportName(label: string, code?: string): AirportLabel {
-  const trimmed = label.trim();
-  if (code && trimmed.startsWith(code + " ")) {
-    const name = trimmed.slice(code.length + 1).trim();
-    if (name) return { code, name };
-  }
-  return { code: "", name: trimmed };
-}
-
 export interface AirportCount {
   name: string;
   flight_count: number;
@@ -120,44 +96,6 @@ export function generateAirportPopupHtml(params: AirportPopupParams): string {
             <span class="popup-metric-value kh-popup-accent">${params.flightCount}</span>
         </div>
     </div>`;
-}
-
-/** The two surfaces that set a unit in small muted type */
-export type UnitClass = "stat-unit" | "kh-stats-lead-unit";
-
-/**
- * Mark the h and m of a flight time as units.
- *
- * Every other lead figure sets its unit in the small muted type ("4,745.5
- * nm"), so "47h 44m" has to do the same rather than shouting both letters at
- * full weight. The class differs per surface, hence the parameter, which is a
- * closed set rather than a string: it lands inside a class attribute, and a
- * caller reaching this with something it read from the data would be writing
- * markup through it.
- *
- * @param flightTime - Formatted time, e.g. "47h 44m"
- * @param unitClass - Class the h and m are wrapped in
- */
-export function markFlightTimeUnits(
-  flightTime: string,
-  unitClass: UnitClass,
-): string {
-  return escapeHtml(flightTime).replace(
-    /(\d+)\s*(h)\s*(\d+)\s*(m)/,
-    (_match, hours: string, hourUnit: string, mins: string, minUnit: string) =>
-      hours +
-      '<span class="' +
-      unitClass +
-      '">' +
-      hourUnit +
-      "</span> " +
-      mins +
-      '<span class="' +
-      unitClass +
-      '">' +
-      minUnit +
-      "</span>",
-  );
 }
 
 export interface SegmentPopupParams {

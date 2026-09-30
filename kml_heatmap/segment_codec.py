@@ -32,8 +32,6 @@ every flight in its path info (see ``kml_heatmap.landings``).
 be mismatched silently.
 """
 
-from __future__ import annotations
-
 from typing import TYPE_CHECKING
 
 from .types import COORDINATE_DECIMALS

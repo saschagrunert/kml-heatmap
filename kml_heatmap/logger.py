@@ -2,7 +2,9 @@
 
 DEBUG and INFO records go to stdout, WARNING and above go to stderr. The
 handlers look up ``sys.stdout``/``sys.stderr`` when a record is emitted, so
-redirected or captured streams are honored.
+redirected or captured streams are honored. The status symbols of the
+messages (a check mark, a warning sign) are written as they are to a
+terminal and in plain ASCII to anything else, such as a CI log or a file.
 """
 
 import logging
@@ -12,8 +14,12 @@ from typing import Any
 __all__ = [
     "logger",
     "set_debug_mode",
+    "set_log_level",
     "setup_logger",
 ]
+
+# What the symbols of the messages become where the stream is no terminal
+_ASCII_SYMBOLS = str.maketrans({"✓": "[ok]", "⚠": "[!]", "✗": "[x]", "📥": ">>"})
 
 
 class _BelowLevelFilter(logging.Filter):
@@ -39,9 +45,18 @@ class _SysStreamHandler(logging.StreamHandler):  # type: ignore[type-arg]
         return getattr(sys, self._stream_name)
 
     @stream.setter
-    def stream(self, value: Any) -> None:
+    def stream(self, _value: Any) -> None:
         # The stream is always resolved dynamically; ignore assignments.
         return
+
+    def format(self, record: logging.LogRecord) -> str:
+        """The record as text, its symbols in ASCII unless on a terminal."""
+        text = super().format(record)
+        try:
+            tty = bool(self.stream.isatty())
+        except AttributeError, ValueError:
+            tty = False
+        return text if tty else text.translate(_ASCII_SYMBOLS)
 
 
 def setup_logger(
@@ -75,10 +90,14 @@ def setup_logger(
 logger = setup_logger()
 
 
-def set_debug_mode(enabled: bool) -> None:
-    """Enable or disable debug logging globally."""
-    level = logging.DEBUG if enabled else logging.INFO
+def set_log_level(level: int) -> None:
+    """Log from ``level`` up: DEBUG, INFO (the default) or WARNING (--quiet)."""
     logger.setLevel(level)
     for handler in logger.handlers:
         if handler.level < logging.WARNING:
-            handler.setLevel(level)
+            handler.setLevel(min(level, logging.INFO))
+
+
+def set_debug_mode(enabled: bool) -> None:
+    """Enable or disable debug logging globally."""
+    set_log_level(logging.DEBUG if enabled else logging.INFO)

@@ -8,9 +8,16 @@ from hypothesis import strategies as st
 
 from kml_heatmap.geometry import (
     EARTH_RADIUS_KM,
+    KM_PER_DEGREE,
+    MAX_LATITUDE,
+    METRES_PER_DEGREE,
+    TERRAIN_MAX_LATITUDE,
     haversine_distance,
     longitude_difference,
+    planar_km,
+    planar_metres,
     true_bearing,
+    web_mercator,
 )
 
 latitudes = st.floats(min_value=-90.0, max_value=90.0)
@@ -104,3 +111,39 @@ class TestTrueBearing:
     def test_a_runway_is_narrower_eastward_further_north(self):
         """A degree of longitude is half as long at 60 degrees."""
         assert true_bearing(60.0, 8.0, 60.01, 8.02) == pytest.approx(45.0, abs=0.1)
+
+
+class TestSharedConstants:
+    def test_the_values_each_module_measured_with(self):
+        """Two degrees of latitude, and two edges of the map, on purpose."""
+        assert pytest.approx(111.19492664455873) == KM_PER_DEGREE
+        assert METRES_PER_DEGREE == 111_320.0
+        assert MAX_LATITUDE == 85.051129
+        assert TERRAIN_MAX_LATITUDE == 85.0511
+
+
+class TestPlanarDistances:
+    def test_planar_km_along_a_meridian(self):
+        assert planar_km(50.0, 8.0, 50.1, 8.0) == pytest.approx(11.132)
+
+    def test_planar_km_across_the_antimeridian(self):
+        assert planar_km(0.0, 179.99, 0.0, -179.99) == pytest.approx(2.2264)
+
+    def test_planar_metres_at_the_middle_latitude(self):
+        expected = math.hypot(
+            0.1 * 111_320.0 * math.cos(math.radians(50.05)), 0.1 * 111_320.0
+        )
+        assert planar_metres(50.0, 8.0, 50.1, 8.1) == pytest.approx(expected)
+
+    def test_planar_metres_across_the_antimeridian(self):
+        assert planar_metres(0.0, 179.99, 0.0, -179.99) == pytest.approx(2226.4)
+
+
+class TestWebMercator:
+    def test_the_corners_of_the_world(self):
+        assert web_mercator(0.0, -180.0) == pytest.approx((0.0, 0.5))
+        assert web_mercator(MAX_LATITUDE, 180.0) == pytest.approx((1.0, 0.0), abs=1e-6)
+
+    def test_beyond_the_edge_is_clamped(self):
+        assert web_mercator(89.9, 0.0) == web_mercator(MAX_LATITUDE, 0.0)
+        assert web_mercator(-89.9, 0.0) == web_mercator(-MAX_LATITUDE, 0.0)

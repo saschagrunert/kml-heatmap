@@ -17,7 +17,10 @@ from kml_heatmap.airport_lookup import database_fingerprint
 from kml_heatmap.parser_cache import (
     CACHE_FORMAT_VERSION,
     CACHE_MAX_AGE_DAYS,
+    CACHE_SUFFIX,
     KML_CACHE_DIR,
+    decode_entry,
+    encode_entry,
     get_cache_key,
     load_cached_parse,
     parser_fingerprint,
@@ -47,7 +50,7 @@ def _expected_name(kml):
     digest.update(kml.read_bytes())
     return (
         f"{digest.hexdigest()}_v{CACHE_FORMAT_VERSION}_{parser_fingerprint()}"
-        f"_{database_fingerprint()}.json"
+        f"_{database_fingerprint()}{CACHE_SUFFIX}"
     )
 
 
@@ -186,7 +189,7 @@ class TestGetCacheKey:
             with_other_db, _ = get_cache_key(str(kml), cache_dir=cache_dir)
 
         assert without_db is not None
-        assert without_db.name.endswith("_nodb.json")
+        assert without_db.name.endswith(f"_nodb{CACHE_SUFFIX}")
         assert len({without_db, with_db, with_other_db}) == 3
 
 
@@ -248,7 +251,7 @@ class TestPruneStaleCacheEntries:
     def _current_suffix(self):
         return (
             f"_v{CACHE_FORMAT_VERSION}_{parser_fingerprint()}"
-            f"_{database_fingerprint()}.json"
+            f"_{database_fingerprint()}{CACHE_SUFFIX}"
         )
 
     def test_removes_entries_no_key_can_produce(self, tmp_path):
@@ -259,15 +262,16 @@ class TestPruneStaleCacheEntries:
         old_version = _entry(
             cache_dir,
             f"{digest}_v{CACHE_FORMAT_VERSION - 1}_{parser_fingerprint()}"
-            f"_{database_fingerprint()}.json",
+            f"_{database_fingerprint()}{CACHE_SUFFIX}",
         )
         old_parser = _entry(
             cache_dir,
-            f"{digest}_v{CACHE_FORMAT_VERSION}_00000000_{database_fingerprint()}.json",
+            f"{digest}_v{CACHE_FORMAT_VERSION}_00000000_"
+            f"{database_fingerprint()}{CACHE_SUFFIX}",
         )
         old_database = _entry(
             cache_dir,
-            f"{digest}_v{CACHE_FORMAT_VERSION}_{parser_fingerprint()}_nodb.json",
+            f"{digest}_v{CACHE_FORMAT_VERSION}_{parser_fingerprint()}_nodb{CACHE_SUFFIX}",
         )
         legacy = _entry(cache_dir, "1_DEAGJ_DA20_0123456789ab_v3_1_2_nodb.json")
         unrelated = _entry(cache_dir, "notes.txt", age_days=365)
@@ -281,6 +285,24 @@ class TestPruneStaleCacheEntries:
         assert not any(
             p.exists() for p in (old_version, old_parser, old_database, legacy)
         )
+
+    def test_removes_the_uncompressed_entries_of_version_5(self, tmp_path):
+        """What an earlier release wrote: plain JSON, under a .json name."""
+        cache_dir = tmp_path / "cache"
+        cache_dir.mkdir()
+        digest = "0123456789abcdef0123456789abcdef"
+        name = f"{digest}_v5_{parser_fingerprint()}_{database_fingerprint()}"
+        uncompressed = _entry(cache_dir, name + ".json")
+        # The name of this version, without the suffix of a compressed entry
+        plain = _entry(
+            cache_dir,
+            f"{digest}_v{CACHE_FORMAT_VERSION}_{parser_fingerprint()}"
+            f"_{database_fingerprint()}.json",
+        )
+
+        assert prune_stale_cache_entries(cache_dir=cache_dir) == 2
+        assert not uncompressed.exists()
+        assert not plain.exists()
 
     def test_removes_entries_unused_for_too_long(self, tmp_path):
         cache_dir = tmp_path / "cache"
@@ -353,6 +375,21 @@ class TestPruneStaleCacheEntries:
 
 
 class TestSaveAndLoad:
+    def test_an_entry_is_compressed_json(self, tmp_path):
+        cache_path = tmp_path / f"entry{CACHE_SUFFIX}"
+        save_to_cache(cache_path, COORDS, [], [])
+
+        data = cache_path.read_bytes()
+        # The magic number of a zstd frame
+        assert data.startswith(b"\x28\xb5\x2f\xfd")
+        assert decode_entry(data)["version"] == CACHE_FORMAT_VERSION
+        assert load_cached_parse(cache_path) is not None
+
+    def test_an_uncompressed_entry_is_a_miss(self, tmp_path):
+        cache_path = tmp_path / f"entry{CACHE_SUFFIX}"
+        cache_path.write_text(json.dumps({"version": CACHE_FORMAT_VERSION}))
+        assert load_cached_parse(cache_path) is None
+
     def test_round_trip_preserves_track_points_and_identity(self, tmp_path):
         cache_path = tmp_path / "cache.json"
         save_to_cache(cache_path, COORDS, PATHS, METADATA)
@@ -370,7 +407,7 @@ class TestSaveAndLoad:
     def test_file_format_is_explicit(self, tmp_path):
         cache_path = tmp_path / "cache.json"
         save_to_cache(cache_path, COORDS, PATHS, METADATA)
-        raw = json.loads(cache_path.read_text())
+        raw = decode_entry(cache_path.read_bytes())
         assert raw["version"] == CACHE_FORMAT_VERSION
         assert raw["coordinates"] == [
             [50.0, 8.5, 300.0, 1000.5],
@@ -384,7 +421,7 @@ class TestSaveAndLoad:
         extra = TrackPoint(52.0, 10.0, 100.0, None)
         save_to_cache(cache_path, COORDS, [[SHARED, extra]], METADATA)
 
-        raw = json.loads(cache_path.read_text())
+        raw = decode_entry(cache_path.read_bytes())
         assert raw["path_groups"] == [[0, [52.0, 10.0, 100.0, None]]]
         loaded = load_cached_parse(cache_path)
         assert loaded is not None
@@ -393,15 +430,15 @@ class TestSaveAndLoad:
     def test_version_mismatch_is_rejected(self, tmp_path):
         cache_path = tmp_path / "cache.json"
         save_to_cache(cache_path, COORDS, PATHS, METADATA)
-        raw = json.loads(cache_path.read_text())
+        raw = decode_entry(cache_path.read_bytes())
         raw["version"] = CACHE_FORMAT_VERSION - 1
-        cache_path.write_text(json.dumps(raw))
+        cache_path.write_bytes(encode_entry(raw))
         assert load_cached_parse(cache_path) is None
 
     def test_missing_version_is_rejected(self, tmp_path):
         cache_path = tmp_path / "cache.json"
-        cache_path.write_text(
-            json.dumps({"coordinates": [], "path_groups": [], "path_metadata": []})
+        cache_path.write_bytes(
+            encode_entry({"coordinates": [], "path_groups": [], "path_metadata": []})
         )
         assert load_cached_parse(cache_path) is None
 
@@ -421,8 +458,8 @@ class TestSaveAndLoad:
     )
     def test_wrong_structure_is_rejected(self, tmp_path, coordinates, path_groups):
         cache_path = tmp_path / "cache.json"
-        cache_path.write_text(
-            json.dumps(
+        cache_path.write_bytes(
+            encode_entry(
                 {
                     "version": CACHE_FORMAT_VERSION,
                     "coordinates": coordinates,
@@ -445,9 +482,9 @@ class TestSaveAndLoad:
     def test_entry_without_warnings_is_rejected(self, tmp_path):
         cache_path = tmp_path / "cache.json"
         save_to_cache(cache_path, COORDS, PATHS, METADATA)
-        raw = json.loads(cache_path.read_text())
+        raw = decode_entry(cache_path.read_bytes())
         del raw["warnings"]
-        cache_path.write_text(json.dumps(raw))
+        cache_path.write_bytes(encode_entry(raw))
         assert load_cached_parse(cache_path) is None
 
     def test_missing_file(self, tmp_path):

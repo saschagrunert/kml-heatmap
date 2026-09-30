@@ -4,7 +4,7 @@
 import type { Marker, Popup } from "maplibre-gl";
 import type { MapApp } from "../mapApp";
 import type { PathSegment, PopupHost, TrailRun } from "../types";
-import type { GroundedHeight } from "../calculations/lift";
+import type { GroundedHeight } from "../calculations/airplaneLift";
 import type { RibbonPiece } from "../calculations/ribbons";
 import type { ReplayCurve } from "../features/replay";
 import {

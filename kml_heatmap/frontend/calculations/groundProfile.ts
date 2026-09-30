@@ -259,8 +259,13 @@ function smoothedCurves(segments: readonly PathSegment[]): SmoothedFlights {
   return curves.flights;
 }
 
-/** Every flight of `segments` smoothed at its altitude, see smoothedCurves */
-function smoothAltitudes(segments: readonly PathSegment[]): SmoothedFlights {
+/**
+ * Every flight of `segments` smoothed at its altitude, see smoothedCurves;
+ * a few flights on their own take it as well (calculations/smoothGrounded.ts)
+ */
+export function smoothAltitudes(
+  segments: readonly PathSegment[],
+): SmoothedFlights {
   return smoothFlights(segments, (i) => segments[i]!.altitude_ft);
 }
 
@@ -312,26 +317,6 @@ export function heldFlights(
 }
 
 /**
- * The flights of `segments` smoothed as groundedFlights smooths them, each
- * on its own, without holding them: for a few flights, such as the
- * selected ones (ui/selectionRibbons.ts), it takes a fraction of the time
- * of every flight of the dataset.
- */
-export function smoothGrounded(
-  segments: readonly PathSegment[],
-  sampled: boolean,
-  level: number,
-): SmoothedFlights {
-  // Each flight stands on its own fields (groundProfileFt), and on the
-  // relief where it is drawn, as coarse as the level draws it, with the
-  // ground of the levels around it
-  return onGround(
-    smoothAltitudes(segments),
-    groundProfilesFt(segments, sampled, level),
-  );
-}
-
-/**
  * The flights `curves`, smoothed at their altitudes (smoothAltitudes), on
  * the ground `ground` under the end of each segment and with the offsets
  * `offsets` of the levels around it (see groundProfilesFt): as
@@ -340,7 +325,7 @@ export function smoothGrounded(
  * it, and a height above it is the altitude over it (liftFt). The points
  * of the curves and where each segment is on them are shared.
  */
-function onGround(
+export function onGround(
   curves: SmoothedFlights,
   { ground, offsets }: ReturnType<typeof groundProfilesFt>,
 ): SmoothedFlights {

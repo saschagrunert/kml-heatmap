@@ -28,10 +28,17 @@ Where:
 - `TYPE` - Aircraft type (e.g., `DA40`, `C172`)
 
 A registration has to look like one (capitals and digits, at least one letter);
-a name such as `2025_summer_trip.kml` names no aircraft. An extra underscore in
-the name is tolerated. Flight dates are not included in filenames for privacy.
-Files are numbered sequentially in chronological order and processed in numeric
-order.
+a name such as `2025_summer_trip.kml` names no aircraft. A name with more than
+three parts (`7_DEAGJ_DA20_copy.kml`) keeps the first three and drops the rest
+with a warning. Flight dates are not included in filenames for privacy.
+
+The hyphen is restored for these nationality prefixes: `2`, `4O`, `5B`, `9A`,
+`9H`, `CS`, `D`, `E7`, `EC`, `EI`, `ES`, `EW`, `F`, `G`, `HA`, `HB`, `I`, `LN`,
+`LX`, `LY`, `LZ`, `M`, `OE`, `OH`, `OK`, `OM`, `OO`, `OY`, `PH`, `S5`, `SE`,
+`SP`, `SX`, `TC`, `TF`, `UR`, `YL`, `YR`, `YU`, `Z3` and `ZA`. For a prefix not
+in the list, write the registration with its hyphen in the file name
+(`3_VH-ABC_C172.kml`); without it the registration is used as written. Files are
+numbered sequentially in chronological order and processed in numeric order.
 
 Nor are times of day or weekdays: the type is published, so a `TYPE` that is one
 (`1_DEHYL_1513h.kml`, `1_DEHYL_15h13.kml`, `1_DEHYL_Saturday.kml`) is left out
@@ -94,8 +101,13 @@ displayed, and they count towards the totals, but they belong to no aircraft:
 Aircraft model names are resolved from an `aircraft.json` file, a manually
 maintained mapping of registrations (written as the map shows them; a key
 without the hyphen, `DEHYL`, is read as `D-EHYL`) to full model names. The file
-is looked up in every directory that holds an input file; when two of them name
-the same registration, the first one found wins:
+is looked up in the directory of every input file and in each directory above it
+up to the directory given on the command line, so an `aircraft.json` in `data/`
+covers the flights in `data/2025/` as well. The files found are merged into one
+list that applies to every flight, wherever it lies. When two of them name the
+same registration, a file in a subdirectory wins over one in a directory above
+it, for the flights outside that subdirectory too, and otherwise the file found
+first (in the order of the input files) wins:
 
 ```json
 {
@@ -110,7 +122,9 @@ an entry the aircraft shows the type from the file name instead.
 ## Multiple directories
 
 You can process KML files from several files and directories at once.
-Directories are scanned with their subdirectories:
+Directories are scanned with their subdirectories, and each directory given has
+its own `aircraft.json` (see [Aircraft model data](#aircraft-model-data)); the
+search for one never goes above it:
 
 ```bash
 python -m kml_heatmap data/ data-new/ extra_flight.kml --output-dir combined
@@ -120,11 +134,14 @@ The tool detects the format of each file and processes them accordingly.
 
 ## With an API key (optional)
 
-**CARTO** - The base map is CARTO's vector style, drawn by MapLibre GL JS. It is
-free within CARTO's fair use limit and works without a key today, but CARTO asks
-everyone to get one and may require it for vector tiles as it already does for
-raster ones. The key goes on the style request and on every tile, glyph and
-sprite request that follows from it.
+**CARTO** - The base map is CARTO's dark-matter vector style, drawn by MapLibre
+GL JS. It is free within CARTO's fair use limit and works without a key today,
+but CARTO asks everyone to get one and may require it for vector tiles as it
+already does for raster ones. The key goes on the style request and on every
+tile, glyph and sprite request that follows from it. No other style is
+supported: the heat steps the style's place names back and fades its border
+bands, the satellite imagery goes in among its ground layers and the airport
+codes are placed with its labels, all by the names of its layers.
 
 ```bash
 # Pass the key on the command line or export it in the environment
@@ -134,8 +151,8 @@ make CARTO_API_KEY=your_carto_key
 make serve
 ```
 
-The key is embedded in the generated `map_config.js`, which is published with
-the site. Treat it as a public client-side key and restrict it to your site's
+The key is published with the site by design (see
+[SECURITY.md](../SECURITY.md#public-tile-api-key)): restrict it to your site's
 domain (referrer restriction) in the CARTO dashboard. The `site` job of the
 `test` workflow reads it from the `CARTO_API_KEY` repository secret.
 
@@ -153,7 +170,7 @@ Variables:
 - `OUTPUT_DIR` - Output directory (default: `docs`); it must not be `INPUT_DIR`,
   lie inside it or contain it, and the two need different base names
 - `CACHE_DIR` - Host directory mounted as `/cache` (default:
-  `~/.cache/kml-heatmap`)
+  `~/.cache/kml-heatmap`, see [Cache directory](output.md#cache-directory))
 - `HOST_BIND` - Address `make serve` binds on the host (default: `127.0.0.1`;
   use `0.0.0.0` for the local network)
 - `PORT` - Host port for `make serve` (default: `8000`)
@@ -204,10 +221,10 @@ container.
 ## Docker usage
 
 If you prefer using Docker directly. Input files are read and left alone (pass
-`--obfuscate-inputs` to rewrite them too). Mount the cache of the OurAirports
-database and the elevation tiles so they are not downloaded on every run, and
-run as your user id so the output is owned by you (add `--userns=keep-id` with
-rootless podman):
+`--obfuscate-inputs` to rewrite them too). Mount the
+[cache directory](output.md#cache-directory) so the OurAirports database and the
+elevation tiles are not downloaded on every run, and run as your user id so the
+output is owned by you (add `--userns=keep-id` with rootless podman):
 
 ```bash
 # Build the image
@@ -232,15 +249,22 @@ docker run --rm --user "$(id -u):$(id -g)" \
   -v ~/.cache/kml-heatmap:/cache \
   kml-heatmap --debug data --output-dir out
 
-# Serve the generated site on http://127.0.0.1:8000/ (mounts docs/ only)
+# Serve the generated site on http://127.0.0.1:8000/ (mounts out/ only, read-only)
 docker run --rm -p 127.0.0.1:8000:8000 -e BIND_HOST=0.0.0.0 \
-  -v "$PWD/docs:/data:ro" --entrypoint python kml-heatmap /app/serve.py
+  -v "$PWD/out:/data:ro" --entrypoint python kml-heatmap /app/serve.py
 ```
 
 The image runs as an unprivileged user, uses `/data` as its working directory
-and `KML_HEATMAP_CACHE_DIR=/cache`. `serve.py` serves `/data` and reads
-`BIND_HOST` (default `127.0.0.1`, hence `0.0.0.0` inside the container), `PORT`
-(default `8000`) and `CORS_ORIGIN` (unset by default).
+and `KML_HEATMAP_CACHE_DIR=/cache`. `make build` and `make serve` also pass
+`-e HOME=/tmp`, since the user id they run as has no entry in the image's
+password database; the commands above go without it, because the cache is
+`/cache` either way and the tool falls back to a directory under the temp
+directory when it has no home (see
+[Cache directory](output.md#cache-directory)). `serve.py` serves `DATA_DIR`
+(default `/data`) and reads `BIND_HOST` (default `127.0.0.1`, hence `0.0.0.0`
+inside the container), `PORT` (default `8000`) and `CORS_ORIGIN` (unset by
+default). It sends `Cache-Control: no-store`, for development; the headers of a
+published site are in [Hosting](hosting.md#headers-and-compression).
 
 ## Python usage
 
@@ -258,7 +282,8 @@ python -m http.server 8000 --bind 127.0.0.1 -d docs
 ```
 
 Opening `docs/index.html` from disk does not work (see
-[Quick start](../README.md#quick-start)).
+[Quick start](../README.md#quick-start)). To publish the directory, see
+[Hosting](hosting.md).
 
 `pip install .` also provides the `kml-heatmap` console script and ships the
 templates and static assets. `python kml-heatmap.py` still works as a legacy
@@ -267,14 +292,23 @@ wrapper.
 ## Command-line options
 
 ```text
-kml-heatmap [--output-dir DIR] [--debug] [--obfuscate-inputs] [--no-terrain] [--force] [--site-url URL] [--version] path [path ...]
+kml-heatmap [--version] [--output-dir DIR] [--force] [--site-url URL] [--list]
+            [-q] [--debug] [--obfuscate-inputs] [--private] [--no-terrain]
+            [--cache-dir DIR] [--refresh-airports] [--jobs N] path [path ...]
 ```
 
-- `path` - KML files and/or directories. Directories are scanned with their
-  subdirectories for `.kml` files (case-insensitive) and processed in numeric
-  order per directory. `aircraft.json` is looked up in every directory that
-  holds an input file. A path that does not exist is an error, and a file named
-  twice is read once.
+`kml-heatmap --help` lists the options in the groups below; `--version` prints
+the version and exits.
+
+- `path` - KML or KMZ files and/or directories. Directories are scanned with
+  their subdirectories for `.kml` and `.kmz` files (case-insensitive) and
+  processed in numeric order per directory. `aircraft.json` is looked up next to
+  every input file and above it (see
+  [Aircraft model data](#aircraft-model-data)). A path that does not exist is an
+  error, and a file named twice is read once.
+
+Output:
+
 - `--output-dir DIR` - Output directory (default: `docs`). The tool refuses to
   run if the output directory is the directory of an input file or contains one,
   or is a directory it must never clean out (`/`, the home directory). An output
@@ -284,15 +318,6 @@ kml-heatmap [--output-dir DIR] [--debug] [--obfuscate-inputs] [--no-terrain] [--
   `data/airports.json` and the like) but no sign of an earlier run
   (`map_config.js`, `data/metadata.json`): many a project keeps a site of its
   own in `docs/`, and the run would replace it file by file.
-- `--debug` - Show debug output
-- `--obfuscate-inputs` - Also rewrite the input KML files themselves, in place
-  and irreversibly, so that the files on disk carry no real dates either. Off by
-  default: the generated site never carries a flight date finer than the year
-  whatever the inputs hold (see [Privacy](privacy.md)), so this is about the KML
-  files, not about what gets published. Keep a copy of the originals first.
-- `--no-terrain` - Do not sample the ground under the flights from the elevation
-  tiles (see [Elevation data](output.md#elevation-data)); nothing is downloaded
-  for it, and the 3D view puts each flight on a line between its airfields
 - `--force` - Replace the files of a site in the output directory that no
   earlier run wrote (see `--output-dir`)
 - `--site-url URL` - The address the site is published at, such as
@@ -301,7 +326,49 @@ kml-heatmap [--output-dir DIR] [--debug] [--obfuscate-inputs] [--no-terrain] [--
   itself: with the address the site, each year and each flight get a preview
   image (see [Link previews](output.md#link-previews)), without it the previews
   go without one. CI fills it in from the Pages configuration.
-- `--version` - Show the version and exit
+- `--list` - Print a table of every flight in the inputs (file, year, aircraft,
+  airports, points, whether it has times) and, for each one the site would leave
+  out, why: no year, a recording that never moves, a copy or a second recording
+  of another flight, a file that is empty or does not parse. It writes no site,
+  downloads no elevation tiles and exits with 0; the parse cache and the airport
+  database are used and filled as by a build.
+- `-q`, `--quiet` - Print only warnings and errors, and one line at the end
+  naming the output directory and the years in it
+- `--debug` - Show debug output (it wins over `--quiet`)
+
+Privacy:
+
+- `--obfuscate-inputs` - Also rewrite the input KML files themselves, in place
+  and irreversibly, so that the files on disk carry no real dates either. Off by
+  default: the generated site never carries a flight date finer than the year
+  whatever the inputs hold (see [Privacy](privacy.md)), so this is about the KML
+  files, not about what gets published. Keep a copy of the originals first. A
+  `.kmz` input is refused: the dates inside a zip archive can be neither checked
+  nor rewritten, so unzip it and keep the `.kml` file.
+- `--private` - Ask search engines not to index the site: the page gets a
+  `<meta name="robots" content="noindex, nofollow">` (the link preview pages
+  carry `noindex` in every build). The site stays public to anyone who has the
+  address. The tool writes no `robots.txt`; see
+  [Hosting](hosting.md#keeping-it-out-of-search-engines) for keeping crawlers
+  out entirely.
+
+Network and cache:
+
+- `--no-terrain` - Do not sample the ground under the flights from the elevation
+  tiles (see [Elevation data](output.md#elevation-data)); nothing is downloaded
+  for it, and the 3D view puts each flight on a line between its airfields
+- `--cache-dir DIR` - Where the OurAirports database, the elevation tiles, the
+  link preview images and the parse cache are kept (default:
+  `KML_HEATMAP_CACHE_DIR`, else `~/.cache/kml-heatmap`)
+- `--refresh-airports` - Download the OurAirports airport and runway lists again
+  instead of using the cached copies, which are otherwise renewed every 30 days.
+  It marks the cached copies expired rather than deleting them, and a complete
+  download replaces them; offline, the run goes on with them and warns
+  `Could not refresh the airport database, using the cached copy`, as it does
+  when a download after 30 days fails.
+- `--jobs N` - Use at most `N` worker processes for parsing, decoding elevation
+  tiles, exporting and drawing the link previews (default: one per CPU the
+  process may use)
 
 ### How the output directory is written
 
@@ -313,21 +380,33 @@ a mix, which the next run repairs. Two runs cannot write to one output directory
 at the same time; the second one stops. Afterwards the tool removes only its own
 files that the new site no longer has (the files of years that dropped out, a
 stale `mapApp.bundle.js.map`) and leaves anything else in the output directory
-alone. It never writes through a symlink: a symlink in place of one of its files
-stops the run. With `KML_HEATMAP_STABLE_MTIMES=1` every published file gets a
-modification time taken from its content instead of the time of the build (some
-day between 2001 and 2010), so a server that derives its ETags from it, as
-GitHub Pages does, keeps them for the files a new build did not change; CI sets
-it for the deployed site. Leave it off for a server that compares the times by
-age (`python -m http.server`).
+alone, such as a `CNAME` or a `robots.txt` of your own. It never writes through
+a symlink: a symlink in place of one of its files stops the run. With
+`KML_HEATMAP_STABLE_MTIMES=1` every published file gets a modification time
+taken from its content instead of the time of the build (some day between 2001
+and 2010), so a server that derives its ETags from it, as GitHub Pages does,
+keeps them for the files a new build did not change; CI sets it for the deployed
+site. Leave it off for a server that compares the times by age
+(`python -m http.server`). The headers a host should send are in
+[Hosting](hosting.md#headers-and-compression).
 
 ### Exit status
 
-The exit status is 1 when no site could be generated: a missing input path, a
-missing JavaScript bundle, an input file that is not valid KML or cannot be
-parsed (such as an empty file or a symlink), an input file without a flight to
-export (no track with altitudes above sea level, none with a determinable year,
-or none that moves), or an error such as an unwritable output directory.
+Every failure ends in one line on stderr, `Error: ...`, after the messages that
+led to it, and the exit status says what kind it was:
+
+- `0` - The site was written (or, with `--list`, the table printed).
+- `2` - The command cannot work with what it was given: a usage error (an
+  unknown option, `--jobs 0`), a missing input path, no KML files, an input file
+  that is not valid KML or cannot be parsed (such as an empty file, a symlink or
+  a `.kmz` without a `.kml` in it), an input file without a flight to export (no
+  track with altitudes above sea level, none with a determinable year, or none
+  that moves), a relative `--site-url`, or an output directory it refuses (see
+  `--output-dir`).
+- `1` - The build failed on the way: a missing JavaScript bundle, a required
+  airport database or elevation tile that is unavailable, an unwritable output
+  directory or a full disk, an input file `--obfuscate-inputs` could not scrub.
+- `130` - The run was interrupted (Ctrl+C); the previous site is left as it was.
 
 ## Troubleshooting
 
@@ -354,8 +433,15 @@ Look for these lines:
   order with its neighbours, is a logger glitch: that point loses its time (and
   so its groundspeed), the rest of the track keeps theirs. A position of exactly
   0,0 is dropped as a missing fix.
-- The file is not picked up at all: only files ending in `.kml` (in any case)
-  are read. A `.kmz` archive has to be unzipped first.
+- The file is not picked up at all: only files ending in `.kml` or `.kmz` (in
+  any case) are read. A `.kmz` archive is read without unpacking it: its
+  `doc.kml` at the root, or else its first `.kml` file, is the flight, up to the
+  100 MB of a KML file (the files macOS adds to a zip, `__MACOSX/` and `._`
+  names, are skipped). An archive with another archive in it, none with a `.kml`
+  in it, or one that is encrypted or uses a compression Python cannot read (such
+  as Deflate64) stops the run. The obfuscator cannot rewrite inside an archive,
+  so `make check-obfuscation` and the hooks fail on one; unzip a `.kmz` before
+  committing it.
 
 ### The run stops
 
@@ -386,17 +472,18 @@ Fix or remove the file and build again.
 ### The flight shows the wrong aircraft, or none
 
 The registration comes only from the file name. Check the name against the
-pattern: `N_REGISTRATION_TYPE.kml` with exactly three parts (extra parts are
-ignored with a warning), or the Charterware pattern with a valid date and time.
+pattern: `N_REGISTRATION_TYPE.kml`, where a fourth part and any after it are
+dropped with a warning, or the Charterware pattern with a valid date and time.
 The registration part has to look like one: capitals and digits with at least
 one letter, `DEHYL` or `D-EHYL`. A name that does not (`2025_summer_trip.kml`)
 names no aircraft, and neither does a four-letter ICAO code after a date
 (`20250601_EDDS_EDDP.kml`). The hyphen is only restored for the nationality
-prefixes the tool knows (`D`, `OE`, `HB` and other European ones); any other
-registration is used as written, so write it the way it should appear. A model
-name that is missing or wrong comes from `data/aircraft.json`; its keys may be
-written with or without the hyphen. With several input directories, the first
-`aircraft.json` found wins.
+prefixes the tool knows (see [the list](#kml-file-naming-convention)); any other
+registration is used as written, so write it with its hyphen the way it should
+appear. A model name that is missing or wrong comes from `data/aircraft.json`;
+its keys may be written with or without the hyphen and in any case. With several
+input directories, the nearest `aircraft.json` wins (see
+[Aircraft model data](#aircraft-model-data)).
 
 ### An airport is not recognized
 
@@ -407,7 +494,11 @@ looked up in the [OurAirports](https://ourairports.com/) database:
 
 - `Airport database unavailable`: the database could not be downloaded, so the
   names stay as the KML file spells them and have no country. Run the build
-  again with network access; CI refuses to publish without it.
+  again with network access; CI refuses to publish without it. A download that
+  failed is not tried again for an hour: to force one, pass
+  `--refresh-airports`, or delete `airports.csv`, `runways.csv` and the
+  `.download-failed` markers from the
+  [cache directory](output.md#cache-directory).
 - A code OurAirports does not know keeps the name from the file. A name without
   an ICAO code is shown as an airport only as an end of a route
   (`Home strip - Aunt farm`), and not as a single word (`Home`). Any other
@@ -450,6 +541,23 @@ times, only the point of the split written twice joins them. A `gx:Track` is
 never joined. Give the pieces of a flight one name, and flights of their own
 different names or times.
 
+### The flights show but the map behind them is black
+
+The flights, the airports and the heat are in the site itself; the map under
+them is streamed from CARTO (`basemaps.cartocdn.com` for the style,
+`*.basemaps.cartocdn.com` for its tiles, glyphs and sprite; see
+[With an API key](#with-an-api-key-optional)). Flights over a black map mean
+those requests fail: a proxy, a firewall or an ad blocker blocks the host, or,
+on a site built with a key, the key is wrong, expired or restricted to another
+referrer. The page says so and offers Retry. To tell the two apart, open the
+browser's developer tools on the Network tab, reload and filter for `cartocdn`:
+a request shown as blocked, cancelled or failed without a status points at the
+network or an extension, so try another network or switch the blocker off for
+the site; a `401` or `403` on the style request points at the key, so check it
+and its referrer restriction in the CARTO dashboard, or build without one, since
+the base map loads without a key today. Nothing of the site is lost either way:
+the flights, the statistics and Replay work over the black map.
+
 ### `make check-obfuscation` or the commit hook fails
 
 Run `make obfuscate`, then check again. When a date cannot be removed (in a file
@@ -463,3 +571,13 @@ are a year and a time at once, such as `2026 local` (20:26), count as a time. A
 duration written like a time of day (`Flight time 1:25`) cannot be told from one
 and has to go as well. A place named after a weekday other than `Friday Harbor`,
 `Thursday Island` and `Sunday Creek` needs another name as well.
+
+A number of ten or thirteen digits in the text of an element (not in an
+attribute, and not the id after the `#` of a reference such as
+`<styleUrl>#1712345678901</styleUrl>`) that reads as a Unix time between 2000
+and today, in seconds or milliseconds, fails the check unless it is midnight on
+January 1st: `Unix time not at midnight on Jan 1, remove it: 1710406320`. The
+rewrite cannot tell whether it is a time or some other number, so it leaves it
+alone; remove or change it by hand. Numbers that would be a time after today,
+such as most phone numbers, pass, and so do the distances and angles of a view
+(`<range>`, `<altitude>`, `<heading>`).

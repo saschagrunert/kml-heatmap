@@ -2,7 +2,9 @@
 
 import csv
 import fcntl
+import hashlib
 import http.client
+import logging
 import os
 import time
 import urllib.error
@@ -46,6 +48,8 @@ def _mock_response(payload, content_length=None):
     response.read.return_value = payload
     length = len(payload) if content_length is None else content_length
     response.headers = {"Content-Length": str(length)}
+    # Where urlopen ended up after any redirect
+    response.url = lookup_module.OURAIRPORTS_URL
     response.__enter__ = MagicMock(return_value=response)
     response.__exit__ = MagicMock(return_value=False)
     return response
@@ -97,9 +101,9 @@ class TestLookupAirportCountry:
         assert lookup_airport_country(code) is None
 
     def test_empty_country_is_none(self):
-        lookup_module._airport_cache = {
-            "TEST": AirportRecord(50.0, 8.5, "Test Airport", "")
-        }
+        lookup_module.use_airport_database(
+            {"TEST": AirportRecord(50.0, 8.5, "Test Airport", "")}
+        )
         assert lookup_airport_country("TEST") is None
 
 
@@ -189,6 +193,39 @@ class TestDownloadAirportDatabase:
         assert list(tmp_path.glob("*.tmp")) == []
         # Readable like any other cache file, not the 0600 of the temp file
         assert cache_file.stat().st_mode & 0o777 == REGULAR_FILE_MODE
+
+    def test_logs_the_digest_of_what_it_cached(self, tmp_path, caplog):
+        """The file changes upstream every day; the log says which one a build used."""
+        with (
+            patch.object(lookup_module, "CACHE_FILE", tmp_path / "airports.csv"),
+            patch.object(
+                lookup_module, "urlopen", return_value=_mock_response(VALID_CSV)
+            ),
+            caplog.at_level(logging.INFO, logger="kml_heatmap"),
+        ):
+            assert _download_airport_database() is True
+
+        assert f"SHA-256 {hashlib.sha256(VALID_CSV).hexdigest()}" in caplog.text
+
+    @pytest.mark.parametrize(
+        "final_url",
+        [
+            "https://evil.example/airports.csv",
+            "http://davidmegginson.github.io/ourairports-data/airports.csv",
+        ],
+    )
+    def test_refuses_a_redirect_off_the_host_or_off_https(self, tmp_path, final_url):
+        cache_file = tmp_path / "airports.csv"
+        response = _mock_response(VALID_CSV)
+        response.url = final_url
+        with (
+            patch.object(lookup_module, "CACHE_FILE", cache_file),
+            patch.object(lookup_module, "urlopen", return_value=response),
+        ):
+            assert _download_airport_database() is False
+
+        assert not cache_file.exists()
+        response.read.assert_not_called()
 
     def test_empty_response_rejected(self, tmp_path):
         cache_file = tmp_path / "airports.csv"
@@ -375,7 +412,7 @@ class TestDownloadFailureMarker:
         """After one failure the other processes of a run skip the download."""
         with patch.object(lookup_module, "urlopen", side_effect=OSError("offline")):
             assert load_airport_database() == {}
-        lookup_module._airport_cache = None
+        lookup_module.databases.reset()
         with patch.object(lookup_module, "urlopen") as mock_urlopen:
             assert load_airport_database() == {}
         mock_urlopen.assert_not_called()
@@ -526,7 +563,7 @@ class TestLoadAirportDatabase:
         ):
             load_airport_database()
         # Nothing is cached, so a later call raises again instead of going on
-        assert lookup_module._airport_cache is None
+        assert lookup_module.databases.airports is None
 
     def test_required_database_rejects_an_invalid_cache(self, tmp_path, monkeypatch):
         monkeypatch.setenv(REQUIRE_DATABASE_ENV, "1")
@@ -697,7 +734,7 @@ class TestStandardizeAirportNames:
         assert names == AirportNames("YSNW Naval Air Station Nowra - HMAS Albatross")
 
     def test_without_database(self):
-        lookup_module._airport_cache = {}
+        lookup_module.use_airport_database({})
         assert standardize_airport_names("EDDS to EDDP - 16 Aug 2026") == (
             AirportNames("EDDS - EDDP", "EDDS", "EDDP")
         )
@@ -757,3 +794,113 @@ class TestStripAirportSuffix:
 
     def test_longest_suffix_wins(self):
         assert _strip_airport_suffix("LAX International Airport") == "LAX"
+
+
+class TestRefreshAirportDatabases:
+    @pytest.fixture
+    def cache(self, tmp_path):
+        files = {
+            name: tmp_path / name
+            for name in (
+                "airports.csv",
+                "runways.csv",
+                "airports.download-failed",
+                "runways.download-failed",
+            )
+        }
+        with (
+            patch.object(lookup_module, "CACHE_FILE", files["airports.csv"]),
+            patch.object(lookup_module, "RUNWAYS_CACHE_FILE", files["runways.csv"]),
+            patch.object(
+                lookup_module,
+                "DOWNLOAD_FAILED_MARKER",
+                files["airports.download-failed"],
+            ),
+            patch.object(
+                lookup_module,
+                "RUNWAYS_DOWNLOAD_FAILED_MARKER",
+                files["runways.download-failed"],
+            ),
+        ):
+            yield files
+
+    def test_expires_the_cached_files_and_forgets_what_was_loaded(self, cache):
+        cache["airports.csv"].write_bytes(VALID_CSV)
+        cache["runways.csv"].write_text("x")
+        cache["airports.download-failed"].write_text("")
+        cache["runways.download-failed"].write_text("")
+        lookup_module.use_airport_database({})
+
+        lookup_module.refresh_airport_databases()
+
+        assert cache["airports.csv"].read_bytes() == VALID_CSV
+        assert not _is_cache_valid()
+        assert not _is_cache_valid(lookup_module._runways_csv())
+        assert not cache["airports.download-failed"].exists()
+        assert not cache["runways.download-failed"].exists()
+        assert lookup_module.databases.airports is None
+
+    def test_nothing_cached_is_no_error(self, cache):
+        lookup_module.refresh_airport_databases()
+
+        assert not any(path.exists() for path in cache.values())
+
+    def test_offline_the_old_database_stays_in_use(self, cache, caplog):
+        cache["airports.csv"].write_bytes(VALID_CSV)
+        lookup_module.refresh_airport_databases()
+
+        with (
+            patch.object(
+                lookup_module, "urlopen", side_effect=OSError("offline")
+            ) as mock_urlopen,
+            caplog.at_level(logging.WARNING, logger="kml_heatmap"),
+        ):
+            db = load_airport_database()
+
+        mock_urlopen.assert_called_once()
+        assert "EDDF" in db
+        assert cache["airports.csv"].read_bytes() == VALID_CSV
+        assert (
+            "Could not refresh the airport database, using the cached copy"
+            in caplog.messages
+        )
+
+    def test_offline_without_a_cached_copy_says_nothing_of_one(self, cache, caplog):
+        lookup_module.refresh_airport_databases()
+
+        with (
+            patch.object(lookup_module, "urlopen", side_effect=OSError("offline")),
+            caplog.at_level(logging.WARNING, logger="kml_heatmap"),
+        ):
+            assert load_airport_database() == {}
+
+        assert not any("cached copy" in message for message in caplog.messages)
+
+    @pytest.mark.usefixtures("small_downloads")
+    def test_online_the_database_is_downloaded_again(self, cache, caplog):
+        cache["airports.csv"].write_bytes(VALID_CSV.replace(b"TEST", b"OLDX"))
+        lookup_module.refresh_airport_databases()
+
+        with (
+            patch.object(
+                lookup_module, "urlopen", return_value=_mock_response(VALID_CSV)
+            ),
+            caplog.at_level(logging.WARNING, logger="kml_heatmap"),
+        ):
+            db = load_airport_database()
+
+        assert "TEST" in db
+        assert cache["airports.csv"].read_bytes() == VALID_CSV
+        assert not any("cached copy" in message for message in caplog.messages)
+
+    def test_a_file_it_cannot_touch_is_reported(self, cache, caplog):
+        cache["airports.csv"].write_bytes(VALID_CSV)
+        with (
+            patch(
+                "kml_heatmap.airport_lookup.os.utime", side_effect=PermissionError("ro")
+            ),
+            caplog.at_level(logging.WARNING),
+        ):
+            lookup_module.refresh_airport_databases()
+
+        assert "Cannot mark the airport database for download" in caplog.text

@@ -8,8 +8,6 @@ import tempfile
 from pathlib import Path
 from typing import IO, TYPE_CHECKING, Any
 
-from .logger import logger
-
 if TYPE_CHECKING:
     from collections.abc import Callable
 
@@ -18,7 +16,6 @@ __all__ = [
     "REGULAR_FILE_MODE",
     "atomic_bytes_write",
     "atomic_data_write",
-    "atomic_json_write",
     "atomic_text_write",
     "atomic_write",
 ]
@@ -154,12 +151,3 @@ def atomic_data_write(path: Path, data: Any, *, sort_keys: bool = False) -> None
     # slower pure-Python one
     content = json.dumps(data, separators=(",", ":"), sort_keys=sort_keys)
     atomic_write(path, lambda tmp: tmp.write(content))
-
-
-def atomic_json_write(path: Path, data: Any) -> None:
-    """Write a cache file as compact JSON atomically; failures are logged only."""
-    try:
-        content = json.dumps(data, separators=(",", ":"))
-        atomic_write(path, lambda tmp: tmp.write(content))
-    except OSError as e:
-        logger.debug("Failed to write cache file %s: %s", path, e)

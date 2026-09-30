@@ -4,8 +4,6 @@
  * Improves performance by reducing DOM lookups
  */
 
-import { HIDEABLE_CONTROL_IDS } from "./constants";
-
 export class DOMCache {
   private cache: Map<string, HTMLElement> = new Map();
 
@@ -51,25 +49,3 @@ export class DOMCache {
 
 // Export singleton instance for global use
 export const domCache = new DOMCache();
-
-/**
- * Hide the controls that must not show while Wrapped has the map, and
- * return their inline display to put back with restoreControls
- */
-export function hideControls(): Map<HTMLElement, string> {
-  const savedDisplays = new Map<HTMLElement, string>();
-  for (const id of HIDEABLE_CONTROL_IDS) {
-    const el = domCache.get(id);
-    if (el) {
-      savedDisplays.set(el, el.style.display);
-      el.style.display = "none";
-    }
-  }
-  return savedDisplays;
-}
-
-export function restoreControls(savedDisplays: Map<HTMLElement, string>): void {
-  savedDisplays.forEach((display, el) => {
-    el.style.display = display;
-  });
-}

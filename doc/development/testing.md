@@ -146,6 +146,13 @@ host's ports and needs the variable passed in (`-e E2E_PORT`). Failed tests keep
 their traces in `test-results/`, and every run writes an HTML report to
 `playwright-report/` (`npx playwright show-report`).
 
+In CI every e2e job also uploads the duration of each test, as the
+`e2e-timings-<job>` artifact of every run and not only of a failed one: a test
+that creeps up on its timeout shows there before it times out.
+`node scripts/e2e_durations.js <file>` lists the 20 slowest attempts with the
+share of their timeout they took (see
+[`scripts/README.md`](../../scripts/README.md#e2e_durationsjs)).
+
 ## CI and deployment
 
 The published site is built on every push to `main` by the `site` and `deploy`
@@ -155,7 +162,11 @@ the weekly run reports it anyway) and skip a commit that is no longer the head
 of `main`: they run the same steps as `make build` (frontend bundle, then
 `python -m kml_heatmap data`) and upload the result to GitHub Pages. Nothing
 generated is committed; `docs/` is only the default output directory of a local
-`make build`.
+`make build`. The `checks` job is the one status a merge needs (the ruleset on
+`main` requires it, see
+[Repository rules](../../CONTRIBUTING.md#repository-rules)), because it needs
+every job a pull request runs and fails when any of them failed, was cancelled
+or was skipped where its own condition does not skip it.
 
 ## Test data generation
 

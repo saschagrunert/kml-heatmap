@@ -811,7 +811,6 @@ describe("the heat cloud", () => {
     afterEach(() => {
       if (app.replayActive) toggleReplayAll(asMapApp(app));
       document.getElementById("replay-all-controls")?.remove();
-      vi.unstubAllGlobals();
     });
 
     it("builds the heat up on the flat map as far as the clock has come, at the height of the flights and at full strength, under the trails", async () => {

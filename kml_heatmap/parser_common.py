@@ -14,6 +14,7 @@ from .logger import logger
 if TYPE_CHECKING:
     from lxml import etree
 
+    from .aircraft import AircraftInfo
     from .types import PathMetadata, PlacemarkMetadata, TrackPoint
 
 # Pre-compiled regex patterns for performance
@@ -365,12 +366,12 @@ def _build_path_metadata_dict(
     kml_file: str,
     path_start: TrackPoint,
     placemark_meta: PlacemarkMetadata,
-    aircraft_info: dict[str, str | None],
+    aircraft_info: AircraftInfo | None,
 ) -> PathMetadata:
     """Build path metadata dictionary.
 
     ``aircraft_info`` is ``parse_aircraft_from_filename`` of the file, parsed
-    once per file by the caller.
+    once per file by the caller (None for a name that says nothing).
     """
     airport_name = placemark_meta["airport_name"]
     start_airport = placemark_meta["start_airport"]
@@ -380,9 +381,10 @@ def _build_path_metadata_dict(
     # such as LOAV-LOAV or EDDF-EDDM) unless the placemark name is a route
     # itself. Charterware names its placemarks after the aircraft, and even
     # a name that is a single airport says nothing about the arrival.
-    route = aircraft_info.get("route")
+    route = aircraft_info.route if aircraft_info is not None else None
     if (
-        aircraft_info.get("format") == "charterware"
+        aircraft_info is not None
+        and aircraft_info.format == "charterware"
         and route
         and "-" in route
         and start_airport is None
@@ -407,11 +409,9 @@ def _build_path_metadata_dict(
         "year": placemark_meta["year"],
     }
 
-    if aircraft_info:
-        meta["aircraft_registration"] = aircraft_info.get("registration")
-
-        aircraft_type = aircraft_info.get("type")
-        if aircraft_type is not None:
-            meta["aircraft_type"] = aircraft_type
+    if aircraft_info is not None:
+        meta["aircraft_registration"] = aircraft_info.registration
+        if aircraft_info.type is not None:
+            meta["aircraft_type"] = aircraft_info.type
 
     return meta

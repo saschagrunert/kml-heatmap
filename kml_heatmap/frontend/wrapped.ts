@@ -17,14 +17,16 @@
  * The app is imported for the bundler's sake: see features.ts.
  */
 import "./mapApp";
-import { StatsManager } from "./ui/statsManager";
-import { WrappedManager } from "./ui/wrappedManager";
-import { prepareWrappedIntro } from "./ui/wrappedIntro";
+export { StatsManager } from "./ui/statsManager";
+export { WrappedManager } from "./ui/wrappedManager";
+export { prepareWrappedIntro } from "./ui/wrappedIntro";
 
-export interface WrappedModule {
-  StatsManager: typeof StatsManager;
-  WrappedManager: typeof WrappedManager;
-  prepareWrappedIntro: typeof prepareWrappedIntro;
-}
+/**
+ * The build this bundle belongs to, which the app compares with its own
+ * (services/featureLoader.ts): a page open over a deploy gets this file of
+ * the new build, next to the old build's shared.bundle.js
+ */
+export const BUILD = typeof __BUILD__ === "string" ? __BUILD__ : undefined;
 
-export { StatsManager, WrappedManager, prepareWrappedIntro };
+/** What the bundle hands the app: every export of this module */
+export type WrappedModule = typeof import("./wrapped");

@@ -2,7 +2,6 @@
 
 import contextlib
 import importlib
-import json
 import os
 from pathlib import Path
 from unittest.mock import patch
@@ -14,7 +13,6 @@ from kml_heatmap.cache import (
     CACHE_DIR,
     atomic_bytes_write,
     atomic_data_write,
-    atomic_json_write,
     atomic_text_write,
     atomic_write,
 )
@@ -196,6 +194,18 @@ class TestAtomicWrite:
             atomic_text_write(tmp_path / "file.txt", "x")
         fsync.assert_not_called()
 
+    def test_a_temp_file_that_cannot_be_removed_is_no_second_error(self, tmp_path):
+        path = tmp_path / "test.json"
+
+        with (
+            patch("kml_heatmap.cache.os.replace", side_effect=OSError("replace")),
+            patch("kml_heatmap.cache.os.unlink", side_effect=OSError("unlink")),
+            pytest.raises(OSError, match="replace"),
+        ):
+            atomic_write(path, lambda tmp: tmp.write("{}"))
+
+        assert not path.exists()
+
 
 class TestAtomicBytesWrite:
     def test_writes_bytes_with_regular_file_mode(self, tmp_path, umask_022):
@@ -251,67 +261,3 @@ class TestAtomicDataWrite:
 
         assert not path.exists()
         assert list(tmp_path.iterdir()) == []
-
-
-class TestAtomicJsonWrite:
-    def test_write_simple_data(self, tmp_path):
-        path = tmp_path / "test.json"
-        data = {"key": "value", "number": 42}
-
-        atomic_json_write(path, data)
-
-        assert json.loads(path.read_text()) == data
-
-    def test_write_overwrites_existing(self, tmp_path):
-        path = tmp_path / "test.json"
-
-        atomic_json_write(path, {"old": True})
-        atomic_json_write(path, {"new": True})
-
-        assert json.loads(path.read_text()) == {"new": True}
-
-    def test_write_compact_format(self, tmp_path):
-        path = tmp_path / "test.json"
-
-        atomic_json_write(path, {"a": 1, "b": 2})
-
-        content = path.read_text()
-        assert ": " not in content
-        assert ", " not in content
-
-    def test_write_nested_data(self, tmp_path):
-        path = tmp_path / "test.json"
-        data = {"nested": {"list": [1, 2, 3]}}
-
-        atomic_json_write(path, data)
-
-        assert json.loads(path.read_text()) == data
-
-    def test_no_temp_files_left_behind(self, tmp_path):
-        atomic_json_write(tmp_path / "test.json", {"a": 1})
-        assert [p.name for p in tmp_path.iterdir()] == ["test.json"]
-
-    def test_write_to_nonexistent_directory(self, tmp_path):
-        missing = tmp_path / "missing"
-        atomic_json_write(missing / "test.json", {"key": "value"})
-        assert not missing.exists()
-
-    def test_write_cleans_up_temp_on_replace_failure(self, tmp_path):
-        path = tmp_path / "test.json"
-
-        with patch("kml_heatmap.cache.os.replace", side_effect=OSError("boom")):
-            atomic_json_write(path, {"key": "value"})
-
-        assert not path.exists()
-        assert list(tmp_path.iterdir()) == []
-
-    def test_write_handles_temp_cleanup_failure(self, tmp_path):
-        path = tmp_path / "test.json"
-
-        with (
-            patch("kml_heatmap.cache.os.replace", side_effect=OSError("replace")),
-            patch("kml_heatmap.cache.os.unlink", side_effect=OSError("unlink")),
-        ):
-            atomic_json_write(path, {"key": "value"})
-
-        assert not path.exists()

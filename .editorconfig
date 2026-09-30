@@ -1,0 +1,37 @@
+# What Prettier (.prettierrc.json) and ruff (pyproject.toml) write, for the
+# editors that read this file. The pre-commit hooks and CI check the same.
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 2
+
+[*.{py,pyi}]
+indent_size = 4
+
+# The tables of pyproject.toml, and what pip-compile writes
+[{pyproject.toml,*.lock}]
+indent_size = 4
+
+[Makefile]
+indent_style = tab
+
+# Two trailing spaces are a line break in Markdown (see the trailing
+# whitespace hook in .pre-commit-config.yaml)
+[*.md]
+trim_trailing_whitespace = false
+
+# The flights, which the hooks leave alone as well, and the fixture flights.
+# Most start with a UTF-8 byte order mark, which "charset = utf-8" would
+# have an editor strip on save; they are kept byte for byte as exported.
+[{data/**,tests/fixtures/**.kml}]
+charset = unset
+end_of_line = unset
+trim_trailing_whitespace = unset
+insert_final_newline = unset
+indent_style = unset
+indent_size = unset

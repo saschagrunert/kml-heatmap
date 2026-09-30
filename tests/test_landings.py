@@ -464,6 +464,7 @@ class TestExport:
             [metadata, metadata],
             [],
             tmp_path,
+            available_flags=[],
         )
 
         timed_info, untimed_info = parse_data(tmp_path / "2025" / "data.json")[

@@ -7,7 +7,8 @@
  * of the chart's SVG, buttons whose name is the same to the eye and the
  * ear, and the selects of the corridor's width and of the heights. Each is
  * appended to the parent it is given, so the order they are made in is the
- * order they are read in.
+ * order they are read in. The flight profile (ui/flightProfile.ts) is
+ * built of the same elements and shapes.
  */
 import { setControlIcon, type IconName } from "../utils/icons";
 
@@ -35,6 +36,15 @@ export function shape(
   return el;
 }
 
+/**
+ * Name an icon-only button the same to the eye and the ear; the panels of
+ * the tour and of the replay of all flights name theirs alike
+ */
+export function nameButton(button: HTMLElement, name: string): void {
+  button.title = name;
+  button.setAttribute("aria-label", name);
+}
+
 /** A button named the same to the eye and the ear */
 export function button(
   className: string,
@@ -44,8 +54,7 @@ export function button(
 ): HTMLButtonElement {
   const el = element("button", className, parent);
   el.type = "button";
-  el.title = name;
-  el.setAttribute("aria-label", name);
+  nameButton(el, name);
   if (iconName) setControlIcon(el, iconName, 16);
   return el;
 }

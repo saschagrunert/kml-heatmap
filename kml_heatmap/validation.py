@@ -12,6 +12,9 @@ if TYPE_CHECKING:
     from collections.abc import Iterable
 
 MAX_KML_FILE_SIZE = 100 * 1024 * 1024  # 100 MB
+# The extensions of the inputs: KML, and KMZ (a zip archive holding a KML
+# file, see parser._read_kmz), in any case
+KML_SUFFIXES = (".kml", ".kmz")
 
 # Files that only a site of this tool has, relative to the output directory
 # and to the data directory: where either is, the site is ours to replace
@@ -21,6 +24,7 @@ DATA_MARKERS = ("metadata.json",)
 _OWNED_DATA_FILES = ("airports.json", "metadata.json", "[0-9][0-9][0-9][0-9]/data.json")
 
 __all__ = [
+    "KML_SUFFIXES",
     "SITE_MARKERS",
     "find_kml_files",
     "foreign_site_files",
@@ -47,8 +51,8 @@ def validate_kml_file(file_path: str) -> tuple[bool, str | None]:
     if not os.access(path, os.R_OK):
         return False, f"File not readable: {file_path}"
 
-    if not str(path).lower().endswith(".kml"):
-        return False, f"File does not have .kml extension: {file_path}"
+    if not str(path).lower().endswith(KML_SUFFIXES):
+        return False, f"File does not have a .kml or .kmz extension: {file_path}"
 
     file_size = path.stat().st_size
     if file_size == 0:
@@ -70,8 +74,10 @@ def find_kml_files(directory: Path) -> list[Path]:
 
     The generator and the obfuscation pass (with its check) have to agree on
     which files a directory holds: a file the check never saw would otherwise
-    be published with its real dates. Files match on the ``.kml`` extension in
-    any case and are listed per directory in numeric order (``2_x.kml``
+    be published with its real dates. Files match on the ``.kml`` and
+    ``.kmz`` extensions in any case (the obfuscator refuses a KMZ it cannot
+    rewrite, and its check reports one) and are listed per directory in
+    numeric order (``2_x.kml``
     before ``10_x.kml``), subdirectories after the files of their parent.
     Symlinks to files are listed so that the caller can refuse or skip them;
     symlinks to directories are not followed. A directory that cannot be
@@ -87,7 +93,8 @@ def find_kml_files(directory: Path) -> list[Path]:
         (
             path
             for path in entries
-            if path.suffix.lower() == ".kml" and (path.is_file() or path.is_symlink())
+            if path.suffix.lower() in KML_SUFFIXES
+            and (path.is_file() or path.is_symlink())
         ),
         key=lambda path: numeric_filename_key(path.name),
     )

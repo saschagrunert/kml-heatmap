@@ -34,40 +34,6 @@ export function formatNumber(value: number, decimals = 0): string {
 }
 
 /**
- * Format seconds into human-readable time string
- * @param seconds - Total seconds
- * @param span - A time the result is to line up with: from an hour on,
- *   hours are shown even when `seconds` has none ("0:05:30")
- * @returns Formatted time (e.g., "2:30:45" or "5:30")
- */
-export function formatTime(seconds: number, span: number = seconds): string {
-  const hours = Math.floor(seconds / 3600);
-  const minutes = Math.floor((seconds % 3600) / 60);
-  const secs = Math.floor(seconds % 60);
-
-  if (hours > 0 || span >= 3600) {
-    return (
-      hours +
-      ":" +
-      minutes.toString().padStart(2, "0") +
-      ":" +
-      secs.toString().padStart(2, "0")
-    );
-  }
-
-  return minutes + ":" + secs.toString().padStart(2, "0");
-}
-
-/**
- * Format speed in knots to human-readable string
- * @param knots - Speed in knots
- * @returns Formatted speed (e.g., "120 kt")
- */
-export function formatSpeed(knots: number): string {
-  return formatNumber(knots) + " kt";
-}
-
-/**
  * Compass track for a bearing, normalised and zero padded ("072°"). The
  * rounding comes first, so 359.6 degrees reads 000, never 360.
  * @param bearing - Bearing in degrees, any range
@@ -105,35 +71,4 @@ export function formatFileSize(bytes: number): string {
   }
   const text = value < 10 ? value.toFixed(1) : String(Math.round(value));
   return `${text} ${unit}`;
-}
-
-const MONTHS = [
-  "Jan",
-  "Feb",
-  "Mar",
-  "Apr",
-  "May",
-  "Jun",
-  "Jul",
-  "Aug",
-  "Sep",
-  "Oct",
-  "Nov",
-  "Dec",
-];
-
-/**
- * Format the build date map_config.js carries (e.g., "21 Sep 2026"). In
- * English, so every viewer reads the same text. The build carries no time
- * of day, which would tell when a flight just before it ended.
- * @param iso - "YYYY-MM-DD", the day in UTC
- * @returns Formatted date, or null when the value is not one
- */
-export function formatBuildDate(iso: string): string | null {
-  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
-  if (!match) return null;
-  const [, year, month, day] = match;
-  const monthName = MONTHS[Number(month) - 1];
-  if (!monthName) return null;
-  return `${Number(day)} ${monthName} ${year}`;
 }

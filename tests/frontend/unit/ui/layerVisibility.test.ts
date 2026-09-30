@@ -65,7 +65,6 @@ describe("layer visibility", () => {
 
   afterEach(() => {
     unmount();
-    vi.restoreAllMocks();
   });
 
   it("shows what the store holds from the start", () => {

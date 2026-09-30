@@ -71,7 +71,6 @@ describe("UIToggles layers", () => {
 
   afterEach(() => {
     unmount();
-    vi.restoreAllMocks();
   });
 
   describe("toggleHeatmap", () => {

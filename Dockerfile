@@ -60,8 +60,14 @@ WORKDIR /app
 
 # Install the pinned Python dependencies into a virtual environment
 COPY requirements.lock ./
+# pip (and setuptools, where the venv has it) only install: the tool runs
+# from this venv and never installs anything once built, so the installer is
+# removed from the venv. The base image keeps its own pip in /usr/local,
+# which nothing here runs. setuptools is not in a 3.14 venv, which pip
+# reports and skips.
 RUN python -m venv /opt/venv \
-    && /opt/venv/bin/pip install --no-cache-dir --require-hashes -r requirements.lock
+    && /opt/venv/bin/pip install --no-cache-dir --require-hashes -r requirements.lock \
+    && /opt/venv/bin/pip uninstall --yes pip setuptools
 ENV PATH="/opt/venv/bin:$PATH"
 
 # The Python package with its templates and static assets, then the built
@@ -70,6 +76,10 @@ ENV PATH="/opt/venv/bin:$PATH"
 COPY --from=package /package/kml_heatmap/ ./kml_heatmap/
 COPY --from=js-builder /build/kml_heatmap/static/ ./kml_heatmap/static/
 COPY serve.py ./
+# The bytecode, compiled once here: the unprivileged user cannot write it
+# next to the sources, and PYTHONDONTWRITEBYTECODE keeps any run from trying,
+# so every run would compile every module again otherwise
+RUN python -m compileall -q /app/kml_heatmap /app/serve.py
 
 # Run as an unprivileged user; /data is the work directory for input and
 # output mounts, /cache holds the OurAirports database, the elevation tiles

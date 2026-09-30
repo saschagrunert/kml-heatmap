@@ -22,9 +22,9 @@ import { mapSize, REPLAY_CAMERA_MOVE } from "../utils/mapHelpers";
 import { lngLatOfMercator } from "../calculations/heatCloud";
 import {
   heightAtZoomFt,
-  liftMetres,
   type GroundedHeight,
-} from "../calculations/lift";
+} from "../calculations/airplaneLift";
+import { liftMetres } from "../calculations/lift";
 
 /**
  * How far the chase tilts the map, in degrees: well into the horizon, and

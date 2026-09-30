@@ -2,18 +2,18 @@
  * The figures of the statistics panel and of Wrapped (panelStats.ts). The
  * filters, distances and ranges they build on are in statistics.test.ts.
  */
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import {
   collectAirports,
   calculateAltitudeStats,
   calculateSpeedStats,
   calculateLongestFlight,
   calculateFilteredStatistics,
+  calculateTotalDistance,
   filterStatistics,
   filterStatisticsInSlices,
   landingTotals,
 } from "../../../../kml_heatmap/frontend/calculations/panelStats";
-import { calculateTotalDistance } from "../../../../kml_heatmap/frontend/calculations/statistics";
 import { datasetIndex } from "../../../../kml_heatmap/frontend/calculations/datasetIndex";
 import {
   FEET_TO_METERS,
@@ -762,10 +762,6 @@ describe("panel statistics", () => {
   });
 
   describe("filterStatisticsInSlices", () => {
-    afterEach(() => {
-      vi.restoreAllMocks();
-    });
-
     /** A clock that has run past a slice at every look */
     const slowClock = () => {
       let now = 0;

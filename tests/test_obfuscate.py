@@ -3,6 +3,7 @@
 import logging
 import os
 import re
+import zipfile
 from datetime import UTC, datetime, timedelta
 from itertools import pairwise
 from pathlib import Path
@@ -752,6 +753,84 @@ class TestObfuscateFiles:
         assert obfuscate_kml_directory(tmp_path) == 0
 
 
+class TestTimestampsNotUnderstood:
+    """A timestamp the rewrite cannot read is one it cannot move either."""
+
+    @pytest.mark.parametrize(
+        "text", ["1710406320", "14.03.2024 09:12", "not-a-timestamp"]
+    )
+    def test_the_check_reports_it(self, tmp_path, text):
+        kml_file = tmp_path / "t.kml"
+        kml_file.write_text(f"<kml><when>{text}</when></kml>", encoding="utf-8")
+        assert f"Timestamp not understood, remove or fix it: {text}" in (
+            check_kml_obfuscated(kml_file)
+        )
+
+    def test_a_unix_time_in_a_when_makes_the_rewrite_refuse(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        """It used to pass the check and stay in the file as it was."""
+        kml_file = tmp_path / "1_DEAGJ_DA20.kml"
+        original = (
+            "<kml><Placemark><gx:Track><when>1710406320</when>"
+            "<gx:coord>12.0 51.5 100</gx:coord></gx:Track></Placemark></kml>"
+        )
+        kml_file.write_text(original, encoding="utf-8")
+        monkeypatch.setattr("sys.argv", ["obfuscate", str(tmp_path)])
+
+        with pytest.raises(SystemExit) as exc_info:
+            obfuscate_module.main()
+
+        assert exc_info.value.code == 1
+        out = capsys.readouterr().out
+        assert "Timestamp not understood" in out
+        assert "1710406320" in out
+        assert kml_file.read_text(encoding="utf-8") == original
+
+
+class TestKmz:
+    """The obfuscator cannot rewrite inside a zip, and says so."""
+
+    @pytest.fixture
+    def kmz(self, tmp_path):
+        path = tmp_path / "1_DEAGJ_DA20.kmz"
+        with zipfile.ZipFile(path, "w") as archive:
+            archive.writestr("doc.kml", SAMPLE_KML)
+        return path
+
+    def test_is_listed_like_the_generator_lists_it(self, tmp_path, kmz):
+        assert find_kml_files(tmp_path) == [kmz]
+
+    def test_is_not_rewritten(self, kmz, capsys):
+        before = kmz.read_bytes()
+        assert obfuscate_kml_file(kmz) is False
+        assert kmz.read_bytes() == before
+        assert "unzip it" in capsys.readouterr().err
+
+    def test_the_check_reports_it(self, tmp_path, kmz):
+        assert check_directory_obfuscated(tmp_path) == {
+            kmz.name: [f"KMZ archive: {obfuscate_module.KMZ_REFUSAL}"]
+        }
+
+    def test_a_charterware_name_is_left_as_it_is(self, tmp_path, capsys):
+        """Refused as it is: renamed first, the refusal would name a file the
+        user never had."""
+        path = tmp_path / "2026-01-12_1513h_OE-AKI_LOAV-LOAV.kmz"
+        with zipfile.ZipFile(path, "w") as archive:
+            archive.writestr("doc.kml", SAMPLE_KML)
+
+        assert obfuscate_module._obfuscate_listed_files([path]) == 0
+        assert list(tmp_path.iterdir()) == [path]
+        assert path.name in capsys.readouterr().err
+
+    def test_the_check_fails_on_it(self, tmp_path, kmz, monkeypatch, capsys):
+        monkeypatch.setattr("sys.argv", ["obfuscate", str(tmp_path), "--check"])
+        with pytest.raises(SystemExit) as exc_info:
+            obfuscate_module.main()
+        assert exc_info.value.code == 1
+        assert "KMZ archive" in capsys.readouterr().out
+
+
 class TestCheckObfuscated:
     def test_detects_unobfuscated_timestamps_and_names(self, tmp_path):
         kml_file = tmp_path / "test.kml"
@@ -803,7 +882,8 @@ class TestCheckObfuscated:
             "<kml><when>2025-01-01T00:00:00.0000000Z</when></kml>",
             "<kml><when>2025-01-01T00:00:00.25Z</when></kml>",
             "<kml><name>test</name></kml>",
-            "<kml><when>not-a-timestamp</when></kml>",
+            # A year alone, or nothing, gives nothing away
+            "<kml><when>2025</when><when></when></kml>",
         ],
     )
     def test_clean_edge_cases(self, tmp_path, kml):
@@ -926,13 +1006,61 @@ class TestCheckObfuscated:
             ("<value>1735689600</value>", []),
             # Noon on January 1st: the date passes, the time of day does not
             ("<value>1735732800</value>", ["1735732800"]),
-            ("<value>12345</value> 1710406320", []),
+            # Anywhere, not only in a data value
+            ("<value>12345</value> 1710406320", ["1710406320"]),
+            ("<name>Flight 1710406320</name>", ["1710406320"]),
+            ("<description>at 1710406320123 ms</description>", ["1710406320123"]),
+            # Part of a longer number, which is none
+            ("<value>17104063201</value>", []),
+            # The fraction of a decimal number is none either
+            ("<value>12.1710406320</value>", []),
+            # A dot after a word only separates it
+            ("<name>log.1710406320</name>", ["1710406320"]),
             # Ten digits, but not a time of this era
             ("<value>9999999999</value>", []),
+            # Numbers that read as a time after today: a phone number (2037),
+            # a serial number (2093)
+            ("<description>Call 2125551234</description>", []),
+            ("<value>3912345678</value>", []),
+            # An attribute value is an id or a reference, not text
+            ('<Style id="1712345678901"/><styleUrl>#s</styleUrl>', []),
+            # So is the id a reference points to, which the obfuscator
+            # cannot rewrite either
+            (
+                '<Style id="1712345678901"/><styleUrl>#1712345678901</styleUrl>',
+                [],
+            ),
+            ("<kml:styleUrl>styles.kml#1712345678901</kml:styleUrl>", []),
+            ("<Icon><href>icons.kml#1712345678901</href></Icon>", []),
+            ("<Update><targetHref>a.kml#1712345678901</targetHref></Update>", []),
+            ("<Alias><sourceHref>m.dae#1712345678901</sourceHref></Alias>", []),
+            # The path before the id is read
+            ("<styleUrl>flight_1710406320.kml#s</styleUrl>", ["1710406320"]),
+            # A "#" elsewhere is no reference
+            ("<name>#1710406320</name>", ["1710406320"]),
+            (
+                "<description>&lt;td data-t='1710406320'&gt;&lt;/td&gt;</description>",
+                [],
+            ),
+            # The dates in an attribute are still found by their shape
+            ('<Placemark id="2024-03-14"/>', ["2024-03-14"]),
+            # A view is 1234567890 m away (2009-02-13 23:31:30 as a time)
+            ("<LookAt><gx:range>1234567890</gx:range></LookAt>", []),
+            ("<Camera><altitude>1234567890</altitude></Camera>", []),
+            # The same number where a time may be is one
+            ("<name>1234567890</name>", ["1234567890"]),
+            ("<!-- recorded 1710406320 -->", ["1710406320"]),
         ],
     )
     def test_stray_dates_tolerate_the_days_after_jan_1(self, text, stray):
         assert _find_stray_dates(text) == stray
+
+    def test_a_unix_time_after_today_is_no_flight(self):
+        # Noon: never the midnight that passes
+        noon = int(datetime.now(UTC).timestamp()) // 86400 * 86400 + 43200
+        week_ago = str(noon - 7 * 86400)
+        in_a_week = str(noon + 7 * 86400)
+        assert _find_stray_dates(f"<name>{week_ago} {in_a_week}</name>") == [week_ago]
 
     @pytest.mark.parametrize(
         "name",
@@ -1285,8 +1413,9 @@ class TestProperties:
     @settings(max_examples=100, deadline=None)
     @given(
         st.datetimes(
-            min_value=datetime(2000, 1, 2),
-            max_value=datetime(2099, 12, 30),
+            # Hypothesis takes naive bounds and adds the time zone itself
+            min_value=datetime(2000, 1, 2),  # noqa: DTZ001
+            max_value=datetime(2099, 12, 30),  # noqa: DTZ001
             timezones=st.just(UTC),
         ),
         st.lists(st.integers(min_value=0, max_value=3600), min_size=1, max_size=8),
@@ -1394,6 +1523,42 @@ class TestCLI:
         )
         assert check_kml_obfuscated(kml_file) == ["Date not on Jan 1: 2025-09-21"]
 
+    def test_numbers_that_are_no_time_pass_the_check(self, tmp_path):
+        kml_file = tmp_path / "test.kml"
+        kml_file.write_text(
+            '<kml><Style id="1712345678901"/>'
+            "<Placemark><styleUrl>#1712345678901</styleUrl>"
+            "<when>2025-01-01T00:00:00Z</when>"
+            "<description>Call 2125551234, serial 3912345678</description>"
+            "<LookAt><range>1234567890</range></LookAt></Placemark></kml>",
+            encoding="utf-8",
+        )
+        assert check_kml_obfuscated(kml_file) == []
+
+    def test_a_past_unix_time_in_a_name_fails_the_check(self, tmp_path):
+        kml_file = tmp_path / "test.kml"
+        kml_file.write_text(
+            "<kml><Placemark><when>2025-01-01T00:00:00Z</when>"
+            "<name>Flight 1710406320</name></Placemark></kml>",
+            encoding="utf-8",
+        )
+        assert check_kml_obfuscated(kml_file) == [
+            "Unix time not at midnight on Jan 1, remove it: 1710406320"
+        ]
+
+    def test_a_past_unix_time_next_to_a_style_reference_fails(self, tmp_path):
+        kml_file = tmp_path / "test.kml"
+        kml_file.write_text(
+            '<kml><Style id="1712345678901"/>'
+            "<Placemark><styleUrl>#1712345678901</styleUrl>"
+            "<when>2025-01-01T00:00:00Z</when>"
+            "<description>Landed 1710406320</description></Placemark></kml>",
+            encoding="utf-8",
+        )
+        assert check_kml_obfuscated(kml_file) == [
+            "Unix time not at midnight on Jan 1, remove it: 1710406320"
+        ]
+
     def test_a_unix_time_of_day_is_reported_as_one(self, tmp_path):
         kml_file = tmp_path / "test.kml"
         # Noon on January 1st: on the right day, at a time of day
@@ -1490,7 +1655,9 @@ class TestRenameCharterwareFiles:
         assert result == [other, renamed]
         assert renamed.read_text(encoding="utf-8") == CHARTERWARE_KML
         assert not path.exists()
-        assert parse_aircraft_from_filename(renamed.name)["route"] == "LOAV-LOAV"
+        info = parse_aircraft_from_filename(renamed.name)
+        assert info is not None
+        assert info.route == "LOAV-LOAV"
 
     def test_numbers_follow_the_flight_order_per_year(self, tmp_path):
         names = [

@@ -54,6 +54,8 @@ kml_heatmap/static/wrapped.bundle.js
 kml_heatmap/static/shared.bundle.js
 kml_heatmap/static/yearWorker.bundle.js
 kml_heatmap/static/*.map
+# The metafile of `node build.js --metafile` (see scripts/README.md)
+/bundle-meta.json
 # Third-party files copied out of node_modules by scripts/vendor.js
 kml_heatmap/static/vendor/
 kml_heatmap/static/flags/

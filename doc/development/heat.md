@@ -144,16 +144,18 @@ Now the page works out the points and the heat of each alone and hands them to
 the year worker as one column (`heatColumns`, a copy of about a millisecond).
 The worker works out the exposure and the roll-off
 (`calculations/heatExposure.ts`) and writes the GeoJSON as text into a Blob
-(`drawHeat` in `services/heatSource.ts`), the text `JSON.stringify` writes for
-the same features, and the source is given a Blob URL of it
-(`DataManager.writeSource`), which MapLibre's worker fetches and parses itself.
-That takes two fixes of `scripts/vendor.js`: MapLibre fetches a URL of a scheme
-other than http(s) and file through the main thread for its worker, and sends
-the GeoJSON of a URL back to the main thread whole, and for a `blob:` URL it now
-does neither. A source keeps its URL until it has taken the next one, which is
-revoked then, and the page's CSP allows `blob:` in `connect-src` for a browser
-that holds MapLibre's worker to it (Chrome does not) and for the e2e tests,
-which read the sources' URLs.
+(`drawHeat` in `services/heatSource.ts`): the text `JSON.stringify` writes for
+the same features, with the coordinates of the points to 5 decimals (about 1.1
+m, drawn up to zoom 12.75), those of the heat lines to 7 (about 1 cm, drawn up
+to the map's last zoom) and the heat of the points to 4 significant digits. The
+source is given a Blob URL of it (`DataManager.writeSource`), which MapLibre's
+worker fetches and parses itself. That takes two fixes of `scripts/vendor.js`:
+MapLibre fetches a URL of a scheme other than http(s) and file through the main
+thread for its worker, and sends the GeoJSON of a URL back to the main thread
+whole, and for a `blob:` URL it now does neither. A source keeps its URL until
+it has taken the next one, which is revoked then, and the page's CSP allows
+`blob:` in `connect-src` for a browser that holds MapLibre's worker to it
+(Chrome does not) and for the e2e tests, which read the sources' URLs.
 
 The heat lines take the same way: the page works them out with the code of the
 worker's bundle (`heatLinesAlong`, along the curves the colour lines keep),

@@ -1,15 +1,36 @@
-"""Custom exceptions for KML Heatmap Generator."""
+"""Custom exceptions for KML Heatmap Generator.
+
+The command line tells three kinds of failure apart by its exit status (see
+``cli.main``): a problem with what it was given (``InvalidInputError``,
+``OutputRefusedError``: 2), a build that failed on the way (``ExportError``
+and every other ``KMLHeatmapError``: 1).
+"""
 
 __all__ = [
     "AirportDatabaseError",
+    "ExportError",
+    "InvalidInputError",
     "KMLHeatmapError",
     "KMLParseError",
+    "OutputRefusedError",
     "TerrainUnavailableError",
 ]
 
 
 class KMLHeatmapError(Exception):
     """Base exception for all KML Heatmap errors."""
+
+
+class InvalidInputError(KMLHeatmapError):
+    """The inputs cannot make a site: a missing, invalid or empty KML file."""
+
+
+class OutputRefusedError(KMLHeatmapError):
+    """The output directory must not be written (see ``validation``)."""
+
+
+class ExportError(KMLHeatmapError):
+    """Writing the site failed on the way (a full disk, a worker that died)."""
 
 
 class AirportDatabaseError(KMLHeatmapError):

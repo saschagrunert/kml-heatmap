@@ -143,7 +143,6 @@ describe("hotspot tour", () => {
   afterEach(() => {
     lifetime.abort();
     vi.useRealTimers();
-    vi.restoreAllMocks();
     document.body.innerHTML = "";
     resetSiteData();
   });
@@ -301,6 +300,38 @@ describe("hotspot tour", () => {
     expect(fly).toMatchObject({ duration: TOUR_FLY_MS - 1000 });
     await vi.advanceTimersByTimeAsync(TOUR_FLY_MS - 1000);
     expect(last("easeTo")[0]).toMatchObject({ duration: TOUR_DWELL_MS });
+  });
+
+  it("pauses while the tab is hidden, and plays on once it is back", async () => {
+    let hidden = false;
+    vi.spyOn(document, "hidden", "get").mockImplementation(() => hidden);
+    const show = (now: boolean): void => {
+      hidden = !now;
+      document.dispatchEvent(new Event("visibilitychange"));
+    };
+    tour.start();
+    await vi.advanceTimersByTimeAsync(1000);
+
+    // The camera's frames stop in a hidden tab, and the tour's steps with
+    // them, as a click on Pause would stop them
+    show(false);
+    expect(tour.isPlaying).toBe(false);
+    expect(el("hotspot-tour-play-btn").getAttribute("aria-label")).toBe(
+      "Play the tour",
+    );
+    await vi.advanceTimersByTimeAsync(TOUR_FLY_MS * 3);
+    expect(tour.current).toBe(0);
+
+    // Back, the flight goes on with what was left of it
+    show(true);
+    expect(tour.isPlaying).toBe(true);
+    expect(last("flyTo")[0]).toMatchObject({ duration: TOUR_FLY_MS - 1000 });
+
+    // A tour paused by hand stays paused through a hidden tab
+    press("hotspot-tour-play-btn");
+    show(false);
+    show(true);
+    expect(tour.isPlaying).toBe(false);
   });
 
   it("steps to the next place and back, and ends after the last", async () => {

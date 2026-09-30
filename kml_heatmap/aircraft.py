@@ -2,9 +2,9 @@
 
 import json
 import re
-from datetime import datetime
+from datetime import date
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NamedTuple
 
 from .constants import ICAO_REGION_PREFIXES
 from .date_tokens import strip_dates
@@ -14,6 +14,8 @@ if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping
 
 __all__ = [
+    "REGISTRATION_PREFIXES",
+    "AircraftInfo",
     "load_aircraft_data",
     "merge_aircraft_data",
     "normalize_registration",
@@ -21,17 +23,27 @@ __all__ = [
     "resolve_aircraft_models",
 ]
 
-# ICAO nationality prefixes that are written with a hyphen. Longer prefixes are
-# matched first. "N" (United States) is written without a hyphen and is
-# intentionally absent.
+# ICAO nationality prefixes that are written with a hyphen, in Europe and
+# around it (doc/usage.md lists them). Longer prefixes are matched first, so
+# "9H" (Malta) wins over nothing shorter and "2" (Guernsey) or "M" (Isle of
+# Man) only apply where no two-character prefix does. "N" (United States) is
+# written without a hyphen and is intentionally absent; any other prefix is
+# used as written, so a registration outside this table has to be written
+# with its hyphen in the file name.
 REGISTRATION_PREFIXES: tuple[str, ...] = tuple(
     sorted(
         (
+            "2",
+            "4O",
+            "5B",
             "9A",
+            "9H",
             "CS",
+            "E7",
             "EC",
             "EI",
             "ES",
+            "EW",
             "HA",
             "HB",
             "LN",
@@ -50,18 +62,38 @@ REGISTRATION_PREFIXES: tuple[str, ...] = tuple(
             "SP",
             "SX",
             "TC",
+            "TF",
+            "UR",
             "YL",
             "YR",
             "YU",
+            "Z3",
+            "ZA",
             "D",
             "F",
             "G",
             "I",
+            "M",
         ),
         key=len,
         reverse=True,
     )
 )
+
+
+class AircraftInfo(NamedTuple):
+    """What a KML file name says about the aircraft (see the parser below).
+
+    ``registration`` is None when the name has the shape of one but no
+    registration in it; ``route`` is the DEPARTURE-ARRIVAL part of a
+    Charterware name.
+    """
+
+    registration: str | None
+    type: str | None = None
+    route: str | None = None
+    format: str = "numbered"
+
 
 # A registration: a nationality prefix of one or two characters (D, OE, 9A,
 # N), with or without its hyphen, then letters and digits (D-EHYL, OEAKI,
@@ -86,7 +118,8 @@ def load_aircraft_data(aircraft_file: Path) -> dict[str, str]:
         return {}
 
     # Keyed the way registrations from file names are written ("DEAGJ" is
-    # D-EAGJ); the first spelling of a registration wins
+    # D-EAGJ, "d-eagj" too: the names are read in capitals); the first
+    # spelling of a registration wins
     aircraft: dict[str, str] = {}
     for key, value in data.items():
         # A null or an object would reach metadata.json as "None" or as a
@@ -98,7 +131,7 @@ def load_aircraft_data(aircraft_file: Path) -> dict[str, str]:
                 aircraft_file,
             )
             continue
-        aircraft.setdefault(normalize_registration(key), value)
+        aircraft.setdefault(normalize_registration(key.strip().upper()), value)
     return aircraft
 
 
@@ -147,7 +180,7 @@ def _is_date(text: str) -> bool:
     """Whether a leading number of a file name is a date (20250601) or year."""
     if len(text) == 8:
         try:
-            datetime.strptime(text, "%Y%m%d")
+            date.fromisoformat(text)
         except ValueError:
             return False
         return True
@@ -180,8 +213,8 @@ def _dated_registration(text: str, filename: str) -> bool:
     return True
 
 
-def parse_aircraft_from_filename(filename: str) -> dict[str, str | None]:
-    """Parse aircraft information from KML filename.
+def parse_aircraft_from_filename(filename: str) -> AircraftInfo | None:
+    """Parse aircraft information from KML filename, None for a name without.
 
     Supports two formats:
     1. Numbered: N_REGISTRATION_TYPE.kml (e.g., 1_DEHYL_DA40.kml)
@@ -198,19 +231,19 @@ def parse_aircraft_from_filename(filename: str) -> dict[str, str | None]:
     if len(parts) >= 3 and parts[0].isascii() and parts[0].isdigit():
         if not _is_registration(parts[1], _is_date(parts[0])):
             logger.debug("No aircraft registration in filename: %s", filename)
-            return {}
+            return None
         if len(parts) > 3:
             logger.warning(
                 "Ignoring extra filename parts in %s (expected N_REGISTRATION_TYPE)",
                 filename,
             )
-        return {
-            "registration": None
+        return AircraftInfo(
+            registration=None
             if _dated_registration(parts[1], filename)
             else normalize_registration(parts[1]),
-            "type": parts[2],
-            "format": "numbered",
-        }
+            type=parts[2],
+            format="numbered",
+        )
 
     if (
         len(parts) >= 4
@@ -218,10 +251,10 @@ def parse_aircraft_from_filename(filename: str) -> dict[str, str | None]:
         and _CHARTERWARE_TIME.fullmatch(parts[1])
     ):
         try:
-            datetime.strptime(parts[0], "%Y-%m-%d")
+            date.fromisoformat(parts[0])
         except ValueError:
             logger.warning("Invalid date in Charterware filename: %s", filename)
-            return {}
+            return None
 
         # The same rules as for a numbered name: "constructor" in
         # "2026-01-12_1513h_constructor_LOAV-LOAV.kml" is no aircraft, but
@@ -233,12 +266,7 @@ def parse_aircraft_from_filename(filename: str) -> dict[str, str | None]:
             registration = normalize_registration(parts[2])
         else:
             logger.debug("No aircraft registration in filename: %s", filename)
-        return {
-            "registration": registration,
-            "type": None,
-            "route": parts[3] or None,
-            "format": "charterware",
-        }
+        return AircraftInfo(registration, None, parts[3] or None, "charterware")
 
     logger.debug("No aircraft information in filename: %s", filename)
-    return {}
+    return None

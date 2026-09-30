@@ -10,6 +10,10 @@ published, not just its tip. Commits the remote already has are skipped.
 Install it once per clone with `make hooks`. It needs nothing but the
 Python the project requires, and it fails closed: when it cannot run the
 check, the push is refused. `git push --no-verify` skips it.
+
+A push that adds exactly one flight to data/ gets a warning, not a refusal:
+the files carry no date, but the commit does, and a commit with one new
+flight in it dates that flight to about the day it was pushed.
 """
 
 import shutil
@@ -19,8 +23,12 @@ import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-# Every KML file, wherever it is and however its extension is spelled
-KML_PATHSPEC = ":(glob,icase)**/*.kml"
+# Every KML file, wherever it is and however its extension is spelled, and
+# every KMZ archive, which the check reports as one it cannot read (the
+# generator reads both, see kml_heatmap.validation.find_kml_files)
+KML_PATHSPECS = (":(glob,icase)**/*.kml", ":(glob,icase)**/*.kmz")
+# The flights of the site
+FLIGHT_PATHSPECS = (":(glob,icase)data/**/*.kml", ":(glob,icase)data/**/*.kmz")
 # What git sends for a ref that is deleted rather than pushed
 ZERO_SHA = "0" * 40
 
@@ -54,7 +62,7 @@ def commits_to_check(repo: Path, remote: str, pushed_shas: list[str]) -> list[st
         "--not",
         f"--remotes={remote}",
         "--",
-        KML_PATHSPEC,
+        *KML_PATHSPECS,
     )
     return output.decode().split()
 
@@ -73,16 +81,37 @@ def changed_kml_files(repo: Path, commit: str) -> list[str]:
         "--diff-filter=d",
         commit,
         "--",
-        KML_PATHSPEC,
+        *KML_PATHSPECS,
     )
     names = [name for name in output.decode().split("\0") if name]
     return list(dict.fromkeys(names))
 
 
+def added_flights(repo: Path, remote: str, pushed_shas: list[str]) -> list[str]:
+    """The flight files under data/ that the commits being pushed add."""
+    if not pushed_shas:
+        return []
+    output = _git(
+        repo,
+        "log",
+        "--diff-filter=A",
+        "--name-only",
+        "--format=",
+        "-z",
+        *pushed_shas,
+        "--not",
+        f"--remotes={remote}",
+        "--",
+        *FLIGHT_PATHSPECS,
+    )
+    names = (name.strip("\n") for name in output.decode().split("\0"))
+    return list(dict.fromkeys(name for name in names if name))
+
+
 def violations_in(repo: Path, commit: str) -> dict[str, list[str]]:
     """The obfuscation violations of the KML files a commit adds or changes."""
     # Imported here: main() puts the checkout on the path first
-    from kml_heatmap.obfuscate import check_directory_obfuscated
+    from kml_heatmap.obfuscate import check_directory_obfuscated  # noqa: PLC0415
 
     with tempfile.TemporaryDirectory(prefix="kml-pre-push-") as tmp:
         directory = Path(tmp)
@@ -119,6 +148,14 @@ def check(repo: Path, remote: str, lines: list[str]) -> int:
             file=sys.stderr,
         )
         return 1
+    added = added_flights(repo, remote, pushed_shas(lines))
+    if len(added) == 1:
+        print(
+            f"pre-push: warning: this push adds one flight ({added[0]}); a "
+            "commit with a single flight dates it to about the day it was "
+            "pushed, so consider adding it together with others.",
+            file=sys.stderr,
+        )
     return 0
 
 

@@ -6,6 +6,7 @@ import { MapApp } from "../../../../kml_heatmap/frontend/mapApp";
 import {
   cartoTransformRequest,
   BASE_STYLE_RETRY_MS,
+  BASE_STYLE_UNAVAILABLE_MESSAGE,
   FALLBACK_STYLE,
 } from "../../../../kml_heatmap/frontend/baseStyle";
 import {
@@ -30,6 +31,7 @@ import {
 import {
   loadFeatures,
   loadWrapped,
+  wasSiteUpdated,
 } from "../../../../kml_heatmap/frontend/services/featureLoader";
 import {
   DOUBLE_TAP_MS,
@@ -129,6 +131,7 @@ vi.mock("../../../../kml_heatmap/frontend/services/featureLoader", () => ({
       }),
     }),
   ),
+  wasSiteUpdated: vi.fn(() => false),
 }));
 vi.mock("../../../../kml_heatmap/frontend/ui/uiToggles", () => ({
   UIToggles: vi.fn(function () {
@@ -559,6 +562,20 @@ describe("MapApp controls and map", () => {
         expect(app.statsManager).toBe(mockStatsManagerInstance),
       );
       expect(app.store.get("statsPanelVisible")).toBe(true);
+    });
+
+    it("leaves a bundle of a newer deploy to the toast that offers the reload", async () => {
+      await initializeApp(app);
+      vi.mocked(loadWrapped).mockResolvedValueOnce(null);
+      vi.mocked(wasSiteUpdated).mockReturnValueOnce(true);
+
+      expect(await app.loadWrapped()).toBeUndefined();
+
+      // featureLoader said the site was updated; its code did load
+      expect(showToast).not.toHaveBeenCalledWith(
+        WRAPPED_UNAVAILABLE_MESSAGE,
+        "error",
+      );
     });
 
     it("takes Wrapped's failure away once the statistics bring the file (regression)", async () => {
@@ -1819,6 +1836,68 @@ describe("MapApp controls and map", () => {
           await vi.advanceTimersByTimeAsync(BASE_STYLE_RETRY_MS * 10);
           expect(fetchBaseStyle).toHaveBeenCalledTimes(2);
           expect(mockMap(app).setStyle).not.toHaveBeenCalled();
+        } finally {
+          vi.useRealTimers();
+        }
+      });
+
+      it("says once that the base map is missing, with a Retry that asks at once", async () => {
+        vi.useFakeTimers();
+        try {
+          fetchBaseStyle.mockRejectedValue(new TypeError("Failed to fetch"));
+          await initializeApp(app);
+          await vi.advanceTimersByTimeAsync(BASE_STYLE_RETRY_MS);
+          expect(fetchBaseStyle).toHaveBeenCalledTimes(2);
+
+          // One toast for both failures, and none that stacks up
+          const said = vi
+            .mocked(showToast)
+            .mock.calls.filter(
+              ([message]) => message === BASE_STYLE_UNAVAILABLE_MESSAGE,
+            );
+          expect(said).toHaveLength(1);
+          const [, type, action] = said[0]!;
+          expect(type).toBe("info");
+          expect(action?.label).toBe("Retry");
+
+          // Its Retry asks again at once, and a style that comes takes
+          // the toast away
+          fetchBaseStyle.mockResolvedValue(styleResponse(BASE_STYLE));
+          action!.run();
+          await vi.advanceTimersByTimeAsync(0);
+          expect(fetchBaseStyle).toHaveBeenCalledTimes(3);
+          expect(mockMap(app).setStyle).toHaveBeenCalledOnce();
+          expect(dismissToast).toHaveBeenCalledWith(
+            BASE_STYLE_UNAVAILABLE_MESSAGE,
+          );
+        } finally {
+          vi.useRealTimers();
+        }
+      });
+
+      it("says so again when its Retry fails as well", async () => {
+        vi.useFakeTimers();
+        try {
+          fetchBaseStyle.mockRejectedValue(new TypeError("Failed to fetch"));
+          await initializeApp(app);
+          await vi.advanceTimersByTimeAsync(BASE_STYLE_RETRY_MS);
+          const said = () =>
+            vi
+              .mocked(showToast)
+              .mock.calls.filter(
+                ([message]) => message === BASE_STYLE_UNAVAILABLE_MESSAGE,
+              );
+          expect(said()).toHaveLength(1);
+
+          said()[0]![2]!.run();
+          await vi.advanceTimersByTimeAsync(0);
+          expect(fetchBaseStyle).toHaveBeenCalledTimes(3);
+          expect(said()).toHaveLength(2);
+
+          // The timed retry of that round stays quiet, as the first one did
+          await vi.advanceTimersByTimeAsync(BASE_STYLE_RETRY_MS);
+          expect(fetchBaseStyle).toHaveBeenCalledTimes(4);
+          expect(said()).toHaveLength(2);
         } finally {
           vi.useRealTimers();
         }

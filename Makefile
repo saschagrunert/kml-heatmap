@@ -129,7 +129,10 @@ check-obfuscation: ## Check that the KML files in INPUT_DIR and the fixture flig
 
 # The obfuscation CI job only sees a real date once it is public; the hook
 # refuses the push before. Linked rather than copied, so it stays current.
-hooks: ## Install the pre-push hook that refuses to push KML files with real dates
+# The pre-commit hooks of .pre-commit-config.yaml go in along with it where
+# pre-commit is installed; like typos in `lint`, a missing one is said, not
+# failed on.
+hooks: ## Install the pre-push hook that refuses to push KML files with real dates, and the pre-commit hooks
 	@hook="$$(git rev-parse --git-path hooks/pre-push)" && \
 	  target="$(CURDIR)/scripts/pre_push.py" && \
 	  if [ -e "$$hook" ] && [ "$$(readlink "$$hook")" != "$$target" ]; then \
@@ -137,6 +140,8 @@ hooks: ## Install the pre-push hook that refuses to push KML files with real dat
 	    exit 1; fi && \
 	  mkdir -p "$$(dirname "$$hook")" && ln -sfn "$$target" "$$hook" && \
 	  echo "Installed $$hook"
+	@if command -v pre-commit >/dev/null 2>&1; then pre-commit install; else \
+	  echo "warning: pre-commit is not installed, skipping its hooks (see CONTRIBUTING.md)" >&2; fi
 
 lint: ## Run the linters, formatters (check only) and type checkers of the CI lint job, plus bandit and typos, which CI runs in the security and typos jobs
 	python scripts/check_locks.py
@@ -149,6 +154,7 @@ lint: ## Run the linters, formatters (check only) and type checkers of the CI li
 	npm run lint
 	npm run lint:unused
 	npm run format:check
+	zizmor --min-severity medium .github/workflows
 	@if command -v typos >/dev/null 2>&1; then typos; else \
 	  echo "warning: typos is not installed, skipping the spell check (CI runs it; see CONTRIBUTING.md)" >&2; fi
 

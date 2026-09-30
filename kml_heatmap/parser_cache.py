@@ -10,6 +10,10 @@ airport database is part of the key because the parser standardizes airport
 names with it: a file parsed while the database was unavailable would
 otherwise keep its raw names until the KML changed.
 
+An entry is the parse as compact JSON, compressed with zstd: a few million
+points take a fifth of the space, and the files are read back faster than
+the JSON alone is from disk.
+
 Stale entries are not removed on the fly. ``prune_stale_cache_entries`` does
 that in one pass over the cache directory before a run: entries that another
 parser, format version or airport database wrote can never be read again,
@@ -23,11 +27,12 @@ import json
 import os
 import re
 import time
+from compression import zstd
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NamedTuple
 
 from .airport_lookup import database_fingerprint
-from .cache import CACHE_DIR, atomic_json_write
+from .cache import CACHE_DIR, atomic_bytes_write
 from .logger import logger
 from .types import FlightPath, FlightPathGroup, PathMetadata, TrackPoint
 
@@ -37,6 +42,7 @@ if TYPE_CHECKING:
 __all__ = [
     "CACHE_FORMAT_VERSION",
     "CACHE_MAX_AGE_DAYS",
+    "CACHE_SUFFIX",
     "KML_CACHE_DIR",
     "CachedParse",
     "get_cache_key",
@@ -46,8 +52,14 @@ __all__ = [
     "save_to_cache",
 ]
 
-# Bump whenever the serialized structure changes.
-CACHE_FORMAT_VERSION = 5
+# Bump whenever the serialized structure or its encoding changes (6: zstd).
+# Entries of any other version are pruned (see prune_stale_cache_entries).
+CACHE_FORMAT_VERSION = 6
+# The name an entry ends in, and how hard it is compressed: level 3 is
+# zstd's default, most of the saving at a fraction of the time of the
+# higher ones
+CACHE_SUFFIX = ".json.zst"
+_ZSTD_LEVEL = 3
 
 # Entries not read or written for this long are removed
 CACHE_MAX_AGE_DAYS = 30
@@ -69,12 +81,15 @@ _PARSER_MODULES = (
     "parser_gx_track",
     "parser_standard",
     "types",
+    "validation",
 )
 
 _ENTRY_NAME = re.compile(
     r"^[0-9a-f]{32}_v(?P<version>\d+)_(?P<parser>[0-9a-f]{8})"
-    r"_(?P<database>[0-9a-f]{8}|nodb)\.json$"
+    r"_(?P<database>[0-9a-f]{8}|nodb)\.json(?:\.zst)?$"
 )
+# The names this module ever gave an entry, for the legacy ones
+_ENTRY_SUFFIXES = (".json", ".zst")
 _HASH_CHUNK_BYTES = 1024 * 1024
 
 
@@ -112,7 +127,7 @@ def _cache_name(kml_path: Path) -> str | None:
         return None
     return (
         f"{content}_v{CACHE_FORMAT_VERSION}_{parser_fingerprint()}"
-        f"_{database_fingerprint()}.json"
+        f"_{database_fingerprint()}{CACHE_SUFFIX}"
     )
 
 
@@ -140,14 +155,15 @@ def get_cache_key(
 def _is_stale(entry: Path, now: float) -> bool:
     match = _ENTRY_NAME.match(entry.name)
     if match is None:
-        if entry.suffix == ".json":
+        if entry.suffix in _ENTRY_SUFFIXES:
             # An older naming scheme, which no current key produces
             return True
         if entry.suffix != ".tmp":
             return False
         # A temp file an interrupted write left behind goes by its age
     elif (
-        int(match["version"]) != CACHE_FORMAT_VERSION
+        not entry.name.endswith(CACHE_SUFFIX)
+        or int(match["version"]) != CACHE_FORMAT_VERSION
         or match["parser"] != parser_fingerprint()
         or match["database"] != database_fingerprint()
     ):
@@ -204,9 +220,27 @@ class CachedParse(NamedTuple):
     warnings: list[tuple[int, str]]
 
 
+def encode_entry(data: Any) -> bytes:
+    """An entry as it is stored: compact JSON, compressed."""
+    content = json.dumps(data, separators=(",", ":")).encode()
+    return zstd.compress(content, level=_ZSTD_LEVEL)
+
+
+def decode_entry(data: bytes) -> Any:
+    """The data of a stored entry (see ``encode_entry``)."""
+    return json.loads(zstd.decompress(data))
+
+
 def _point_from_json(item: Any) -> TrackPoint:
     lat, lon, alt, ts = item
     return TrackPoint(float(lat), float(lon), alt, ts)
+
+
+def _metadata_list(value: Any) -> list[PathMetadata]:
+    """The path metadata of an entry, which has to be a list."""
+    if not isinstance(value, list):
+        raise TypeError("path_metadata must be a list")
+    return value
 
 
 def load_cached_parse(cache_path: Path) -> CachedParse | None:
@@ -218,8 +252,7 @@ def load_cached_parse(cache_path: Path) -> CachedParse | None:
     being pruned for its age.
     """
     try:
-        with open(cache_path, encoding="utf-8") as f:
-            cached = json.load(f)
+        cached = decode_entry(cache_path.read_bytes())
         if cached.get("version") != CACHE_FORMAT_VERSION:
             logger.debug("Cache file %s has an unsupported version", cache_path)
             return None
@@ -231,12 +264,12 @@ def load_cached_parse(cache_path: Path) -> CachedParse | None:
             ]
             for path in cached["path_groups"]
         ]
-        path_metadata: list[PathMetadata] = cached["path_metadata"]
-        if not isinstance(path_metadata, list):
-            raise TypeError("path_metadata must be a list")
+        path_metadata = _metadata_list(cached["path_metadata"])
         warnings = [(int(level), str(message)) for level, message in cached["warnings"]]
     except (
         json.JSONDecodeError,
+        zstd.ZstdError,
+        UnicodeDecodeError,
         IndexError,
         KeyError,
         OSError,
@@ -271,13 +304,17 @@ def save_to_cache(
         index = index_by_id.get(id(point))
         return list(point) if index is None else index
 
-    atomic_json_write(
-        cache_path,
+    data = encode_entry(
         {
             "version": CACHE_FORMAT_VERSION,
             "coordinates": [list(point) for point in coordinates],
             "path_groups": [[encode(point) for point in path] for path in path_groups],
             "path_metadata": path_metadata,
             "warnings": [list(warning) for warning in warnings],
-        },
+        }
     )
+    try:
+        atomic_bytes_write(cache_path, data)
+    except OSError as e:
+        # The next run parses the file again, that is all
+        logger.debug("Failed to write cache file %s: %s", cache_path, e)

@@ -62,7 +62,6 @@ describe("ReplayManager activation", () => {
   afterEach(() => {
     vi.useRealTimers();
     unmountReplayDom();
-    vi.restoreAllMocks();
   });
 
   describe("constructor", () => {

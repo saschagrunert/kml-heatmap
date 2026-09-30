@@ -27,7 +27,6 @@ Rename a SkyDemon export to `N_REGISTRATION_TYPE.kml` and copy it into `data/`:
   in `data/` (`ls data | sort -n | tail -n 1`). The numbers keep the flights in
   chronological order, and the files are processed in that order.
 - `REGISTRATION` is the registration without its hyphen (`DEHYL` for `D-EHYL`).
-  The hyphen is put back from a table of nationality prefixes.
 - `TYPE` is the aircraft type designator (`DA40`, `C172`).
 
 For example, the flight after `103_DESST_C172.kml` in D-EHYL is
@@ -94,12 +93,18 @@ without one today, and the flights do not depend on it.
 
 ## 6. Check the result
 
-In the build output:
+`python -m kml_heatmap --list data` is the quick way to see that a flight is in:
+it prints a line for every flight with its year, aircraft and airports, and says
+why the site would leave any of them out, without building anything.
 
-- `✓ Loaded N points from <file>` for the new file, and no warning about it (see
+In the build output (on a terminal; where the output goes to a file or a pipe,
+as with `make build` and in CI, `✓` is written `[ok]` and `⚠` is written `[!]`):
+
+- `✓ Loaded N points from <file>` (or `[ok] Loaded N points from <file>`) for
+  the new file, and no warning about it (see
   [Troubleshooting](usage.md#troubleshooting) for the warnings that matter)
-- A `✓` line with the registration and its model in the aircraft list; a `⚠`
-  line there means `aircraft.json` has no model for it
+- A `✓` (`[ok]`) line with the registration and its model in the aircraft list;
+  a `⚠` (`[!]`) line there means `aircraft.json` has no model for it
 
 On the map:
 
@@ -131,4 +136,5 @@ test job against the new data, including the obfuscation check; once they pass,
 its `site` job builds the site from `data/` with the tile API key from the
 repository secrets and its `deploy` job publishes it to GitHub Pages. Nothing
 generated is committed: the local `docs/` stays out of git. A pull request runs
-the same tests but publishes nothing.
+the same tests but publishes nothing. To publish the site anywhere else, see
+[Hosting](hosting.md).

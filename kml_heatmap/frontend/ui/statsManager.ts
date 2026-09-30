@@ -13,20 +13,20 @@ import {
   calculateFilteredStatistics,
   filterStatistics,
 } from "../calculations/panelStats";
+import { airportCode } from "../features/airports";
 import {
-  airportCode,
   countryDisplayName,
   countryFlagSrc,
   groupByCountry,
-} from "../features/airports";
+} from "../features/countries";
 import { FEET_TO_METERS, NAUTICAL_MILES_TO_KM } from "../utils/constants";
-import { formatBuildDate, formatNumber } from "../utils/formatters";
+import { formatNumber } from "../utils/formatters";
+import { escapeHtml, pluralize } from "../utils/htmlGenerators";
 import {
-  escapeHtml,
+  formatBuildDate,
   markFlightTimeUnits,
-  pluralize,
   splitAirportName,
-} from "../utils/htmlGenerators";
+} from "../utils/statsFormat";
 import { icon, type IconName } from "../utils/icons";
 import { domCache } from "../utils/domCache";
 import { datasetIndex } from "../calculations/datasetIndex";

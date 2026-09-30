@@ -83,3 +83,11 @@ export const FALLBACK_STYLE: StyleSpecification = {
  * except by the network coming back, which `online` reports.
  */
 export const BASE_STYLE_RETRY_MS = 5_000;
+
+/**
+ * Said once a page, as the base style first fails: without it the map is
+ * the flights on a plain background, which looks like a broken page. Its
+ * Retry asks at once, as coming back online does.
+ */
+export const BASE_STYLE_UNAVAILABLE_MESSAGE =
+  "The base map could not be loaded, showing the flights alone";

@@ -213,7 +213,6 @@ describe("MapApp", () => {
 
     afterEach(() => {
       btn.remove();
-      vi.restoreAllMocks();
       delete window.mapApp;
     });
 

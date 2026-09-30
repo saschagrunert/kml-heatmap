@@ -179,16 +179,28 @@ const LABELLED_STUB_STYLE = {
 
 /** The origins the page is allowed to reach */
 const CARTO_STYLE_HOST = "basemaps.cartocdn.com";
-const TILE_HOSTS = [
+/**
+ * The tile servers, by host and, where the page asks a shared host for one
+ * set of tiles only, by the path of that set: anything else there, another
+ * bucket of S3 for one, is a request the page was not meant to make and
+ * fails the test like any other third party. A path changed in the app has
+ * to be changed here as well.
+ */
+const TILE_SOURCES: readonly { host: RegExp; path?: string }[] = [
   // Vector tiles come from tiles-a to tiles-d, glyphs and the sprite from
   // tiles; the stub style asks for none of them, but a request that does
   // get out is answered rather than failing the test for CARTO's layout
-  /^tiles(-[a-d])?\.basemaps\.cartocdn\.com$/,
-  /^nwy-tiles-api\.prod\.newaydata\.com$/,
-  /^s3\.amazonaws\.com$/,
-  // The satellite imagery: JPEG tiles, but the map decodes the stub's PNG
-  // by its content, not by the name
-  /^tiles\.maps\.eox\.at$/,
+  { host: /^tiles(-[a-d])?\.basemaps\.cartocdn\.com$/ },
+  { host: /^nwy-tiles-api\.prod\.newaydata\.com$/ },
+  // The elevation tiles (TERRAIN_TILE_URL in ui/terrain.ts)
+  { host: /^s3\.amazonaws\.com$/, path: "/elevation-tiles-prod/terrarium/" },
+  // The satellite imagery (SATELLITE_TILE_URL in ui/satellite.ts): JPEG
+  // tiles, but the map decodes the stub's PNG by its content, not by the
+  // name
+  {
+    host: /^tiles\.maps\.eox\.at$/,
+    path: "/wmts/1.0.0/s2cloudless-2024_3857/",
+  },
 ];
 
 /** The site under test, served by the webServer in playwright.config.ts */
@@ -202,7 +214,10 @@ function isBaseStyle(url: URL): boolean {
 }
 
 function isTile(url: URL): boolean {
-  return TILE_HOSTS.some((host) => host.test(url.hostname));
+  return TILE_SOURCES.some(
+    ({ host, path }) =>
+      host.test(url.hostname) && (!path || url.pathname.startsWith(path)),
+  );
 }
 
 function isSite(url: URL): boolean {

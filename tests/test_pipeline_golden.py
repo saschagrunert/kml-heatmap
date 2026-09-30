@@ -16,9 +16,9 @@ import pytest
 from lxml import html as lxml_html
 
 from kml_heatmap.airport_lookup import airport_icao_code
-from kml_heatmap.data_exporter import PATH_ID_BITS
 from kml_heatmap.geometry import haversine_distance
 from kml_heatmap.obfuscate import obfuscate_kml_files
+from kml_heatmap.path_content import PATH_ID_BITS
 from kml_heatmap.renderer import create_progressive_heatmap
 from kml_heatmap.segment_codec import (
     ALTITUDE_STEP,
@@ -81,29 +81,50 @@ GOLDEN = {
 }
 
 
-def _file_number(path):
-    """The leading number of a data file name like ``42_DELGD_C182.kml``."""
-    match = re.match(r"\d+", path.name)
-    return (int(match.group()) if match else -1, path.name)
+# The subset of data/ GOLDEN pins: the first PER_YEAR files of each year by
+# their number. Written out rather than picked by reading every file of
+# data/ on every run; a name that goes missing fails the test instead of
+# silently picking another flight.
+GOLDEN_FILES = {
+    "2025": [
+        "1_DEAGJ_DA20.kml",
+        "2_DEAGJ_DA20.kml",
+        "3_DEAGJ_DA20.kml",
+        "4_DEAGJ_DA20.kml",
+    ],
+    "2026": [
+        "73_DELGD_C182.kml",
+        "74_DEAGJ_DA20.kml",
+        "75_DEHYL_DA40.kml",
+        "76_DEHYL_DA40.kml",
+    ],
+}
 
 
-def _select_input_files(per_year=PER_YEAR):
-    """Pick a deterministic subset of committed files covering every year.
+def _select_input_files():
+    """The committed files GOLDEN pins, in year and number order.
 
-    The files are ordered by their numeric prefix, so that adding newer
-    recordings to data/ does not change the subset.
-
-    Returns the selection and the number of files found per year.
+    Returns the selection and the number of files it holds per year; empty
+    when data/ is not there (the image leaves it out).
     """
-    by_year: dict[str, list[Path]] = {}
-    for path in sorted(DATA_DIR.glob("*.kml"), key=_file_number):
-        match = re.search(r"<when>(\d{4})-", path.read_text(encoding="utf-8"))
-        if match:
-            by_year.setdefault(match.group(1), []).append(path)
-    selected = []
-    for year in sorted(by_year):
-        selected.extend(by_year[year][:per_year])
-    return selected, {year: len(paths) for year, paths in by_year.items()}
+    if not DATA_DIR.is_dir():
+        return [], {}
+    selected = [
+        DATA_DIR / name for year in sorted(GOLDEN_FILES) for name in GOLDEN_FILES[year]
+    ]
+    missing = [path.name for path in selected if not path.is_file()]
+    assert not missing, f"the golden files are gone from data/: {missing}"
+    for year, names in GOLDEN_FILES.items():
+        for name in names:
+            text = (DATA_DIR / name).read_text(encoding="utf-8")
+            assert re.search(rf"<when>{year}-", text), f"{name} is not of {year}"
+    return selected, {year: len(names) for year, names in GOLDEN_FILES.items()}
+
+
+@pytest.fixture(scope="session")
+def golden_inputs():
+    """``_select_input_files`` once for the session."""
+    return _select_input_files()
 
 
 class Hills:
@@ -223,14 +244,14 @@ def _observed_values(data_dir):
 
 
 @pytest.fixture(scope="module")
-def golden_output(tmp_path_factory):
-    inputs, files_per_year = _select_input_files()
+def golden_output(tmp_path_factory, golden_inputs):
+    inputs, files_per_year = golden_inputs
     if not inputs:
         pytest.skip("no sample KML files available (data/ is not part of the image)")
     assert len(files_per_year) >= 2, "the sample data must span at least two years"
-    assert len(inputs) == sum(min(PER_YEAR, n) for n in files_per_year.values())
+    assert set(files_per_year.values()) == {PER_YEAR}
     out = tmp_path_factory.mktemp("golden")
-    assert _build_site(out, inputs) is True
+    assert _build_site(out, inputs) is not None
     return out / "site", inputs
 
 
@@ -397,7 +418,7 @@ def test_ids_survive_removing_an_input_file(golden_output, tmp_path):
     out, inputs = golden_output
     before = _observed_values(out / "data")["path_ids"]
 
-    assert _build_site(tmp_path, inputs[1:]) is True
+    assert _build_site(tmp_path, inputs[1:]) is not None
 
     after = _observed_values(tmp_path / "site" / "data")["path_ids"]
     first_year = min(before)
@@ -429,7 +450,7 @@ def _with_real_dates(source_files, destination):
     return shifted
 
 
-def test_real_dates_export_exactly_like_obfuscated_ones(tmp_path):
+def test_real_dates_export_exactly_like_obfuscated_ones(tmp_path, golden_inputs):
     """The site is the same whether or not the inputs were rewritten.
 
     This is why ``--obfuscate-inputs`` is off by default: rewriting the user's
@@ -437,13 +458,15 @@ def test_real_dates_export_exactly_like_obfuscated_ones(tmp_path):
     every absolute timestamp anyway. If this ever stops holding, the default
     has to be reconsidered, not the assertion.
     """
-    inputs, _ = _select_input_files()
+    inputs, _ = golden_inputs
+    if not inputs:
+        pytest.skip("no sample KML files available (data/ is not part of the image)")
     with_dates = _with_real_dates(inputs, tmp_path / "with-dates")
     obfuscated = _with_real_dates(inputs, tmp_path / "obfuscated")
 
-    assert _build_site(tmp_path / "a", with_dates) is True
+    assert _build_site(tmp_path / "a", with_dates) is not None
     assert obfuscate_kml_files(obfuscated) == len(obfuscated)
-    assert _build_site(tmp_path / "b", obfuscated) is True
+    assert _build_site(tmp_path / "b", obfuscated) is not None
 
     def data_files(root):
         return {
@@ -505,7 +528,7 @@ def test_no_date_of_a_name_is_exported(tmp_path):
         ]
     assert obfuscate_kml_files(sources["b"]) == len(sources["b"])
     for label, inputs in sources.items():
-        assert _build_site(tmp_path / label, inputs) is True
+        assert _build_site(tmp_path / label, inputs) is not None
 
     data_dir = tmp_path / "a" / "site" / "data"
     airports = _load_js(data_dir / "airports.json")["airports"]

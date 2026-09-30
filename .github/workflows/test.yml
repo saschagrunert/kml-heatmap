@@ -1,9 +1,10 @@
 ---
-# Tests every pull request and push to main. A push to main (or a manual run
-# on main) also builds the site and publishes it to GitHub Pages, but only
-# once every test job has passed. The weekly run only repeats the security
-# job, so a new advisory for a pinned dependency or a leaked secret shows up
-# without a push.
+# Tests every pull request, every entry of the merge queue and every push
+# to main. A push to main (or a manual run on main) also builds the site and
+# publishes it to GitHub Pages, but only once every test job has passed. The
+# weekly run only repeats the security job, so a new advisory for a pinned
+# dependency or a leaked secret shows up without a push. The checks job at
+# the end is the one status a ruleset on main requires (see there).
 #
 # A pull request Dependabot opens for a Python dependency changes only the
 # range in pyproject.toml, and every job installs the lock files, which it
@@ -12,14 +13,16 @@
 # only when they no longer satisfy the new range (a lock that pins a
 # release in it already passes, as the setuptools bump of ab4db1f did),
 # and the unit job would fail with it, on the lock check of
-# test_check_locks.py. The jobs that build and drive the site (unit and the
-# visual job after it, packaging, e2e-sites and the e2e jobs after it,
-# container) therefore skip Dependabot's own pushes to its pull requests
+# test_check_locks.py. The jobs that build and drive the site (unit,
+# packaging, e2e-sites and the e2e and visual jobs after it, container)
+# therefore skip Dependabot's own pushes to its pull requests
 # from a dependabot/pip/ branch. `github.actor` is whoever pushed (a re-run
 # keeps it), so the push of the lock files runs all of them. zizmor calls
 # the actor spoofable: here it can only skip jobs, and only in a pull
 # request Dependabot opened (its author cannot be spoofed), whose lint job
-# still checks the lock files against the range.
+# still checks the lock files against the range. In the merge queue there is
+# no pull request in the event (github.event.pull_request is empty, and so is
+# github.head_ref), so none of these conditions holds and every job runs.
 #
 # A bump of @playwright/test (the `playwright` group, branches starting with
 # dependabot/npm_and_yarn/playwright) is the same case for the jobs that run
@@ -33,6 +36,9 @@ on:
     branches:
       - main
   pull_request:
+  # The merge queue tests each pull request on top of the ones queued before
+  # it, on a branch of its own (refs/heads/gh-readonly-queue/main/...)
+  merge_group:
   schedule:
     - cron: "0 5 * * 1"
   workflow_dispatch:
@@ -42,7 +48,9 @@ concurrency:
   # Runs on main are not cancelled once they started. Of the pushes waiting
   # behind a running one only the newest is kept, so the newest commit is
   # always tested and deployed. The weekly run gets its own group so it can
-  # never replace a push that is waiting to deploy.
+  # never replace a push that is waiting to deploy. Every entry of the merge
+  # queue has a ref of its own, so its runs never cancel each other; a run
+  # of an entry the queue drops may still run to its end.
   group: ${{ github.workflow }}-${{ github.event_name == 'schedule' && 'schedule' || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
@@ -105,6 +113,13 @@ jobs:
       - name: Check for unused files, exports and dependencies
         if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
         run: npm run lint:unused
+      # The workflows themselves: template injection, credentials left in
+      # the checkout, unpinned actions and the like. zizmor comes with the
+      # dev extra in requirements-test.lock; without a token it runs its
+      # offline audits only, the same as `make lint`.
+      - name: Audit the workflows
+        if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
+        run: zizmor --min-severity medium .github/workflows
 
   unit:
     # Not for Dependabot's Python bumps, see the top (also for the zizmor
@@ -172,26 +187,13 @@ jobs:
         run: python -m kml_heatmap data --output-dir docs
         env:
           KML_HEATMAP_REQUIRE_AIRPORT_DB: "1"
-      # The visual job compares this site inside the Playwright image, where
-      # the package's own Python is not available (actions/setup-python
-      # installs one there that cannot start: its scripts point at the tool
-      # cache path of the runner, which the container mounts elsewhere). The
-      # script keeps the build offline and its build stamp fixed.
-      - name: Build the fixture site of the visual snapshots
-        run: python scripts/build_visual_site.py
-      - name: Upload the fixture site
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: visual-site
-          path: visual-site
-          if-no-files-found: error
-          retention-days: 1
       - name: Run JavaScript tests with coverage
         run: npm run test:coverage
       # Also enforces fail_under from pyproject.toml. A bare --cov measures
-      # the sources [tool.coverage.run] names, the scripts among them.
+      # the sources [tool.coverage.run] names, the scripts among them. The
+      # slowest tests are listed, so one that grows shows in the log.
       - name: Run Python tests with coverage
-        run: pytest -n auto --cov --cov-branch --cov-report=xml:coverage/coverage.xml --cov-report=term
+        run: pytest -n auto --durations=15 --cov --cov-branch --cov-report=xml:coverage/coverage.xml --cov-report=term
       - name: Upload coverage to Codecov
         if: github.actor != 'dependabot[bot]'
         uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
@@ -291,7 +293,8 @@ jobs:
 
   # The sites the e2e jobs test, built once for all of them. The published
   # site has a tile API key and a default build has none, so there are two:
-  # one with a dummy key and one without (see the e2e job).
+  # one with a dummy key and one without (see the e2e job). The fixture site
+  # of the visual job is built here as well, with the same bundles.
   e2e-sites:
     # Not for Dependabot's Python bumps, see the top (also for the zizmor
     # finding this ignores)
@@ -365,6 +368,21 @@ jobs:
         with:
           name: e2e-site-none
           path: e2e-sites/none
+          if-no-files-found: error
+          retention-days: 1
+      # The visual job compares this site inside the Playwright image, where
+      # the package's own Python is not available (actions/setup-python
+      # installs one there that cannot start: its scripts point at the tool
+      # cache path of the runner, which the container mounts elsewhere). The
+      # script keeps the build offline and its build stamp fixed, so it needs
+      # none of the caches above.
+      - name: Build the fixture site of the visual snapshots
+        run: python scripts/build_visual_site.py
+      - name: Upload the fixture site
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: visual-site
+          path: visual-site
           if-no-files-found: error
           retention-days: 1
 
@@ -518,6 +536,9 @@ jobs:
           PROJECT: ${{ matrix.project }}
           SPECS: ${{ matrix.no-key-specs }}
           PLAYWRIGHT_HTML_OUTPUT_DIR: playwright-report-no-key
+          # Beside the results of this run; the path in playwright.config.ts
+          # would overwrite the timings of the run above
+          PLAYWRIGHT_JSON_OUTPUT_FILE: test-results-no-key/e2e-timings.json
         run: |
           rm -rf docs
           mv e2e-site-none docs
@@ -538,6 +559,20 @@ jobs:
             playwright-report-no-key/
           if-no-files-found: ignore
           retention-days: 7
+      # The duration of every test (the JSON reporter of playwright.config.ts),
+      # from every run and not only the failed ones: a test that creeps up
+      # on its timeout shows here before it times out. List the slowest with
+      # `node scripts/e2e_durations.js <file>`.
+      - name: Upload the test durations
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: e2e-timings-${{ matrix.name }}
+          path: |
+            test-results/e2e-timings.json
+            test-results-no-key/e2e-timings.json
+          if-no-files-found: ignore
+          retention-days: 3
 
   # Pixel comparisons are only meaningful where the rendering is fixed, so
   # this one runs inside the Playwright image, which is also what the
@@ -545,8 +580,8 @@ jobs:
   # differing pixel, so the site is not the one of data/, whose figures move
   # with every flight, but the fixture site of scripts/build_visual_site.py:
   # a few committed flights, the airport and runway fixtures in place of the
-  # OurAirports downloads and a fixed build stamp. The unit job builds it, since the
-  # package needs a Python the image does not carry.
+  # OurAirports downloads and a fixed build stamp. The e2e-sites job builds
+  # it, since the package needs a Python the image does not carry.
   #
   # The image tag has to match the
   # @playwright/test version package-lock.json pins; scripts/check_locks.py
@@ -559,7 +594,7 @@ jobs:
   # (check_locks.py checks all of them). A digest left behind keeps pulling
   # the old image, whatever the tag next to it says.
   visual:
-    needs: unit
+    needs: e2e-sites
     # Not for Dependabot's Playwright bumps, see the top
     if: >- # zizmor: ignore[bot-conditions]
       !(github.event.pull_request.user.login == 'dependabot[bot]' &&
@@ -749,6 +784,50 @@ jobs:
         with:
           persist-credentials: false
       - uses: crate-ci/typos@512fc24f32f44ab01972217aaaf3dc86ec234d53 # v1.50.2
+
+  # The one status a ruleset on main requires of a pull request and of each
+  # entry of the merge queue: every test job a pull request runs, whatever
+  # the matrix, so a job or a shard added later needs no change of the
+  # repository settings. Not the security job, for the reason publishing
+  # does not wait for it (below): a new advisory would hold back every pull
+  # request, the flights among them. A job may be skipped only where its own
+  # condition skips it on purpose, Dependabot's own pushes to a pip or a
+  # Playwright branch (see the top); anywhere else a skip, a failure or a
+  # cancellation fails this job. The weekly run has none of these jobs.
+  checks:
+    needs:
+      - lint
+      - unit
+      - packaging
+      - e2e-sites
+      - e2e
+      - visual
+      - container
+      - obfuscation
+      - typos
+    if: ${{ always() && github.event_name != 'schedule' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check that every test job passed
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+          # The conditions of the jobs that skip Dependabot's own pushes
+          SKIPS_ALLOWED: >-
+            ${{ github.event.pull_request.user.login == 'dependabot[bot]' &&
+            github.actor == 'dependabot[bot]' &&
+            (startsWith(github.head_ref, 'dependabot/pip/') ||
+            startsWith(github.head_ref, 'dependabot/npm_and_yarn/playwright')) }}
+        run: |
+          echo "$RESULTS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
+          allowed='["success"]'
+          if [ "$SKIPS_ALLOWED" = true ]; then allowed='["success", "skipped"]'; fi
+          failed=$(echo "$RESULTS" | jq -r --argjson allowed "$allowed" \
+            'to_entries[] | select(.value.result as $r | $allowed | index($r) | not) | .key')
+          if [ -n "$failed" ]; then
+            echo "::error::did not pass: $(echo "$failed" | paste -sd " ")"
+            exit 1
+          fi
 
   # Publishing waits for every test job. The security job is not a gate: a
   # new advisory for a test dependency must not hold back new flights, and

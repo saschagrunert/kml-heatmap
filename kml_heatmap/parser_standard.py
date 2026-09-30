@@ -20,6 +20,7 @@ if TYPE_CHECKING:
 
     from lxml import etree
 
+    from .aircraft import AircraftInfo
     from .types import FlightPath, FlightPathGroup, PathMetadata, PlacemarkMetadata
 
 _SPACE_AFTER_COMMA = re.compile(r",\s+")
@@ -46,7 +47,7 @@ def process_standard_coordinates(
     coordinates: FlightPath,
     path_groups: FlightPathGroup,
     path_metadata: list[PathMetadata],
-    aircraft_info: dict[str, str | None],
+    aircraft_info: AircraftInfo | None,
     unknown_altitude: Collection[int] = frozenset(),
 ) -> None:
     """Process standard KML <coordinates> elements.

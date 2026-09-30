@@ -20,11 +20,8 @@
 import type { GeoJSONSource } from "maplibre-gl";
 import type { MapApp } from "../mapApp";
 import type { StoreState } from "../state/store";
-import {
-  groundedFlights,
-  heldFlights,
-  smoothGrounded,
-} from "../calculations/groundProfile";
+import { groundedFlights, heldFlights } from "../calculations/groundProfile";
+import { smoothGrounded } from "../calculations/smoothGrounded";
 import { isLiftedAt, ribbonWidthZoom } from "../calculations/lift";
 import { ribbonOf, ribbonProperties } from "../calculations/ribbons";
 import {

@@ -15,7 +15,6 @@ async function loadMotion(
 describe("prefersReducedMotion", () => {
   afterEach(() => {
     Reflect.deleteProperty(window, "matchMedia");
-    vi.restoreAllMocks();
   });
 
   it("follows the reduced motion media query", async () => {

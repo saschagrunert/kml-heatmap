@@ -12,7 +12,8 @@ from .logger import logger
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
-    from .types import AirportData, AirportMarker, SiteMetadata
+    from .airports import AirportData
+    from .types import AirportMarker, SiteMetadata
 
 __all__ = [
     "export_airports_data",
@@ -32,9 +33,8 @@ def _exported_airports(
     """
     exported = []
     for apt in unique_airports:
-        full_name = apt.get("name") or "Unknown"
-        is_at_path_end = apt.get("is_at_path_end", False)
-        airport_name = extract_airport_name(full_name, is_at_path_end)
+        full_name = apt.name or "Unknown"
+        airport_name = extract_airport_name(full_name, apt.is_at_path_end)
         if airport_name:
             exported.append((apt, airport_name))
     return exported
@@ -75,8 +75,8 @@ def export_airports_data(
         # path info of the active year/aircraft filter, so an exported count
         # would only ever be shown for the instant before the first refresh
         airport_data: AirportMarker = {
-            "lat": apt["lat"],
-            "lon": apt["lon"],
+            "lat": apt.lat,
+            "lon": apt.lon,
             "name": airport_name,
         }
 
