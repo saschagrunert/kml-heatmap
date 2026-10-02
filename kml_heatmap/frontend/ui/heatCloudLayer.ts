@@ -57,13 +57,15 @@ import type {
   CustomRenderMethodInput,
   Map as MapLibreMap,
 } from "maplibre-gl";
-import { mercatorOf, type CloudPoints } from "../calculations/heatCloud";
+import type { CloudPoints } from "../calculations/heatCloud";
+import { mercatorOf } from "../utils/mercator";
 import {
   drawing,
   LayerGl,
   mercatorUnitMetres,
   setDepth,
   setProjection,
+  worldCopies,
 } from "./glLayer";
 import {
   ATTRIBUTES,
@@ -239,18 +241,12 @@ export class HeatCloudLayer implements CustomLayerInterface {
 
     const u = ready.program.uniforms;
     const center = map.getCenter();
-    setProjection(gl, u, options, cloud.origin, center.lat);
     const width = gl.drawingBufferWidth;
     const height = gl.drawingBufferHeight;
     const ratio = map.getPixelRatio();
     const zoom = map.getZoom();
     const [mx, my] = mercatorOf([center.lat, center.lng]);
-    gl.uniform3f(
-      u.u_centre,
-      mx - cloud.origin[0],
-      my - cloud.origin[1],
-      map.getCenterElevation(),
-    );
+    const elevation = map.getCenterElevation();
     gl.uniform2f(u.u_viewport, width, height);
     const look = cloudLook(zoom);
     const sigma = look.sigmaPx * ratio;
@@ -359,6 +355,11 @@ export class HeatCloudLayer implements CustomLayerInterface {
       ],
     ] as const;
     const shadow = style.liftM > 0 && style.opacity >= 1;
+    // Each pass in every world copy the view shows (see worldCopies), each
+    // copy from its own origin and with the centre of the map from it: the
+    // shadows of all copies before any glow, which a later shadow's MAX
+    // would darken where copies overlap
+    const copies = worldCopies(map, options, cloud.xs);
     for (const [
       liftM,
       colour,
@@ -375,12 +376,17 @@ export class HeatCloudLayer implements CustomLayerInterface {
       gl.uniform3f(u.u_colour, colour[0], colour[1], colour[2]);
       gl.uniform1f(u.u_ceiling, ceiling);
       gl.uniform2f(u.u_flowMix, octave - Math.floor(octave), pulses);
-      gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, cloud.count - 1);
+      for (const copy of copies) {
+        const origin = [cloud.origin[0] + copy, cloud.origin[1]] as const;
+        setProjection(gl, u, options, origin, center.lat);
+        gl.uniform3f(u.u_centre, mx - origin[0], my - origin[1], elevation);
+        gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, cloud.count - 1);
+      }
     }
     gl.bindVertexArray(null);
     gl.depthMask(true);
     this.frames++;
-    this.drawn = cloud.count - 1;
+    this.drawn = copies.length > 0 ? cloud.count - 1 : 0;
     // The next frame while the pulses run or fade, the exposure moves or
     // the cloud fades out, every one the screen shows so they move
     // smoothly; none at all once they rest, for the map or for reduced

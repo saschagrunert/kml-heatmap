@@ -698,8 +698,13 @@ It only draws: a custom layer has no features for `queryRenderedFeatures`, and
 the ribbons stay what is hovered and clicked (the readout below works out what
 the cloud under the pointer is made of from the segments instead). An exported
 image has it, without its pulses, since the canvas is read in the frame that
-drew it (`withMapStill`). It is drawn in the world copy of the flights only,
-where the flat map shows several.
+drew it (`withMapStill`). On the flat map it is drawn in every world copy the
+view shows (`worldCopies` in `ui/glLayer.ts`), as MapLibre draws its own layers
+(three either side of world 0, none without `renderWorldCopies`): MapLibre hands
+a custom layer the matrix of world 0 alone and wraps the centre back into it as
+the map is dragged, so drawn there only, flights beside the antimeridian went
+missing from the other side of it. The replay of all flights is drawn the same
+way; the globe is one world.
 
 ### The band of heights
 
@@ -857,14 +862,14 @@ is the maths:
 - A sample is on the ground only where `project` takes the place `unproject`
   gave back to within half a radius of the sample: MapLibre answers the sky of a
   tilted map with ground behind the camera, and the space beside the globe with
-  its rim. Neither is a longitude past 180, in a world copy the cloud is not
-  drawn in. The pointer on no ground has no readout, and the line ends at the
-  first sample on none. It ends too where two samples are more than 8 radii
-  apart (`SIGHT_MAX_GAP_RADII`), towards the horizon of a steeply tilted map,
-  and has no readout if that is the first pair: a radius spans a few pixels
-  there, and the reach of the search below grows with the gap. Without the
-  checks a pointer just above the horizon searched 2,000 km for 3.7 s per frame
-  (130,000 synthetic segments, Node).
+  its rim. A place in another world copy reads the flights of its longitude
+  wrapped, as the cloud is drawn there too. The pointer on no ground has no
+  readout, and the line ends at the first sample on none. It ends too where two
+  samples are more than 8 radii apart (`SIGHT_MAX_GAP_RADII`), towards the
+  horizon of a steeply tilted map, and has no readout if that is the first pair:
+  a radius spans a few pixels there, and the reach of the search below grows
+  with the gap. Without the checks a pointer just above the horizon searched
+  2,000 km for 3.7 s per frame (130,000 synthetic segments, Node).
 - The radius is a round one (`READOUT_RADII_M`, 100 m to 50 km) nearest to the
   reach of a stretch's glow in the middle of the map (`cloudReachPx`: 21 CSS px
   out to map zoom 9.5, `z` 10.5, narrowing with `CLOUD_STOPS` to 7.5 px from map

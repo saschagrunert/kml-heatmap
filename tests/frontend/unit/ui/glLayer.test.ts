@@ -6,11 +6,12 @@
  * that does not link leaves behind, a lost context, and letting go.
  */
 import { describe, it, expect, beforeEach, vi, type Mock } from "vitest";
-import type { CustomRenderMethodInput } from "maplibre-gl";
+import type { CustomRenderMethodInput, Map as MapLibreMap } from "maplibre-gl";
 import {
   cloudMatrix,
   LayerGl,
   setProjection,
+  worldCopies,
   type LayerShaders,
 } from "../../../../kml_heatmap/frontend/ui/glLayer";
 
@@ -573,5 +574,62 @@ describe("setProjection", () => {
       [1, 2, 3, 4],
     );
     expect(gl.uniform1f).toHaveBeenCalledWith(u.u_projection_transition, 0.5);
+  });
+});
+
+describe("worldCopies", () => {
+  /** A map whose view spans `west` to `east`, unwrapped */
+  const view = (west: number, east: number, copies = true): MapLibreMap =>
+    ({
+      getBounds: () => ({ getWest: () => west, getEast: () => east }),
+      getRenderWorldCopies: () => copies,
+    }) as unknown as MapLibreMap;
+  /** Points from `from` to `to` degrees of longitude, in Mercator x */
+  const xs = (from: number, to: number): [number, number] => [
+    (from + 180) / 360,
+    (to + 180) / 360,
+  ];
+
+  it("is world 0 alone for points in a view of it", () => {
+    expect(worldCopies(view(5, 15), frame(), xs(10, 12))).toEqual([0]);
+  });
+
+  it("draws points beside the antimeridian on the side the view is", () => {
+    // Flights at 179.5 W, seen from 179.9 E: the copy a world east
+    expect(worldCopies(view(179, 181), frame(), xs(-179.6, -179.4))).toEqual([
+      1,
+    ]);
+    // A flight from 179.5 E on past 180, seen from 179.9 W: a world west
+    expect(worldCopies(view(-181, -179), frame(), xs(179.5, 180.5))).toEqual([
+      -1,
+    ]);
+  });
+
+  it("draws every copy a view of more than a world shows, and none off it", () => {
+    expect(worldCopies(view(-400, 400), frame(), xs(10, 12))).toEqual([
+      -1, 0, 1,
+    ]);
+    expect(worldCopies(view(100, 110), frame(), xs(10, 12))).toEqual([]);
+  });
+
+  it("draws no more copies than MapLibre: three either side of world 0", () => {
+    // A tilt of 85 at the least zoom on a wide screen spans dozens
+    expect(worldCopies(view(-6000, 6000), frame(), xs(10, 12))).toEqual([
+      -3, -2, -1, 0, 1, 2, 3,
+    ]);
+    expect(worldCopies(view(2000, 2200), frame(), xs(10, 12))).toEqual([]);
+  });
+
+  it("draws world 0 alone where the map renders no world copies", () => {
+    expect(worldCopies(view(-400, 400, false), frame(), xs(10, 12))).toEqual([
+      0,
+    ]);
+    expect(
+      worldCopies(view(179, 181, false), frame(), xs(-179.6, -179.4)),
+    ).toEqual([]);
+  });
+
+  it("is world 0 on the globe, which is one world", () => {
+    expect(worldCopies(view(100, 110), frame(true), xs(10, 12))).toEqual([0]);
   });
 });

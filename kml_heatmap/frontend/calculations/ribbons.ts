@@ -61,6 +61,27 @@ export function groundOffsetStepFt(widthZoom: number): number {
   return step;
 }
 
+/**
+ * The unit normal (to the left) of the segment from `a` to `b`, in metres
+ * with `metresPerLng` to a degree of longitude; null for none
+ */
+function normalOf(
+  a: Readonly<Coordinate> | undefined,
+  b: Readonly<Coordinate> | undefined,
+  metresPerLng: number,
+): [number, number] | null {
+  if (!a || !b) return null;
+  const dx = (b[1] - a[1]) * metresPerLng;
+  const dy = (b[0] - a[0]) * METRES_PER_DEGREE;
+  const length = Math.hypot(dx, dy);
+  return length > 0 ? [-dy / length, dx / length] : null;
+}
+
+/** The point `t` of the way from `a` to `b` */
+function lerp(a: number[], b: number[], t: number): number[] {
+  return [a[0]! + (b[0]! - a[0]!) * t, a[1]! + (b[1]! - a[1]!) * t];
+}
+
 /** How far a mitred corner may reach out, in ribbon half widths */
 const MITER_LIMIT = 3;
 
@@ -95,19 +116,8 @@ function ribbonEdges(
   for (let i = first; i < first + points.length; i++) {
     const [lat, lng] = all[i]!;
     const metresPerLng = METRES_PER_DEGREE * Math.cos(lat * DEGREES_TO_RADIANS);
-    // The unit normal (to the left) of the segment from `a` to `b`, in metres
-    const normal = (
-      a: Coordinate | undefined,
-      b: Coordinate | undefined,
-    ): [number, number] | null => {
-      if (!a || !b) return null;
-      const dx = (b[1] - a[1]) * metresPerLng;
-      const dy = (b[0] - a[0]) * METRES_PER_DEGREE;
-      const length = Math.hypot(dx, dy);
-      return length > 0 ? [-dy / length, dx / length] : null;
-    };
-    const incoming = normal(all[i - 1], all[i]);
-    const outgoing = normal(all[i], all[i + 1]);
+    const incoming = normalOf(all[i - 1], all[i], metresPerLng);
+    const outgoing = normalOf(all[i], all[i + 1], metresPerLng);
     let offset: [number, number] = incoming ?? outgoing ?? [0, 0];
     let scale = 1;
     if (incoming && outgoing) {
@@ -351,10 +361,6 @@ export function ribbonPieces(
   let low = 0;
   let high = 0;
   const step = groundOffsetStepFt(widthZoom);
-  const lerp = (a: number[], b: number[], t: number): number[] => [
-    a[0]! + (b[0]! - a[0]!) * t,
-    a[1]! + (b[1]! - a[1]!) * t,
-  ];
   for (let i = 0; i + 1 < points.length; i++) {
     const from = heights[i]!;
     const to = heights[i + 1]!;
@@ -380,15 +386,16 @@ export function ribbonPieces(
         // Without a negative zero, which JSON writes as a zero anyway
         return Math.round(offset / step) * step || 0;
       });
-      const quads = Array.from({ length: parts }, (_, p) => {
+      const quads: number[][][][] = [];
+      for (let p = 0; p < parts; p++) {
         const start = t0 + ((t1 - t0) * p) / parts;
         const end = t0 + ((t1 - t0) * (p + 1)) / parts;
         const a = lerp(left[i]!, left[i + 1]!, start);
         const b = lerp(left[i]!, left[i + 1]!, end);
         const c = lerp(right[i]!, right[i + 1]!, end);
         const d = lerp(right[i]!, right[i + 1]!, start);
-        return [[a, b, c, d, a]];
-      });
+        quads.push([[a, b, c, d, a]]);
+      }
       const last = pieces[pieces.length - 1];
       if (
         last &&

@@ -295,10 +295,11 @@ describe("the readout of the heat cloud", () => {
     await nextFrame();
     expect(shown()).toBeNull();
 
-    // A copy of the world to the east, with no cloud drawn in it
+    // A copy of the world to the east, where the cloud is drawn as well
+    // (worldCopies), and back in world 0
     move(360000, 0);
     await nextFrame();
-    expect(shown()).toBeNull();
+    expect(shown()).not.toBeNull();
     move(0, 0);
     await nextFrame();
     expect(shown()).not.toBeNull();
@@ -334,16 +335,29 @@ describe("the readout of the heat cloud", () => {
     expect(shown()).not.toBeNull();
   });
 
-  it("reads nothing past 180 beside a flight that does not cross it", async () => {
-    // At 172 W, which the world copy east of 180 would put at 188: no
-    // cloud is drawn there
+  it("reads a flight in every world copy, as the cloud is drawn in each", async () => {
+    // At 172 W, and at 188 in the world copy east of 180, where the cloud
+    // is drawn as well (worldCopies)
     app.currentData = only(moved(-180));
     map().jumpTo({ center: [-172, 50] });
     enter3D();
     move(0, 0);
     await nextFrame();
+    const there = shown();
+    expect(there).not.toBeNull();
+
+    map().jumpTo({ center: [188, 50] });
+    move(20, 0);
+    await nextFrame();
     expect(shown()).not.toBeNull();
 
+    // Not in a copy MapLibre draws none of, nor beside world 0 where it
+    // draws no copies
+    map().jumpTo({ center: [-172 + 4 * 360, 50] });
+    move(0, 0);
+    await nextFrame();
+    expect(shown()).toBeNull();
+    map().getRenderWorldCopies.mockReturnValue(false);
     map().jumpTo({ center: [188, 50] });
     move(20, 0);
     await nextFrame();

@@ -23,6 +23,14 @@ export const EARTH_CIRCUMFERENCE_M = 40075016.686;
 /** The pixels a tile of the map spans, and the world at zoom 0 */
 export const TILE_SIZE_PX = 512;
 
+/**
+ * The distance of the camera from the screen, in pixels, for a screen
+ * `heightPx` high seen with the vertical field of view `fov` (radians)
+ */
+export function focalLengthPx(heightPx: number, fov: number): number {
+  return heightPx / 2 / Math.tan(fov / 2);
+}
+
 /** Metres a pixel spans at the equator at a map zoom */
 export function metresPerPixel(zoom: number): number {
   return EARTH_CIRCUMFERENCE_M / (TILE_SIZE_PX * 2 ** zoom);

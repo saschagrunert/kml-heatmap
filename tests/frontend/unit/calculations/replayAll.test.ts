@@ -9,10 +9,11 @@ import {
   fitTilted,
   REPLAY_ALL_POINT_FLOATS,
   replayAllPoints,
+  worldShifts,
   type FitMap,
   type ReplayAllPoints,
 } from "../../../../kml_heatmap/frontend/calculations/replayAll";
-import { mercatorOf } from "../../../../kml_heatmap/frontend/calculations/heatCloud";
+import { mercatorOf } from "../../../../kml_heatmap/frontend/utils/mercator";
 import * as clockModule from "../../../../kml_heatmap/frontend/calculations/flightClock";
 import { flightClock } from "../../../../kml_heatmap/frontend/calculations/flightClock";
 import { heatWeight } from "../../../../kml_heatmap/frontend/calculations/heatLines";
@@ -211,6 +212,50 @@ describe("replayAllPoints", () => {
     }
   });
 
+  it("lays flights either side of the antimeridian in one world, their bounds narrow", () => {
+    // One flight from 179.5 E on past 180, written down from 179.5 W on,
+    // and one wholly west of 180, at 179.4 W
+    const at = (path_id: number, from: number): PathSegment[] =>
+      flight(path_id, 10, { count: 11 }).map((segment) => ({
+        ...segment,
+        coords: segment.coords.map(([lat, lng]) => {
+          const east = from + (lng - 11);
+          return [lat, east > 180 ? east - 360 : east];
+        }) as PathSegment["coords"],
+      }));
+    const points = build([...at(1, 179.995), ...at(2, -179.4)]);
+    const [west, , east] = points.bounds!;
+    expect(west).toBeCloseTo(179.995, 6);
+    expect(east).toBeCloseTo(180.61, 6);
+    expect(points.xs[1] - points.xs[0]).toBeLessThan(1 / 360);
+    // The second flight drawn a world east of where it is written down
+    const xs = column(points, 0).map((x) => x + points.origin[0]);
+    expect(Math.min(...xs)).toBeGreaterThan(0.99);
+    expect(Math.max(...xs)).toBeLessThan(1.01);
+  });
+
+  it("keeps flights either side of the antimeridian together beside a far-off first flight", () => {
+    const at = (path_id: number, from: number): PathSegment[] =>
+      flight(path_id, 10, { count: 11 }).map((segment) => ({
+        ...segment,
+        coords: segment.coords.map(([lat, lng]) => {
+          const east = from + (lng - 11);
+          return [lat, east > 180 ? east - 360 : east];
+        }) as PathSegment["coords"],
+      }));
+    // A flight in England first, then Fiji on past 180 and Samoa at 172 W
+    const points = build([...at(1, -1), ...at(2, 179.995), ...at(3, -172)]);
+    const [west, , east] = points.bounds!;
+    // Not round the whole world: Fiji and Samoa side by side east of 180,
+    // England a world on
+    expect(west).toBeCloseTo(179.995, 6);
+    expect(east - west).toBeLessThan(200);
+    const xs = column(points, 0).map((x) => x + points.origin[0]);
+    const pacific = xs.slice(points.count / 3);
+    expect(Math.min(...pacific)).toBeGreaterThan(0.99);
+    expect(Math.max(...pacific)).toBeLessThan(1.03);
+  });
+
   it("has nothing to play without flights", () => {
     const points = build([]);
 
@@ -346,5 +391,20 @@ describe("the fit of the flights on a tilted map", () => {
     expect(fitTilted({ ...run, count: 0 }, camera, MAP, 22)).toBe(camera);
     expect(fitTilted(run, camera, { ...MAP, width: 0 }, 22)).toBe(camera);
     expect(fitTilted(run, camera, MAP, 5.5).zoom).toBe(5.5);
+  });
+});
+
+describe("worldShifts", () => {
+  it("moves every start into the 360 degrees after the widest gap between them", () => {
+    // England, Fiji and Samoa: the widest gap is between England and Fiji
+    const shifts = worldShifts([-1, 179.995, -172]);
+    const unwrapped = [-1, 179.995, -172].map((lng, k) => lng + shifts[k]!);
+    expect(unwrapped).toEqual([359, 179.995, 188]);
+  });
+
+  it("leaves flights that lie together as they are", () => {
+    expect(worldShifts([8, 11, 13])).toEqual([0, 0, 0]);
+    expect(worldShifts([179.5, 180.4])).toEqual([0, 0]);
+    expect(worldShifts([])).toEqual([]);
   });
 });

@@ -405,7 +405,7 @@ export class ReplayManager {
 
   /**
    * Lift the trail and the airplane, or put them on the ground: the trail's
-   * ribbons are cut from the flight's curve at its height (see lift.ts),
+   * ribbons are cut from the flight's curve at its height (see ribbons.ts),
    * over the ground the layers stand on (terrainActive). As that changes,
    * the curve's heights are worked out anew; where it runs, and when the
    * airplane is where on it, stay as they are.
@@ -446,8 +446,10 @@ export class ReplayManager {
   }
 
   private deactivateReplay(panel: HTMLElement): void {
-    // The closing announcement below replaces the "stopped" one
-    this.stopReplay(false);
+    // The closing announcement below replaces the "stopped" one, and the
+    // map stays where it is: the airplane leaves it, and a chase gives the
+    // view back from where it looks
+    this.stopReplay(false, false);
     panel.style.display = "none";
     document.body.style.removeProperty(REPLAY_PANEL_HEIGHT_VAR);
     this.unwatchLegends();
@@ -690,7 +692,7 @@ export class ReplayManager {
   private writeRoute(): void {
     const coordinates = routeCoordinates(
       this.state.segments,
-      this.state.smoothed,
+      this.state.smoothed!,
     );
     this.setReplaySource(
       MAP_SOURCES.replayRoute,
@@ -865,9 +867,16 @@ export class ReplayManager {
     }
   }
 
-  stopReplay(announce = true): void {
+  stopReplay(announce = true, onMap = true): void {
     this.pauseReplay(false);
     this.state.resetDrawState();
+    if (!onMap) {
+      // Back to the start without moving the airplane and the camera with
+      // it: a paused chase took a step towards the start of the flight
+      // before it eased back, about 2 km at its zoom
+      this.renderer.updateTransport(this.state);
+      return;
+    }
     if (this.state.airplaneMarker && this.state.segments.length > 0) {
       const firstSeg = this.state.segments[0];
       const startCoords = firstSeg?.coords[0];
@@ -1043,20 +1052,15 @@ function setTransportState(playing: boolean): void {
 
 /**
  * The flight's whole track as one list of `[lng, lat]` points: along its
- * curve (see calculations/curves.ts), where the trail will run, or without
- * one the start of every segment, plus the end of the last one.
+ * curve (see smoothing.ts), where the trail will run
  */
 export function routeCoordinates(
   segments: PathSegment[],
-  curves: SmoothedFlights | null,
+  curves: SmoothedFlights,
 ): LngLatTuple[] {
   const coords: LngLatTuple[] = [];
   segments.forEach((segment, index) => {
     const start = segment.coords[0];
-    if (!curves) {
-      coords.push(toLngLat(start));
-      return;
-    }
     // A segment that starts a curve (the first, or the first after a break
     // in the flight) adds its start: appendCurve continues from the point
     // before it
@@ -1066,7 +1070,5 @@ export function routeCoordinates(
     }
     appendCurve(coords, curves, index);
   });
-  const last = segments[segments.length - 1]?.coords[1];
-  if (last && !curves) coords.push(toLngLat(last));
   return coords;
 }

@@ -883,6 +883,31 @@ describe("the replay of all flights", () => {
       expect(controls.player.playing).toBe(true);
     });
 
+    it("says every flight has landed each time it plays to the end", () => {
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      try {
+        controls.show();
+        const live = document.getElementById("replay-all-live")!;
+        const play = document.getElementById("replay-all-play-btn")!;
+        frames.run();
+        frames.run(100, 50);
+        vi.runAllTimers();
+        expect(live.textContent).toBe("Every flight has landed");
+        expect(controls.player.playing).toBe(false);
+
+        // From the start again: a second play-through says it again
+        play.click();
+        vi.runAllTimers();
+        expect(live.textContent).toBe("Playing");
+        frames.run();
+        frames.run(100, 50);
+        vi.runAllTimers();
+        expect(live.textContent).toBe("Every flight has landed");
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
     it("plays at the speed picked", () => {
       controls.show();
       const speed = document.getElementById(

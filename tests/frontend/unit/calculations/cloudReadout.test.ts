@@ -7,7 +7,6 @@ import { describe, it, expect, afterEach } from "vitest";
 import {
   formatTimeSpent,
   insideFraction,
-  isCloudWorld,
   makeSegmentGrid,
   readoutAt,
   readoutData,
@@ -275,36 +274,6 @@ describe("makeSegmentGrid", () => {
       );
       expect(visited).toEqual([0]);
     }
-  });
-});
-
-describe("isCloudWorld", () => {
-  /** A flight from `from` to `to` at LAT, its longitudes within 180 */
-  function across(path_id: number, from: number, to: number): PathSegment[] {
-    const wrap = (lng: number): number =>
-      lng > 180 ? lng - 360 : lng < -180 ? lng + 360 : lng;
-    return flight(path_id, { fromLng: from, toLng: to }).map((segment) => ({
-      ...segment,
-      coords: [
-        [segment.coords[0][0], wrap(segment.coords[0][1])],
-        [segment.coords[1][0], wrap(segment.coords[1][1])],
-      ],
-    }));
-  }
-
-  it("is the world within 180, and past it around the flights that cross", () => {
-    const segments = [
-      ...across(1, 179.5, 180.5),
-      ...across(2, -179.5, -180.5),
-      ...across(3, -172.5, -171.5),
-    ];
-    expect(isCloudWorld(segments, [LAT, 8], 0.01)).toBe(true);
-    // East of 180 from the west, and west of -180 from the east
-    expect(isCloudWorld(segments, [LAT, 180.3], 0.01)).toBe(true);
-    expect(isCloudWorld(segments, [LAT, -180.3], 0.01)).toBe(true);
-    // The copy of the flight at 172 W in the world east of 180
-    expect(isCloudWorld(segments, [LAT, 188], 0.01)).toBe(false);
-    expect(isCloudWorld(segments, [LAT + 1, 180.3], 0.01)).toBe(false);
   });
 });
 

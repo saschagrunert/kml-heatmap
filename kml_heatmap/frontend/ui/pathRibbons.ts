@@ -19,6 +19,7 @@ import type { SmoothedFlights } from "../calculations/smoothing";
 import { groundedFlights } from "../calculations/groundProfile";
 import { ribbonOf, ribbonProperties } from "../calculations/ribbons";
 import { overlaps, type Box } from "../utils/viewBox";
+import { boxOf } from "../utils/curveBox";
 import type { Run } from "./pathRuns";
 
 /**
@@ -35,17 +36,11 @@ function smoothedFlights(
 
 /** The part of the map the ribbon of a run lies in, along its curve */
 function runBox(run: Run, smoothed: SmoothedFlights): Box {
-  const { points } = smoothed.chains[smoothed.chainOf[run.start]!]!;
-  let [west, south, east, north] = [540, 90, -540, -90];
-  const last = smoothed.to[run.end - 1]!;
-  for (let j = smoothed.from[run.start]!; j <= last; j++) {
-    const [lat, lng] = points[j]!;
-    west = Math.min(west, lng);
-    east = Math.max(east, lng);
-    south = Math.min(south, lat);
-    north = Math.max(north, lat);
-  }
-  return [west, south, east, north];
+  return boxOf(
+    smoothed.chains[smoothed.chainOf[run.start]!]!.points,
+    smoothed.from[run.start],
+    smoothed.to[run.end - 1],
+  );
 }
 
 /**

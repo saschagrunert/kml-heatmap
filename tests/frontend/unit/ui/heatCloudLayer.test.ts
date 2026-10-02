@@ -19,6 +19,7 @@ import {
   markStrength,
 } from "../../../../kml_heatmap/frontend/ui/heatCloudShaders";
 import { cloudMatrix } from "../../../../kml_heatmap/frontend/ui/glLayer";
+import { mercatorOf } from "../../../../kml_heatmap/frontend/utils/mercator";
 import {
   cloudPoints,
   type CloudPoints,
@@ -149,6 +150,7 @@ function frame(globe = false): CustomRenderMethodInput {
 
 function mockMap(): MapLibreMap & {
   triggerRepaint: Mock;
+  getBounds: Mock;
   emit: (type: string) => void;
 } {
   const listeners = new Map<string, Set<() => void>>();
@@ -164,12 +166,20 @@ function mockMap(): MapLibreMap & {
       for (const listener of listeners.get(type) ?? []) listener();
     },
     getCenter: vi.fn(() => ({ lng: 11, lat: 47 })),
+    // A view a degree either side of the centre, the flat map's (see
+    // worldCopies)
+    getRenderWorldCopies: vi.fn(() => true),
+    getBounds: vi.fn(function (this: MapLibreMap) {
+      const { lng } = this.getCenter();
+      return { getWest: () => lng - 1, getEast: () => lng + 1 };
+    }),
     getZoom: vi.fn(() => 8),
     getPixelRatio: vi.fn(() => 2),
     getCenterElevation: vi.fn(() => 500),
     triggerRepaint: vi.fn(),
   } as unknown as MapLibreMap & {
     triggerRepaint: Mock;
+    getBounds: Mock;
     emit: (type: string) => void;
   };
 }
@@ -304,6 +314,59 @@ describe("the heat cloud's layer", () => {
     expect(gl.drawArraysInstanced).not.toHaveBeenCalled();
     expect(layer.frames).toBe(0);
     expect(layer.drawn).toBe(0);
+  });
+
+  it("draws in every world copy the flat map shows, and none it does not", () => {
+    const cloud = points();
+    layer.onAdd(map);
+    layer.setPoints(cloud);
+    // A view from 10 W to 12 E a world further east: the flights drawn in
+    // world 0 and in the copy east of it, the last from an origin a world
+    // east
+    const [mx, my] = mercatorOf([47, 11]);
+    map.getBounds.mockReturnValueOnce({
+      getWest: () => -10,
+      getEast: () => 372,
+    });
+    render();
+    expect(gl.drawArraysInstanced).toHaveBeenCalledTimes(2 * PASSES);
+    // Pass by pass, each in both copies: the shadows of both before either
+    // glow, which a later shadow's MAX would darken
+    const draws = gl.drawArraysInstanced.mock.invocationCallOrder;
+    const blends = gl.blendEquation.mock.invocationCallOrder;
+    /** The blend equation last set before the call `draw` */
+    const blendAt = (draw: number): unknown =>
+      gl.blendEquation.mock.calls[
+        blends.filter((call) => call < draw).length - 1
+      ]![0];
+    expect(draws.map(blendAt)).toEqual([
+      gl.MAX,
+      gl.MAX,
+      gl.FUNC_ADD,
+      gl.FUNC_ADD,
+    ]);
+    const centres = draws.map((draw) => uniform("u_centre", draw));
+    for (const [k, copy] of [0, 1, 0, 1].entries()) {
+      expect(centres[k]![0]).toBeCloseTo(mx - cloud.origin[0] - copy, 9);
+      expect(centres[k]![1]).toBeCloseTo(my - cloud.origin[1], 9);
+    }
+
+    gl.drawArraysInstanced.mockClear();
+    map.getBounds.mockReturnValueOnce({
+      getWest: () => 100,
+      getEast: () => 110,
+    });
+    render();
+    expect(gl.drawArraysInstanced).not.toHaveBeenCalled();
+    expect(layer.drawn).toBe(0);
+
+    // The globe has the one
+    map.getBounds.mockReturnValueOnce({
+      getWest: () => 100,
+      getEast: () => 110,
+    });
+    render(frame(true));
+    expect(gl.drawArraysInstanced).toHaveBeenCalledTimes(PASSES);
   });
 
   it("asks the map for a frame as it gets new points", () => {

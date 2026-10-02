@@ -44,13 +44,12 @@ import type { LngLat, MapMouseEvent, MapTouchEvent, Point } from "maplibre-gl";
 import type { MapApp } from "../mapApp";
 import type { StoreState } from "../state/store";
 import type { PathSegment } from "../types";
-import { datasetIndex } from "../calculations/datasetIndex";
+import { idsKey, keptFlights } from "./keptFlights";
 import { heightBandEdgesFt, parseHeightBand } from "../calculations/heightBand";
 import { heatWeight } from "../calculations/heatLines";
 import { airplaneLiftPx } from "../calculations/airplaneLift";
 import { liftExaggeration } from "../calculations/lift";
 import {
-  isCloudWorld,
   readoutAt,
   readoutData,
   readoutKept,
@@ -63,14 +62,12 @@ import {
   type ReadoutData,
 } from "../calculations/cloudReadout";
 import { frameCoalescer } from "../utils/frameCoalescer";
-import {
-  DEGREES_TO_RADIANS,
-  METRES_PER_DEGREE,
-  metresPerPixel,
-} from "../utils/geometry";
+import { DEGREES_TO_RADIANS, metresPerPixel } from "../utils/geometry";
 import { announceStatus } from "../utils/toast";
 import { whenIdle } from "../utils/whenIdle";
 import { cloudReachPx } from "./heatCloudShaders";
+import { drawnWorlds } from "./glLayer";
+import { mercatorX } from "../utils/mercator";
 
 /** The class of the box, styled in features.css */
 const READOUT_CLASS = "cloud-readout";
@@ -378,10 +375,6 @@ export function followCloudReadout(app: MapApp): void {
       return undefined;
     }
     const prepared = dataOf(segments);
-    // Degrees of longitude the cloud of a flight reaches beside it
-    const reachDeg =
-      radiusM /
-      (METRES_PER_DEGREE * Math.max(Math.cos(lat * DEGREES_TO_RADIANS), 0.1));
     // Lifted as the cloud is (ui/heatCloud.ts), and taken down the screen
     // by as much as a ribbon under the pointer is (PathHover.nearest)
     const exaggeration =
@@ -397,12 +390,15 @@ export function followCloudReadout(app: MapApp): void {
         // MapLibre answers the sky of a tilted map with ground behind the
         // camera, and the space beside the globe with its rim: ground that
         // is not drawn at the point, and does not come back to it. The
-        // cloud is drawn in the world copy of the flights only, whose
-        // longitudes are those of the flights, and past 180 around the
-        // flights that cross the antimeridian.
+        // cloud is drawn in the world copies MapLibre draws (worldCopies in
+        // ui/glLayer.ts), so a place in one of them reads the flights of its
+        // longitude wrapped, and one beyond them none.
         const at = map.unproject([x, y]);
         const back = map.project(at);
-        return isCloudWorld(segments, [at.lat, at.lng], reachDeg) &&
+        const world = Math.floor(mercatorX(at.lng));
+        const [first, last] = drawnWorlds(map);
+        return world >= first &&
+          world <= last &&
           Math.hypot(back.x - x, back.y - y) <= radiusPx / 2
           ? [at.lat, at.wrap().lng]
           : null;
@@ -608,7 +604,7 @@ export function followCloudReadout(app: MapApp): void {
       app.currentData,
       app.selectedYear,
       app.selectedAircraft,
-      isolated && [...isolated].sort((a, b) => a - b).join(),
+      isolated && idsKey(isolated),
       app.terrainActive,
       app.reliefLevel,
       app.heightBand,
@@ -619,13 +615,7 @@ export function followCloudReadout(app: MapApp): void {
       made = inputs;
       hide();
       const data = app.currentData;
-      const kept =
-        data &&
-        datasetIndex(data).filter(app.selectedYear, app.selectedAircraft)
-          .pathIds;
-      keep =
-        kept &&
-        ((pathId) => kept.has(pathId) && (!isolated || isolated.has(pathId)));
+      keep = data && keptFlights(app, data, isolated);
       // A resting pointer is told anew: the relief coming in as the 3D
       // view starts changes the heights under it
       if (on) retell();

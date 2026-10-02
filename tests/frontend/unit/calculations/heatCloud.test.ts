@@ -14,7 +14,6 @@ import {
   CLOUD_POINT_FLOATS,
   CLOUD_STEP_PX,
   cloudPoints,
-  mercatorOf,
   nthSmallest,
   type CloudPoints,
 } from "../../../../kml_heatmap/frontend/calculations/heatCloud";
@@ -41,6 +40,7 @@ import {
   metresPerPixel,
   type Coordinate,
 } from "../../../../kml_heatmap/frontend/utils/geometry";
+import { mercatorOf } from "../../../../kml_heatmap/frontend/utils/mercator";
 import type { PathSegment } from "../../../../kml_heatmap/frontend/types";
 
 /**
@@ -151,27 +151,15 @@ function secondsOf(segments: PathSegment[]): number[] {
   return segments.map((segment, i) => segmentSeconds(segment, segments[i + 1]));
 }
 
-describe("mercatorOf", () => {
-  it("puts null island in the middle of the world and the antimeridian at its edges", () => {
-    expect(mercatorOf([0, 0])).toEqual([0.5, 0.5]);
-    expect(mercatorOf([0, -180])[0]).toBe(0);
-    expect(mercatorOf([0, 180])[0]).toBe(1);
-  });
-
-  it("puts the north above the south, further apart towards the poles", () => {
-    const [, y45] = mercatorOf([45, 0]);
-    const [, y60] = mercatorOf([60, 0]);
-    expect(y45).toBeLessThan(0.5);
-    expect(y60).toBeLessThan(y45);
-    expect(0.5 - y45).toBeCloseTo(
-      Math.log(Math.tan(Math.PI / 4 + (45 * DEGREES_TO_RADIANS) / 2)) /
-        (2 * Math.PI),
-      12,
-    );
-  });
-});
-
 describe("cloudPoints", () => {
+  it("keeps its origin and points finite for a fix at the pole", () => {
+    const fixes: Coordinate[] = [...line(4, 89.99), [90, 11.009]];
+    const cloud = cloudOf(flight(1, fixes), everything, [0, 0, 0, 0], 8);
+    expect(cloud.count).toBeGreaterThan(1);
+    expect(cloud.origin.every(Number.isFinite)).toBe(true);
+    expect(cloud.points.every(Number.isFinite)).toBe(true);
+  });
+
   it("is empty without segments, or where the filter keeps none", () => {
     expect(cloudOf([], everything, [], 8).count).toBe(0);
     const segments = flight(1, line(4));

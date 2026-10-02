@@ -517,6 +517,7 @@ describe("AirplaneMarker", () => {
     };
 
     it("draws the airplane and points its popup the lift higher", () => {
+      airplane.openPopup();
       airplane.setLift(30);
 
       expect(airplane.marker.setOffset).toHaveBeenLastCalledWith([0, -30]);
@@ -528,7 +529,17 @@ describe("AirplaneMarker", () => {
       }
     });
 
+    it("points a closed popup only as it opens, not on every lift", () => {
+      airplane.setLift(30);
+      airplane.setLift(40);
+      expect(airplane.popup.setOffset).not.toHaveBeenCalled();
+
+      airplane.openPopup();
+      expect(popupOffset()["bottom"]).toEqual([0, -16 - 40]);
+    });
+
     it("gives the standard offsets back on the ground", () => {
+      airplane.openPopup();
       airplane.setLift(30);
       airplane.setLift(0);
 
@@ -1435,6 +1446,7 @@ describe("ReplayRenderer", () => {
 
       it("points its popup at it, up where it is drawn", () => {
         map.jumpTo({ zoom: 13, pitch: 60 });
+        airplane.openPopup();
 
         callUpdateDisplay();
 

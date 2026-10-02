@@ -221,9 +221,16 @@ export class AirplaneMarker implements ReplayAirplane {
     this.lift = px;
     this.across = across;
     this.marker.setOffset([across, -px]);
-    // The popup points at the airplane where it is drawn, whichever side
-    // of it the popup opens on
-    this.popup.setOffset(liftedPopupOffset(px, across));
+    if (this.popup.isOpen()) this.pointPopup();
+  }
+
+  /**
+   * The popup points at the airplane where it is drawn, whichever side of
+   * it the popup opens on: set while it is open, not on every frame of the
+   * lift without it
+   */
+  private pointPopup(): void {
+    this.popup.setOffset(liftedPopupOffset(this.lift, this.across));
   }
 
   setUpright(upright: boolean): void {
@@ -247,6 +254,7 @@ export class AirplaneMarker implements ReplayAirplane {
 
   openPopup(): void {
     if (this.popup.isOpen()) return;
+    this.pointPopup();
     this.popup.setLngLat(this.marker.getLngLat()).addTo(this.map);
   }
 
@@ -518,9 +526,9 @@ export class ReplayRenderer {
     if (this.app.map && hasLostContext(this.app.map)) return;
 
     // Find current position in replay timeline (for airplane positioning)
-    const currentIndex = this.locateCurrentIndex(state, isManualSeek);
-    state.currentIndex = currentIndex;
     const segments = state.segments;
+    const currentIndex = findSegmentIndexAtTime(segments, state.currentTime);
+    state.currentIndex = currentIndex;
     const lastSegment =
       currentIndex >= 0 ? (segments[currentIndex] ?? null) : null;
 
@@ -545,7 +553,8 @@ export class ReplayRenderer {
       isManualSeek,
     );
     this.updateReadout(lastSegment, bearing);
-    marker.setLatLng(position);
+    // Placed by the camera as it turns the icon, after it has moved (see
+    // ReplayCamera.follow)
     this.followAirplane(state, marker, position, bearing, isManualSeek);
 
     // While it plays, the trail is written in the frame the airplane moved
@@ -563,7 +572,7 @@ export class ReplayRenderer {
   }
 
   /** Write the time and the slider of the transport row */
-  private updateTransport(state: ReplayState): void {
+  updateTransport(state: ReplayState): void {
     const currentTime = state.currentTime;
     // In the format of the total, so "0:03:26 / 3:22:57" rather than a
     // minute count beside an hour count
@@ -708,37 +717,6 @@ export class ReplayRenderer {
         this.camera.keepAirplaneInView(state, position, isManualSeek);
       }
     });
-  }
-
-  /**
-   * Determine the segment index for the current time. Uses an incremental
-   * forward scan from the previous index while playing and a binary search
-   * for seeks or when the time moved backwards.
-   */
-  private locateCurrentIndex(
-    state: ReplayState,
-    isManualSeek: boolean,
-  ): number {
-    const segments = state.segments;
-    const currentTime = state.currentTime;
-    const previous = state.currentIndex;
-    const canScan =
-      !isManualSeek &&
-      previous >= 0 &&
-      previous < segments.length &&
-      (segments[previous]?.time ?? 0) <= currentTime;
-
-    if (!canScan) return findSegmentIndexAtTime(segments, currentTime);
-
-    let index = previous;
-    for (let i = previous + 1; i < segments.length; i++) {
-      if ((segments[i]?.time ?? 0) <= currentTime) {
-        index = i;
-      } else {
-        break;
-      }
-    }
-    return index;
   }
 
   /** Add the segments flown since the last frame to the trail */
