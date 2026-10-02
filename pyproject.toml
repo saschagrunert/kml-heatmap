@@ -38,7 +38,7 @@ test = [
     "lxml-stubs>=0.5.1",
 ]
 dev = [
-    "ruff>=0.16.8",
+    "ruff>=0.16.9",
     "mypy>=2.3.1",
     "bandit>=1.9.4",
     "pip-audit>=2.10.1",
