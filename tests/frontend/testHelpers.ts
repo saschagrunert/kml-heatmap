@@ -620,6 +620,27 @@ export function syncControlsWithStore(app: MockApp): void {
 }
 
 /**
+ * Have the safe area's probe (utils/safeArea.ts) measure these insets, as
+ * an iPhone's home screen app would; the sides left out are 0. Call
+ * resetSafeArea first where an earlier measure may be kept.
+ */
+export function measureSafeArea(
+  insets: Partial<Record<"top" | "right" | "bottom" | "left", number>>,
+) {
+  const real = window.getComputedStyle.bind(window);
+  return vi.spyOn(window, "getComputedStyle").mockImplementation((element) =>
+    element.id === "safe-area-probe"
+      ? ({
+          paddingTop: `${insets.top ?? 0}px`,
+          paddingRight: `${insets.right ?? 0}px`,
+          paddingBottom: `${insets.bottom ?? 0}px`,
+          paddingLeft: `${insets.left ?? 0}px`,
+        } as CSSStyleDeclaration)
+      : real(element),
+  );
+}
+
+/**
  * Give the window a device pixel ratio. jsdom's own value (1) is a property
  * of the window, so a test sets it back with `setDevicePixelRatio(1)` rather
  * than deleting it: a deleted one reads as undefined, and every comparison

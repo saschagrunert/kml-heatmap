@@ -354,9 +354,10 @@ function compareBundles(before, after, names) {
 // lazy bundles, which the page loads together (mapApp.bundle.js only starts
 // the chunk, so the sum is what counts). What the map draws cannot move to a
 // lazy bundle, since a link may open turned, as a globe or in 3D; what only
-// a panel or a mode shows can. About 51.5 KB gzipped in CI when it was last
-// set, lowered as the ribbons of the 3D view moved to the feature bundle.
-const BUDGET_APP = { raw: 153.25 * 1024, gzip: 52.5 * 1024 };
+// a panel or a mode shows can. About 52.6 KB gzipped in CI when it was last
+// set, raised for the safe area of the home screen app (the popups and the
+// start view clear of the status bar, the island and the home indicator).
+const BUDGET_APP = { raw: 155.5 * 1024, gzip: 53.5 * 1024 };
 // The feature bundle: replay and Replay all, the 3D view (relief, ribbons,
 // heat cloud), the imagery, the flight profile, the cross-section and the
 // hotspot tour. Fetched only when one of them is first used, so no part of

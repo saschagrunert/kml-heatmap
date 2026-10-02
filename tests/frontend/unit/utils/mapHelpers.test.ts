@@ -33,7 +33,8 @@ import {
   mockControl,
   resetMapLibreMock,
 } from "../../../mocks/maplibre-gl";
-import { setDevicePixelRatio } from "../../testHelpers";
+import { measureSafeArea, setDevicePixelRatio } from "../../testHelpers";
+import { resetSafeArea } from "../../../../kml_heatmap/frontend/utils/safeArea";
 
 /** A mock map, typed the way the helpers take it */
 function mapStub(options: Record<string, unknown> = {}): MapLibreMap & MockMap {
@@ -262,6 +263,28 @@ describe("mapHelpers", () => {
       panPopupIntoView(map, popup, 16);
 
       expect(map.panBy).not.toHaveBeenCalled();
+    });
+
+    it("keeps a popup clear of the status bar and the home indicator where the map fills the screen", () => {
+      // Measured afresh, not the zeros of the tests before
+      resetSafeArea();
+      // The insets of an iPhone's home screen app, held upright
+      measureSafeArea({ top: 59, bottom: 34 });
+      vi.spyOn(window, "innerHeight", "get").mockReturnValue(600);
+      try {
+        const map = mapStub();
+        // 40 px from the top is under the island: down to 59 + 16
+        panPopupIntoView(map, openPopup(map, rect(100, 40, 300, 200)), 16);
+        expect(map.panBy).toHaveBeenLastCalledWith([0, -35], {
+          animate: true,
+        });
+        // Up from the home indicator: 600 - 34 - 16
+        panPopupIntoView(map, openPopup(map, rect(100, 400, 300, 560)), 16);
+        expect(map.panBy).toHaveBeenLastCalledWith([0, 10], { animate: true });
+      } finally {
+        vi.restoreAllMocks();
+        resetSafeArea();
+      }
     });
 
     it("still pans a turned map by pixels, which is exact while it is flat", () => {

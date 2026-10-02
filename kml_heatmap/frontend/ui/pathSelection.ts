@@ -14,6 +14,7 @@ import { segmentBounds } from "../utils/geometry";
 import { pluralFlights } from "../utils/htmlGenerators";
 import { toBounds, unwrapLng } from "../utils/mapHelpers";
 import { prefersReducedMotion } from "../utils/motion";
+import { safeAreaInsets } from "../utils/safeArea";
 import { announceStatus } from "../utils/toast";
 
 /** What Isolate does, its title in the template */
@@ -70,8 +71,10 @@ function afterLayout(): Promise<void> {
  * panels over it: the control columns at the sides, the selection chip at
  * the top, the legend and the phone's bar at the bottom. Each panel counts
  * at the edge it stands at from which it reaches in least, and no edge
- * takes more than a third of the map. `margin` is the room left beyond,
- * and `chrome` the panels that count.
+ * takes more than a third of the map. Where the map fills the screen the
+ * safe area is the least at each edge: the status bar, the island and the
+ * home indicator, which a panel placed clear of them already takes in.
+ * `margin` is the room left beyond, and `chrome` the panels that count.
  */
 export function mapChromePadding(
   map: Pick<MapLibreMap, "getContainer">,
@@ -111,6 +114,18 @@ export function mapChromePadding(
     }
     if (edge) padding[edge] = Math.max(padding[edge], depth);
   }
+  // Measured from the window's edges, as the insets are; none, no floor
+  const safe = safeAreaInsets();
+  padding.top = Math.max(padding.top, safe.top - box.top);
+  padding.left = Math.max(padding.left, safe.left - box.left);
+  padding.bottom = Math.max(
+    padding.bottom,
+    safe.bottom && box.bottom - window.innerHeight + safe.bottom,
+  );
+  padding.right = Math.max(
+    padding.right,
+    safe.right && box.right - window.innerWidth + safe.right,
+  );
   const limit = (edge: Edge, size: number): number =>
     Math.min(padding[edge], size / 3) + margin;
   return {

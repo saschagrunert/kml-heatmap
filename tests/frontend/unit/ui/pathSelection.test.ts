@@ -4,11 +4,13 @@ import {
   mapChromePadding,
   PathSelection,
 } from "../../../../kml_heatmap/frontend/ui/pathSelection";
+import { resetSafeArea } from "../../../../kml_heatmap/frontend/utils/safeArea";
 import {
   createMockApp,
   createDataset,
   createSegment,
   asMapApp,
+  measureSafeArea,
   type MockApp,
 } from "../../testHelpers";
 import { DataManager } from "../../../../kml_heatmap/frontend/ui/dataManager";
@@ -420,6 +422,44 @@ describe("PathSelection", () => {
         configurable: true,
       });
       column.remove();
+    });
+
+    it("keeps a fit clear of the safe area where the map fills the screen", () => {
+      resetSafeArea();
+      // An iPhone's home screen app, held upright: nothing over the map
+      measureSafeArea({ top: 59, bottom: 34 });
+      const map = mockApp.map!;
+      vi.spyOn(map.getContainer(), "getBoundingClientRect").mockReturnValue(
+        rect(0, 0, window.innerWidth, window.innerHeight),
+      );
+
+      const padding = mapChromePadding(map, 48, CONTROL_COLUMNS);
+
+      expect(padding.top).toBe(59 + 48);
+      expect(padding.bottom).toBe(34 + 48);
+      expect(padding.left).toBe(48);
+      resetSafeArea();
+    });
+
+    it("counts the safe area once under a panel placed clear of it", () => {
+      resetSafeArea();
+      // Held sideways: the island at the left, and the column 8 px beside it
+      measureSafeArea({ left: 59, bottom: 21, right: 59 });
+      const map = mockApp.map!;
+      vi.spyOn(map.getContainer(), "getBoundingClientRect").mockReturnValue(
+        rect(0, 0, 1280, 720),
+      );
+      const column = document.createElement("div");
+      column.id = "left-buttons";
+      vi.spyOn(column, "getBoundingClientRect").mockReturnValue(
+        rect(67, 8, 170, 500),
+      );
+      document.body.append(column);
+
+      // The column's reach, which takes the inset in, and not 59 + 237
+      expect(mapChromePadding(map, 48, CONTROL_COLUMNS).left).toBe(237 + 48);
+      column.remove();
+      resetSafeArea();
     });
 
     it("counts only the panels it is given", () => {

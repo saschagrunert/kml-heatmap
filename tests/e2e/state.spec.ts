@@ -526,23 +526,31 @@ test.describe("State Persistence", () => {
       0,
     );
 
-    // North up and flat over the bounds a first visit is fitted to
+    // North up and flat over the bounds a first visit is fitted to, on a
+    // phone above the bar as well
     await waitForMapReady(page);
     expect(await getOrientation(page)).toEqual({
       bearing: 0,
       pitch: 0,
       projection: "mercator",
     });
-    const camera = await page.evaluate(() => {
+    const camera = await page.evaluate((phone) => {
       const app = window.mapApp!;
       const map = app.map!;
       const [[south, west], [north, east]] = app.config.bounds;
+      const bar = phone
+        ? parseFloat(
+            getComputedStyle(document.documentElement).getPropertyValue(
+              "--mobile-bar-h",
+            ),
+          )
+        : 0;
       const fit = map.cameraForBounds(
         [
           [west, south],
           [east, north],
         ],
-        { padding: 48 },
+        { padding: { top: 48, right: 48, bottom: 48 + bar, left: 48 } },
       )!;
       const center = map.getCenter();
       const target = fit.center as { lng: number; lat: number };
@@ -551,7 +559,7 @@ test.describe("State Persistence", () => {
         lng: [center.lng, target.lng],
         lat: [center.lat, target.lat],
       };
-    });
+    }, mobile);
     for (const [actual, expected] of Object.values(camera)) {
       expect(actual).toBeCloseTo(expected!, 4);
     }

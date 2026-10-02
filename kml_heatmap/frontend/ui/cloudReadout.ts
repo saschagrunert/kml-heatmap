@@ -68,6 +68,7 @@ import { whenIdle } from "../utils/whenIdle";
 import { cloudReachPx } from "./heatCloudShaders";
 import { drawnWorlds } from "./glLayer";
 import { mercatorX } from "../utils/mercator";
+import { safeAreaInsets } from "../utils/safeArea";
 
 /** The class of the box, styled in features.css */
 const READOUT_CLASS = "cloud-readout";
@@ -232,8 +233,21 @@ export function followCloudReadout(app: MapApp): void {
     shownAt = { point, finger };
     const width = box.offsetWidth;
     const height = box.offsetHeight;
-    const right = container.clientWidth - width;
-    const bottom = container.clientHeight - height;
+    // Within the map, and where it fills the screen within the safe area
+    const frame = container.getBoundingClientRect();
+    const safe = safeAreaInsets();
+    const minX = Math.max(0, safe.left - frame.left);
+    const minY = Math.max(0, safe.top - frame.top);
+    const right =
+      Math.min(
+        container.clientWidth,
+        window.innerWidth - safe.right - frame.left,
+      ) - width;
+    const bottom =
+      Math.min(
+        container.clientHeight,
+        window.innerHeight - safe.bottom - frame.top,
+      ) - height;
     const values = boxesOf(
       container.querySelectorAll(
         ":scope > .segment-tooltip, :scope > .segment-popup",
@@ -246,7 +260,7 @@ export function followCloudReadout(app: MapApp): void {
     const gap = finger ? FINGER_GAP_PX : POINTER_GAP_PX;
     const above = point.y - gap - height;
     const below = point.y + gap;
-    const middle = Math.max(0, Math.min(point.x - width / 2, right));
+    const middle = Math.max(minX, Math.min(point.x - width / 2, right));
     const spots: [number, number][] = finger
       ? [
           [middle, above],
@@ -262,7 +276,7 @@ export function followCloudReadout(app: MapApp): void {
       spots.push([end, top], [left - width, top]);
     }
     const fits = ([x, y]: [number, number]): boolean =>
-      x >= 0 && x <= right && y >= 0 && y <= bottom;
+      x >= minX && x <= right && y >= minY && y <= bottom;
     const clear = ([x, y]: [number, number]): boolean =>
       covered.every(
         (other) =>
@@ -275,8 +289,8 @@ export function followCloudReadout(app: MapApp): void {
       spots.find((spot) => fits(spot) && clear(spot)) ??
       spots.find(fits) ??
       spots[0]!;
-    x = Math.max(0, Math.min(x, right));
-    y = Math.max(0, Math.min(y, bottom));
+    x = Math.max(minX, Math.min(x, right));
+    y = Math.max(minY, Math.min(y, bottom));
     box.style.transform = `translate(${Math.round(x)}px, ${Math.round(y)}px)`;
   };
 

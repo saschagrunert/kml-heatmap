@@ -4,7 +4,7 @@
   "short_name": "KML Heatmap",
   "description": "Interactive flight path heatmap visualization",
   "start_url": "./",
-  "display": "minimal-ui",
+  "display": "standalone",
   "scope": "./",
   "orientation": "any",
   "background_color": "#141414",

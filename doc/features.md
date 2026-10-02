@@ -498,6 +498,13 @@ the filters.
   did, and scrolls. Replay, Replay all and the hotspot tour take over the bottom
   edge and the bar steps aside until they end. The colour legend steps aside
   while a popup is open on the map, which it would cover
+- Added to the home screen, the site opens as an app of its own (the manifest's
+  `standalone` display), and on an iPhone the map fills the whole screen, under
+  the status bar and around the Dynamic Island or the notch; the controls, the
+  sheets, Wrapped, the popups, the map attribution and the first view keep clear
+  of them, of the rounded corners and of the home indicator. In a Safari tab the
+  strip at the top is Safari's own, and only a phone held sideways shows the map
+  around the island
 
 ### Units
 
