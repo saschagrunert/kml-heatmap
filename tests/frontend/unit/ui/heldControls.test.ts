@@ -130,6 +130,20 @@ describe("holdControls", () => {
     expect(control("year-select").title).toBe("");
   });
 
+  it("gives back the title a control was given while held (regression)", () => {
+    control("heatmap-btn").title = "Pick one flight";
+    const release = holdControls(["heatmap-btn"], WHY);
+
+    // A pick in the statistics rail while the tour runs
+    setUnavailable(control("heatmap-btn"), false, "Replay the flight");
+    expect(control("heatmap-btn").title).toBe(REASON);
+
+    release();
+    expect(control("heatmap-btn").title).toBe("Replay the flight");
+    expect(control("heatmap-btn").dataset["heldTitle"]).toBeUndefined();
+    expect(control("heatmap-btn").getAttribute("aria-disabled")).toBe("false");
+  });
+
   it("gives them back once", () => {
     const release = holdControls(["heatmap-btn"], WHY);
     release();

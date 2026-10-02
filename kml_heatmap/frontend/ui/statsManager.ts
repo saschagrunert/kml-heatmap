@@ -29,7 +29,7 @@ import {
 } from "../utils/statsFormat";
 import { icon, type IconName } from "../utils/icons";
 import { domCache } from "../utils/domCache";
-import { countryMark } from "../utils/wrappedHtml";
+import { countryHeading } from "../utils/wrappedHtml";
 import { datasetIndex } from "../calculations/datasetIndex";
 import { watchScrollEnd, type ScrollEndWatcher } from "../utils/scrollFade";
 import { setStatsTitle, STATS_PANEL_ID as PANEL_ID } from "./statsPanel";
@@ -202,21 +202,17 @@ function airportSummary(numAirports: number, numCountries: number): string {
 function airportGroups(grouped: Map<string, string[]>): string {
   let html = "";
   for (const [code, airports] of grouped) {
-    const isCountry = code !== "Other";
-    const label = isCountry ? countryDisplayName(code) : "Other";
     html +=
-      '<div class="kh-stats-group">' +
-      (isCountry
-        ? countryMark(code, countryFlagSrc(code), "kh-stats-group", 16, 12)
-        : "") +
-      '<span class="kh-stats-group-name">' +
-      escapeHtml(label) +
-      "</span>" +
-      '<span class="kh-stats-group-count">' +
-      airports.length +
-      "</span>" +
-      "</div>" +
-      '<ul class="kh-stats-list kh-stats-airport-list">';
+      countryHeading(
+        "kh-stats-group",
+        "kh-stats-group",
+        code,
+        code === "Other" ? code : countryDisplayName(code),
+        airports.length,
+        countryFlagSrc(code),
+        16,
+        12,
+      ) + '<ul class="kh-stats-list kh-stats-airport-list">';
     for (const name of airports) {
       const airport = splitAirportName(name, airportCode(name));
       html +=

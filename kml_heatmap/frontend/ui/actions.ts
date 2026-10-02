@@ -13,6 +13,36 @@ import { focusStatsRail } from "./appChrome";
 /** Said for a control that waits for the first load (runAction) */
 export const STILL_LOADING_MESSAGE = "Still loading the flights";
 
+/** Why Isolate cannot act yet, on the button and in the phone's sheet */
+export const NO_SELECTION_MESSAGE = "Select flights to isolate";
+
+/** Said for a control that needs flights while none loaded (runAction) */
+export const NO_DATA_MESSAGE = "The flights did not load, use Retry";
+
+/**
+ * Actions that open something made of the flights: with none loaded, after
+ * a load that failed, Wrapped said "0 flights" and the tour that no flight
+ * had logged time (see followLoadFailure in appInitializer.ts, which shows
+ * their controls unavailable meanwhile)
+ */
+export const NEED_DATA: ReadonlySet<ActionName> = new Set<ActionName>([
+  "toggleStats",
+  "showWrapped",
+  "toggleReplayAll",
+  "toggleHotspotTour",
+  "toggleCrossSection",
+  "exportMap",
+]);
+
+/**
+ * Whether a load left the page without flights, so that what is made of
+ * them is unavailable: set by followLoadFailure in appInitializer.ts, read
+ * by runAction and the phone's bar
+ */
+export function flightsFailed(): boolean {
+  return document.body.classList.contains("flights-failed");
+}
+
 /**
  * Why the speed layer cannot be switched on: the flights have no times
  * (#airspeed-reason in the template says the same)
@@ -131,6 +161,15 @@ export function runAction(app: MapApp, action: ActionName, e?: Event): boolean {
     // The controls look ready and a click would do nothing without a word.
     // Not for a filter, whose change is applied once the load is over.
     if (!action.startsWith("filter")) showToast(STILL_LOADING_MESSAGE);
+    return false;
+  }
+  // An open statistics rail can still be closed
+  if (
+    flightsFailed() &&
+    NEED_DATA.has(action) &&
+    !(action === "toggleStats" && app.statsPanelVisible)
+  ) {
+    showToast(NO_DATA_MESSAGE);
     return false;
   }
   fn(e);

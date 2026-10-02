@@ -650,6 +650,19 @@
          would carry. Filled by ui/pathSelection.ts. -->
       <div id="selection-chip" hidden>
         <span id="selection-chip-count"></span>
+        <!-- Replay where a phone's pick of one flight lands, which has no
+           Replay but in the More sheet (styles.css shows it on a phone) -->
+        <button
+          type="button"
+          id="selection-replay-btn"
+          class="btn-surface"
+          data-icon="play"
+          title="Replay the selected flight"
+          aria-label="Replay the selected flight"
+          hidden
+        >
+          <span class="control-label">Replay</span>
+        </button>
         <button
           type="button"
           id="selection-clear-btn"
@@ -928,8 +941,8 @@
         href="https://github.com/saschagrunert/kml-heatmap"
         target="_blank"
         rel="noopener noreferrer"
-        title="View on GitHub"
-        aria-label="View on GitHub"
+        title="KML Heatmap source code on GitHub"
+        aria-label="KML Heatmap source code on GitHub"
       >
         <svg
           class="github-icon"

@@ -509,8 +509,6 @@ function buildMockApp(
     get fullPathSegments() {
       return store.get("currentData")?.path_segments ?? null;
     },
-    togglePathSelection: vi.fn(),
-    seekReplay: vi.fn(),
     initialize: vi.fn(),
     destroy: vi.fn(),
   };

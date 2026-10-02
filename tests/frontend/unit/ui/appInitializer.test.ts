@@ -21,6 +21,7 @@ import {
   type MockApp,
 } from "../../testHelpers";
 import { Marker as MockMarker } from "../../../mocks/maplibre-gl";
+import { NO_DATA_MESSAGE } from "../../../../kml_heatmap/frontend/ui/actions";
 
 const toastMock = vi.hoisted(() => ({
   showToast: vi.fn(),
@@ -33,6 +34,7 @@ function setupDOM(): void {
   document.body.innerHTML = `
     <select id="year-select"><option value="all">All Years</option></select>
     <button id="airspeed-btn"></button>
+    <button id="wrapped-btn" title="Wrapped"></button>
     <div id="altitude-legend"></div>
     <div id="airspeed-legend"></div>
     <div id="map-empty" hidden>
@@ -625,6 +627,17 @@ describe("appInitializer", () => {
       expect(app.store.get("statsPanelVisible")).toBe(true);
     });
 
+    it("keeps the stats panel closed over a load that failed", async () => {
+      app.savedState = { statsPanelVisible: true };
+      app.dataManager.loadData.mockResolvedValue(null);
+
+      await loadInitialData(asMapApp(app));
+
+      // It would open on zeros while its button says the flights are missing
+      expect(app.store.get("statsPanelVisible")).toBe(false);
+      expect(document.body.classList.contains("flights-failed")).toBe(true);
+    });
+
     it("hides the colour legends until the first dataset is in", async () => {
       let during: boolean | undefined;
       app.dataManager.loadData.mockImplementation(() => {
@@ -893,6 +906,25 @@ describe("appInitializer", () => {
         await vi.waitFor(() => expect(panel.hidden).toBe(false));
       });
 
+      it("shows what is made of the flights unavailable until a Retry brings them", async () => {
+        const wrapped = document.getElementById("wrapped-btn")!;
+        app.filterManager.retryLoad.mockImplementation(() => {
+          app.currentData = createDataset([{ id: 1, year: 2025 }]);
+          return Promise.resolve(true);
+        });
+        await loadInitialData(asMapApp(app));
+
+        expect(wrapped.getAttribute("aria-disabled")).toBe("true");
+        expect(wrapped.title).toBe(NO_DATA_MESSAGE);
+
+        document.getElementById("map-empty-retry")!.click();
+
+        await vi.waitFor(() =>
+          expect(wrapped.getAttribute("aria-disabled")).toBe("false"),
+        );
+        expect(wrapped.title).toBe("Wrapped");
+      });
+
       it("hands the focus of its Retry to the map as it hides", async () => {
         document.body.append(app.map!.getCanvas());
         app.map!.getCanvas().tabIndex = 0;
@@ -952,6 +984,18 @@ describe("appInitializer", () => {
       expect([...app.selectedPathIds]).toEqual([7]);
       expect(app.isolateSelection).toBe(true);
       expect(listener).toHaveBeenCalledTimes(1);
+      // Quietly, unless asked: a year switch leaves out the others' flights
+      expect(toastMock.showToast).not.toHaveBeenCalled();
+    });
+
+    it("says how many flights of a link it left out, when asked", () => {
+      app.selectedPathIds = new Set([3, 7, 12]);
+
+      dropUnknownPathIds(asMapApp(app), data, true);
+
+      expect(toastMock.showToast).toHaveBeenCalledExactlyOnceWith(
+        "Left out 2 flights not on this site",
+      );
     });
 
     it("turns isolation off when no selected id is left", () => {

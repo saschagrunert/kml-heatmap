@@ -207,7 +207,8 @@ export function generateFunFacts(
     });
   }
 
-  // Distance facts
+  // Distance facts. The distance itself is a figure on the card above;
+  // said again here it only repeated it.
   const distanceNm = yearStats.total_distance_nm;
   const earthCircumferenceNm = 21639; // Nautical miles
 
@@ -218,13 +219,6 @@ export function generateFunFacts(
       text: markup`You flew <strong>${ratio}x</strong> around the Earth!`,
       category: "distance",
       priority: 10,
-    });
-  } else if (distanceNm > 1000) {
-    facts.push({
-      icon: "distance",
-      text: markup`You covered <strong>${formatNumber(distanceNm, 1)} nautical miles</strong> ${period}!`,
-      category: "distance",
-      priority: 8,
     });
   }
 

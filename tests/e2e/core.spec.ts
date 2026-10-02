@@ -162,7 +162,6 @@ test.describe("Core", () => {
     page,
   }) => {
     for (const selector of [
-      "#isolate-btn",
       "#stats-collapse-btn",
       "#replay-play-btn",
       "#replay-pause-btn",
@@ -172,6 +171,20 @@ test.describe("Core", () => {
       const title = await button.getAttribute("title");
       expect(title, selector).toBeTruthy();
       await expect(button).toHaveAttribute("aria-label", title!);
+    }
+    // Unavailable, Isolate and Replay keep their name and say why in the
+    // title, which a screen reader reads as the description
+    for (const [selector, name] of [
+      ["#isolate-btn", "Isolate selected paths"],
+      ["#replay-btn", "Replay selected flight path"],
+    ]) {
+      const button = page.locator(selector!);
+      await expect(button).toHaveAttribute("aria-disabled", "true");
+      await expect(button).toHaveAttribute("aria-label", name!);
+      await expect(button).not.toHaveAttribute("title", name!);
+      await expect(button).toHaveAccessibleDescription(
+        (await button.getAttribute("title"))!,
+      );
     }
   });
 
@@ -389,7 +402,19 @@ test.describe("Core", () => {
       "href",
       "https://github.com/saschagrunert/kml-heatmap",
     );
-    await expect(link).toHaveAttribute("aria-label", "View on GitHub");
+    // The project's code, not the pilot's: on a fork's site the link still
+    // goes upstream
+    await expect(link).toHaveAttribute(
+      "aria-label",
+      "KML Heatmap source code on GitHub",
+    );
+    // The whole box is the target, not only the icon in its middle
+    const [box, target] = await Promise.all([
+      footer.boundingBox(),
+      link.boundingBox(),
+    ]);
+    expect(target!.width).toBeGreaterThanOrEqual(box!.width - 2);
+    expect(target!.height).toBeGreaterThanOrEqual(box!.height - 2);
   });
 
   test.describe("Airport popup", () => {

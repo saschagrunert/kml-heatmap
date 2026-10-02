@@ -542,7 +542,7 @@ test.describe("Mobile bar", () => {
         "a disabled button would not be reachable by keyboard",
       ).toBe(false);
       await expect(replay.locator(".sheet-row-hint")).toHaveText(
-        "Pick one flight under Stats, Flights",
+        "Pick one flight with timing data to replay, under Statistics, Flights",
       );
       // The label dims, the hint that explains it does not
       await expect(replay).toHaveCSS("opacity", "1");

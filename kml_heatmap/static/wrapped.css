@@ -374,6 +374,9 @@ body:has(#wrapped-modal:not([hidden]))
   opacity: 0;
   animation: fadeInUp 0.6s ease-out forwards;
 }
+.wrapped-square-card[hidden] {
+  display: none;
+}
 /* The card's padding is its inset on every side: the margins of its first
    and last section doubled it above and below. By id, to outrank the
    margins of the sections in the layouts below. */
@@ -1063,7 +1066,7 @@ body:has(#wrapped-modal:not([hidden]))
   }
 }
 @supports (animation-timeline: scroll()) {
-  @media (min-width: 1024px) {
+  @media (min-width: 1024px) and (min-height: 480.02px) {
     #wrapped-cards-column,
     #wrapped-cards-column.is-at-end {
       mask-image: linear-gradient(
@@ -1082,7 +1085,7 @@ body:has(#wrapped-modal:not([hidden]))
   }
   /* Stacked, the dialog scrolls as one column, and a card scrolled up
      under its head was cut off square there too */
-  @media (max-width: 1023.98px) {
+  @media (max-width: 1023.98px), (max-height: 480px) {
     #wrapped-content {
       mask-image: linear-gradient(transparent, #000 var(--wrapped-top-fade));
       animation: wrapped-top-fade linear both;
@@ -1100,7 +1103,7 @@ body:has(#wrapped-modal:not([hidden]))
    covers iPads in either orientation and landscape phones, so the dialog
    stacks until the row fits.
    ========================================================================== */
-@media (max-width: 1023.98px) {
+@media (max-width: 1023.98px), (max-height: 480px) {
   /* The map is a card of its own, so the dialog scrolls as one column and
      the desktop mask and inner scroller are handed back */
   #wrapped-content {
@@ -1160,7 +1163,7 @@ body:has(#wrapped-modal:not([hidden]))
 /* ==========================================================================
    Mobile layout (narrow viewports)
    ========================================================================== */
-@media (max-width: 767.98px) {
+@media (max-width: 767.98px), (max-height: 480px) {
   #wrapped-modal {
     --wrapped-gutter: var(--space-base);
     --wrapped-title: calc(var(--text-display) * 0.92);
@@ -1695,7 +1698,7 @@ body:has(#wrapped-modal:not([hidden]))
   color: var(--color-text);
 }
 /* Fine print on a phone, below the 12px floor (see --text-fine) */
-@media (max-width: 767.98px) {
+@media (max-width: 767.98px), (max-height: 480px) {
   .kh-stats-footer,
   .kh-stats-build {
     font-size: var(--text-fine);

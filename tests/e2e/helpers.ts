@@ -505,7 +505,7 @@ export async function togglePathSelection(
   expectedSize: number,
 ): Promise<void> {
   await page.evaluate(
-    (id) => window.mapApp!.togglePathSelection(String(id)),
+    (id) => window.mapApp!.pathSelection.togglePathSelection(id),
     pathId,
   );
   await page.waitForFunction(

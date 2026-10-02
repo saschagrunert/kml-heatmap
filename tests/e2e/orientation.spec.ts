@@ -520,7 +520,9 @@ test.describe("Map orientation", () => {
         await activateReplay(page);
         await page.evaluate(() => {
           const state = window.mapApp!.replayState;
-          window.mapApp!.seekReplay(String(Math.floor(state.maxTime / 2)));
+          window.mapApp!.replayManager!.seekReplay(
+            String(Math.floor(state.maxTime / 2)),
+          );
         });
         const chase = page.locator("#replay-chase-btn");
         await chase.click();

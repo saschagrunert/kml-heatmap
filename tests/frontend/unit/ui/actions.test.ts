@@ -1,6 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
   DEFERRED_WHILE_INITIALIZING,
+  NEED_DATA,
+  NO_DATA_MESSAGE,
   STILL_LOADING_MESSAGE,
   bindActions,
   runAction,
@@ -370,6 +372,26 @@ describe("runAction", () => {
     runAction(asMapApp(app), "filterByYear");
     runAction(asMapApp(app), "filterByAircraft");
     expect(showToast).toHaveBeenCalledOnce();
+    showToast.mockRestore();
+  });
+
+  it("says the flights did not load for what is made of them", () => {
+    const showToast = vi.spyOn(toast, "showToast");
+    document.body.classList.add("flights-failed");
+
+    for (const action of NEED_DATA) {
+      expect(runAction(asMapApp(app), action), action).toBe(false);
+    }
+    expect(showToast).toHaveBeenCalledTimes(NEED_DATA.size);
+    expect(showToast).toHaveBeenLastCalledWith(NO_DATA_MESSAGE);
+    expect(app.loadWrapped).not.toHaveBeenCalled();
+    // The rest of the controls work, and an open rail can be closed
+    expect(runAction(asMapApp(app), "toggleHeatmap")).toBe(true);
+    app.statsPanelVisible = true;
+    expect(runAction(asMapApp(app), "toggleStats")).toBe(true);
+
+    document.body.classList.remove("flights-failed");
+    expect(runAction(asMapApp(app), "showWrapped")).toBe(true);
     showToast.mockRestore();
   });
 

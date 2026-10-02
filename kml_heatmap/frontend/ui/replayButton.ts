@@ -23,7 +23,11 @@ export function updateReplayButtonState(ready: boolean): void {
 
   // The button stays enabled so it can explain why replay is unavailable:
   // aria-disabled says so without taking it out of the tab order, which
-  // the disabled attribute would, and the stylesheet dims it
-  setUnavailable(btn, !ready);
-  btn.title = ready ? REPLAY_BUTTON_LABEL : REPLAY_PRECONDITION_MESSAGE;
+  // the disabled attribute would, and the stylesheet dims it. A mode that
+  // holds the button keeps its own title until it ends
+  setUnavailable(
+    btn,
+    !ready,
+    ready ? REPLAY_BUTTON_LABEL : REPLAY_PRECONDITION_MESSAGE,
+  );
 }

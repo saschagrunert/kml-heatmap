@@ -353,7 +353,11 @@ test.describe("Solo Mode", () => {
     );
     await expect(isolateBtn).toBeVisible();
     await expect(isolateBtn).toHaveCSS("opacity", "0.5");
-    await expect(isolateBtn).toHaveAttribute("title", "Isolate selected paths");
+    // Saying why it is dimmed, as the phone's sheet does
+    await expect(isolateBtn).toHaveAttribute(
+      "title",
+      "Select flights to isolate",
+    );
     await expect(isolateBtn.locator("svg.icon")).toHaveCount(1);
     await expect(isolateBtn.locator(".control-label")).toHaveText("Isolate");
   });

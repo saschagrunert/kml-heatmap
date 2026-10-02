@@ -73,20 +73,24 @@ export function syncLegend(
 }
 
 /**
- * Say through aria-disabled whether a control can act: it stays in the tab
- * order to explain itself, and the stylesheet dims it. A control a mode
- * holds (holdControls in ui/heldControls.ts, which keeps the control's own
- * word in `data-held`) stays unavailable, and gets this back as it ends.
+ * Say through aria-disabled whether a control can act, and with `title`
+ * what it does or why it cannot: it stays in the tab order to explain
+ * itself, and the stylesheet dims it. A control a mode holds (holdControls
+ * in ui/heldControls.ts, which keeps the control's own word in `data-held`
+ * and its title in `data-held-title`) keeps saying why it is held, and gets
+ * both back as the mode ends.
  */
 export function setUnavailable(
   control: HTMLElement,
   unavailable: boolean,
+  title?: string,
 ): void {
-  if (control.dataset["held"] === undefined) {
-    control.setAttribute("aria-disabled", String(unavailable));
-  } else {
-    control.dataset["held"] = String(unavailable);
-  }
+  const held = control.dataset["held"] !== undefined;
+  if (held) control.dataset["held"] = String(unavailable);
+  else control.setAttribute("aria-disabled", String(unavailable));
+  if (title === undefined) return;
+  if (held) control.dataset["heldTitle"] = title;
+  else control.title = title;
 }
 
 /**

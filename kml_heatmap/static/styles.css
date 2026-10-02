@@ -721,7 +721,7 @@ main {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-#selection-clear-btn {
+#selection-chip button {
   display: flex;
   align-items: center;
   gap: var(--space-xs);
@@ -735,7 +735,7 @@ main {
   cursor: pointer;
 }
 @media (hover: hover) {
-  #selection-clear-btn:hover {
+  #selection-chip button:hover {
     background-color: var(--color-bg-active);
     color: var(--color-text);
   }
@@ -743,6 +743,9 @@ main {
 #selection-clear-btn[aria-disabled="true"] {
   opacity: 0.5;
   cursor: not-allowed;
+}
+#selection-chip #selection-replay-btn {
+  display: none;
 }
 
 /* ==========================================================================
@@ -833,7 +836,7 @@ main {
 .stats-open:has(.toast-visible) .color-legend {
   visibility: hidden;
 }
-@media (max-width: 939.98px) {
+@media (max-width: 939.98px), (max-height: 480px) {
   body:has(.toast-visible) .color-legend {
     visibility: hidden;
   }
@@ -1025,7 +1028,7 @@ body.stats-open #left-buttons {
    compact to their icons. Every control carries its name in `aria-label`
    and `title`, and the filter rows keep their value, which is the one piece
    of text in a column that is not a repeat of its icon. */
-@media (min-width: 768px) and (max-width: 1279.98px) {
+@media (min-width: 768px) and (max-width: 1279.98px) and (min-height: 480.02px) {
   body.stats-open .control-column {
     width: auto;
   }
@@ -1466,14 +1469,15 @@ body.stats-open #left-buttons {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: var(--space-sm);
   background-color: var(--color-bg-secondary);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-control);
   z-index: var(--z-footer);
   box-shadow: var(--shadow-control);
 }
+/* The link fills the box, so its edge is as much of the target as the icon */
 #github-footer a {
+  padding: var(--space-sm);
   color: var(--color-text-muted);
   text-decoration: none;
   display: flex;
@@ -1488,7 +1492,7 @@ body.stats-open #left-buttons {
 }
 #github-footer a:focus-visible {
   outline: var(--focus-ring);
-  outline-offset: 4px;
+  outline-offset: 2px;
 }
 #github-footer .github-icon {
   display: block;
@@ -1641,7 +1645,7 @@ body.stats-open #left-buttons {
 /* ==========================================================================
    Mobile layout (narrow viewports)
    ========================================================================== */
-@media (max-width: 767.98px) {
+@media (max-width: 767.98px), (max-height: 480px) {
   :root {
     --btn-min-height: 44px;
     --edge-gap: 8px;
@@ -1718,7 +1722,7 @@ body.stats-open #left-buttons {
   .mobile-tab.active {
     color: var(--color-accent-blue);
   }
-  .mobile-tab:disabled {
+  .mobile-tab[aria-disabled="true"] {
     opacity: 0.5;
     color: var(--color-text-dim);
   }
@@ -2092,7 +2096,7 @@ body.stats-open #left-buttons {
     overflow: hidden;
   }
 
-  #github-footer {
+  #github-footer a {
     padding: var(--space-xs);
   }
   #github-footer .github-icon {
@@ -2145,6 +2149,9 @@ body.stats-open #left-buttons {
      below): the sheet says what is selected itself, in the notice above
      the figures and the marked rows of the list, and the count ran into
      the longest title. */
+  body:not(.stats-open) #selection-chip #selection-replay-btn:not([hidden]) {
+    display: flex;
+  }
   .stats-open #selection-chip {
     inset: var(--safe-top) var(--space-sm) auto auto;
     transform: none;

@@ -200,6 +200,18 @@ describe("buttonState", () => {
       expect(button.getAttribute("aria-disabled")).toBe("true");
       expect(button.dataset["held"]).toBe("false");
     });
+
+    it("titles the control, or keeps the title for a held one's release", () => {
+      setUnavailable(button, true, "Why not");
+      expect(button.title).toBe("Why not");
+
+      button.dataset["held"] = "true";
+      button.title = "End the tour to change this";
+      setUnavailable(button, false, "Replay");
+
+      expect(button.title).toBe("End the tour to change this");
+      expect(button.dataset["heldTitle"]).toBe("Replay");
+    });
   });
 
   describe("setControlLabel", () => {

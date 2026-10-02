@@ -575,6 +575,11 @@ describe("FilterManager", () => {
       expect(mockApp.dataManager.loadData.mock.calls[0]![2]).toBeUndefined();
       expect(mockApp.currentData).toEqual(year2024Data());
       expect([...mockApp.selectedPathIds]).toEqual([3]);
+      // What the link named and the site does not have is said, as on a
+      // first load that worked
+      expect(toastMock.showToast).toHaveBeenCalledWith(
+        "Left out 1 flight not on this site",
+      );
     });
 
     it("says which year it shows once the switch is applied", async () => {
