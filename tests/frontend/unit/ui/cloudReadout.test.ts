@@ -206,7 +206,7 @@ describe("the readout of the heat cloud", () => {
     await nextFrame();
     expect(shown()).toBeNull();
     app.heightBand = "";
-    move(1, 0);
+    move(20, 0);
     await nextFrame();
     expect(shown()).toContain("2 flights");
 
@@ -302,6 +302,52 @@ describe("the readout of the heat cloud", () => {
     move(0, 0);
     await nextFrame();
     expect(shown()).not.toBeNull();
+  });
+
+  /** flight(1, 50) moved `east` degrees, its longitudes kept within 180 */
+  function moved(east: number): PathSegment[] {
+    const wrap = (lng: number): number => (lng > 180 ? lng - 360 : lng);
+    return flight(1, 50).map((segment) => ({
+      ...segment,
+      coords: [
+        [segment.coords[0][0], wrap(segment.coords[0][1] + east)],
+        [segment.coords[1][0], wrap(segment.coords[1][1] + east)],
+      ],
+    }));
+  }
+
+  const only = (segments: PathSegment[]) =>
+    createDataset(
+      [{ id: 1, year: 2026, aircraft_registration: "D-EAAA" }],
+      segments,
+    );
+
+  it("reads a flight across the antimeridian where it is drawn, past 180", async () => {
+    // From 179.95 to 180.05, written down as -179.95 past the antimeridian
+    // and drawn going on past 180 rather than round the world
+    app.currentData = only(moved(172));
+    expect(app.currentData.path_segments.at(-1)!.coords[1][1]).toBeLessThan(0);
+    map().jumpTo({ center: [180.03, 50] });
+    enter3D();
+    move(0, 0);
+    await nextFrame();
+    expect(shown()).not.toBeNull();
+  });
+
+  it("reads nothing past 180 beside a flight that does not cross it", async () => {
+    // At 172 W, which the world copy east of 180 would put at 188: no
+    // cloud is drawn there
+    app.currentData = only(moved(-180));
+    map().jumpTo({ center: [-172, 50] });
+    enter3D();
+    move(0, 0);
+    await nextFrame();
+    expect(shown()).not.toBeNull();
+
+    map().jumpTo({ center: [188, 50] });
+    move(20, 0);
+    await nextFrame();
+    expect(shown()).toBeNull();
   });
 
   it("goes with Escape until the pointer moves on", async () => {

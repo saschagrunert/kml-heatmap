@@ -108,7 +108,9 @@ void main() {
     corner = (atEnd ? pb : pa) + vec2(-dir.y, dir.x) * a_corner.y * reach;
     w = atEnd ? b.w : a.w;
   }
-  float pulled = max(w - reach * w / u_depth.w, 0.5 * w);
+  // Not past the near plane either, as in the heat cloud: an end just
+  // beyond it was pulled through and clipped
+  float pulled = max(w - reach * w / u_depth.w, max(0.5 * w, near * 1.01));
   gl_Position = vec4(
     (corner / u_viewport * 2.0 - 1.0) * pulled,
     u_depth.y - u_depth.x * pulled,

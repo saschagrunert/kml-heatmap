@@ -312,6 +312,44 @@ describe("geometry utilities", () => {
       ]);
     });
 
+    it("spans a flight across the antimeridian the short way", () => {
+      expect(
+        segmentBounds([
+          createSegment({
+            coords: [
+              [-17.8, 177.4],
+              [-17.5, 179.9],
+            ],
+          }),
+          createSegment({
+            coords: [
+              [-17.5, 179.9],
+              [-16.7, -179.9],
+            ],
+          }),
+        ]),
+      ).toEqual([
+        [-17.8, 177.4],
+        [-16.7, 180.1],
+      ]);
+    });
+
+    it("keeps a flight either side of the prime meridian as it is", () => {
+      expect(
+        segmentBounds([
+          createSegment({
+            coords: [
+              [51.4, -0.5],
+              [51.5, 0.3],
+            ],
+          }),
+        ]),
+      ).toEqual([
+        [51.4, -0.5],
+        [51.5, 0.3],
+      ]);
+    });
+
     it("returns null without segments", () => {
       expect(segmentBounds([])).toBeNull();
     });

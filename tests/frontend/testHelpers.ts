@@ -250,6 +250,7 @@ export interface MockAppOverrides extends Partial<StoreState> {
   aircraftModels?: MapApp["aircraftModels"];
   altitudeRange?: MapApp["altitudeRange"];
   airspeedRange?: MapApp["airspeedRange"];
+  metadataAirspeedRange?: MapApp["metadataAirspeedRange"];
   config?: Partial<MapApp["config"]>;
   isInitializing?: boolean;
   airportMarkers?: MapApp["airportMarkers"];
@@ -496,6 +497,7 @@ function buildMockApp(
     aircraftModels: {},
     altitudeRange: { ...DEFAULT_ALTITUDE_RANGE },
     airspeedRange: { ...DEFAULT_AIRSPEED_RANGE },
+    metadataAirspeedRange: { ...DEFAULT_AIRSPEED_RANGE },
     signal: new AbortController().signal,
     savedState: null,
     restoredYearFromState: false,

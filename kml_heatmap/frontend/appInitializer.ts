@@ -73,7 +73,7 @@ export function resolveYearSelection(
  * @param app - The MapApp instance to operate on
  */
 export async function loadInitialData(app: MapApp): Promise<void> {
-  colorSegmentPopups();
+  colorSegmentPopups(app.signal);
   // From the start, so the legends wait for the first dataset
   const failure = followLoadFailure(app);
 
@@ -123,7 +123,7 @@ export async function loadInitialData(app: MapApp): Promise<void> {
   if (!hasTimingData && app.airspeedVisible) app.airspeedVisible = false;
 
   if (hasTimingData) {
-    app.airspeedRange = {
+    app.airspeedRange = app.metadataAirspeedRange = {
       min: metadata.min_groundspeed_knots,
       max: metadata.max_groundspeed_knots,
     };
@@ -186,10 +186,15 @@ export async function loadInitialData(app: MapApp): Promise<void> {
  */
 export function publishDataset(app: MapApp, data: KMLDataset): void {
   if (app.hasTimingData) {
-    const range = calculateAirspeedRange(data.path_segments, app.airspeedRange);
+    const range = calculateAirspeedRange(
+      data.path_segments,
+      app.metadataAirspeedRange,
+    );
     // A dataset whose flights all went one speed has no scale to stretch,
-    // and keeps the one of the metadata
-    if (range.max > range.min) app.airspeedRange = range;
+    // and takes the one of the metadata: the range of the year before
+    // belongs to other flights
+    app.airspeedRange =
+      range.max > range.min ? range : app.metadataAirspeedRange;
   }
   app.currentData = data;
 }
@@ -285,14 +290,16 @@ function followLoadFailure(app: MapApp): { settle: () => void } {
  * Colour the segment popups and tooltips as they are written into the
  * map. They carry their colours as data, since the CSP allows no style
  * attribute (see applyMetricColors); the observer runs before the next
- * paint, so they never show uncoloured.
+ * paint, so they never show uncoloured. It stops with `signal`.
  */
-export function colorSegmentPopups(): void {
+export function colorSegmentPopups(signal: AbortSignal): void {
   const container = domCache.get("map");
   if (!container) return;
-  new MutationObserver((records) => {
+  const observer = new MutationObserver((records) => {
     for (const { target } of records) applyMetricColors(target as Element);
-  }).observe(container, { childList: true, subtree: true });
+  });
+  observer.observe(container, { childList: true, subtree: true });
+  signal.addEventListener("abort", () => observer.disconnect());
 }
 
 /**

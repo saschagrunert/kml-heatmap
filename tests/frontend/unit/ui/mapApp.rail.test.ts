@@ -941,6 +941,25 @@ describe("MapApp controls and map", () => {
       expect(app.wrappedManager).toBeUndefined();
     });
 
+    it("builds no replay manager once destroyed while its bundle loaded", async () => {
+      await initializeApp(app);
+      let deliver: () => void = () => {};
+      const bundle = await loadFeatures();
+      vi.mocked(loadFeatures).mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            deliver = () => resolve(bundle);
+          }),
+      );
+
+      const loading = app.loadReplay();
+      app.destroy();
+      deliver();
+
+      expect(await loading).toBeUndefined();
+      expect(app.replayManager).toBeUndefined();
+    });
+
     it("drops a Replay click still waiting for the bundle", async () => {
       await initializeApp(app);
       const { deliver } = await holdNextLoad(loadFeatures);
@@ -949,10 +968,12 @@ describe("MapApp controls and map", () => {
       app.toggleReplay();
       app.destroy();
       deliver();
-      await vi.waitFor(() => expect(app.replayManager).toBeDefined());
-      await Promise.resolve();
+      // The click is let go of once its load has settled
+      const pending = app as unknown as { pendingReplayToggle: unknown };
+      await vi.waitFor(() => expect(pending.pendingReplayToggle).toBeNull());
 
       expect(m.mockReplayManagerInstance.toggleReplay).not.toHaveBeenCalled();
+      expect(app.replayManager).toBeUndefined();
     });
 
     it("opens Replay all once for quick clicks while the bundle loads", async () => {

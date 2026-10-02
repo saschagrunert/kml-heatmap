@@ -372,39 +372,6 @@ export function withoutValidation<T>(map: MapLibreMap, apply: () => T): T {
   }
 }
 
-/**
- * Resize the map after a CSS transition completes on the given element.
- * MapLibre follows its container through a ResizeObserver, but a container
- * that is mid-transition reports every size on the way; this settles on the
- * final one. Falls back to a timeout matching --duration-base (300ms) when no
- * element is provided or the transitionend event does not fire.
- */
-export function resizeMapAfterTransition(
-  map: MapLibreMap | null,
-  transitionTarget?: HTMLElement | null,
-): void {
-  if (!map) return;
-
-  const FALLBACK_MS = 350;
-
-  if (transitionTarget) {
-    let settled = false;
-    const done = (): void => {
-      if (settled) return;
-      settled = true;
-      transitionTarget.removeEventListener("transitionend", onEnd);
-      map.resize();
-    };
-    const onEnd = (e: TransitionEvent): void => {
-      if (e.target === transitionTarget) done();
-    };
-    transitionTarget.addEventListener("transitionend", onEnd);
-    setTimeout(done, FALLBACK_MS);
-  } else {
-    setTimeout(() => map.resize(), FALLBACK_MS);
-  }
-}
-
 /** Longest a slide of the map beside the rail may take: --duration-base */
 const RAIL_SLIDE_MS = 350;
 

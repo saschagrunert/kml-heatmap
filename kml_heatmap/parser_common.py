@@ -2,12 +2,13 @@
 
 import math
 import re
-from datetime import UTC, datetime
+from datetime import UTC
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from .airport_lookup import standardize_airport_names, standardize_route
 from .constants import ALT_MAX_M, ALT_MIN_M, LAT_MAX, LAT_MIN, LON_MAX, LON_MIN
+from .date_tokens import CHARTERWARE_DATE_PATTERN, charterware_datetime
 from .helpers import DATE_PATTERN, parse_iso_timestamp
 from .logger import logger
 
@@ -24,10 +25,6 @@ _DATE_ONLY_PATTERN = re.compile(r"\d{4}(?:-\d{2}(?:-\d{2})?)?(?:Z|[+-]\d{2}:\d{2
 # The years a date without a time of day may name: anything else in its
 # four leading digits is no year of a flight log
 _DATE_ONLY_YEARS = range(1900, 2100)
-# Charterware description: "Flight Jan 12 2026 03:01PM" or "Flight January 12 ..."
-CHARTERWARE_PATTERN = re.compile(
-    r"Flight\s+(\w{3,9})\s+(\d{1,2})\s+(\d{4})\s+(\d{2}):(\d{2})(AM|PM)"
-)
 
 
 # altitudeMode values under which a coordinate's altitude is not its height
@@ -210,26 +207,13 @@ def extract_charterware_timestamp(description: str | None) -> str | None:
     if not description:
         return None
 
-    match = CHARTERWARE_PATTERN.search(description)
+    match = CHARTERWARE_DATE_PATTERN.search(description)
     if not match:
         return None
 
-    month_str, day, year, hour_str, minute, meridiem = match.groups()
-
-    # Convert 12-hour to 24-hour
-    hour = int(hour_str)
-    if meridiem == "PM" and hour != 12:
-        hour += 12
-    elif meridiem == "AM" and hour == 12:
-        hour = 0
-
-    dt_str = f"{day} {month_str} {year} {hour:02d}:{minute}"
-    # Short month name first (Jan), then full month name (January)
-    for fmt in ("%d %b %Y %H:%M", "%d %B %Y %H:%M"):
-        try:
-            return datetime.strptime(dt_str, fmt).replace(tzinfo=UTC).isoformat()
-        except ValueError:
-            continue
+    parsed = charterware_datetime(match)
+    if parsed is not None:
+        return parsed.isoformat()
 
     logger.debug("Failed to parse Charterware timestamp: %s", description)
     return None

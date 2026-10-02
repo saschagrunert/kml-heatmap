@@ -16,7 +16,11 @@ import {
   CROSS_SECTION_LAYERS,
   CROSS_SECTION_SOURCE,
 } from "../../../../kml_heatmap/frontend/ui/crossSectionCorridor";
-import { densityReference } from "../../../../kml_heatmap/frontend/ui/crossSectionChart";
+import {
+  densityColour,
+  densityReference,
+} from "../../../../kml_heatmap/frontend/ui/crossSectionChart";
+import { HEATMAP_GRADIENT } from "../../../../kml_heatmap/frontend/ui/heatmapPaint";
 import {
   heightUnit,
   sectionSummary,
@@ -1117,6 +1121,17 @@ describe("the figures", () => {
 });
 
 describe("the chart's colours", () => {
+  it("are the heatmap's at each of its stops", () => {
+    const out = new Uint8ClampedArray(4);
+    for (const [share, rgb, alpha] of HEATMAP_GRADIENT) {
+      densityColour(share, out, 0);
+      expect(Array.from(out)).toEqual([
+        ...rgb.split(",").map(Number),
+        Math.round(255 * alpha),
+      ]);
+    }
+  });
+
   it("draws a cell of every fullness", async () => {
     const lifetimeHere = new AbortController();
     document.body.innerHTML = `<div id="map"></div>`;

@@ -106,6 +106,7 @@ serve: require-runtime ## Serve OUTPUT_DIR on http://HOST_BIND:PORT (run 'make b
 	  exit 1; }
 	$(CONTAINER_RUNTIME) run --rm $(TTY_FLAG) $(RUN_AS_USER) -e HOME=/tmp \
 	  -p "$(HOST_BIND):$(PORT):8000" -e BIND_HOST=0.0.0.0 \
+	  -e OPEN_URL="http://$(if $(filter 0.0.0.0,$(HOST_BIND)),localhost,$(HOST_BIND)):$(PORT)/" \
 	  -v "$(abspath $(OUTPUT_DIR)):/data:ro" \
 	  --entrypoint python $(IMAGE_NAME) /app/serve.py
 

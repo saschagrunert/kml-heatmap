@@ -252,6 +252,10 @@ class TestExtractCharterwareTimestamp:
                 "Flight January 15 2026 02:00PM path of D-EAGJ",
                 "2026-01-15T14:00:00+00:00",
             ),
+            # The hour with one digit, and the four-letter September, as
+            # the obfuscator reads them too
+            ("Flight Jan 12 2026 3:01PM path of OE-AKI", "2026-01-12T15:01:00+00:00"),
+            ("Flight Sept 12 2026 03:01PM path of OE-AKI", "2026-09-12T15:01:00+00:00"),
         ],
     )
     def test_parsing(self, desc, expected):

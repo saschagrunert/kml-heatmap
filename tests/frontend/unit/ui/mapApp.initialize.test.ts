@@ -676,6 +676,19 @@ describe("MapApp.initialize", () => {
       expectAvailable(true);
     });
 
+    it("has the phone's open sheet read its row again", async () => {
+      const bar = { refreshSheet: vi.fn(), destroy: vi.fn() };
+      mobileBarMock.mountFor.mockReturnValue(bar);
+      await initializeApp(app);
+      bar.refreshSheet.mockClear();
+
+      // The end of the first load and of a camera move are no store keys
+      // the sheet follows
+      moveCamera({ center: [9.5, 51] });
+
+      expect(bar.refreshSheet).toHaveBeenCalledTimes(1);
+    });
+
     it("stays unavailable through a move that ends where it started", async () => {
       await initializeApp(app);
 

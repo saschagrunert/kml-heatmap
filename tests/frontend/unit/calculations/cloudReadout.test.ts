@@ -7,6 +7,7 @@ import { describe, it, expect, afterEach } from "vitest";
 import {
   formatTimeSpent,
   insideFraction,
+  isCloudWorld,
   makeSegmentGrid,
   readoutAt,
   readoutData,
@@ -254,6 +255,57 @@ describe("makeSegmentGrid", () => {
     );
     expect(visited).toEqual([0]);
   });
+
+  it("finds a segment just across the antimeridian from a place", () => {
+    const segments: PathSegment[] = [
+      {
+        path_id: 1,
+        coords: [
+          [LAT, -179.998],
+          [LAT, -179.99],
+        ],
+        altitude_ft: 0,
+        groundspeed_knots: 0,
+      },
+    ];
+    for (const lng of [179.999, -179.98]) {
+      const visited: number[] = [];
+      makeSegmentGrid(segments, 1000)([[LAT, lng]], 500, (index) =>
+        visited.push(index),
+      );
+      expect(visited).toEqual([0]);
+    }
+  });
+});
+
+describe("isCloudWorld", () => {
+  /** A flight from `from` to `to` at LAT, its longitudes within 180 */
+  function across(path_id: number, from: number, to: number): PathSegment[] {
+    const wrap = (lng: number): number =>
+      lng > 180 ? lng - 360 : lng < -180 ? lng + 360 : lng;
+    return flight(path_id, { fromLng: from, toLng: to }).map((segment) => ({
+      ...segment,
+      coords: [
+        [segment.coords[0][0], wrap(segment.coords[0][1])],
+        [segment.coords[1][0], wrap(segment.coords[1][1])],
+      ],
+    }));
+  }
+
+  it("is the world within 180, and past it around the flights that cross", () => {
+    const segments = [
+      ...across(1, 179.5, 180.5),
+      ...across(2, -179.5, -180.5),
+      ...across(3, -172.5, -171.5),
+    ];
+    expect(isCloudWorld(segments, [LAT, 8], 0.01)).toBe(true);
+    // East of 180 from the west, and west of -180 from the east
+    expect(isCloudWorld(segments, [LAT, 180.3], 0.01)).toBe(true);
+    expect(isCloudWorld(segments, [LAT, -180.3], 0.01)).toBe(true);
+    // The copy of the flight at 172 W in the world east of 180
+    expect(isCloudWorld(segments, [LAT, 188], 0.01)).toBe(false);
+    expect(isCloudWorld(segments, [LAT + 1, 180.3], 0.01)).toBe(false);
+  });
 });
 
 describe("readoutAt", () => {
@@ -362,6 +414,69 @@ describe("readoutAt", () => {
     expect(readout.flights).toBe(4);
     const alone = readoutAt(data(low), segmentGrid(low, R), sight, R, everyone);
     expect(alone).toBeNull();
+  });
+
+  /** Segments through `lngs` at 17 S, 10 s each, at `altitude` feet */
+  function through(lngs: number[], altitude = 1000): PathSegment[] {
+    return lngs.slice(1).map((lng, i) => ({
+      path_id: 1,
+      coords: [
+        [-17, lngs[i]!],
+        [-17, lng],
+      ],
+      altitude_ft: altitude,
+      groundspeed_knots: 100,
+      time: i * 10,
+    }));
+  }
+
+  it("counts the segments either side of the antimeridian as near as they are", () => {
+    const fiji = through([179.99, 179.998, -179.995, -179.99]);
+    // The same flight half the world round, where nothing wraps
+    const greenwich = through([-0.01, -0.002, 0.005, 0.01]);
+    const seconds = (segments: PathSegment[], place: Coordinate): number =>
+      readoutAt(
+        data(segments),
+        segmentGrid(segments, 1000),
+        down(place),
+        1000,
+        everyone,
+      )!.seconds;
+
+    expect(seconds(fiji, [-17, 179.999])).toBeCloseTo(
+      seconds(greenwich, [-17, -0.001]),
+      6,
+    );
+    expect(seconds(fiji, [-17, -179.999])).toBeCloseTo(
+      seconds(greenwich, [-17, 0.001]),
+      6,
+    );
+  });
+
+  it("follows a line of sight across the antimeridian the short way", () => {
+    // Halfway up, the line of sight is on the antimeridian, not at 0
+    const seconds = (west: number, east: number, lngs: number[]): number => {
+      const segments = through(lngs, 500);
+      const sight: SightLine = {
+        places: [
+          [-17, west],
+          [-17, east],
+        ],
+        stepFt: 1000,
+      };
+      return readoutAt(
+        data(segments),
+        segmentGrid(segments, R),
+        sight,
+        R,
+        everyone,
+      )!.seconds;
+    };
+
+    expect(seconds(179.99, -179.99, [179.995, 179.999, -179.999])).toBeCloseTo(
+      seconds(-0.01, 0.01, [-0.005, -0.001, 0.001]),
+      6,
+    );
   });
 
   it("names the 400 ft band that holds most of the time", () => {

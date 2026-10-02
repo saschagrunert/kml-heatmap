@@ -31,6 +31,7 @@ import { formatNumber } from "../utils/formatters";
 import { toLngLat } from "../utils/mapHelpers";
 import { element, shape } from "./crossSectionElements";
 import { formatKm, heightUnit, sectionSummary } from "./crossSectionText";
+import { HEATMAP_GRADIENT } from "./heatmapPaint";
 
 /**
  * Cells of the density image along the line and up: about one per pixel of
@@ -53,20 +54,13 @@ const VIEW_H = 100;
 const READOUT_RADIUS = 4;
 
 /**
- * The heatmap's colours by density (HEATMAP_GRADIENT in ui/heatmapPaint.ts),
- * `[share of the fullest cell, [r, g, b], alpha]`: deep blue through cyan
- * to white, each stop about four times the one before
+ * The heatmap's colours by density, `[share of the fullest cell,
+ * [r, g, b], alpha]`: taken from its stops, so the chart reads in the
+ * colours of the map it is read against
  */
-const DENSITY_STOPS: readonly (readonly [number, readonly number[], number])[] =
-  [
-    [0, [10, 30, 120], 0],
-    [0.004, [20, 60, 190], 0.25],
-    [0.015, [20, 120, 235], 0.5],
-    [0.06, [40, 190, 255], 0.7],
-    [0.25, [120, 230, 255], 0.85],
-    [0.6, [200, 248, 255], 0.95],
-    [1, [255, 255, 255], 1],
-  ];
+const DENSITY_STOPS = HEATMAP_GRADIENT.map(
+  ([share, rgb, alpha]) => [share, rgb.split(",").map(Number), alpha] as const,
+);
 
 /**
  * Share of the cells with any time that sets the white end of the colours:
@@ -76,7 +70,11 @@ const DENSITY_STOPS: readonly (readonly [number, readonly number[], number])[] =
 const DENSITY_REFERENCE_QUANTILE = 0.95;
 
 /** The colour of a cell holding `share` of the reference, as RGBA */
-function densityColour(share: number, out: Uint8ClampedArray, at: number) {
+export function densityColour(
+  share: number,
+  out: Uint8ClampedArray,
+  at: number,
+): void {
   const t = Math.min(1, share);
   let i = 1;
   while (i < DENSITY_STOPS.length - 1 && DENSITY_STOPS[i]![0] < t) i++;

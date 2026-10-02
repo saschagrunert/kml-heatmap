@@ -36,8 +36,10 @@ from typing import TYPE_CHECKING, NamedTuple
 from .cache import atomic_write
 from .constants import MAX_TIMESTAMP_DISTANCE_SECONDS
 from .date_tokens import (
+    CHARTERWARE_DATE_PATTERN,
     MONTHS_LONG,
     MONTHS_SHORT,
+    charterware_datetime,
     find_date_tokens,
     find_time_tokens,
     find_weekday_tokens,
@@ -101,10 +103,6 @@ NAME_DATE_PATTERN = re.compile(
 )
 CHECK_NAME_DATE_PATTERN = re.compile(_MARKER_DATE_RE + r"\d{4}\s+" + _MARKER_TIME_RE)
 
-# Charterware description: "Flight Jan 12 2026 03:01PM path of OE-AKI"
-DESCRIPTION_DATE_PATTERN = re.compile(
-    r"(Flight\s+)([A-Za-z]{3,9})\s+(\d{1,2})\s+(\d{4})\s+(\d{1,2}):(\d{2})(AM|PM)"
-)
 # Route name with date: "<name>EDDS to EDDP - 16 Aug 2026</name>", or in the
 # ISO form the parser reads too ("EDDS to EDDP - 2026-08-16", see
 # helpers.DATE_PATTERN)
@@ -196,23 +194,6 @@ def _extract_frac(ts_str: str) -> str:
 def _format_timestamp(dt: datetime, frac: str = "") -> str:
     """Format a UTC datetime back to KML timestamp format."""
     return f"{dt.strftime('%Y-%m-%dT%H:%M:%S')}{frac}Z"
-
-
-def _parse_description_date(match: re.Match[str]) -> datetime | None:
-    """Parse a Charterware description date match into a UTC datetime."""
-    _, month_str, day, year, hour_str, minute, meridiem = match.groups()
-    month = month_number(month_str)
-    if month is None:
-        return None
-    hour = int(hour_str)
-    if meridiem == "PM" and hour != 12:
-        hour += 12
-    elif meridiem == "AM" and hour == 12:
-        hour = 0
-    try:
-        return datetime(int(year), month, int(day), hour, int(minute), tzinfo=UTC)
-    except ValueError:
-        return None
 
 
 def _format_description_date(prefix: str, dt: datetime, long_month: bool) -> str:
@@ -472,7 +453,7 @@ def obfuscate_kml_content(content: str) -> str | None:
     # Shifting them with a timestamp offset could leave them on January 2nd.
     # The time of a description goes to midnight, like the start of a flight.
     def description_on_jan_first(match: re.Match[str]) -> str:
-        dt = _parse_description_date(match)
+        dt = charterware_datetime(match)
         if dt is None:
             return match.group(0)
         long_month = len(match.group(2)) > 3
@@ -501,7 +482,7 @@ def obfuscate_kml_content(content: str) -> str | None:
     ):
         new_content = TIMESTAMP_PATTERN.sub(shift_timestamp, content)
     new_content = NAME_DATE_PATTERN.sub(marker_on_jan_first, new_content)
-    new_content = DESCRIPTION_DATE_PATTERN.sub(description_on_jan_first, new_content)
+    new_content = CHARTERWARE_DATE_PATTERN.sub(description_on_jan_first, new_content)
     new_content = ROUTE_DATE_PATTERN.sub(route_on_jan_first, new_content)
     new_content = CREATOR_PATTERN.sub(replace_creator, new_content)
 
@@ -886,7 +867,7 @@ def _find_stray_times(content: str, stray_dates: list[str]) -> list[str]:
     list of dates ("2025-09-21 2025-09-22") would read as a time after it.
     """
     text = _with_unescaped(
-        DESCRIPTION_DATE_PATTERN.sub("", TIMESTAMP_PATTERN.sub("", content))
+        CHARTERWARE_DATE_PATTERN.sub("", TIMESTAMP_PATTERN.sub("", content))
     )
     for date in dict.fromkeys(stray_dates):
         text = text.replace(date, " ")
@@ -971,8 +952,8 @@ def check_kml_obfuscated(filepath: Path) -> list[str]:
 
     violations.extend(
         f"Description date not on Jan 1 at 12:00AM: {match.group(0)}"
-        for match in DESCRIPTION_DATE_PATTERN.finditer(content)
-        if not _is_canonical_start(_parse_description_date(match))
+        for match in CHARTERWARE_DATE_PATTERN.finditer(content)
+        if not _is_canonical_start(charterware_datetime(match))
     )
 
     violations.extend(

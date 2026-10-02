@@ -103,6 +103,16 @@ def _serve_module():
     return module
 
 
+def test_prints_the_address_it_is_reached_at(monkeypatch):
+    monkeypatch.setenv("PORT", "8000")
+    monkeypatch.delenv("OPEN_URL", raising=False)
+    assert _serve_module().OPEN_URL == "http://localhost:8000/"
+
+    # In the image the port is 8000 inside, and make serve maps another
+    monkeypatch.setenv("OPEN_URL", "http://127.0.0.1:9000/")
+    assert _serve_module().OPEN_URL == "http://127.0.0.1:9000/"
+
+
 @pytest.mark.parametrize(
     ("value", "origin"),
     [

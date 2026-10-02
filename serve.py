@@ -8,6 +8,9 @@ from urllib.parse import SplitResult, urlsplit
 
 PORT = int(os.environ.get("PORT", "8000"))
 BIND_HOST = os.environ.get("BIND_HOST", "127.0.0.1")
+# Where a browser reaches the server: in a container that is the host's
+# address and port, which `make serve` passes, not the ones bound inside
+OPEN_URL = os.environ.get("OPEN_URL") or f"http://localhost:{PORT}/"
 
 CORS_ORIGIN = os.environ.get("CORS_ORIGIN", "")
 
@@ -106,7 +109,7 @@ def main() -> int:
     os.chdir(DATA_DIR)
     print(f"Starting HTTP server on {BIND_HOST}:{PORT}...")
     print(f"Serving files from: {os.getcwd()}")
-    print(f"Open http://localhost:{PORT}/ in your browser", flush=True)
+    print(f"Open {OPEN_URL} in your browser", flush=True)
 
     with Server((BIND_HOST, PORT), CORSHTTPRequestHandler) as httpd:
         try:

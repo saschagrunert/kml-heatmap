@@ -188,6 +188,11 @@ export function ddToDms(dd: number, isLat: boolean): string {
  * coordinates. Replay and Wrapped both frame their flights with it, and
  * their bundles share only what the app has as well (see build.js), so it
  * lives here rather than with either of them.
+ *
+ * Flights across the antimeridian span the narrower way round: the
+ * western longitudes are counted from 180 on, so the east edge can lie
+ * past 180, where MapLibre frames it, rather than the bounds taking in
+ * the whole world the other way.
  */
 export function segmentBounds(
   segments: PathSegment[],
@@ -196,15 +201,25 @@ export function segmentBounds(
   let minLon = Infinity;
   let maxLat = -Infinity;
   let maxLon = -Infinity;
+  // The same longitudes with the western ones counted on past 180
+  let minEast = Infinity;
+  let maxEast = -Infinity;
   for (const segment of segments) {
     for (const [lat, lon] of segment.coords) {
       if (lat < minLat) minLat = lat;
       if (lat > maxLat) maxLat = lat;
       if (lon < minLon) minLon = lon;
       if (lon > maxLon) maxLon = lon;
+      const east = lon < 0 ? lon + 360 : lon;
+      if (east < minEast) minEast = east;
+      if (east > maxEast) maxEast = east;
     }
   }
   if (minLat === Infinity) return null;
+  if (maxEast - minEast < maxLon - minLon) {
+    minLon = minEast;
+    maxLon = maxEast;
+  }
   return [
     [minLat, minLon],
     [maxLat, maxLon],

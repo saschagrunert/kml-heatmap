@@ -47,15 +47,18 @@ as often.
 """
 
 import re
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
 __all__ = [
+    "CHARTERWARE_DATE_PATTERN",
     "MAX_DAYS_AFTER_JAN_1",
     "MONTHS_LONG",
     "MONTHS_SHORT",
+    "charterware_datetime",
     "find_date_tokens",
     "find_time_tokens",
     "find_weekday_tokens",
@@ -520,6 +523,36 @@ _SPACES = re.compile(r"\s+")
 def month_number(name: str) -> int | None:
     """The number of an English month name, long or short, in any case."""
     return _MONTH_NUMBERS.get(name.lower())
+
+
+# Charterware description: "Flight Jan 12 2026 03:01PM path of OE-AKI", the
+# month short or long ("January", "Sept") and the hour with one digit or two.
+# The parser reads the time of a flight from it and the obfuscator moves it,
+# so both read it the same way.
+CHARTERWARE_DATE_PATTERN = re.compile(
+    r"(Flight\s+)([A-Za-z]{3,9})\s+(\d{1,2})\s+(\d{4})\s+(\d{1,2}):(\d{2})(AM|PM)"
+)
+
+
+def charterware_datetime(match: re.Match[str]) -> datetime | None:
+    """The time a ``CHARTERWARE_DATE_PATTERN`` match names, as UTC.
+
+    The description has no time zone; it is read as UTC, as the parser
+    reads every time without one. None when it is no date.
+    """
+    _, month_name, day, year, hour_text, minute, meridiem = match.groups()
+    month = month_number(month_name)
+    if month is None:
+        return None
+    hour = int(hour_text)
+    if meridiem == "PM" and hour != 12:
+        hour += 12
+    elif meridiem == "AM" and hour == 12:
+        hour = 0
+    try:
+        return datetime(int(year), month, int(day), hour, int(minute), tzinfo=UTC)
+    except ValueError:
+        return None
 
 
 def near_jan_first(month: int, day: int) -> bool:

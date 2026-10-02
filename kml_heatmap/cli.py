@@ -20,7 +20,7 @@ from .exceptions import (
     KMLHeatmapError,
     OutputRefusedError,
 )
-from .logger import logger, set_debug_mode, set_log_level
+from .logger import logger, set_debug_mode, set_info_stream, set_log_level
 from .validation import find_kml_files, validate_kml_file, validate_output_dir
 
 if TYPE_CHECKING:
@@ -415,11 +415,12 @@ day, and the creator attribute is replaced. Charterware files are
 renamed to January 1st as well (2026-01-12_1513h_OE-AKI_LOAV-LOAV.kml becomes
 2026-01-01_0000h_...). Keep a copy of the originals if you need the real
 dates. The same rewrite is available on its own, without generating a site, as
-`python -m kml_heatmap.obfuscate <path>`.
+`python -m kml_heatmap.obfuscate <dir>`.
 
 The output directory must not be the directory of an input file, or contain
 one: the tool replaces and removes its own files in there. An output
-directory below the input directory (such as the default, docs) is fine. A
+directory below the directory of an input file is fine, so `kml-heatmap
+flight.kml` in the file's directory writes to ./docs. A
 run that fails while generating the site leaves the previous site in the
 output directory untouched. An output directory with files of another site
 (an index.html, a styles.css) and no sign of an earlier run of this tool
@@ -555,6 +556,8 @@ def main() -> None:
         set_debug_mode(True)
     elif args.quiet:
         set_log_level(logging.WARNING)
+    # The table of --list goes to stdout alone, so it can be piped or saved
+    set_info_stream("stderr" if args.list else "stdout")
     if args.cache_dir:
         # Before anything reads it: kml_heatmap.cache does at import
         os.environ[CACHE_DIR_ENV] = str(Path(args.cache_dir).expanduser().resolve())
