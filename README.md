@@ -86,12 +86,14 @@ or switched off, the page says so in place of the map. `make serve` only serves
 the existing `docs/` directory; run `make build` (or `make serve-build`) to
 regenerate it first. `docs/` is a local build output and is not committed: the
 published site is built from the sources in CI once all tests pass (see
-[Development](#development)).
+[Your own site on GitHub Pages](doc/hosting.md#your-own-site-on-github-pages)).
 
 Your KML files are read and left alone, and nothing has to be stripped from them
 first (see [Privacy](#privacy)). To scrub the files themselves as well, pass
 `--obfuscate-inputs` or run `make obfuscate`; that rewrites them in place and
-cannot be undone, so keep a copy of the originals.
+cannot be undone, so keep a copy of the originals. `make obfuscate` runs on the
+host, not in the container: it needs Python 3.14, but nothing beyond its
+standard library, so nothing has to be installed for it.
 
 Without podman or docker, build the frontend and run the generator from the
 checkout (see [Python usage](doc/usage.md#python-usage)). The Makefile
@@ -154,9 +156,9 @@ and the page ask for what, and how to scrub the KML files themselves.
 - [Output and technical details](doc/output.md): the files a run writes and
   their format, link previews, the data export, the cache directory, the airport
   database, the elevation data and the satellite imagery
-- [Hosting](doc/hosting.md): serving the site from any static host, in a
-  subdirectory, the cache headers and compression, link previews, a login and
-  search engines
+- [Hosting](doc/hosting.md): your own site on GitHub Pages, serving the site
+  from any static host, in a subdirectory, the cache headers and compression,
+  link previews, a login and search engines
 - [Development](DEVELOPMENT.md): the developer guide, with its pages in
   [doc/development/](doc/development/)
 
@@ -166,10 +168,6 @@ and the page ask for what, and how to scrub the KML files themselves.
 frontend and backend workflows, the test commands, the build output and the test
 data generator, and [CONTRIBUTING.md](CONTRIBUTING.md) for the local setup and
 the commit conventions.
-
-Nothing generated is committed: `docs/` is only the default output directory of
-a local `make build`, and the published site is built from the sources on every
-push to `main`.
 
 ## Contributing and security
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Git pre-push hook: refuse to push KML files that carry real dates.
 
-The repository is public, so the obfuscation CI job only notices a real
+The repository is public, so the obfuscation check of CI only notices a real
 date once it has been published. This hook runs the same check before the
 push, on every KML file that the commits about to be pushed add or change,
 including commits whose files a later commit fixes again: the history is

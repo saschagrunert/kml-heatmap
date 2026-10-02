@@ -1,9 +1,11 @@
+# The flights are committed in data/ and its subdirectories (doc/usage.md
+# shows data/2025/ as an example), every other KML file stays local
 *.kml
-!data/*.kml
+!data/**/*.kml
 # The flights the visual snapshots are taken with (scripts/build_visual_site.py)
 !tests/fixtures/visual/*.kml
 # Temp files of an interrupted obfuscation run hold the original dates
-data/.*.tmp
+data/**/.*.tmp
 /index.html
 AGENTS.md
 .playwright-mcp

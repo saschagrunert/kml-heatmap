@@ -743,6 +743,8 @@ test.describe("Mobile bar", () => {
   test("replay takes the bottom edge and the bar leaves the document", async ({
     page,
   }) => {
+    // A replay on a phone in software WebGL: 49 s of the project's 60 in CI
+    test.setTimeout(90000);
     await selectPathForReplay(page);
 
     await openMobileSheet(page, "more");

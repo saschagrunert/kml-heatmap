@@ -439,11 +439,13 @@ test.describe("State Persistence", () => {
   }) => {
     // About forty steps, the 3D view on the globe among them, where every
     // step takes a second in software WebGL with a browser per core: 35 s
-    // on a desktop in CI. The mobile project gives it the same time. The
-    // globe shades the relief at every zoom, which this spec does not look
-    // at: without its tiles there is nothing to shade, and the turn does
-    // not wait for them (holdElevationTiles).
-    test.setTimeout(60000);
+    // on a desktop in CI, and up to 44 s (73 % of a minute) among the
+    // phone's specs, which run it beside three other browsers rather than
+    // in a heavy job of their own. The globe shades the relief at every
+    // zoom, which this spec does not look at: without its tiles there is
+    // nothing to shade, and the turn does not wait for them
+    // (holdElevationTiles).
+    test.setTimeout(90000);
     await holdElevationTiles(page);
     const mobile = await usesMobileBar(page);
     // Nothing to reset on a first visit: announced and dimmed, like Isolate

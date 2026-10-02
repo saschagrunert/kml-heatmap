@@ -17,9 +17,12 @@ import importlib.resources
 import sys
 from pathlib import Path
 
-# The bundles build.js writes, the stylesheets and the vendored MapLibre
-# modules the page imports, by their paths in the package's static/ and in
-# a generated site alike
+# The bundles build.js writes, the stylesheets and the vendored files the
+# page imports, by their paths in the package's static/ and in a generated
+# site alike: BUNDLE_FILES, CSS_FILES and VENDOR_FILES of
+# kml_heatmap/site_assets.py, which tests/test_scripts.py holds this list
+# to. Written out rather than imported, since the container job runs this
+# with a Python that does not have the package.
 ASSETS = (
     "mapApp.bundle.js",
     "features.bundle.js",
@@ -30,7 +33,10 @@ ASSETS = (
     "features.css",
     "wrapped.css",
     "vendor/maplibre-gl.mjs",
+    "vendor/maplibre-gl-shared.mjs",
     "vendor/maplibre-gl-worker.mjs",
+    "vendor/maplibre-gl.css",
+    "vendor/html-to-image.mjs",
 )
 
 SITE_FILES = ("index.html", "map_config.js", *ASSETS, "data/metadata.json")

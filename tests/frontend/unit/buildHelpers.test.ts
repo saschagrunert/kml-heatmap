@@ -8,6 +8,7 @@ import {
   formatBytes,
   inputDeltas,
   largestInputs,
+  overrunSummary,
   parseBuildArgs,
 } from "../../../scripts/build-helpers.js";
 
@@ -94,5 +95,37 @@ describe("parseBuildArgs", () => {
     expect(() => parseBuildArgs(["--compare"], "meta.json")).toThrow(
       /--compare needs the path of a metafile/,
     );
+  });
+});
+
+describe("overrunSummary", () => {
+  it("names each budget a bundle exceeds and the bytes over", () => {
+    expect(
+      overrunSummary([
+        {
+          what: "features.bundle.js",
+          kind: "gzip",
+          size: 53_288,
+          budget: 53_248,
+        },
+        {
+          what: "wrapped.bundle.js",
+          kind: "raw",
+          size: 44_100,
+          budget: 44_032,
+        },
+        {
+          what: "vendor/html-to-image.mjs",
+          kind: "raw",
+          size: NaN,
+          budget: 14_336,
+        },
+      ]),
+    ).toEqual([
+      "❌ Bundle size budget exceeded:",
+      "  features.bundle.js: 53288 B gzipped, budget 53248 B, 40 B over",
+      "  wrapped.bundle.js: 44100 B raw, budget 44032 B, 68 B over",
+      "  vendor/html-to-image.mjs: could not be measured",
+    ]);
   });
 });

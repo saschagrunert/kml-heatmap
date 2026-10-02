@@ -1,4 +1,8 @@
 ---
+# Each ecosystem runs at a time and on a day of its own: a run of the test
+# workflow starts about 20 jobs, as many as the account runs at once, and
+# four pull requests opened in the same minute kept jobs waiting for a
+# runner for up to eleven minutes.
 version: 2
 updates:
   # Python dependencies: the ranges in pyproject.toml, the single source of
@@ -34,7 +38,7 @@ updates:
       default-days: 7
     schedule:
       interval: "daily"
-      time: "09:00"
+      time: "07:00"
     open-pull-requests-limit: 5
     labels:
       - "dependencies"
@@ -54,9 +58,19 @@ updates:
           - "mypy"
           - "bandit"
           - "zizmor"
+      # The type stubs of lxml, bumped together with it
       core:
         patterns:
           - "lxml"
+          - "lxml-stubs"
+      # The tools that build and audit the packages, each of which came as a
+      # pull request of its own that needed `make lock`
+      packaging:
+        patterns:
+          - "pip-audit"
+          - "pip-tools"
+          - "packaging"
+          - "setuptools"
       minifiers:
         patterns:
           - "rcssmin"
@@ -74,6 +88,7 @@ updates:
     # group's. Security updates do not wait for it.
     schedule:
       interval: "weekly"
+      day: "monday"
       time: "09:00"
     open-pull-requests-limit: 5
     labels:
@@ -136,6 +151,7 @@ updates:
       default-days: 7
     schedule:
       interval: "weekly"
+      day: "wednesday"
       time: "09:00"
     open-pull-requests-limit: 3
     labels:
@@ -159,7 +175,7 @@ updates:
       default-days: 7
     schedule:
       interval: "daily"
-      time: "09:00"
+      time: "13:00"
     open-pull-requests-limit: 3
     # Labels the repository has: Dependabot does not create a missing one,
     # it only comments on the pull request that it could not be found
@@ -195,6 +211,8 @@ updates:
       default-days: 7
     schedule:
       interval: "weekly"
+      day: "friday"
+      time: "09:00"
     open-pull-requests-limit: 3
     labels:
       - "dependencies"

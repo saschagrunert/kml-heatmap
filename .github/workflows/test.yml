@@ -54,29 +54,32 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event_name == 'schedule' && 'schedule' || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
+  # Everything that checks the sources without building a site, the spelling
+  # and the obfuscation of the flights among it: a job of their own each
+  # waited for a runner as long as this one and ran for seconds
   lint:
     if: github.event_name != 'schedule'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - &checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Set up Python
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      - name: Set up Python and Node.js
+        uses: ./.github/actions/setup-toolchain
         with:
-          python-version-file: .python-version
-          cache: pip
-          cache-dependency-path: requirements-test.lock
-      - name: Set up Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version-file: .nvmrc
-          cache: npm
+          python-lock: requirements-test.lock
+      # Before the dependencies: it needs none, and a misspelling should
+      # show even when an install fails
+      - name: Check the spelling
+        uses: crate-ci/typos@00f422f3b19c57bc6338715ebfe3316d38768461 # v1.50.3
       # requirements-test.lock pins the runtime dependencies as well, to the
       # same versions (scripts/check_locks.py checks that)
+      # Also after a misspelling, so the steps below still report
       - name: Install dependencies
         id: deps
+        if: ${{ !cancelled() }}
         run: |
           pip install --require-hashes -r requirements-test.lock
           npm ci
@@ -113,7 +116,7 @@ jobs:
       - name: Check for unused files, exports and dependencies
         if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
         run: npm run lint:unused
-      # The workflows, the composite action and dependabot.yml: template
+      # The workflows, the composite actions and dependabot.yml: template
       # injection, credentials left in the checkout, unpinned actions and
       # the like. zizmor comes with the dev extra in requirements-test.lock;
       # without a token it runs its offline audits only, the same as
@@ -121,11 +124,19 @@ jobs:
       - name: Audit the workflows
         if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
         run: zizmor --min-severity medium .github
+      # The check imports nothing but the standard library
+      - name: Check that the KML files are obfuscated
+        if: ${{ !cancelled() }}
+        run: python -m kml_heatmap.obfuscate data/ --check
+      # Copies of flights from data/, and as public as they are
+      - name: Check that the fixture flights of the visual snapshots are obfuscated
+        if: ${{ !cancelled() }}
+        run: python -m kml_heatmap.obfuscate tests/fixtures/visual/ --check
 
   unit:
     # Not for Dependabot's Python bumps, see the top (also for the zizmor
     # finding this ignores)
-    if: >- # zizmor: ignore[bot-conditions]
+    if: &skip-pip-bumps >- # zizmor: ignore[bot-conditions]
       github.event_name != 'schedule' &&
       !(github.event.pull_request.user.login == 'dependabot[bot]' &&
       github.actor == 'dependabot[bot]' &&
@@ -133,9 +144,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
+      - *checkout
       # Python, Node.js, the dependencies, the bundles and the caches of the
       # OurAirports database and the elevation tiles
       - name: Set up the site build
@@ -166,33 +175,17 @@ jobs:
   packaging:
     # Not for Dependabot's Python bumps, see the top (also for the zizmor
     # finding this ignores)
-    if: >- # zizmor: ignore[bot-conditions]
-      github.event_name != 'schedule' &&
-      !(github.event.pull_request.user.login == 'dependabot[bot]' &&
-      github.actor == 'dependabot[bot]' &&
-      startsWith(github.head_ref, 'dependabot/pip/'))
+    if: *skip-pip-bumps # zizmor: ignore[bot-conditions]
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - *checkout
+      - name: Set up Python and Node.js
+        uses: ./.github/actions/setup-toolchain
         with:
-          persist-credentials: false
-      # The pip cache is keyed by the lock files this job installs, as in
-      # every job: a key shared by all of them held only what the first job
-      # to save it had downloaded
-      - name: Set up Python
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with:
-          python-version-file: .python-version
-          cache: pip
-          cache-dependency-path: |
+          python-lock: |
             requirements-build.lock
             requirements.lock
-      - name: Set up Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version-file: .nvmrc
-          cache: npm
       # Fails when the minified bundle exceeds the size budget in build.js
       - name: Build the JavaScript bundle
         run: npm ci && npm run build
@@ -217,26 +210,21 @@ jobs:
         working-directory: ${{ runner.temp }}
         run: '"$RUNNER_TEMP/wheel-venv/bin/python" "$GITHUB_WORKSPACE/scripts/check_site_files.py" --package'
       # Loads the parser, the minifiers, the renderer and the templates, which
-      # `--version` alone never imports. The airport and runway fixtures
-      # stand in for the OurAirports downloads, and `--no-terrain` keeps the
-      # elevation tiles from being fetched on every run: the sampling has
-      # tests of its own, and the image below builds without a network.
+      # `--version` alone never imports. scripts/smoke_site.py puts the
+      # airport and runway fixtures in place of the OurAirports downloads
+      # and checks afterwards that they were not replaced; `--no-terrain`
+      # keeps the elevation tiles from being fetched on every run: the
+      # sampling has tests of its own, and the image below builds without a
+      # network.
       - name: Generate a site with the installed package
         working-directory: ${{ runner.temp }}
         env:
           KML_HEATMAP_CACHE_DIR: ${{ runner.temp }}/smoke/cache
         run: |
-          mkdir -p smoke/input smoke/cache
-          cp "$GITHUB_WORKSPACE/tests/fixtures/airports.csv" \
-            "$GITHUB_WORKSPACE/tests/fixtures/runways.csv" smoke/cache/
-          kml=("$GITHUB_WORKSPACE"/data/*.kml)
-          cp "${kml[@]:0:3}" smoke/input/
+          python "$GITHUB_WORKSPACE/scripts/smoke_site.py" prepare smoke
           "$RUNNER_TEMP/wheel-venv/bin/kml-heatmap" --version
           "$RUNNER_TEMP/wheel-venv/bin/kml-heatmap" --no-terrain smoke/input --output-dir smoke/site
-          python "$GITHUB_WORKSPACE/scripts/check_site_files.py" smoke/site
-          # Still the fixture, so nothing was downloaded
-          cmp "$GITHUB_WORKSPACE/tests/fixtures/airports.csv" smoke/cache/airports.csv
-          cmp "$GITHUB_WORKSPACE/tests/fixtures/runways.csv" smoke/cache/runways.csv
+          python "$GITHUB_WORKSPACE/scripts/smoke_site.py" check smoke
 
   # The sites the e2e jobs test, built once for all of them. The published
   # site has a tile API key and a default build has none, so there are two:
@@ -245,17 +233,11 @@ jobs:
   e2e-sites:
     # Not for Dependabot's Python bumps, see the top (also for the zizmor
     # finding this ignores)
-    if: >- # zizmor: ignore[bot-conditions]
-      github.event_name != 'schedule' &&
-      !(github.event.pull_request.user.login == 'dependabot[bot]' &&
-      github.actor == 'dependabot[bot]' &&
-      startsWith(github.head_ref, 'dependabot/pip/'))
+    if: *skip-pip-bumps # zizmor: ignore[bot-conditions]
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
+      - *checkout
       # As in the unit job, with the runtime dependencies only
       - name: Set up the site build
         uses: ./.github/actions/site-build-setup
@@ -336,9 +318,13 @@ jobs:
       # the setup of a runner costs.
       #
       # Software WebGL runs one browser per core of the 4-vCPU runner. The
-      # desktop project is split into three shards and the mobile project
-      # into two, on runners of their own; with two, the second desktop
-      # shard took 6 to 6.5 minutes against 5 of the first.
+      # desktop and mobile projects are split into three shards each and
+      # the webkit project into two, on runners of their own. Playwright
+      # splits a project by the number of tests, not their time: with two
+      # mobile shards the second needed about 315 s of tests against 150 to
+      # 220 s of the first (the phone's state.spec.ts tests take 30 to 44 s
+      # each), and the one webkit job ran its 114 tests for 6.7 minutes, the
+      # longest job of the run.
       #
       # The tests tagged @heavy (HEAVY in tests/e2e/fixtures.ts) draw the 3D
       # view or turn the globe with the flights on it, which takes seconds per
@@ -379,13 +365,20 @@ jobs:
             specs: base-style.spec.ts error-free.spec.ts layers.spec.ts
           - name: mobile-1
             project: mobile
-            shard: 1/2
+            shard: 1/3
           - name: mobile-2
             project: mobile
-            shard: 2/2
+            shard: 2/3
+          - name: mobile-3
+            project: mobile
+            shard: 3/3
           # The phone interface in Safari's engine
-          - name: webkit
+          - name: webkit-1
             project: webkit
+            shard: 1/2
+          - name: webkit-2
+            project: webkit
+            shard: 2/2
           # Turning, the globe, the replay and the error-free interactions
           # in Safari's engine
           - name: webkit-desktop
@@ -402,14 +395,9 @@ jobs:
             # blocking the main thread for 30 s
             debug: pw:browser
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
+      - *checkout
       - name: Set up Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version-file: .nvmrc
-          cache: npm
+        uses: ./.github/actions/setup-toolchain
       - name: Install npm dependencies
         run: npm ci
       # After the checkout, so tests/e2e/site-check.ts finds the site newer
@@ -502,14 +490,9 @@ jobs:
     container:
       image: mcr.microsoft.com/playwright:v1.63.0-noble@sha256:eff16c30e6f3f4af0a03fa4b706120d5e9b0891c344a27d64559aff5900a4a27
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
+      - *checkout
       - name: Set up Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version-file: .nvmrc
-          cache: npm
+        uses: ./.github/actions/setup-toolchain
       - name: Install npm dependencies
         run: npm ci
       # The bundles come with it, so tests/e2e/site-check.ts can check them
@@ -542,12 +525,14 @@ jobs:
           # gitleaks scans the whole commit history
           fetch-depth: 0
           persist-credentials: false
-      - name: Set up Python
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      # npm audit reads package-lock.json and installs nothing, so without
+      # the npm cache: restoring it cost 51 MB a run, and saving it raced the
+      # jobs that do install
+      - name: Set up Python and Node.js
+        uses: ./.github/actions/setup-toolchain
         with:
-          python-version-file: .python-version
-          cache: pip
-          cache-dependency-path: requirements-test.lock
+          python-lock: requirements-test.lock
+          npm-cache: "false"
       - name: Install Python dependencies
         run: pip install --require-hashes -r requirements-test.lock
       - name: Run bandit
@@ -565,11 +550,6 @@ jobs:
           pip-audit --disable-pip --require-hashes -r requirements.lock -r requirements-test.lock
           pip-audit --disable-pip --require-hashes -r requirements-build.lock
           pip-audit --disable-pip --require-hashes -r requirements-tools.lock
-      - name: Set up Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version-file: .nvmrc
-          cache: npm
       - name: Audit npm dependencies
         run: npm audit --audit-level=high
       # The same gitleaks release as the pre-commit hook, whose rev Dependabot
@@ -595,85 +575,39 @@ jobs:
   container:
     # Not for Dependabot's Python bumps, see the top (also for the zizmor
     # finding this ignores)
-    if: >- # zizmor: ignore[bot-conditions]
-      github.event_name != 'schedule' &&
-      !(github.event.pull_request.user.login == 'dependabot[bot]' &&
-      github.actor == 'dependabot[bot]' &&
-      startsWith(github.head_ref, 'dependabot/pip/'))
+    if: *skip-pip-bumps # zizmor: ignore[bot-conditions]
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
+      - *checkout
       # The image itself is not published
       - name: Build the container image
         run: docker build -t kml-heatmap .
       # Runs the image the way the Makefile does, with the airport and runway
-      # fixtures in place of the OurAirports downloads. Without a network the elevation
-      # tiles cannot be fetched either, which the build has to get through
-      # with the ground left out.
+      # fixtures in place of the OurAirports downloads (scripts/smoke_site.py,
+      # run with the runner's Python, which does not have the package).
+      # Without a network the elevation tiles cannot be fetched either, which
+      # the build has to get through with the ground left out, and the check
+      # finds the fixtures in the cache still as they were.
       - name: Generate a site with the image
         run: |
           smoke="$RUNNER_TEMP/smoke"
-          mkdir -p "$smoke/input" "$smoke/site" "$smoke/cache"
-          cp tests/fixtures/airports.csv tests/fixtures/runways.csv "$smoke/cache/"
-          kml=(data/*.kml)
-          cp "${kml[@]:0:3}" "$smoke/input/"
+          python3 scripts/smoke_site.py prepare "$smoke"
           docker run --rm --network none --user "$(id -u):$(id -g)" -e HOME=/tmp \
             -v "$smoke/input:/data/input" -v "$smoke/site:/data/site" -v "$smoke/cache:/cache" \
             kml-heatmap input --output-dir site
-          python3 scripts/check_site_files.py "$smoke/site"
-          # Still the fixture, and without a network nothing else was fetched
-          cmp tests/fixtures/airports.csv "$smoke/cache/airports.csv"
-          cmp tests/fixtures/runways.csv "$smoke/cache/runways.csv"
+          python3 scripts/smoke_site.py check "$smoke"
       # The same run as the image's own user (USER app, no home directory),
       # which the --user flag above bypasses. The mounts are world-writable
       # because that user exists only inside the image.
       - name: Generate a site as the image user
         run: |
           smoke="$RUNNER_TEMP/smoke-app"
-          mkdir -p "$smoke/input" "$smoke/site" "$smoke/cache"
-          cp tests/fixtures/airports.csv tests/fixtures/runways.csv "$smoke/cache/"
-          kml=(data/*.kml)
-          cp "${kml[@]:0:3}" "$smoke/input/"
-          chmod -R a+rwX "$smoke"
+          python3 scripts/smoke_site.py prepare --world-writable "$smoke"
           docker run --rm --network none \
             -v "$smoke/input:/data/input" -v "$smoke/site:/data/site" -v "$smoke/cache:/cache" \
             kml-heatmap input --output-dir site
-          python3 scripts/check_site_files.py "$smoke/site"
-
-  obfuscation:
-    if: github.event_name != 'schedule'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - name: Set up Python
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with:
-          python-version-file: .python-version
-          cache: pip
-          cache-dependency-path: requirements.lock
-      - name: Install Python dependencies
-        run: pip install --require-hashes -r requirements.lock
-      - name: Check that the KML files are obfuscated
-        run: python -m kml_heatmap.obfuscate data/ --check
-      # Copies of flights from data/, and as public as they are
-      - name: Check that the fixture flights of the visual snapshots are obfuscated
-        run: python -m kml_heatmap.obfuscate tests/fixtures/visual/ --check
-
-  typos:
-    if: github.event_name != 'schedule'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: crate-ci/typos@00f422f3b19c57bc6338715ebfe3316d38768461 # v1.50.3
+          python3 scripts/smoke_site.py check "$smoke"
 
   # The one status a ruleset on main requires of a pull request and of each
   # entry of the merge queue: every test job a pull request runs, whatever
@@ -693,8 +627,6 @@ jobs:
       - e2e
       - visual
       - container
-      - obfuscation
-      - typos
     if: ${{ always() && github.event_name != 'schedule' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -719,20 +651,12 @@ jobs:
             exit 1
           fi
 
-  # Publishing waits for every test job. The security job is not a gate: a
-  # new advisory for a test dependency must not hold back new flights, and
-  # the weekly run reports it anyway.
+  # Publishing waits for every test job, through the one job that checks
+  # them all. The security job is not a gate: a new advisory for a test
+  # dependency must not hold back new flights, and the weekly run reports it
+  # anyway.
   publishable:
-    needs:
-      - lint
-      - unit
-      - packaging
-      - e2e-sites
-      - e2e
-      - visual
-      - container
-      - obfuscation
-      - typos
+    needs: checks
     if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -767,9 +691,7 @@ jobs:
       contents: read
       pages: read
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
+      - *checkout
       # As in the unit job, with the runtime dependencies only
       - name: Set up the site build
         uses: ./.github/actions/site-build-setup
@@ -782,7 +704,7 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/kml-heatmap/previews
-          key: previews-${{ hashFiles('data/*.kml', 'kml_heatmap/*.py') }}
+          key: previews-${{ hashFiles('data/**/*.kml', 'kml_heatmap/*.py') }}
           restore-keys: previews-
       # Where the site is published: the link previews name their images by
       # absolute URLs, which the build cannot know by itself. Only reads the

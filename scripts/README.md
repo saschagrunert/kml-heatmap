@@ -132,18 +132,40 @@ python scripts/build_visual_site.py
 
 Checks that a generated site has every file the page loads (the page, its
 configuration, the five bundles, the three stylesheets, the vendored MapLibre
-modules and `data/metadata.json`), each of them not empty, or with `--package`,
-that the installed `kml_heatmap` package ships the template and the same assets
-and none of their source maps. CI runs it on the wheel it installed and on the
-site that wheel generates (the `packaging` job) and on the sites the container
-image generates (the `container` job), from the one list in the script. Run
-`--package` with the Python of the environment the package is installed in,
-outside the checkout, so the installed package is imported and not the sources.
+and html-to-image files and `data/metadata.json`), each of them not empty, or
+with `--package`, that the installed `kml_heatmap` package ships the template
+and the same assets and none of their source maps. CI runs it on the wheel it
+installed and on the site that wheel generates (the `packaging` job) and on the
+sites the container image generates (the `container` job), from the one list in
+the script. Run `--package` with the Python of the environment the package is
+installed in, outside the checkout, so the installed package is imported and not
+the sources.
 
 ```bash
 python scripts/check_site_files.py docs
 python scripts/check_site_files.py --package
 ```
+
+## smoke_site.py
+
+Sets up and checks the small site the `packaging` and `container` jobs generate
+the way a user would. `prepare <dir>` makes `<dir>/input` with the first three
+flights of `data/`, `<dir>/cache` with the airport and runway fixtures in place
+of the OurAirports downloads and an empty `<dir>/site` (`--world-writable` for a
+run as the image's own user); `check <dir>` runs the site check above and fails
+when the fixtures in the cache were replaced, that is when the build downloaded
+something. Standard library only, since the container job runs it with the
+runner's Python.
+
+```bash
+python scripts/smoke_site.py prepare /tmp/smoke
+KML_HEATMAP_CACHE_DIR=/tmp/smoke/cache \
+  kml-heatmap --no-terrain /tmp/smoke/input --output-dir /tmp/smoke/site
+python scripts/smoke_site.py check /tmp/smoke
+```
+
+The cache directory is the one the build reads: `KML_HEATMAP_CACHE_DIR` for the
+installed package, the `/cache` mount for the image.
 
 ## e2e_durations.js
 

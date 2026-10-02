@@ -21,9 +21,11 @@ response within a few days.
 The generated site embeds the CARTO tile API key in its `map_config.js`. It is a
 public client-side key that the browser needs to load the base map, so it is
 published with the site by design. The `site` job of the `test` workflow reads
-it from the repository secrets; the generated site itself is not committed.
-Reports about this key being visible on the site are not security issues. The
-aviation overlay (open flightmaps) and the satellite imagery (EOX) need no key.
+it from the repository secrets (see
+[Usage](doc/usage.md#with-an-api-key-optional) for how to pass it to a local
+build). Reports about this key being visible on the site are not security
+issues. The aviation overlay (open flightmaps) and the satellite imagery (EOX)
+need no key.
 
 ## Automated checks
 

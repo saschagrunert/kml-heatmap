@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from kml_heatmap import site_assets
 from kml_heatmap.constants import KM_TO_NAUTICAL_MILES
 from kml_heatmap.export_pipeline import path_duration
 from kml_heatmap.geometry import haversine_distance
@@ -306,3 +307,57 @@ class TestCheckSiteFiles:
             check_site_files.main([])
         with pytest.raises(SystemExit):
             check_site_files.main(["site", "--package"])
+
+    def test_lists_every_bundle_stylesheet_and_vendored_file(self):
+        # The list is written out for the container job, whose Python has
+        # no package to import it from
+        expected = {
+            *(bundle.name for bundle in site_assets.BUNDLE_FILES),
+            *site_assets.CSS_FILES,
+            *(f"vendor/{name}" for name in site_assets.VENDOR_FILES),
+        }
+        assert set(check_site_files.ASSETS) == expected
+
+
+smoke_site = _load("smoke_site")
+
+
+class TestSmokeSite:
+    def test_prepares_the_flights_the_fixtures_and_the_site(self, tmp_path):
+        assert smoke_site.main(["prepare", str(tmp_path)]) == 0
+
+        flights = sorted((smoke_site.REPO / "data").rglob("*.kml"))[:3]
+        assert sorted(p.name for p in (tmp_path / "input").iterdir()) == sorted(
+            p.name for p in flights
+        )
+        for name in smoke_site.CACHE_FIXTURES:
+            assert (tmp_path / "cache" / name).read_bytes() == (
+                smoke_site.FIXTURES / name
+            ).read_bytes()
+        assert list((tmp_path / "site").iterdir()) == []
+
+    def test_world_writable_for_the_image_user(self, tmp_path):
+        smoke_site.prepare(tmp_path, world_writable=True)
+
+        for path in (tmp_path, *tmp_path.rglob("*")):
+            expected = 0o777 if path.is_dir() else 0o666
+            assert path.stat().st_mode & 0o777 == expected
+
+    def test_a_complete_site_with_the_fixtures_passes(self, tmp_path, capsys):
+        smoke_site.prepare(tmp_path)
+        _write_files(tmp_path / "site", check_site_files.SITE_FILES)
+
+        assert smoke_site.main(["check", str(tmp_path)]) == 0
+        assert "nothing was fetched" in capsys.readouterr().out
+
+    def test_names_a_missing_file_and_a_download(self, tmp_path, capsys):
+        smoke_site.prepare(tmp_path)
+        _write_files(tmp_path / "site", check_site_files.SITE_FILES)
+        (tmp_path / "site" / "index.html").unlink()
+        (tmp_path / "cache" / "runways.csv").write_text("downloaded")
+
+        assert smoke_site.main(["check", str(tmp_path)]) == 1
+        assert capsys.readouterr().out.splitlines() == [
+            f"::error::{tmp_path / 'site' / 'index.html'} was not generated",
+            f"::error::{tmp_path / 'cache' / 'runways.csv'} is no longer the fixture",
+        ]
