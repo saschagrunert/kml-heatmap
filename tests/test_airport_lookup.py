@@ -433,6 +433,23 @@ class TestDownloadFailureMarker:
 
 
 class TestDatabaseFingerprint:
+    def test_changes_with_the_runways(self, tmp_path):
+        """A parse keeps the landings, which the runways decide too."""
+        database = tmp_path / "airports.csv"
+        database.write_bytes(VALID_CSV)
+        runways = tmp_path / "runways.csv"
+        with (
+            patch.object(lookup_module, "CACHE_FILE", database),
+            patch.object(lookup_module, "RUNWAYS_CACHE_FILE", runways),
+        ):
+            without = database_fingerprint()
+            runways.write_text("airport_ident,le_ident,he_ident,closed\nTEST,09,27,0\n")
+            first = database_fingerprint()
+            runways.write_text("airport_ident,le_ident,he_ident,closed\nTEST,08,26,0\n")
+            second = database_fingerprint()
+        assert len({without, first, second}) == 3
+        assert "nodb" not in {without, first, second}
+
     def test_nodb_without_cache_file(self, tmp_path):
         with patch.object(lookup_module, "CACHE_FILE", tmp_path / "missing.csv"):
             assert database_fingerprint() == "nodb"

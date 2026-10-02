@@ -263,6 +263,26 @@ class TestFindKmlFiles:
             "sub/deeper/x.kml",
         ]
 
+    def test_apple_double_files_and_git_are_left_out(self, tmp_path):
+        # macOS writes an AppleDouble file next to every file on a foreign
+        # disk; it is no KML and would fail the whole run. Other hidden
+        # files stay listed, for the obfuscation check to see them.
+        for name in (
+            "1_a.kml",
+            "._1_a.kml",
+            ".git/x.kml",
+            ".2_y.kml",
+            ".old/1_x.kml",
+            ".old/._1_x.kml",
+        ):
+            path = tmp_path / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("<kml/>")
+
+        found = [p.relative_to(tmp_path).as_posix() for p in find_kml_files(tmp_path)]
+
+        assert found == ["1_a.kml", ".2_y.kml", ".old/1_x.kml"]
+
     def test_symlinks_to_files_are_listed_but_directories_not_followed(self, tmp_path):
         target = tmp_path / "elsewhere" / "t.kml"
         target.parent.mkdir()

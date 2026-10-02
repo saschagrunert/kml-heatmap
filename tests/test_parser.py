@@ -426,7 +426,9 @@ class TestCharterwareIntegration:
     def test_skydemon_airport_name_not_replaced(self, tmp_path):
         kml = f"""{KML_HEADER}<Document><Placemark><name>EDAV - EDBH</name>
         <gx:Track><when>2025-08-22T10:13:00Z</when>
-        <gx:coord>13.71 52.82 42.0</gx:coord></gx:Track>
+        <gx:coord>13.71 52.82 42.0</gx:coord>
+        <when>2025-08-22T10:14:00Z</when>
+        <gx:coord>13.72 52.83 60.0</gx:coord></gx:Track>
         </Placemark></Document></kml>"""
         kml_file = _write(tmp_path, "1_DEHYL_DA40.kml", kml)
         _, _, metadata = parse_kml_coordinates(kml_file)

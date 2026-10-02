@@ -74,3 +74,8 @@ KML_NAMESPACES = {"kml": KML_NAMESPACE, "gx": GX_NAMESPACE}
 # Excludes I (not assigned), J (not assigned for airports),
 # Q (reserved for non-geographic use), X (not assigned).
 ICAO_REGION_PREFIXES = "ABCDEFGHKLMNOPRSTUVWYZ"
+
+# === Cache ===
+# Where the caches go (see kml_heatmap.cache), read once when that module is
+# first imported: the command line sets it from --cache-dir before
+CACHE_DIR_ENV = "KML_HEATMAP_CACHE_DIR"

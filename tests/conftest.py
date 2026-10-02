@@ -140,7 +140,7 @@ def no_network(monkeypatch):
 
     monkeypatch.setattr("kml_heatmap.airport_lookup.urlopen", _refuse)
     # The tiles are fetched over a connection of http.client, not urlopen
-    monkeypatch.setattr("kml_heatmap.terrain.HTTPSConnection", _refuse)
+    monkeypatch.setattr("kml_heatmap.terrain_fetch.HTTPSConnection", _refuse)
 
 
 @pytest.fixture(autouse=True)

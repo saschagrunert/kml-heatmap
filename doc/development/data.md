@@ -106,10 +106,11 @@ Format 5 writes the altitudes in steps of 20 ft instead of 100 ft, which costs
 about 4 % more gzipped year files on `data/`, and adds the landings of every
 flight with timestamps to its `path_info`: `landings`, `touch_and_goes`,
 `go_arounds` and the `touchdowns` as `[airport, runway]`.
-`kml_heatmap/landings.py` reads them in the main process of the export from the
-full-precision track, with the fields and the runways of the OurAirports
-database (`load_runway_database` caches `runways.csv` next to `airports.csv`);
-the page only adds them up.
+`kml_heatmap/landings.py` reads them with the parse of each file (in the parse
+workers) from the full-precision track, with the fields and the runways of the
+OurAirports database (`load_runway_database` caches `runways.csv` next to
+`airports.csv`), and the parse cache keeps them with the paths; its key covers
+both databases. The page only adds them up.
 
 The speed column is written in tenths of a knot, but the exporter rounds the
 speeds to whole knots (`exported_knots` in `kml_heatmap/export_pipeline.py`),

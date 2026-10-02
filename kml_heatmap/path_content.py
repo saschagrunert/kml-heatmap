@@ -18,7 +18,7 @@ from .logger import logger
 from .types import COORDINATE_DECIMALS
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
+    from collections.abc import Collection, Container, Mapping, Sequence
 
     from .types import FlightPath, FlightPathGroup, PathMetadata
 
@@ -29,6 +29,7 @@ __all__ = [
     "exported_contents",
     "is_exportable_path",
     "path_content_id",
+    "without_paths",
 ]
 
 # Path ids are this wide: exact JavaScript numbers, short enough for a link,
@@ -127,16 +128,28 @@ def drop_duplicate_paths(
                 all_path_metadata[index].get("filename") or f"path {index}",
                 all_path_metadata[first].get("filename") or f"path {first}",
             )
-    if not duplicates:
+    return without_paths(paths_by_year, duplicates, contents)
+
+
+def without_paths(
+    paths_by_year: Mapping[int, list[int]],
+    dropped: Collection[int],
+    exported: Container[int],
+) -> dict[int, list[int]]:
+    """The paths of every year less those ``dropped``.
+
+    A year left without a path in ``exported`` is left out.
+    """
+    if not dropped:
         return dict(paths_by_year)
     kept = {
-        year: [index for index in indices if index not in duplicates]
+        year: [index for index in indices if index not in dropped]
         for year, indices in paths_by_year.items()
     }
     return {
         year: indices
         for year, indices in kept.items()
-        if any(index in contents for index in indices)
+        if any(index in exported for index in indices)
     }
 
 

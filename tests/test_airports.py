@@ -756,6 +756,15 @@ class TestIcaoCodesNeverMerge:
         assert first == second
         assert deduplicator.unique_airports[0].name == "ZZTX Field"
 
+    def test_entry_without_a_code_merges_with_the_nearest_field(self):
+        """Two fields 0.7 km apart: an end 70 m from the second is the second."""
+        deduplicator = AirportDeduplicator()
+        first = self._add(deduplicator, 49.2, 9.5, "ZZTX Field")
+        second = self._add(deduplicator, 49.2, 9.5097, "ZZTY Other Field")
+        near_second = self._add(deduplicator, 49.2, 9.5088, "Aunt Martha")
+        assert haversine_distance(49.2, 9.5088, 49.2, 9.5) < 1.5
+        assert near_second == second != first
+
     @pytest.mark.parametrize("coded_first", [True, False])
     def test_code_wins_whatever_the_order(self, coded_first):
         """The coded entry must not lose its marker to a nearby plain name."""

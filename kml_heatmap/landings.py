@@ -44,11 +44,14 @@ The rules, per timed fix of a flight:
   constant magnetic variation would only hold in one part of the world;
   the true headings of the runway list hold everywhere.
 
-The detection runs in the main process of the export (see
-``data_exporter.export_all_data``), which has the airport database loaded
-already; the export workers never load it.
+The detection runs with the parse of every file, in the parse workers
+(see ``path_landings``), and the parse cache keeps what it found with the
+paths: its key covers the airport and the runway database. The export
+only falls back to detecting them itself (``detect_landings``) for paths
+that come without them; its workers never load the databases.
 """
 
+import functools
 import math
 import time
 from bisect import bisect_left, bisect_right
@@ -80,6 +83,8 @@ __all__ = [
     "detect_landings",
     "detect_path_landings",
     "field_index",
+    "log_landings",
+    "path_landings",
 ]
 
 # How far from an airport's reference point a fix still counts as at the
@@ -607,6 +612,26 @@ def detect_path_landings(path: FlightPath, fields: FieldIndex) -> FlightLandings
     return detector.finish()
 
 
+@functools.cache
+def _fields_of_this_process() -> FieldIndex:
+    """The fields of the databases this process loaded, built once."""
+    return field_index()
+
+
+def path_landings(paths: Sequence[FlightPath]) -> list[FlightLandings | None]:
+    """The landings of every path, in their order, None for a path without.
+
+    What a parse keeps with its paths in the parse cache, whose key covers
+    the airport and runway databases the fields come from. Without an
+    airport database every path gets None, as ``detect_landings`` counts no
+    landing then.
+    """
+    fields = _fields_of_this_process()
+    if not len(fields):
+        return [None] * len(paths)
+    return [detect_path_landings(path, fields) for path in paths]
+
+
 def detect_landings(
     paths: Mapping[int, FlightPath], fields: FieldIndex | None = None
 ) -> dict[int, FlightLandings]:
@@ -625,11 +650,22 @@ def detect_landings(
         landings = detect_path_landings(path, fields)
         if landings is not None:
             found[key] = landings
+    log_landings(found, time.monotonic() - started)
+    return found
+
+
+def log_landings(
+    found: Mapping[int, FlightLandings], seconds: float | None = None
+) -> None:
+    """Say how many landings the flights hold, and the time it took to tell.
+
+    Without ``seconds`` they came with the parse, from the cache or not.
+    """
+    took = "with the parse" if seconds is None else f"in {seconds:.1f} s"
     logger.info(
-        "  Found %d landing(s) and %d touch-and-go(es) in %d flight(s) in %.1f s",
+        "  Found %d landing(s) and %d touch-and-go(es) in %d flight(s) %s",
         sum(landings.landings for landings in found.values()),
         sum(landings.touch_and_goes for landings in found.values()),
         len(found),
-        time.monotonic() - started,
+        took,
     )
-    return found

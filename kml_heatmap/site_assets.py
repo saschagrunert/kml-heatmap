@@ -168,8 +168,8 @@ def minify_html(html_content: str) -> str:
     """Minify the HTML page.
 
     Only the markup: the template has no inline styles or scripts (its CSP
-    blocks inline scripts), the stylesheet and the config are minified as
-    separate files.
+    blocks inline scripts). The stylesheets are minified by the build, and
+    the config is written as compact JSON (see ``_generate_map_config``).
     """
     minified: str = mh.minify(html_content)
     return minified

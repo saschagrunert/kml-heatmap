@@ -9,18 +9,22 @@ in every worker. ``--jobs`` caps every pool (see ``configure_workers``).
 """
 
 import contextlib
+import math
 import os
 import pickle  # nosec B403
-from typing import TYPE_CHECKING
+from concurrent.futures import Executor, Future, ProcessPoolExecutor
+from concurrent.futures.process import BrokenProcessPool
+from typing import TYPE_CHECKING, Any
 
 from .airport_lookup import use_airport_database
-from .logger import set_log_level
+from .logger import logger, set_log_level
 from .parser import parse_size
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Iterable, Iterator, Sequence
 
 __all__ = [
+    "WorkerPool",
     "configure_workers",
     "default_worker_count",
     "init_worker",
@@ -43,14 +47,34 @@ def configure_workers(jobs: int | None) -> None:
     _worker_limit = jobs if jobs is None or jobs > 0 else 1
 
 
+def _cgroup_cpu_limit() -> int | None:
+    """The CPUs the cgroup v2 quota allows, rounded up; None without a quota.
+
+    ``docker run --cpus=2`` sets a quota of two CPUs' time, not an
+    affinity: the process still sees every CPU of the host.
+    """
+    try:
+        with open(f"{CGROUP_DIR}/cpu.max", encoding="ascii") as limit_file:
+            quota, _, period = limit_file.read().strip().partition(" ")
+        if quota == "max":
+            return None
+        return max(1, math.ceil(int(quota) / int(period or "100000")))
+    except OSError, ValueError, ZeroDivisionError:
+        return None
+
+
 def default_worker_count() -> int:
     """The workers a pool gets without a better measure.
 
-    Every CPU the process may use (``process_cpu_count`` honors the CPU
-    affinity, and with it a container's quota; ``cpu_count`` would start one
-    worker per CPU of the host), or the ``--jobs`` limit when that is lower.
+    Every CPU the process may use: ``process_cpu_count`` honors the CPU
+    affinity (``cpu_count`` would start one worker per CPU of the host), and
+    a container's CPU quota limits it further (see ``_cgroup_cpu_limit``).
+    The ``--jobs`` limit, when that is lower.
     """
     workers = os.process_cpu_count() or 4
+    quota = _cgroup_cpu_limit()
+    if quota is not None:
+        workers = min(workers, quota)
     if _worker_limit is not None:
         workers = min(workers, _worker_limit)
     return workers
@@ -73,6 +97,119 @@ def init_worker(log_level: int, airport_database: bytes | None = None) -> None:
         with contextlib.suppress(Exception):
             database = pickle.loads(airport_database)  # noqa: S301  # nosec B301
             use_airport_database(database)
+
+
+# What starting a process pool raises where it cannot start one: a sandbox
+# without POSIX semaphores, or a system out of processes or memory
+_CANNOT_START = (OSError, NotImplementedError, ImportError)
+
+
+class WorkerPool(Executor):
+    """A process pool that does the work in this process where it cannot.
+
+    A pool that cannot start (see ``_CANNOT_START``), now or at the first
+    task, runs every task here instead, one after the other, with a warning
+    that names ``what`` it was for. A pool that broke on the way (a worker
+    killed for its memory) is given up the same way by ``fall_back``, which
+    the caller decides on, since it knows what the tasks still pending are;
+    ``result`` does it for one task. Here, the tasks take far less memory
+    than the workers took at once, which may still not be enough: a parent
+    killed for its memory takes the run with it, where the pool's failure
+    alone would have failed it as well.
+
+    The workers are set up by ``init_worker`` with ``initargs``.
+    """
+
+    def __init__(self, max_workers: int, what: str, initargs: tuple[Any, ...] = ()):
+        """Start the pool of ``max_workers`` workers, or fall back already."""
+        self._what = what
+        self._pool: ProcessPoolExecutor | None = None
+        self._given_up = False
+        try:
+            self._pool = ProcessPoolExecutor(
+                max_workers=max_workers, initializer=init_worker, initargs=initargs
+            )
+        except _CANNOT_START as e:
+            self.fall_back(e)
+
+    @property
+    def fell_back(self) -> bool:
+        """Whether the tasks run in this process."""
+        return self._pool is None
+
+    def fall_back(self, error: BaseException) -> None:
+        """Give the pool up for this process, with a warning the first time."""
+        if self._given_up:
+            return
+        self._given_up = True
+        logger.warning(
+            "The worker processes for %s failed (%s); going on in this process",
+            self._what,
+            str(error) or type(error).__name__,
+        )
+        pool, self._pool = self._pool, None
+        if pool is not None:
+            pool.shutdown(wait=True, cancel_futures=True)
+
+    def submit[R](
+        self, fn: Callable[..., R], /, *args: Any, **kwargs: Any
+    ) -> Future[R]:
+        """Hand a task to a worker, or run it here once the pool is given up."""
+        if self._pool is not None:
+            try:
+                return self._pool.submit(fn, *args, **kwargs)
+            except (*_CANNOT_START, BrokenProcessPool) as e:
+                self.fall_back(e)
+        future: Future[R] = Future()
+        try:
+            future.set_result(fn(*args, **kwargs))
+        except Exception as e:  # noqa: BLE001 - handed to the caller, as a worker's
+            future.set_exception(e)
+        return future
+
+    def map[R](
+        self,
+        fn: Callable[..., R],
+        *iterables: Iterable[Any],
+        timeout: float | None = None,
+        chunksize: int = 1,
+        buffersize: int | None = None,
+    ) -> Iterator[R]:
+        """``Executor.map``, in chunks to the workers, or here.
+
+        A pool that breaks on the way raises BrokenProcessPool from the
+        iterator, for the caller to decide on (see ``fall_back``).
+        """
+        if self._pool is not None:
+            try:
+                return self._pool.map(
+                    fn,
+                    *iterables,
+                    timeout=timeout,
+                    chunksize=chunksize,
+                    buffersize=buffersize,
+                )
+            except (*_CANNOT_START, BrokenProcessPool) as e:
+                self.fall_back(e)
+        return map(fn, *iterables, strict=False)
+
+    def result[R](self, future: Future[R], fn: Callable[..., R], *args: Any) -> R:
+        """The result of ``future``, the task ``fn(*args)``.
+
+        Where its worker died with the pool (BrokenProcessPool), the pool
+        is given up and the task done again here; any other error of the
+        task is raised, as ``future.result`` raises it.
+        """
+        try:
+            return future.result()
+        except BrokenProcessPool as e:
+            self.fall_back(e)
+            return self.submit(fn, *args).result()
+
+    def shutdown(self, wait: bool = True, *, cancel_futures: bool = False) -> None:
+        """Shut the pool down; nothing to do once it was given up."""
+        if self._pool is not None:
+            self._pool.shutdown(wait=wait, cancel_futures=cancel_futures)
 
 
 CGROUP_DIR = "/sys/fs/cgroup"
@@ -142,9 +279,8 @@ def parse_worker_count(kml_files: Sequence[str]) -> int:
     worker may be parsing one of the largest files at the same time. The
     size is the one ``parse_size`` gives, that of the document inside a KMZ
     rather than of the archive, which is ten to twenty times smaller. The
-    pool gets
-    as many workers as the largest files fit into the available memory, at
-    least one; an unknown amount of memory does not limit it.
+    pool gets as many workers as the largest files fit into the available
+    memory, at least one; an unknown amount of memory does not limit it.
     """
     workers = max(1, min(len(kml_files), default_worker_count()))
     available = _available_memory_bytes()

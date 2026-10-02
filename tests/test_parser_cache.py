@@ -14,6 +14,7 @@ import pytest
 import kml_heatmap.airport_lookup as lookup_module
 import kml_heatmap.parser_cache as parser_cache_module
 from kml_heatmap.airport_lookup import database_fingerprint
+from kml_heatmap.landings import FlightLandings
 from kml_heatmap.parser_cache import (
     CACHE_FORMAT_VERSION,
     CACHE_MAX_AGE_DAYS,
@@ -229,7 +230,8 @@ class TestParserFingerprint:
         package = Path(parser_cache_module.__file__).parent
         without_effect = {"__init__", "cache", "exceptions", "logger"}
         seen: set[str] = set()
-        pending = ["parser"]
+        # The parse finds the landings of its paths as well
+        pending = ["parser", "landings"]
         while pending:
             module = pending.pop()
             if module in seen:
@@ -396,8 +398,8 @@ class TestSaveAndLoad:
 
         loaded = load_cached_parse(cache_path)
 
-        assert loaded == (COORDS, PATHS, METADATA, [])
-        coordinates, path_groups, _, _ = loaded
+        assert loaded == (COORDS, PATHS, METADATA, [], None)
+        coordinates, path_groups, _, _, _ = loaded
         assert all(isinstance(p, TrackPoint) for p in coordinates)
         assert coordinates[1].alt is None
         assert coordinates[1].ts is None
@@ -469,6 +471,44 @@ class TestSaveAndLoad:
                 }
             )
         )
+        assert load_cached_parse(cache_path) is None
+
+    def test_paths_without_their_metadata_are_rejected(self, tmp_path):
+        cache_path = tmp_path / "cache.json"
+        save_to_cache(cache_path, COORDS, PATHS, METADATA)
+        entry = decode_entry(cache_path.read_bytes())
+        entry["path_metadata"] = entry["path_metadata"][:-1]
+        cache_path.write_bytes(encode_entry(entry))
+        assert load_cached_parse(cache_path) is None
+
+    def test_landings_round_trip(self, tmp_path):
+        """One per path, kept as the parse found them (see path_landings)."""
+        cache_path = tmp_path / "cache.json"
+        landings = [
+            FlightLandings(
+                takeoffs=1,
+                landings=2,
+                touch_and_goes=1,
+                touchdowns=[("EDAQ", "09"), ("EDAQ", None)],
+                circuits=1,
+            )
+        ]
+        save_to_cache(cache_path, COORDS, PATHS, METADATA, landings=landings)
+        loaded = load_cached_parse(cache_path)
+        assert loaded is not None
+        assert loaded.landings == landings
+        first = loaded.landings[0]
+        assert first is not None
+        assert isinstance(first.touchdowns[0], tuple)
+
+        save_to_cache(cache_path, COORDS, PATHS, METADATA, landings=[None])
+        loaded = load_cached_parse(cache_path)
+        assert loaded is not None
+        assert loaded.landings == [None]
+
+    def test_landings_of_other_paths_are_rejected(self, tmp_path):
+        cache_path = tmp_path / "cache.json"
+        save_to_cache(cache_path, COORDS, PATHS, METADATA, landings=[None, None])
         assert load_cached_parse(cache_path) is None
 
     def test_warnings_round_trip(self, tmp_path):

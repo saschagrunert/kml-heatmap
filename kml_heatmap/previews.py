@@ -35,7 +35,6 @@ import time
 import zlib
 from array import array
 from bisect import bisect_right
-from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
 from functools import partial
 from itertools import accumulate, chain
@@ -49,7 +48,7 @@ from .export_pipeline import build_path_info
 from .geometry import web_mercator
 from .logger import logger
 from .png import PNG_SIGNATURE, chunk
-from .workers import default_worker_count, init_worker
+from .workers import WorkerPool, default_worker_count
 
 if TYPE_CHECKING:
     from collections.abc import Collection, Iterable, Mapping, Sequence
@@ -543,10 +542,9 @@ def _draw(missing: Mapping[Path, list[PreviewJob]], site_dir: Path) -> None:
                 raise fail(entry, exc) from exc
             finish(entry, data)
         return
-    with ProcessPoolExecutor(
-        max_workers=workers,
-        initializer=init_worker,
-        initargs=(logger.getEffectiveLevel(),),
+    # A pool that cannot start, or breaks, draws here (see WorkerPool)
+    with WorkerPool(
+        workers, "drawing the link previews", (logger.getEffectiveLevel(),)
     ) as executor:
         futures = [
             (entry, executor.submit(render_preview, missing[entry][0].tracks))
@@ -554,7 +552,7 @@ def _draw(missing: Mapping[Path, list[PreviewJob]], site_dir: Path) -> None:
         ]
         for entry, future in futures:
             try:
-                data = future.result()
+                data = executor.result(future, render_preview, missing[entry][0].tracks)
             except Exception as exc:
                 # The images still queued would only be thrown away
                 executor.shutdown(wait=True, cancel_futures=True)

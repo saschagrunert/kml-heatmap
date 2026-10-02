@@ -114,6 +114,12 @@ obfuscation check on every KML file that the commits about to be pushed add or
 change, and refuses the push when one carries a real date or when it cannot run
 the check. It needs nothing beyond Python; `--no-verify` skips it.
 
+`make hooks` installs a copy of `pre-push-hook`, which runs `pre_push.py` of the
+worktree the push comes from: the worktrees of a clone share one hooks
+directory, and a link into the worktree that installed it would dangle once that
+worktree is removed, which git skips without a word. Without a `pre_push.py` to
+run, the wrapper refuses the push.
+
 ## build_visual_site.py
 
 Builds `visual-site/`, the site the visual snapshots are compared against (see

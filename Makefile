@@ -129,17 +129,22 @@ check-obfuscation: ## Check that the KML files in INPUT_DIR and the fixture flig
 	python -m kml_heatmap.obfuscate tests/fixtures/visual --check
 
 # The obfuscation check of CI only sees a real date once it is public; the hook
-# refuses the push before. Linked rather than copied, so it stays current.
+# refuses the push before. Copied from scripts/pre-push-hook (see there).
 # The pre-commit hooks of .pre-commit-config.yaml go in along with it where
 # pre-commit is installed; like typos in `lint`, a missing one is said, not
 # failed on.
 hooks: ## Install the pre-push hook that refuses to push KML files with real dates, and the pre-commit hooks
 	@hook="$$(git rev-parse --git-path hooks/pre-push)" && \
-	  target="$(CURDIR)/scripts/pre_push.py" && \
-	  if [ -e "$$hook" ] && [ "$$(readlink "$$hook")" != "$$target" ]; then \
-	    echo "error: $$hook exists already; remove it or call $$target from it"; \
-	    exit 1; fi && \
-	  mkdir -p "$$(dirname "$$hook")" && ln -sfn "$$target" "$$hook" && \
+	  wrapper="$(CURDIR)/scripts/pre-push-hook" && \
+	  if [ -e "$$hook" ] || [ -L "$$hook" ]; then \
+	    case "$$(readlink "$$hook")" in \
+	      */scripts/pre_push.py) ;; \
+	      *) grep -qs "^# kml-heatmap pre-push hook" "$$hook" || { \
+	        echo "error: $$hook exists already; remove it or call $$wrapper from it"; \
+	        exit 1; } ;; \
+	    esac; fi && \
+	  mkdir -p "$$(dirname "$$hook")" && rm -f "$$hook" && \
+	  cp "$$wrapper" "$$hook" && chmod 755 "$$hook" && \
 	  echo "Installed $$hook"
 	@if command -v pre-commit >/dev/null 2>&1; then pre-commit install; else \
 	  echo "warning: pre-commit is not installed, skipping its hooks (see CONTRIBUTING.md)" >&2; fi

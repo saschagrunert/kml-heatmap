@@ -81,10 +81,17 @@ def find_kml_files(directory: Path) -> list[Path]:
     before ``10_x.kml``), subdirectories after the files of their parent.
     Symlinks to files are listed so that the caller can refuse or skip them;
     symlinks to directories are not followed. A directory that cannot be
-    listed yields no files.
+    listed yields no files. The AppleDouble files macOS writes next to every
+    file on a foreign disk (``._1_x.kml``) are left out, being no KML, and
+    so is ``.git``, which holds no flights. Other hidden files and
+    directories are listed: the check has to see every file a build reads.
     """
     try:
-        entries = list(directory.iterdir())
+        entries = [
+            entry
+            for entry in directory.iterdir()
+            if not entry.name.startswith("._") and entry.name != ".git"
+        ]
     except OSError as e:
         logger.debug("Cannot list %s: %s", directory, e)
         return []

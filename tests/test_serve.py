@@ -125,6 +125,10 @@ def test_prints_the_address_it_is_reached_at(monkeypatch):
         ("https://example.org/", "https://example.org"),
         ("http://[::1]:8000", "http://[::1]:8000"),
         ("http://[::1]/", "http://[::1]"),
+        # The default port of the scheme, which a browser leaves out
+        ("https://example.org:443", "https://example.org"),
+        ("http://example.org:80/", "http://example.org"),
+        ("http://example.org:443", "http://example.org:443"),
     ],
 )
 def test_a_cors_origin_is_accepted(value, origin):

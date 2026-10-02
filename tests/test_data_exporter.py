@@ -6,9 +6,10 @@ import tempfile
 import threading
 import time
 from concurrent.futures import Future
+from concurrent.futures.process import BrokenProcessPool
 from pathlib import Path
 from typing import Any, cast
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -30,7 +31,7 @@ from kml_heatmap.data_exporter import (
     export_all_data,
     process_year_chunk,
 )
-from kml_heatmap.exceptions import KMLHeatmapError
+from kml_heatmap.exceptions import KMLHeatmapError, OutputRefusedError
 from kml_heatmap.helpers import parse_timestamp_epoch
 from kml_heatmap.path_content import (
     PATH_ID_BITS,
@@ -731,11 +732,8 @@ class _CountingPool:
         self.max_in_flight = 0
         self.lock = threading.Lock()
 
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *exc):
-        return False
+    def shutdown(self, *args, **kwargs):
+        pass
 
     def submit(self, fn, *args):
         future: Future[ChunkResult] = Future()
@@ -761,7 +759,7 @@ class TestExportChunks:
         metadata = _metadata([{"year": 2025}, {"year": 2025}])
         plans = _plan_chunks({2025: [0, 1]}, {0: 0, 1: 1}, max_workers=4)
 
-        with patch("kml_heatmap.data_exporter.ProcessPoolExecutor") as pool:
+        with patch("kml_heatmap.workers.ProcessPoolExecutor") as pool:
             results = _export_chunks(plans, paths, metadata, str(tmp_path), 4)
 
         pool.assert_not_called()
@@ -856,7 +854,7 @@ class TestExportChunks:
         pool = _RunningChunksPool()
 
         with (
-            patch("kml_heatmap.data_exporter.ProcessPoolExecutor", return_value=pool),
+            patch("kml_heatmap.workers.ProcessPoolExecutor", return_value=pool),
             pytest.raises(RuntimeError, match="No space left on device"),
         ):
             _export_chunks(plans, paths, metadata, str(tmp_path), 4)
@@ -864,6 +862,34 @@ class TestExportChunks:
         assert _leftover_parts(tmp_path) == []
         # An expected error is one line, without a traceback
         assert "Traceback" not in capsys.readouterr().err
+
+    @pytest.mark.parametrize("cannot_start", [True, False])
+    def test_a_pool_that_fails_writes_the_chunks_here(
+        self, tmp_path, parse_data, cannot_start
+    ):
+        """No semaphores in a sandbox, or a worker killed for its memory."""
+        paths = [_two_point_path(i) for i in range(2)]
+        metadata = _metadata([{"year": 2025}, {"year": 2026}])
+        plans = _plan_chunks({2025: [0], 2026: [1]}, {0: 0, 1: 1}, max_workers=2)
+        if cannot_start:
+            pool = MagicMock(side_effect=OSError("no semaphores"))
+        else:
+
+            def broken(*_args):
+                future: Future[ChunkResult] = Future()
+                future.set_exception(BrokenProcessPool("a worker died"))
+                return future
+
+            pool = MagicMock()
+            pool.return_value.submit.side_effect = broken
+
+        with patch("kml_heatmap.workers.ProcessPoolExecutor", pool):
+            results = _export_chunks(plans, paths, metadata, str(tmp_path), 2)
+
+        assert [r.year for r in results] == [2025, 2026]
+        assert _leftover_parts(tmp_path) == []
+        for year in (2025, 2026):
+            assert len(parse_data(tmp_path / f"{year}/data.json")["path_info"]) == 1
 
     def test_no_plans(self, tmp_path):
         assert _export_chunks([], [], _metadata([]), str(tmp_path), 4) == []
@@ -885,7 +911,7 @@ class TestExportChunks:
         assert len(plans) == len(years)
         pool = _CountingPool()
 
-        with patch("kml_heatmap.data_exporter.ProcessPoolExecutor", return_value=pool):
+        with patch("kml_heatmap.workers.ProcessPoolExecutor", return_value=pool):
             results = _export_chunks(plans, paths, metadata, str(tmp_path), 2)
 
         assert [r.year for r in results] == years
@@ -1127,7 +1153,7 @@ class TestSiteOutput:
 
         with SiteOutput(out, out / "data") as site:
             _stage_site(site, years=(2025, 2026))
-            with pytest.raises(ValueError, match="Refusing"):
+            with pytest.raises(OutputRefusedError, match="Refusing"):
                 site.publish([2025, 2026])
 
         assert _tree(out) == previous
@@ -1263,12 +1289,12 @@ class TestSiteOutput:
 
     @pytest.mark.parametrize("dangerous", ["/", str(os.path.expanduser("~"))])
     def test_dangerous_data_dir_rejected(self, tmp_path, dangerous):
-        with pytest.raises(ValueError, match="dangerous"):
+        with pytest.raises(OutputRefusedError, match="dangerous"):
             SiteOutput(tmp_path, dangerous)
 
     @pytest.mark.parametrize("dangerous", ["/", str(os.path.expanduser("~"))])
     def test_dangerous_output_dir_rejected(self, dangerous):
-        with pytest.raises(ValueError, match="dangerous"):
+        with pytest.raises(OutputRefusedError, match="dangerous"):
             SiteOutput(dangerous, os.path.join(dangerous, "data"))
 
     def test_home_behind_a_symlink_rejected(self, tmp_path, monkeypatch):
@@ -1278,9 +1304,9 @@ class TestSiteOutput:
         link.symlink_to(home)
         monkeypatch.setenv("HOME", str(link))
 
-        with pytest.raises(ValueError, match="dangerous"):
+        with pytest.raises(OutputRefusedError, match="dangerous"):
             SiteOutput(tmp_path / "out", link)
-        with pytest.raises(ValueError, match="dangerous"):
+        with pytest.raises(OutputRefusedError, match="dangerous"):
             SiteOutput(link, tmp_path / "out" / "data")
 
     def test_protected_directories_without_home(self):

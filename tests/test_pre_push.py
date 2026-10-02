@@ -6,6 +6,7 @@ assumptions the script makes.
 """
 
 import importlib.util
+import io
 import os
 import shutil
 import subprocess
@@ -234,30 +235,63 @@ class TestMain:
 
         monkeypatch.setattr(pre_push, "check", broken)
         monkeypatch.setattr(sys, "argv", ["pre-push", "origin"])
+        monkeypatch.setattr(sys, "stdin", io.StringIO(""))
         assert pre_push.main() == 1
-        assert "--no-verify" in capsys.readouterr().err
+        err = capsys.readouterr().err
+        assert "--no-verify" in err
+        assert "Python 3.14" in err
+
+    def test_a_git_failure_says_what_git_said(self, monkeypatch, capsys):
+        def broken(*_args):
+            raise subprocess.CalledProcessError(
+                128, ["git"], stderr=b"fatal: bad object deadbeef\n"
+            )
+
+        monkeypatch.setattr(pre_push, "check", broken)
+        monkeypatch.setattr(sys, "argv", ["pre-push", "origin"])
+        monkeypatch.setattr(sys, "stdin", io.StringIO(""))
+        assert pre_push.main() == 1
+        err = capsys.readouterr().err
+        assert "fatal: bad object deadbeef" in err
+        assert "Python 3.14" not in err
+        assert "--no-verify" in err
+
+
+WRAPPER = SCRIPT.parent / "pre-push-hook"
+MAKEFILE = SCRIPT.parent.parent / "Makefile"
+MAKE = shutil.which("make")
+
+
+def _with_remote(repo: Path, tmp_path: Path) -> Path:
+    """Give ``repo`` a bare remote that has its commits; returns its hook."""
+    remote = tmp_path / "remote.git"
+    git(tmp_path, "init", "-q", "--bare", str(remote))
+    git(repo, "remote", "add", "origin", str(remote))
+    git(repo, "push", "-q", "origin", "main")
+    hook = Path(git(repo, "rev-parse", "--git-path", "hooks/pre-push"))
+    hook = hook if hook.is_absolute() else repo / hook
+    hook.parent.mkdir(parents=True, exist_ok=True)
+    return hook
+
+
+def _push(repo: Path) -> subprocess.CompletedProcess[str]:
+    assert GIT is not None
+    return subprocess.run(  # noqa: S603
+        [GIT, "push", "-q", "origin", "main"],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
 
 
 class TestInstalledHook:
     def test_git_push_is_refused(self, repo, tmp_path):
-        remote = tmp_path / "remote.git"
-        git(tmp_path, "init", "-q", "--bare", str(remote))
-        git(repo, "remote", "add", "origin", str(remote))
-        git(repo, "push", "-q", "origin", "main")
-        hook = Path(git(repo, "rev-parse", "--git-path", "hooks/pre-push"))
-        hook = hook if hook.is_absolute() else repo / hook
-        hook.parent.mkdir(parents=True, exist_ok=True)
+        hook = _with_remote(repo, tmp_path)
         hook.symlink_to(SCRIPT)
 
         commit(repo, {"data/2.kml": REAL_KML})
-        assert GIT is not None
-        refused = subprocess.run(  # noqa: S603
-            [GIT, "push", "-q", "origin", "main"],
-            cwd=repo,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
+        refused = _push(repo)
         assert refused.returncode != 0
         assert "Push refused" in refused.stderr
 
@@ -265,3 +299,82 @@ class TestInstalledHook:
         git(repo, "reset", "-q", "--hard", "origin/main")
         commit(repo, {"data/2.kml": CLEAN_KML})
         git(repo, "push", "-q", "origin", "main")
+
+
+class TestHookWrapper:
+    """The hook `make hooks` installs runs the check of the pushing worktree."""
+
+    def test_runs_the_check_of_the_worktree(self, repo, tmp_path):
+        hook = _with_remote(repo, tmp_path)
+        shutil.copy(WRAPPER, hook)
+        (repo / "scripts").mkdir()
+        (repo / "scripts" / "pre_push.py").symlink_to(SCRIPT)
+
+        commit(repo, {"data/2.kml": REAL_KML})
+        refused = _push(repo)
+        assert refused.returncode != 0
+        assert "Push refused" in refused.stderr
+
+    def test_refuses_the_push_without_a_check_to_run(self, repo, tmp_path):
+        """The worktree that installed the hook is gone: no silent pass."""
+        hook = _with_remote(repo, tmp_path)
+        shutil.copy(WRAPPER, hook)
+
+        commit(repo, {"data/2.kml": CLEAN_KML})
+        refused = _push(repo)
+        assert refused.returncode != 0
+        assert "is missing" in refused.stderr
+
+    @pytest.mark.skipif(MAKE is None, reason="needs make")
+    def test_make_hooks_replaces_the_link_of_an_earlier_install(self, repo, tmp_path):
+        hook = _with_remote(repo, tmp_path)
+        # Into a worktree that was removed since: git skips it silently
+        hook.symlink_to(tmp_path / "gone" / "scripts" / "pre_push.py")
+        (repo / "scripts").mkdir()
+        shutil.copy(WRAPPER, repo / "scripts" / WRAPPER.name)
+
+        assert MAKE is not None
+        subprocess.run(  # noqa: S603
+            [MAKE, "-s", "-f", str(MAKEFILE), "-C", str(repo), "hooks"],
+            capture_output=True,
+            check=True,
+        )
+
+        assert not hook.is_symlink()
+        assert hook.read_bytes() == WRAPPER.read_bytes()
+        assert os.access(hook, os.X_OK)
+
+    @pytest.mark.skipif(MAKE is None, reason="needs make")
+    def test_make_hooks_updates_an_older_copy_of_the_wrapper(self, repo, tmp_path):
+        hook = _with_remote(repo, tmp_path)
+        hook.write_text("#!/bin/sh\n# kml-heatmap pre-push hook: older\nexit 1\n")
+        (repo / "scripts").mkdir()
+        shutil.copy(WRAPPER, repo / "scripts" / WRAPPER.name)
+
+        assert MAKE is not None
+        subprocess.run(  # noqa: S603
+            [MAKE, "-s", "-f", str(MAKEFILE), "-C", str(repo), "hooks"],
+            capture_output=True,
+            check=True,
+        )
+
+        assert hook.read_bytes() == WRAPPER.read_bytes()
+
+    @pytest.mark.skipif(MAKE is None, reason="needs make")
+    def test_make_hooks_keeps_a_hook_of_its_own(self, repo, tmp_path):
+        hook = _with_remote(repo, tmp_path)
+        hook.write_text("#!/bin/sh\nexit 0\n")
+        (repo / "scripts").mkdir()
+        shutil.copy(WRAPPER, repo / "scripts" / WRAPPER.name)
+
+        assert MAKE is not None
+        failed = subprocess.run(  # noqa: S603
+            [MAKE, "-s", "-f", str(MAKEFILE), "-C", str(repo), "hooks"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        assert failed.returncode != 0
+        assert "exists already" in failed.stdout + failed.stderr
+        assert hook.read_text() == "#!/bin/sh\nexit 0\n"

@@ -6,11 +6,15 @@ import struct
 import time
 import zlib
 from array import array
+from concurrent.futures import Future
+from concurrent.futures.process import BrokenProcessPool
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 from lxml import html as lxml_html
 
+import kml_heatmap.workers as workers_module
 from kml_heatmap import previews
 from kml_heatmap.previews import (
     PREVIEW_HEIGHT,
@@ -433,6 +437,32 @@ class TestRenderImages:
 
         with pytest.raises(RuntimeError, match=r"link preview f/b\.png"):
             render_images(jobs, tmp_path / "site")
+
+    @pytest.mark.parametrize("cannot_start", [True, False])
+    def test_a_pool_that_fails_draws_here(
+        self, tmp_path, monkeypatch, caplog, cannot_start
+    ):
+        """No semaphores in a sandbox, or a worker killed for its memory."""
+        monkeypatch.setattr(os, "process_cpu_count", lambda: 2)
+        if cannot_start:
+            pool = MagicMock(side_effect=OSError("no semaphores"))
+        else:
+            pool = MagicMock()
+            broken: Future[bytes] = Future()
+            broken.set_exception(BrokenProcessPool("a worker died"))
+            pool.return_value.submit.return_value = broken
+        monkeypatch.setattr(workers_module, "ProcessPoolExecutor", pool)
+        jobs = [
+            PreviewJob("f/a.png", (track_of(_circuit()),)),
+            PreviewJob("f/b.png", (track_of(_cross_country()),)),
+        ]
+
+        render_images(jobs, tmp_path / "site")
+
+        for name in ("f/a.png", "f/b.png"):
+            assert (tmp_path / "site" / name).read_bytes().startswith(b"\x89PNG")
+        warnings = [r.getMessage() for r in caplog.records]
+        assert sum("going on in this process" in w for w in warnings) == 1
 
     def test_an_unwritable_cache_still_draws(self, tmp_path, preview_cache):
         preview_cache.write_text("a file where the directory should be")

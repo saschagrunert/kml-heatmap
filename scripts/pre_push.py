@@ -222,13 +222,19 @@ def main() -> int:
     try:
         sys.path.insert(0, str(ROOT))
         return check(Path.cwd(), remote, sys.stdin.read().splitlines())
-    except (ImportError, SyntaxError, OSError, subprocess.CalledProcessError) as e:
-        print(
-            f"pre-push: cannot check the KML files ({e}); needs Python 3.14 as "
-            "python3. Refusing the push; `git push --no-verify` skips the check.",
-            file=sys.stderr,
-        )
-        return 1
+    except (ImportError, SyntaxError) as e:
+        reason = f"{e}; needs Python 3.14 as python3"
+    except subprocess.CalledProcessError as e:
+        stderr = e.stderr.decode(errors="replace").strip() if e.stderr else ""
+        reason = f"git failed: {stderr or e}"
+    except OSError as e:
+        reason = str(e)
+    print(
+        f"pre-push: cannot check the KML files ({reason}). Refusing the push; "
+        "`git push --no-verify` skips the check.",
+        file=sys.stderr,
+    )
+    return 1
 
 
 if __name__ == "__main__":
