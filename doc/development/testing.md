@@ -39,8 +39,10 @@ kept one to three points below what the suite reaches. Property-based tests use
 No test touches the network: `tests/conftest.py` fails any download of a tile
 loudly, the pipeline tests pass a tile source of their own
 (`create_progressive_heatmap(..., terrain=...)`, see `TileSource`), such as the
-flat model of `FlatTiles` in `tests/conftest.py`. A decoding pool that dies
-leaves the ground out with one warning instead of failing the build.
+flat model of `FlatTiles` in `tests/conftest.py`. A decoding pool that dies or
+cannot start makes the build decode the remaining tiles in its own process, with
+one warning; only a `MemoryError` there leaves the ground out, and that does not
+fail the build either.
 
 ## End-to-end tests
 

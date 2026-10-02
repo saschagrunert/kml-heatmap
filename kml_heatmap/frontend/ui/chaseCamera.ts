@@ -19,7 +19,7 @@ import {
   turnOf,
 } from "../utils/geometry";
 import { mapSize, REPLAY_CAMERA_MOVE } from "../utils/mapHelpers";
-import { lngLatOfMercator } from "../calculations/heatCloud";
+import { lngLatOfMercator, mercatorOf } from "../calculations/heatCloud";
 import {
   heightAtZoomFt,
   type GroundedHeight,
@@ -121,14 +121,6 @@ export function turnTime(speed: number): number {
     Math.max(CHASE_TURN_FLIGHT_S / speed, CHASE_TURN_S[0]),
     CHASE_TURN_S[1],
   );
-}
-
-/** Web Mercator, as a share of the world: x east, y south */
-function mercator(lng: number, lat: number): [x: number, y: number] {
-  return [
-    (lng + 180) / 360,
-    (1 - Math.log(Math.tan(Math.PI / 4 + (lat * RAD) / 2)) / Math.PI) / 2,
-  ];
 }
 
 /**
@@ -354,7 +346,7 @@ export class ChaseCamera {
     snap: boolean,
   ): boolean {
     const map = this.map;
-    const [lat, lon] = target.position;
+    const [lat] = target.position;
     const altitude = this.altitude(target);
     const seeding = this.seeding;
     if (seeding) {
@@ -411,7 +403,7 @@ export class ChaseCamera {
         this.pitch.value,
         distance,
       ) / world;
-    const [ax, ay] = mercator(lon, lat);
+    const [ax, ay] = mercatorOf(target.position);
     // Where the camera is to look: ahead of the airplane, at its height
     const cx = ax + ahead * Math.sin(b);
     const cy = ay - ahead * Math.cos(b);
@@ -419,7 +411,7 @@ export class ChaseCamera {
     if (seeding) {
       // From where the map looks now
       const center = map.getCenter();
-      const [mx, my] = mercator(center.lng, center.lat);
+      const [mx, my] = mercatorOf([center.lat, center.lng]);
       this.x = spring(mx - cx);
       this.y = spring(my - cy);
       this.z = spring(map.getCenterElevation() - altitude);
@@ -517,8 +509,8 @@ export class ChaseCamera {
     const zoom = map.getZoom();
     const { world, distance } = this.scale(zoom);
     const center = map.getCenter();
-    const [ax, ay] = mercator(lon, lat);
-    const [cx, cy] = mercator(center.lng, center.lat);
+    const [ax, ay] = mercatorOf(target.position);
+    const [cx, cy] = mercatorOf([center.lat, center.lng]);
     const up =
       (this.altitude(target) - map.getCenterElevation()) /
       ChaseCamera.metresPerPx(center.lat, world);
@@ -553,7 +545,7 @@ export class ChaseCamera {
     const metresPerPx = ChaseCamera.metresPerPx(center.lat, world);
     const b = map.getBearing() * RAD;
     const p = map.getPitch() * RAD;
-    const [cx, cy] = mercator(center.lng, center.lat);
+    const [cx, cy] = mercatorOf([center.lat, center.lng]);
     // The camera, and the ground at sea level along its line of sight
     const back = (distance * Math.sin(p)) / world;
     const ahead = ((elevation / metresPerPx) * Math.tan(p)) / world;

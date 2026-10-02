@@ -32,6 +32,8 @@ import {
 import { isTouchDevice } from "../utils/device";
 import { siteData } from "../state/siteData";
 import { airportLabelFeatures, setAirportLabelHover } from "./airportLabels";
+import { prefersReducedMotion } from "../utils/motion";
+import { listFlights } from "./airportFlights";
 
 /** The airports of the site, none until airports.json has loaded */
 function siteAirports(): Airport[] {
@@ -49,8 +51,6 @@ const LABEL_TOUCH_HIT_PADDING_PX = 6;
 
 /** Class on a marker whose label is under the pointer */
 const LABEL_HOVERED_CLASS = "is-label-hovered";
-import { prefersReducedMotion } from "../utils/motion";
-import { listFlights } from "./airportFlights";
 
 /** Room kept between an airport popup and the edge of the map, in pixels */
 const POPUP_PAN_PADDING_PX = 50;

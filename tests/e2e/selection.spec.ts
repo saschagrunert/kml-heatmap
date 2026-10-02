@@ -290,8 +290,8 @@ test.describe("Path Selection", () => {
     await centerOnAirport(page, airport!.name, 12);
     await focusAirportMarker(page, airport!.name);
 
-    // Leaflet reports Enter as keypress, not click: the popup opened but
-    // nothing was selected
+    // Under Leaflet, which reported Enter as a keypress rather than a
+    // click, the popup opened but nothing was selected
     await page.keyboard.press("Enter");
 
     await expect

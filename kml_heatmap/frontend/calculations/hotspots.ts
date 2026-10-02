@@ -19,14 +19,18 @@ import type { Airport, PathSegment } from "../types";
 import {
   calculateBearing,
   calculateDistance,
-  DEGREES_TO_RADIANS,
   METRES_PER_DEGREE,
   planarMetres,
   turnOf,
   type Coordinate,
 } from "../utils/geometry";
 import { formatDuration } from "../utils/duration";
-import { cellKey, heatWeight, type SegmentWeight } from "./heatLines";
+import {
+  cellKey,
+  columnWidth,
+  heatWeight,
+  type SegmentWeight,
+} from "./heatLines";
 
 /** Edge of a cell of the grid the heat is added up in, in metres */
 const HOTSPOT_CELL_M = 1000;
@@ -94,10 +98,7 @@ const ROW_DEGREES = HOTSPOT_CELL_M / METRES_PER_DEGREE;
 /** The row and the column of the cell a `[lat, lng]` point lies in */
 function cellOf([lat, lng]: Readonly<Coordinate>): [number, number] {
   const row = Math.floor(lat / ROW_DEGREES);
-  // A column is a cell wide in the middle of its row, as in heatLines.ts
-  const width =
-    ROW_DEGREES / Math.cos((row + 0.5) * ROW_DEGREES * DEGREES_TO_RADIANS);
-  return [row, Math.floor(lng / width)];
+  return [row, Math.floor(lng / columnWidth(row, ROW_DEGREES))];
 }
 
 /**

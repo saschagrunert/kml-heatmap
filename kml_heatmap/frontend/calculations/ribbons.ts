@@ -65,14 +65,14 @@ export function groundOffsetStepFt(widthZoom: number): number {
 const MITER_LIMIT = 3;
 
 /**
- * The two edges of a ribbon along a line of `[lat, lng]` points, as
- * `[lng, lat]`: every point moved half of RIBBON_WIDTH_PX to the left and to
- * the right of the line, at the zoom `widthZoom` (see ribbonWidthZoom). At a bend the offset follows the bisector of the two
- * segments, lengthened so the edges stay parallel to both (a mitred join),
- * and capped at MITER_LIMIT half widths for a hairpin. `before` and `after`
- * are the points the line continues from and to, outside it: a ribbon cut
- * into features at its height steps then joins its neighbours without a
- * gap.
+ * The two edges of a ribbon along a line of `[lat, lng]` points, as `[lng,
+ * lat]`: every point moved half of RIBBON_WIDTH_PX to the left and to the right
+ * of the line, at the zoom `widthZoom` (see ribbonWidthZoom). At a bend the
+ * offset follows the bisector of the two segments, lengthened so the edges stay
+ * parallel to both (a mitred join), and capped at MITER_LIMIT half widths for a
+ * hairpin. `before` and `after` are the points the line continues from and to,
+ * outside it: a ribbon cut into features at its height steps then joins its
+ * neighbours without a gap.
  */
 function ribbonEdges(
   points: readonly Coordinate[],

@@ -57,20 +57,19 @@ function fieldFt(
 }
 
 /**
- * The ground under every segment, in feet, by its index: what the build
- * sampled under a flight (PathSegment.ground_ft), where it has that for
- * every segment and `sampled` asks for it, smoothed as the relief the map
- * draws at the relief level `level` (see reliefPixelM), and as sampled
- * without one. The sampled ground follows the relief, so it is only the
- * ground where the relief is drawn: over a flat map a level flight above
- * it would climb and sink with every ridge it crossed, and over a relief
- * coarser than it with every ridge the relief leaves out. Otherwise from
- * the field a flight left to the one it
+ * The ground under every segment, in feet, by its index: what the build sampled
+ * under a flight (PathSegment.ground_ft), where it has that for every segment
+ * and `sampled` asks for it, smoothed as the relief the map draws at the relief
+ * level `level` (see reliefPixelM), and as sampled without one. The sampled
+ * ground follows the relief, so it is only the ground where the relief is
+ * drawn: over a flat map a level flight above it would climb and sink with
+ * every ridge it crossed, and over a relief coarser than it with every ridge
+ * the relief leaves out. Otherwise from the field a flight left to the one it
  * landed on, as its taxiing recorded them, and in between along the way it
- * flew, in proportion to the distance. The heights are the recorder's own,
- * so its taxiing is on the map whatever its altimeter was off by; and an
- * altitude that dips below the fields in flight, as a glitch of the
- * recorder does, takes no flight up with it.
+ * flew, in proportion to the distance. The heights are the recorder's own, so
+ * its taxiing is on the map whatever its altimeter was off by; and an altitude
+ * that dips below the fields in flight, as a glitch of the recorder does, takes
+ * no flight up with it.
  *
  * A flight that starts or ends in the air has a field at one end only, and
  * stands on it; one with neither, or without speeds, on the lowest part

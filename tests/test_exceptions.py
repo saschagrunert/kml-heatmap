@@ -21,19 +21,12 @@ class TestKMLParseError:
     def test_simple_parse_error(self):
         assert str(KMLParseError("Parse failed")) == "Parse failed"
 
-    def test_parse_error_with_file(self):
-        error = KMLParseError("Parse failed", file_path="test.kml")
-        assert str(error) == "Parse failed | File: test.kml"
-        assert error.file_path == "test.kml"
-
-    def test_parse_error_with_line(self):
-        error = KMLParseError("Parse failed", line_number=42)
-        assert str(error) == "Parse failed | Line: 42"
-        assert error.line_number == 42
-
-    def test_parse_error_with_file_and_line(self):
+    def test_parse_error_keeps_the_file_and_the_line_apart(self):
+        """The message does not repeat them: the caller names the file."""
         error = KMLParseError("Parse failed", file_path="test.kml", line_number=42)
-        assert str(error) == "Parse failed | File: test.kml | Line: 42"
+        assert str(error) == "Parse failed"
+        assert error.file_path == "test.kml"
+        assert error.line_number == 42
 
     def test_parse_error_inheritance(self):
         assert isinstance(KMLParseError("Test"), KMLHeatmapError)

@@ -2,11 +2,13 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
   AirplaneMarker,
   ReplayRenderer,
-  appendTrailSegment,
   findSegmentIndexAtTime,
+} from "../../../../kml_heatmap/frontend/ui/replayRenderer";
+import {
+  appendTrailSegment,
   trailFeatureCollection,
   truncateTrail,
-} from "../../../../kml_heatmap/frontend/ui/replayRenderer";
+} from "../../../../kml_heatmap/frontend/ui/replayTrail";
 import {
   AUTO_ZOOM_DURATION_MS,
   AUTO_ZOOM_SETTLE_MS,

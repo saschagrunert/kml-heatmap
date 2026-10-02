@@ -216,10 +216,6 @@ describe("MapApp", () => {
       delete window.mapApp;
     });
 
-    it("is exposed on window", () => {
-      expect(window.initMapApp).toBe(initMapApp);
-    });
-
     it("creates the app, draws the icons, binds actions and then initializes", async () => {
       const app = await initMapApp(config);
 

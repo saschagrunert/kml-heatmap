@@ -328,7 +328,7 @@ describe("airports feature", () => {
       expect(countries.countCountries(["EDAV Halle-Oppin"]).size).toBe(0);
     });
 
-    it("picks up airports.js when it arrives after the first lookup", () => {
+    it("picks up airports.json when it arrives after the first lookup", () => {
       siteData.airports = null;
       expect(countries.countCountries(["EDAV Halle-Oppin"]).size).toBe(0);
       siteData.airports = [

@@ -8,7 +8,11 @@ import { domCache } from "../utils/domCache";
 import { announceInRegion, announceStatus, showToast } from "../utils/toast";
 import { formatTime } from "../utils/replayFormatters";
 import { applyToggleButtonState } from "../utils/buttonState";
-import { focusModeControl, holdControls } from "./heldControls";
+import {
+  focusModeControl,
+  holdControls,
+  REPLAY_HELD_CONTROL_IDS,
+} from "./heldControls";
 import { setControlIcon } from "../utils/icons";
 import { AUTO_ZOOM_FOLLOW, MAP_SOURCES } from "../utils/constants";
 import { airplaneLiftPx, heightAtZoomFt } from "../calculations/airplaneLift";
@@ -33,11 +37,8 @@ import {
 import { segmentBounds } from "../utils/geometry";
 import { segmentsForPathIds } from "../calculations/statistics";
 
-import {
-  AirplaneMarker,
-  ReplayRenderer,
-  appendTrailSegment,
-} from "./replayRenderer";
+import { AirplaneMarker, ReplayRenderer } from "./replayRenderer";
+import { appendTrailSegment } from "./replayTrail";
 import { restingPitch, type ReplayState } from "./replayState";
 import type { SavedCamera } from "./chaseCamera";
 import type { PathSegment } from "../types";
@@ -73,18 +74,8 @@ export const CHASE_REDUCED_MOTION_MESSAGE =
  * behind it is not the replay's to count again.
  */
 const REPLAY_DISABLED_CONTROL_IDS = [
-  "heatmap-btn",
-  "airports-btn",
-  "aviation-btn",
-  "wrapped-btn",
-  "year-select",
-  "aircraft-select",
-  "isolate-btn",
-  "selection-clear-btn",
-  "reset-view-btn",
+  ...REPLAY_HELD_CONTROL_IDS,
   "replay-all-btn",
-  "cross-section-btn",
-  "hotspot-tour-btn",
 ];
 
 /** Custom property holding the replay panel's height, read by styles.css */
@@ -264,11 +255,6 @@ export class ReplayManager {
     }
   }
 
-  /** Whether the current selection can be replayed; the app decides */
-  canReplay(): boolean {
-    return this.app.canReplay();
-  }
-
   /**
    * Open replay, or close it. `moveCamera` false opens it where the map
    * is: the flight profile opens it at a moment of the flight, and seeks
@@ -286,7 +272,7 @@ export class ReplayManager {
     // a click whose bundle came late
     if (this.app.tourView) return;
 
-    if (!this.canReplay()) {
+    if (!this.app.canReplay()) {
       // Paths are picked on the map only in a colour layer: with nothing
       // selected, the list of the flights to pick one from opens with it
       const app = this.app;

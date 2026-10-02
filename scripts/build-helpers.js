@@ -85,7 +85,8 @@ export function glslLiterals(source, path = "shader.ts") {
 
 /**
  * `source` with the GLSL of its template literals tightened (tightenGlsl):
- * what the shader plugin of build.js hands esbuild for a ui/*Layer.ts.
+ * what the shader plugin of build.js hands esbuild for a ui/*Layer.ts or
+ * ui/*Shaders.ts.
  * @param {string} source
  * @param {string} [path]
  * @returns {string}

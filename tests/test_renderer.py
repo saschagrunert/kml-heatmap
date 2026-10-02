@@ -167,7 +167,7 @@ class TestCoordinateExtent:
         assert extent == CoordinateExtent(50.0, 52.0, 7.0, 8.0)
 
     def test_across_the_antimeridian_keeps_every_flight_in_view(self):
-        """Fiji: Leaflet draws 179°W at -179, so the box has to reach it.
+        """Fiji: the map draws 179°W at -179, so the box has to reach it.
 
         A box that wrapped around 180 (178.5 to 181) would open the map on
         the flights east of the antimeridian and leave the others 358° away.

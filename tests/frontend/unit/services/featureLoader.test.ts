@@ -74,10 +74,7 @@ describe("loadFeatures", () => {
   it("fetches the stylesheet alongside the bundle", async () => {
     await loadFeatures();
 
-    expect(loadStylesheet).toHaveBeenCalledWith(
-      FEATURES_CSS_URL,
-      expect.any(Number),
-    );
+    expect(loadStylesheet).toHaveBeenCalledWith(FEATURES_CSS_URL);
     // Relative to the page, which is not at the root of its host
     expect(FEATURES_CSS_URL.startsWith("./")).toBe(true);
   });
@@ -197,10 +194,7 @@ describe("loadWrapped", () => {
 
     expect(importWrapped).toHaveBeenCalledTimes(1);
     expect(loadStylesheet).toHaveBeenCalledTimes(1);
-    expect(loadStylesheet).toHaveBeenCalledWith(
-      WRAPPED_CSS_URL,
-      expect.any(Number),
-    );
+    expect(loadStylesheet).toHaveBeenCalledWith(WRAPPED_CSS_URL);
     expect(WRAPPED_CSS_URL.startsWith("./")).toBe(true);
     // Opening Wrapped says nothing about replay
     expect(importFeatures).not.toHaveBeenCalled();

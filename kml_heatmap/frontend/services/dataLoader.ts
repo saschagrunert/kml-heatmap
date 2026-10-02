@@ -4,9 +4,8 @@
  */
 
 import { logDebug, logError } from "../utils/logger";
-import { withTimeout } from "../utils/withTimeout";
 import type { YearDecoder } from "./yearDecoder";
-import { importWithRetry } from "./lazyImport";
+import { importWithRetry, timedImports } from "./lazyImport";
 import { siteData } from "../state/siteData";
 import type {
   KMLDataset,
@@ -284,12 +283,14 @@ export class DataLoader {
   private operation = 0;
   private fetchJson: NonNullable<DataLoaderOptions["fetchJson"]>;
   private fetchBytes: NonNullable<DataLoaderOptions["fetchBytes"]>;
-  private importYearTools: NonNullable<DataLoaderOptions["importYearTools"]>;
+  /**
+   * Imports the year tools (see importYearTools), each given up on after
+   * as long as a year file may take
+   */
+  private importYearTools: () => ReturnType<typeof importYearTools>;
   /** Started with the first year file, see getDecoder */
   private decoder: YearDecoder | null = null;
   private decoderRequest: Promise<YearDecoder> | null = null;
-  /** Imports of the year tools that were rejected */
-  private failedImports = 0;
   /** Set by destroy(); a load that ends after it has nobody to tell */
   private destroyed = false;
   /** The year files of the loading operation; emptied with the indicator */
@@ -312,7 +313,11 @@ export class DataLoader {
     this.loadingDepth = 0;
     this.fetchJson = options.fetchJson || fetchJson;
     this.fetchBytes = options.fetchBytes || fetchBytes;
-    this.importYearTools = options.importYearTools || importYearTools;
+    this.importYearTools = timedImports(
+      options.importYearTools || importYearTools,
+      LOAD_TIMEOUT_MS,
+      "Timed out loading " + YEAR_WORKER_BUNDLE,
+    );
     this.showLoading = options.showLoading || (() => {});
     this.hideLoading = options.hideLoading || (() => {});
     this.onLoadError = options.onLoadError || (() => {});
@@ -553,7 +558,7 @@ export class DataLoader {
    */
   getDecoder(): Promise<YearDecoder> {
     if (this.decoder) return Promise.resolve(this.decoder);
-    this.decoderRequest ??= this.importWithTimeout()
+    this.decoderRequest ??= this.importYearTools()
       .then(
         ({ createYearDecoder }) => {
           // Not started for an app that ended while the import was under way
@@ -570,22 +575,6 @@ export class DataLoader {
         this.decoderRequest = null;
       });
     return this.decoderRequest;
-  }
-
-  /**
-   * importYearTools, given up on after as long as a year file may take: an
-   * import cannot be aborted. One that merely timed out is not counted as
-   * failed, since it may still finish, and the same URL then gets the module.
-   */
-  private importWithTimeout(): ReturnType<typeof importYearTools> {
-    return withTimeout(
-      this.importYearTools(this.failedImports).catch((error: unknown) => {
-        this.failedImports++;
-        throw error;
-      }),
-      LOAD_TIMEOUT_MS,
-      "Timed out loading " + YEAR_WORKER_BUNDLE,
-    );
   }
 
   /**

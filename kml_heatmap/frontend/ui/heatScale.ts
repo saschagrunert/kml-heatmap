@@ -27,7 +27,7 @@
  *   the hand-over changes nothing here.
  * - The heat cloud of the 3D view fills its colours so that a lone cruise
  *   at full strength glows as the heatmap does at that density (see
- *   CLOUD_COLOUR in ui/heatCloudLayer.ts). It draws its heat with the gain
+ *   CLOUD_COLOUR in ui/heatCloudShaders.ts). It draws its heat with the gain
  *   of its look and an exposure of its own that follows its busiest cells,
  *   and hands their product to the store where the map comes to rest
  *   (heatCloudScale, see ui/heatCloud.ts).

@@ -175,7 +175,6 @@ interface MockManagers {
   loadStats: Mock;
   replayManager: {
     state: ReplayState;
-    canReplay: Mock;
     updateReplayButtonState: Mock;
     toggleReplay: Mock;
     playReplay: Mock;
@@ -271,7 +270,6 @@ function createMockManagers(): MockManagers {
   const replayState = new ReplayState();
   const replayManager = {
     state: replayState,
-    canReplay: vi.fn(() => false), // replaced below once the app exists
     updateReplayButtonState: vi.fn(),
     toggleReplay: vi.fn(),
     playReplay: vi.fn(),
@@ -519,10 +517,6 @@ function buildMockApp(
   defineStoreAccessors(app);
 
   const mockApp = app as unknown as MockApp;
-  // The stub manager answers the way the real one does: by asking the app
-  mockApp.replayManager.canReplay.mockImplementation((): boolean =>
-    Boolean(mockApp.canReplay()),
-  );
   // Marks the buttons of the flight lists the way PathSelection does, from
   // the app's selection
   mockApp.pathSelection.markSelected.mockImplementation(

@@ -142,14 +142,14 @@ export interface SmoothOptions {
  * as a smooth curve through its points: the logged positions stay where
  * they are, and a segment where the flight turns is cut into more points
  * along a spline through its neighbours; its heights change no faster
- * than MAX_SLOPE allows. The whole of a flight is smoothed at once, so the ribbons cut from it at its colour and height steps meet
- * in the same points and fit together without a seam.
+ * than MAX_SLOPE allows. The whole of a flight is smoothed at once, so the
+ * ribbons cut from it at its colour and height steps meet in the same
+ * points and fit together without a seam.
  *
- * `turnStepDeg` is the turn per point of the curve. With `ground`, the
- * ground under each point, `heights` are altitudes, and
- * are smoothed and held to the slope as such before the ground is taken
- * off: a flight level over a ridge stays level, where its height above the
- * relief changes faster than any climb.
+ * `turnStepDeg` is the turn per point of the curve. With `ground`, the ground
+ * under each point, `heights` are altitudes, and are smoothed and held to the
+ * slope as such before the ground is taken off: a flight level over a ridge
+ * stays level, where its height above the relief changes faster than any climb.
  */
 export function smoothLine(
   points: readonly Coordinate[],

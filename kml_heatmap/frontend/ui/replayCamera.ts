@@ -292,8 +292,9 @@ class UserMapMovement {
     const signal = this.listening.signal;
     const press = (e: Event): void => {
       // The primary button only. The right one turns the map, which the
-      // `movestart` of the turn says, and the context menu of a right click swallows the `mouseup` on
-      // Linux and macOS, which would leave the press on for good.
+      // `movestart` of the turn says, and the context menu of a right
+      // click swallows the `mouseup` on Linux and macOS, which would leave
+      // the press on for good.
       if (e instanceof MouseEvent && e.button !== 0) return;
       this.pressed = true;
     };

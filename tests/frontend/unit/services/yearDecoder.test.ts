@@ -303,7 +303,7 @@ describe("createYearDecoder", () => {
 
       await expectDrawn(await owed);
       expect(logError).toHaveBeenCalledWith(
-        "Year worker failed over a heat:",
+        "Year worker could not draw the heat:",
         "out of memory",
       );
       expect(worker.terminate).not.toHaveBeenCalled();

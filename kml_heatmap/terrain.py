@@ -58,12 +58,12 @@ from . import __version__
 from .cache import CACHE_DIR, atomic_bytes_write
 from .constants import METERS_TO_FEET
 from .exceptions import TerrainUnavailableError
-from .geometry import METRES_PER_DEGREE, TERRAIN_MAX_LATITUDE, planar_metres
+from .geometry import TERRAIN_MAX_LATITUDE, planar_metres
 from .logger import logger
 from .png import PNG_SIGNATURE, PngError, chunks
 from .segment_codec import ALTITUDE, GROUND_STEP, LAT, LON, SPEED
 from .types import COORDINATE_DECIMALS
-from .workers import default_worker_count
+from .workers import default_worker_count, init_worker
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping, Sequence
@@ -72,12 +72,10 @@ if TYPE_CHECKING:
     from .types import FlightPath, SegmentRow
 
 __all__ = [
-    "METRES_PER_DEGREE",
     "REQUIRE_TERRAIN_ENV",
     "TERRAIN_CACHE_DIR",
     "TERRAIN_ZOOM",
     "DecodeFailedError",
-    "PngError",
     "TerrariumTiles",
     "TileKey",
     "TileSource",
@@ -85,7 +83,6 @@ __all__ = [
     "elevations_by_coordinate",
     "ground_profile_ft",
     "sample_path_elevations",
-    "terrarium_elevation",
 ]
 
 # The zoom level the ground is sampled at. Its pixels are about 100 m across
@@ -97,6 +94,9 @@ TERRAIN_ZOOM = 10
 TILE_SIZE = 256
 TILE_URL = "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png"
 TERRAIN_CACHE_DIR = CACHE_DIR / "terrain"
+# A temp file of the cache this old is left from a write that never ended
+# (see TerrariumTiles.remove_stale_temp_files)
+STALE_TEMP_SECONDS = 24 * 3600
 
 # Downloads in flight at once: S3 answers each in a fraction of a second, so
 # a few overlap the latency without hammering the host
@@ -207,7 +207,7 @@ MAX_PNG_SIDE = 4096
 
 
 class DecodeFailedError(RuntimeError):
-    """The tiles could not be decoded at all: the decoding pool died."""
+    """The tiles could not be decoded at all, not even in this process."""
 
 
 def _unfilter(raw: bytes, width: int, height: int, bpp: int) -> bytearray:  # noqa: C901
@@ -339,16 +339,6 @@ def decode_png(data: bytes) -> tuple[int, int, int, bytearray]:
     return width, height, channels, _unfilter(raw, width, height, channels)
 
 
-def terrarium_elevation(red: int, green: int, blue: int) -> float:
-    """The elevation in metres a Terrarium pixel encodes."""
-    return red * 256 + green + blue / 256 - 32768
-
-
-def decode_tile_pixels(data: bytes, indices: Sequence[int]) -> list[float]:
-    """The elevations of the pixels at ``indices`` of a Terrarium tile."""
-    return list(_elevations_at(_decode_planes(data), indices))
-
-
 # The decoded pixels of a tile, next to its PNG: a header, then the red,
 # the green and the blue value of every pixel, one plane after the other,
 # compressed with zstd. Planes compress better than the PNG itself (the red
@@ -429,7 +419,10 @@ def _keep_pixel_planes(path: Path, data: bytes, planes: bytes) -> None:
 
 
 def _elevations_at(planes: bytes, indices: Sequence[int]) -> array[float]:
-    """``terrarium_elevation`` of the pixels at ``indices`` of the planes."""
+    """The elevations in metres of the pixels at ``indices`` of the planes.
+
+    A Terrarium pixel encodes red * 256 + green + blue / 256 - 32768.
+    """
     green = TILE_SIZE * TILE_SIZE
     blue = 2 * green
     return array(
@@ -505,6 +498,25 @@ class TerrariumTiles:
     def path(self, tile: TileKey) -> Path:
         """Where a tile is kept."""
         return self.cache_dir / f"{tile.z}-{tile.x}-{tile.y}.png"
+
+    def remove_stale_temp_files(self) -> int:
+        """Remove the temp files of writes a killed build left behind.
+
+        A tile and its pixels are written through a temp file next to them
+        (see ``cache.atomic_bytes_write``), which a build killed on the way
+        leaves in the cache for good: the tiles themselves are never pruned.
+        One older than ``STALE_TEMP_SECONDS`` is no write still going on.
+        Returns how many went.
+        """
+        oldest = time.time() - STALE_TEMP_SECONDS
+        removed = 0
+        # A missing or unreadable directory globs to nothing
+        for entry in list(self.cache_dir.glob(".*.tmp")):
+            with contextlib.suppress(OSError):
+                if entry.stat().st_mtime < oldest:
+                    entry.unlink()
+                    removed += 1
+        return removed
 
     def _connection(self, host: str) -> HTTPSConnection:
         """This thread's connection to ``host``, opened when there is none.
@@ -705,6 +717,7 @@ class TerrariumTiles:
         self, wanted: Mapping[TileKey, Sequence[int]]
     ) -> dict[TileKey, Sequence[float]]:
         """Fetch what is missing, then decode the pixels of every tile."""
+        self.remove_stale_temp_files()
         self.fetch(wanted)
         cached = [
             (tile, self.path(tile)) for tile in wanted if self.path(tile).is_file()
@@ -722,10 +735,14 @@ class TerrariumTiles:
             decoded = list(map(_decode_cached_tile, paths, indices, strict=True))
         else:
             workers = min(default_worker_count(), len(cached))
-            # A worker killed for its memory, or a pool that cannot start
-            # (no semaphores in a sandbox), must not fail the build
+            # The workers log at the parent's level, so --debug names the
+            # tiles they could not use
             try:
-                with ProcessPoolExecutor(max_workers=workers) as pool:
+                with ProcessPoolExecutor(
+                    max_workers=workers,
+                    initializer=init_worker,
+                    initargs=(logger.getEffectiveLevel(),),
+                ) as pool:
                     decoded = list(
                         pool.map(
                             _decode_cached_tile,
@@ -735,12 +752,34 @@ class TerrariumTiles:
                         )
                     )
             except (BrokenProcessPool, OSError) as e:
-                raise DecodeFailedError(str(e) or type(e).__name__) from e
+                # A worker killed for its memory, or a pool that cannot
+                # start (no semaphores in a sandbox), must not fail the
+                # build: the tiles the workers got through kept their
+                # pixels, so the rest are decoded here, one after the other.
+                # That risks the parent being killed for its memory in
+                # turn, for keeping the ground; one tile at a time takes
+                # far less than the pool did
+                logger.warning(
+                    "Terrain: the decoding pool failed (%s); decoding the "
+                    "tiles in this process",
+                    str(e) or type(e).__name__,
+                )
+                decoded = self._decode_here(paths, indices)
         return {
             tile: values
             for (tile, _), values in zip(cached, decoded, strict=True)
             if values is not None
         }
+
+    @staticmethod
+    def _decode_here(
+        paths: Sequence[Path], indices: Sequence[Sequence[int]]
+    ) -> list[array[float] | None]:
+        """Decode the tiles in this process, after the pool failed."""
+        try:
+            return list(map(_decode_cached_tile, paths, indices, strict=True))
+        except MemoryError as e:
+            raise DecodeFailedError(str(e) or type(e).__name__) from e
 
 
 # --- Sampling -----------------------------------------------------------
@@ -931,8 +970,8 @@ def sample_path_elevations(
     rows carry. A point the tiles do not cover is NaN, and a path none of
     whose points they cover is left out. Logs one summary, and one warning
     when tiles were missing; never raises for a tile it could not get,
-    unless ``KML_HEATMAP_REQUIRE_TERRAIN`` is "1": then a missing tile or a
-    decoding pool that died raises ``TerrainUnavailableError``.
+    unless ``KML_HEATMAP_REQUIRE_TERRAIN`` is "1": then a missing tile, or
+    tiles that cannot be decoded at all, raise ``TerrainUnavailableError``.
     """
     started = time.monotonic()
     required = os.environ.get(REQUIRE_TERRAIN_ENV) == "1"

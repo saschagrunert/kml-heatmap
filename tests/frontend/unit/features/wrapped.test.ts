@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { cwd } from "node:process";
 import {
   REFERENCE_DISTANCES,
-  calculateYearStats,
+  calculateYearStats as yearStatsOf,
   findClosestReferenceDistance,
   findFurthestAirport,
   generateFunFacts,
@@ -123,6 +123,28 @@ describe("wrapped feature", () => {
       time: 4200,
     }),
   ];
+
+  /**
+   * calculateYearStats with the statistics of the same filter, as Wrapped
+   * has them from the panel
+   */
+  function calculateYearStats(
+    pathInfo: PathInfo[] | null,
+    segments: PathSegment[],
+    year: number | string,
+    models = {},
+    aircraft = "all",
+    preFiltered?: { paths: PathInfo[]; segments: PathSegment[] },
+    filtered = calculateFilteredStatistics({
+      pathInfo: pathInfo ?? [],
+      segments,
+      year: String(year),
+      aircraft,
+      ...(preFiltered && { preFiltered }),
+    }),
+  ) {
+    return yearStatsOf(pathInfo, year, models, aircraft, preFiltered, filtered);
+  }
 
   describe("calculateYearStats", () => {
     it("calculates stats for specific year", () => {

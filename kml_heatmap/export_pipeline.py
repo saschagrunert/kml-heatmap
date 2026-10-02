@@ -100,10 +100,9 @@ def build_path_info(
     a name holding an ICAO code, or an airport of a route of more than one
     word, at a real start or landing. A name that is no route ("EDDS" for a
     local flight) is the start of the path when it is one of the markers,
-    since
-    ``airports.deduplicate_airports`` puts the start of every path on the
-    map under its name. None keeps every route name (for callers without
-    airports) and no other.
+    since ``airports.deduplicate_airports`` puts the start of every path on
+    the map under its name. None keeps every route name (for callers
+    without airports) and no other.
     """
     # The names match the airport markers of airports.json exactly, which
     # have their dates taken out the same way
@@ -213,7 +212,9 @@ def process_path_segments(
     implausible values) is exported as 0, which the frontend reads as "no
     speed" rather than as standing still. Times stay at a tenth of a second:
     loggers write fixes a fraction of a second apart as often as whole ones,
-    and the replay moves the airplane by them.
+    and the replay moves the airplane by them. A row's time is when its
+    segment starts, while its point is where it ends: the frontend's flight
+    clock reads them so (see ``types.SegmentRow``).
 
     Returns:
         Tuple of (start point, segment rows). The start point is empty when
@@ -245,18 +246,16 @@ def process_path_segments(
         if end == previous:
             continue
 
+        # Flight paths only carry points with a known altitude (see
+        # types.FlightPath). Were both missing, the row would keep the
+        # altitude of the one before rather than be skipped: a skipped row
+        # would break the end-to-start chain the row format relies on.
         altitudes = [alt for alt in (p1.alt, p2.alt) if alt is not None]
         if altitudes:
             avg_alt_m = sum(altitudes) / len(altitudes)
             altitude_ft = (
                 round(avg_alt_m * METERS_TO_FEET / ALTITUDE_STEP) * ALTITUDE_STEP
             )
-        else:
-            # Flight paths only carry points with a known altitude (see
-            # types.FlightPath), so this is unreachable in practice. Carry the
-            # previous altitude over instead of skipping the segment: a skipped
-            # row would break the end-to-start chain the row format relies on.
-            logger.debug("Segment without altitude at index %d", segment.index)
 
         groundspeed_knots = _segment_groundspeed(
             segment, window, path_distance_km, path_duration_seconds

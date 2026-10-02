@@ -30,7 +30,8 @@ export { followTerrain } from "./ui/terrain";
 export { followSatellite } from "./ui/satellite";
 export { followHeatCloud, prepareHeatCloud } from "./ui/heatCloud";
 export { followSelectionRibbons } from "./ui/selectionRibbons";
-export { ReplayAllPlayer, toggleReplayAll } from "./ui/replayAll";
+export { ReplayAllPlayer } from "./ui/replayAllPlayer";
+export { toggleReplayAll } from "./ui/replayAll";
 export { followFlightProfile } from "./ui/flightProfile";
 export { toggleCrossSection } from "./ui/crossSection";
 export {

@@ -525,9 +525,9 @@ a refused output directory, 1 when the build failed, 130 when interrupted.
         "--cache-dir",
         metavar="DIR",
         help=(
-            "where the airport database, the elevation tiles and the parse "
-            "cache are kept (default: $KML_HEATMAP_CACHE_DIR, else "
-            "~/.cache/kml-heatmap)"
+            "where the airport database, the elevation tiles, the link "
+            "preview images and the parse cache are kept (default: "
+            "$KML_HEATMAP_CACHE_DIR, else ~/.cache/kml-heatmap)"
         ),
     )
     network.add_argument(

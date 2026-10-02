@@ -353,35 +353,35 @@ class TestAltitudeGain:
 
 class TestSegmentGroundspeed:
     def test_windowed_speed_used_when_available(self):
-        seg = SegmentSpeed(0, 1000.0, 0.0, 100.0, 1.0, 30.0, valid=True)
+        seg = SegmentSpeed(1000.0, 0.0, 100.0, 1.0, 30.0, valid=True)
         speed = _segment_groundspeed(seg, SpeedWindow([seg]), 10.0, 0.0)
         assert speed == pytest.approx(1.0 / 1.852 / 30.0 * 3600, rel=1e-6)
 
     def test_fallback_when_no_timestamp(self):
-        seg = SegmentSpeed(0, None, None, None, 1.0, 0.0)
+        seg = SegmentSpeed(None, None, None, 1.0, 0.0)
         speed = _segment_groundspeed(seg, SpeedWindow([]), 10.0, 600.0)
         assert speed == pytest.approx(1.0 / 1.852 / 60.0 * 3600, rel=1e-6)
 
     def test_unknown_when_nothing_known(self):
-        seg = SegmentSpeed(0, None, None, None, 1.0, 0.0)
+        seg = SegmentSpeed(None, None, None, 1.0, 0.0)
         assert _segment_groundspeed(seg, SpeedWindow([]), 10.0, 0.0) is None
 
     def test_measured_standstill_is_not_replaced_by_the_average(self):
-        seg = SegmentSpeed(0, 1000.0, 0.0, 0.0, 0.0, 60.0, valid=True)
+        seg = SegmentSpeed(1000.0, 0.0, 0.0, 0.0, 60.0, valid=True)
         assert _segment_groundspeed(seg, SpeedWindow([seg]), 10.0, 600.0) == 0.0
 
     def test_a_segment_longer_than_the_window_is_its_own_speed(self):
         """A logger that writes a fix every few minutes: nothing else is in
         the window around a segment."""
-        seg = SegmentSpeed(0, 1000.0, 0.0, 90.0, 5.0, 300.0, valid=True)
+        seg = SegmentSpeed(1000.0, 0.0, 90.0, 5.0, 300.0, valid=True)
         window = SpeedWindow([seg])
         assert len(window) == 0
         assert _segment_groundspeed(seg, window, 100.0, 600.0) == 90.0
 
     def test_a_gap_takes_the_speed_before_it(self):
         """The straight line over a lost fix says little about the speed."""
-        before = SegmentSpeed(0, 940.0, 0.0, 100.0, 3.087, 60.0, valid=True)
-        gap = SegmentSpeed(1, 1000.0, 60.0, 30.0, 1.852, 120.5, valid=True)
+        before = SegmentSpeed(940.0, 0.0, 100.0, 3.087, 60.0, valid=True)
+        gap = SegmentSpeed(1000.0, 60.0, 30.0, 1.852, 120.5, valid=True)
         speed = _segment_groundspeed(gap, SpeedWindow([before, gap]), 5.0, 180.5)
         assert speed == pytest.approx(100.0, rel=1e-3)
 

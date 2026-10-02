@@ -25,13 +25,9 @@ const stylesheetRequests = new Map<string, Promise<void>>();
  * stylesheet of a later, successful one back out of the page with it.
  *
  * @param url - URL to load
- * @param timeoutMs - Time after which the load is given up on
  * @returns Promise that resolves once the stylesheet applies
  */
-export function loadStylesheet(
-  url: string,
-  timeoutMs: number = STYLESHEET_TIMEOUT_MS,
-): Promise<void> {
+export function loadStylesheet(url: string): Promise<void> {
   const inFlight = stylesheetRequests.get(url);
   if (inFlight) return inFlight;
 
@@ -60,7 +56,7 @@ export function loadStylesheet(
     link.onerror = () => giveUp("Failed to load stylesheet");
     const timer = setTimeout(
       () => giveUp("Timed out loading stylesheet"),
-      timeoutMs,
+      STYLESHEET_TIMEOUT_MS,
     );
     document.head.appendChild(link);
   });

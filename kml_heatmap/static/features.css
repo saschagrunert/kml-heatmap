@@ -1132,7 +1132,8 @@ body.cross-section-open .toast-stack {
   list-style: none;
 }
 /* The pulses rest under reduced motion, and the chevrons show the way
-   flown in their place (see ui/heatCloudLayer.ts) */
+   flown in their place (see ui/heatCloudLayer.ts and markStrength in
+   ui/heatCloudShaders.ts) */
 #heat-legend .heat-cloud-still {
   display: none;
 }

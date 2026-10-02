@@ -104,20 +104,6 @@ describe("ReplayManager activation", () => {
     });
   });
 
-  describe("canReplay", () => {
-    it("requires exactly one selected path with timing data", () => {
-      mockApp.selectedPathIds = new Set([1]);
-      expect(replayManager.canReplay()).toBe(true);
-
-      mockApp.selectedPathIds = new Set([1, 2]);
-      expect(replayManager.canReplay()).toBe(false);
-
-      mockApp.selectedPathIds = new Set([1]);
-      mockApp.hasTimingData = false;
-      expect(replayManager.canReplay()).toBe(false);
-    });
-  });
-
   describe("toggleReplay", () => {
     it("returns early if replay-controls panel not found", () => {
       el("replay-controls").remove();

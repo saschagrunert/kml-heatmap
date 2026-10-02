@@ -167,7 +167,7 @@ build ships it (`tightenGlsl`, `tightenShaders`), the sizes of the files, the
 check that the build wrote only the five bundles the site publishes
 (`assertExpectedOutputs`), the composition of a bundle and the flags of the
 command. `tests/frontend/unit/glsl.test.ts` holds the tightened shaders of every
-`ui/*Layer.ts` to the same tokens as written, and
+`ui/*Layer.ts` and `ui/*Shaders.ts` to the same tokens as written, and
 `tests/frontend/unit/buildHelpers.test.ts` the rest.
 
 After the sizes, a production build prints what each bundle is made of, by kind

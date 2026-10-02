@@ -47,7 +47,6 @@ class SegmentSpeed:
     ``speed`` is None for every other segment.
     """
 
-    index: int
     timestamp: float | None
     relative_time: float | None
     speed: float | None
@@ -66,7 +65,7 @@ def extract_segment_speeds(
     """
     segment_speeds: list[SegmentSpeed] = []
 
-    for i, (p1, p2) in enumerate(pairwise(path)):
+    for p1, p2 in pairwise(path):
         segment_distance_km = haversine_distance(p1.lat, p1.lon, p2.lat, p2.lon)
 
         instant_speed: float | None = None
@@ -92,7 +91,6 @@ def extract_segment_speeds(
 
         segment_speeds.append(
             SegmentSpeed(
-                index=i,
                 timestamp=timestamp,
                 relative_time=relative_time,
                 speed=instant_speed,

@@ -70,7 +70,7 @@ import {
 } from "../utils/geometry";
 import { announceStatus } from "../utils/toast";
 import { whenIdle } from "../utils/whenIdle";
-import { cloudReachPx } from "./heatCloudLayer";
+import { cloudReachPx } from "./heatCloudShaders";
 
 /** The class of the box, styled in features.css */
 const READOUT_CLASS = "cloud-readout";

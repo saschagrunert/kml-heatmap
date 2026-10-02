@@ -140,9 +140,10 @@ class TestParseKmlCoordinates:
 
     def test_parse_error_names_the_line(self, tmp_path):
         kml = "<?xml version='1.0'?>\n<kml>\n<Document>\n<Placemark>\n</kml>"
-        with pytest.raises(KMLParseError, match="Line: 5") as excinfo:
+        with pytest.raises(KMLParseError, match="line 5") as excinfo:
             parse_kml_coordinates(_write(tmp_path, "bad.kml", kml))
         assert excinfo.value.line_number == 5
+        assert "| File:" not in str(excinfo.value)
 
     def test_missing_file_raises(self, tmp_path):
         with pytest.raises(KMLParseError, match="I/O error"):

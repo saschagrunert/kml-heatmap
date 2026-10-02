@@ -2,7 +2,7 @@
  * The data the page opens on is preloaded, and fetched once.
  *
  * The template asks for the two index files and the latest year before
- * Leaflet and the bundle have run. The loader's fetch() then has to take
+ * MapLibre and the bundle have run. The loader's fetch() then has to take
  * those responses instead of downloading the largest file of the page a
  * second time, which it only does when the preload and the fetch agree on
  * the URL and on the request mode (the `crossorigin` on the link).

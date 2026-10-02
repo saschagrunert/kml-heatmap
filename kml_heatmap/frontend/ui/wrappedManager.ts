@@ -577,14 +577,11 @@ export class WrappedManager {
     // so a filter it already computed is not walked again here
     const data = this.app.currentData;
     const view = this.filterView();
-    const preFiltered = {
-      paths: view?.paths ?? [],
-      segments: view?.segments() ?? [],
-    };
+    const preFiltered = { paths: view?.paths ?? [] };
+    const segments = view?.segments() ?? [];
 
     const yearStats = calculateYearStats(
       data?.path_info ?? [],
-      data?.path_segments ?? [],
       year,
       this.app.aircraftModels,
       aircraft,
@@ -616,7 +613,7 @@ export class WrappedManager {
       yearStats,
       filteredStats,
       year,
-      this.app.dataManager.newAreaKm2(year, preFiltered.segments),
+      this.app.dataManager.newAreaKm2(year, segments),
     );
 
     const funFactsHtml = generateFunFactsHtml(funFacts);

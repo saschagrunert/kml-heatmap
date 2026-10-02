@@ -18,6 +18,7 @@ import type { PathSegment } from "../types";
 import {
   DEGREES_TO_RADIANS,
   METRES_PER_DEGREE,
+  turnOf,
   type Coordinate,
 } from "../utils/geometry";
 import { heatWeight } from "./heatLines";
@@ -71,19 +72,13 @@ export interface LineFrame {
   uy: number;
 }
 
-/** Degrees of longitude from `from` to `to`, the short way round */
-function eastDegrees(from: number, to: number): number {
-  const degrees = to - from;
-  return degrees - 360 * Math.round(degrees / 360);
-}
-
 /** The plane of a line from `start` to `end` */
 export function lineFrame(start: Coordinate, end: Coordinate): LineFrame {
   const kx =
     METRES_PER_DEGREE *
     Math.cos(((start[0] + end[0]) / 2) * DEGREES_TO_RADIANS);
   const ky = METRES_PER_DEGREE;
-  const x = eastDegrees(start[1], end[1]) * kx;
+  const x = turnOf(start[1], end[1]) * kx;
   const y = (end[0] - start[0]) * ky;
   const lengthM = Math.hypot(x, y);
   return {
@@ -104,7 +99,7 @@ export function toFrame(
   frame: LineFrame,
   [lat, lon]: Coordinate,
 ): [along: number, across: number] {
-  const x = eastDegrees(frame.start[1], lon) * frame.kx;
+  const x = turnOf(frame.start[1], lon) * frame.kx;
   const y = (lat - frame.start[0]) * frame.ky;
   return [x * frame.ux + y * frame.uy, y * frame.ux - x * frame.uy];
 }

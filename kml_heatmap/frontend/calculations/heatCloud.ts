@@ -37,6 +37,7 @@ import { overlaps, type Box } from "../utils/viewBox";
 import { heatWeight, CRUISE_SPEED_MS, type SegmentWeight } from "./heatLines";
 import { liftExaggeration } from "./lift";
 import { chainPieces, flightClockOf } from "./flightClock";
+import { cellTable } from "./cellTable";
 import { markStretches } from "./cloudCells";
 import type { SmoothedFlights } from "./smoothing";
 
@@ -45,7 +46,7 @@ import type { SmoothedFlights } from "./smoothing";
  * in the middle of the zoom level the cloud is cut for (see cloudPoints):
  * closer ones are merged into the step between the ones kept, and their
  * heat with it. The glow of a step is wider (see CLOUD_STOPS in
- * ui/heatCloudLayer.ts), so a step is a chord of the curve that no one
+ * ui/heatCloudShaders.ts), so a step is a chord of the curve that no one
  * tells from it, and zoomed out a year's flights are a few thousand steps
  * instead of a hundred thousand. Closer in the level is the zoom's, so the
  * cloud follows a taxiway or the corner of a circuit as the flat heat
@@ -65,7 +66,7 @@ const CLOUD_HEIGHT_STEP_PX = 1;
  * stretch, as long as it strays from none of the points on the way by more
  * than this many pixels of the level: across, in height or on the ground
  * under it, a seventh of the glow zoomed out and under half of it close
- * in, where it is narrowest (see CLOUD_STOPS in ui/heatCloudLayer.ts).
+ * in, where it is narrowest (see CLOUD_STOPS in ui/heatCloudShaders.ts).
  * Every stretch is a quad that reaches three glows past either end, and
  * those of steps of a few pixels lay ten deep along every track: on a
  * phone's screen that was over 100 million pixels of glow a frame.
@@ -75,7 +76,7 @@ export const CLOUD_MERGE_PX = 1;
 /**
  * How far from a point merged over the pulses may run by the time it was
  * flown at, in pixels of the level: a pulse fades along 90 of them (see
- * CLOUD_FLOW_SPACING_PX in ui/heatCloudLayer.ts), and the layer runs them
+ * CLOUD_FLOW_SPACING_PX in ui/heatCloudShaders.ts), and the layer runs them
  * along a stretch at an even speed.
  */
 const CLOUD_MERGE_TIME_PX = 3;
@@ -105,7 +106,7 @@ const MIN_HEAT_S = 0.01;
  * The cells the heat is added up in for the exposure of the cloud (see
  * CloudPoints.busiest), this many pixels wide in the middle of the relief
  * level: about as wide as the glow of a stretch (see CLOUD_STOPS in
- * ui/heatCloudLayer.ts), so the heat of a cell is about what glows on its
+ * ui/heatCloudShaders.ts), so the heat of a cell is about what glows on its
  * brightest pixels. The directions of the stretches are added up in cells
  * as wide at the level the cloud is cut for (see markStretches), so the
  * flights of one track share them and those of a track a glow away do not.
@@ -159,7 +160,7 @@ export interface CloudPoints {
    * added up in, the one CLOUD_BUSIEST_PERCENTILE of the others are
    * below, its heat over its width, in seconds per metre; 0 without any.
    * The layer sets its exposure by it (see cloudExposure in
-   * ui/heatCloudLayer.ts).
+   * ui/heatCloudShaders.ts).
    */
   busiest: number;
 }
@@ -338,56 +339,6 @@ function reaches(box: Box, points: readonly Readonly<Coordinate>[]): boolean {
 }
 
 /**
- * The heat of the steps of the cloud added up by cell (see CLOUD_CELL_PX),
- * in a table of its own: in a Map, keyed by a number made of the column
- * and the row, the cells were a third of the work of cloudPoints. Most
- * steps go into the cell of the step before.
- */
-function cellHeat(): {
-  add(column: number, row: number, heat: number): void;
-  heats(): Float64Array;
-} {
-  let columns = new Int32Array(1 << 12);
-  let rows = new Int32Array(1 << 12);
-  /** The heat of each cell, none where there is no cell */
-  let heats = new Float64Array(1 << 12);
-  let size = 0;
-  /** Where the cell added to last is in the table, -1 for none */
-  let last = -1;
-  /** Add `heat`, more than none, to the cell at `column` and `row` */
-  const add = (column: number, row: number, heat: number): void => {
-    let k = last;
-    if (k < 0 || columns[k] !== column || rows[k] !== row) {
-      const mask = heats.length - 1;
-      const hash = Math.imul(Math.imul(column, 0x9e3779b1) ^ row, 0x85ebca6b);
-      k = (hash ^ (hash >>> 15)) & mask;
-      while (heats[k]! > 0 && (columns[k] !== column || rows[k] !== row)) {
-        k = (k + 1) & mask;
-      }
-      if (heats[k] === 0 && ++size * 2 > heats.length) {
-        // Twice as many places for the cells
-        const [before, beforeRows, beforeHeats] = [columns, rows, heats];
-        columns = new Int32Array(before.length * 2);
-        rows = new Int32Array(before.length * 2);
-        heats = new Float64Array(before.length * 2);
-        size = 0;
-        last = -1;
-        beforeHeats.forEach((h, n) => {
-          if (h > 0) add(before[n]!, beforeRows[n]!, h);
-        });
-        add(column, row, heat);
-        return;
-      }
-      columns[k] = column;
-      rows[k] = row;
-      last = k;
-    }
-    heats[k] = heats[k]! + heat;
-  };
-  return { add, heats: () => heats.filter((heat) => heat > 0) };
-}
-
-/**
  * The points of the cloud of the flights `keep` accepts, along their curves
  * `flights`, smoothed on their ground at the relief level `level` (see
  * groundedFlights): the curve the ribbons are cut from, at the heights
@@ -416,7 +367,7 @@ function cellHeat(): {
  * that do not reach the box are left alone.
  *
  * `scaleOf` says how brightly the layer draws a flight's worth for the
- * busiest heat per metre (see cloudExposure in ui/heatCloudLayer.ts), and
+ * busiest heat per metre (see cloudExposure in ui/heatCloudShaders.ts), and
  * with it the heat of the stretches written is rolled off by that of the
  * cells they pass (see markStretches); without it the heat is left as it
  * is.
@@ -445,7 +396,9 @@ export function cloudPoints(
   // The cells of heat, in Mercator units, and the heat per metre in each,
   // unless the exposure is known
   const cell = CLOUD_CELL_PX / (TILE_SIZE_PX * 2 ** (level + 0.5));
-  const cells = busiest === undefined ? cellHeat() : null;
+  // The heat of the steps added up by cell (see CLOUD_CELL_PX); most
+  // steps go into the cell of the step before
+  const cells = busiest === undefined ? cellTable(1) : null;
   // The time of the points, as replay all plays them
   const clock = flightClockOf(segments);
   const straight = chord();
@@ -613,11 +566,14 @@ export function cloudPoints(
             // Into the cell it starts in, over as many metres as it spans;
             // one of no heat is not busy at all
             if (cellSeconds > 0) {
-              cells.add(
+              const at = cells.at(
                 Math.floor(cellX / cell),
                 Math.floor(cellY / cell),
-                Math.max(cellSeconds, MIN_HEAT_S) / Math.max(cellAlong, cellM),
               );
+              const heats = cells.sums();
+              heats[at] =
+                heats[at]! +
+                Math.max(cellSeconds, MIN_HEAT_S) / Math.max(cellAlong, cellM);
             }
             [cellX, cellY] = mercatorOf(points[j]!);
             cellFt = heightAt(j);
@@ -641,7 +597,7 @@ export function cloudPoints(
     }
     i = end;
   }
-  const busy = cells?.heats();
+  const busy = cells?.sums().subarray(0, cells.count());
   const most = !busy
     ? busiest!
     : busy.length > 0

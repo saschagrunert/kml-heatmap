@@ -79,7 +79,7 @@ export type SegmentWeight = (
 /**
  * The speed a stretch without times or speeds is counted at, in metres per
  * second: a cruise at 100 kt, the one the heat cloud's glow is calibrated
- * for (see CLOUD_REFERENCE_SPEED_MS in ui/heatCloudLayer.ts)
+ * for (see CLOUD_REFERENCE_SPEED_MS in ui/heatCloudShaders.ts)
  */
 export const CRUISE_SPEED_MS = 51.4;
 
@@ -109,14 +109,20 @@ function rowOf(lat: number): number {
 }
 
 /**
- * A column is `HEAT_CELL_M` wide at the middle of its row, so the cells
- * stay square from the equator to the north of Norway
+ * The width in degrees of the columns of `row` in a grid whose rows are
+ * `rowDegrees` of latitude: as wide as a row is high at its middle, so the
+ * cells stay square from the equator to the north of Norway. The hotspots'
+ * grid is one too, of cells of its own size (calculations/hotspots.ts).
  */
+export function columnWidth(row: number, rowDegrees: number): number {
+  return rowDegrees / Math.cos((row + 0.5) * rowDegrees * DEGREES_TO_RADIANS);
+}
+
+/** A column is `HEAT_CELL_M` wide at the middle of its row (columnWidth) */
 function columnOf(row: number, lng: number): number {
   let width = columnWidths.get(row);
   if (width === undefined) {
-    const lat = (row + 0.5) * ROW_DEGREES;
-    width = ROW_DEGREES / Math.cos(lat * DEGREES_TO_RADIANS);
+    width = columnWidth(row, ROW_DEGREES);
     columnWidths.set(row, width);
   }
   return Math.floor(lng / width);

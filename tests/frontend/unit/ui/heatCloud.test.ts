@@ -20,16 +20,16 @@ import {
   prepareHeatCloud,
 } from "../../../../kml_heatmap/frontend/ui/heatCloud";
 import {
-  cloudExposure,
-  cloudLook,
   HEAT_CLOUD_LAYER,
   HeatCloudLayer,
   type HeatCloudStyle,
 } from "../../../../kml_heatmap/frontend/ui/heatCloudLayer";
 import {
-  ReplayAllPlayer,
-  toggleReplayAll,
-} from "../../../../kml_heatmap/frontend/ui/replayAll";
+  cloudExposure,
+  cloudLook,
+} from "../../../../kml_heatmap/frontend/ui/heatCloudShaders";
+import { toggleReplayAll } from "../../../../kml_heatmap/frontend/ui/replayAll";
+import { ReplayAllPlayer } from "../../../../kml_heatmap/frontend/ui/replayAllPlayer";
 import { REPLAY_ALL_LAYER } from "../../../../kml_heatmap/frontend/ui/replayAllLayer";
 import {
   CLOUD_POINT_FLOATS,

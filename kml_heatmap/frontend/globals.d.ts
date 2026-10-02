@@ -12,7 +12,6 @@ declare global {
   var __BUILD__: string | undefined;
 
   interface Window {
-    initMapApp?: (config: MapConfig) => Promise<MapApp>;
     mapApp?: MapApp;
 
     // Map configuration

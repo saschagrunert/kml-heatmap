@@ -60,7 +60,6 @@ updates:
       minifiers:
         patterns:
           - "rcssmin"
-          - "rjsmin"
           - "minify-html"
 
   # JavaScript/TypeScript dependencies

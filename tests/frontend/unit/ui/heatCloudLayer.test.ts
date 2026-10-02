@@ -7,15 +7,17 @@
 import { describe, it, expect, beforeEach, vi, type Mock } from "vitest";
 import type { CustomRenderMethodInput, Map as MapLibreMap } from "maplibre-gl";
 import {
+  HEAT_CLOUD_LAYER,
+  HeatCloudLayer,
+  type HeatCloudStyle,
+} from "../../../../kml_heatmap/frontend/ui/heatCloudLayer";
+import {
   CLOUD_STOPS,
   cloudExposure,
   cloudLook,
   cloudPulse,
-  HEAT_CLOUD_LAYER,
-  HeatCloudLayer,
   markStrength,
-  type HeatCloudStyle,
-} from "../../../../kml_heatmap/frontend/ui/heatCloudLayer";
+} from "../../../../kml_heatmap/frontend/ui/heatCloudShaders";
 import { cloudMatrix } from "../../../../kml_heatmap/frontend/ui/glLayer";
 import {
   cloudPoints,
@@ -532,10 +534,12 @@ describe("the heat cloud's layer", () => {
     layer.onAdd(map);
     layer.setPoints(points());
     render();
-    map.emit("webglcontextlost");
-    // MapLibre removes the layer with the style of before, and the app adds
-    // it again to the one it gets back (see ui/heatCloud.ts)
+    // MapLibre removes the layer with the style of before, while the
+    // context is already lost, and the app adds it again to the one it
+    // gets back (see ui/heatCloud.ts)
+    gl.isContextLost.mockReturnValue(true);
     layer.onRemove(map, gl as unknown as WebGL2RenderingContext);
+    gl.isContextLost.mockReturnValue(false);
     expect(gl.deleteBuffer).not.toHaveBeenCalled();
     gl.createVertexArray.mockClear();
     gl.createProgram.mockClear();
