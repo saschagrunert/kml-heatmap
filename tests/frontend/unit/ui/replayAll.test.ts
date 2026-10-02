@@ -7,14 +7,16 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
   REPLAY_ALL_NOTHING_MESSAGE,
   REPLAY_ALL_ORBIT_REDUCED_MOTION_MESSAGE,
-  REPLAY_ALL_SPEED,
   REPLAY_ALL_UNAVAILABLE_MESSAGE,
   ReplayAllControls,
-  ReplayAllPlayer,
   replayAllClock,
   replayAllTime,
   toggleReplayAll,
 } from "../../../../kml_heatmap/frontend/ui/replayAll";
+import {
+  REPLAY_ALL_SPEED,
+  ReplayAllPlayer,
+} from "../../../../kml_heatmap/frontend/ui/replayAllPlayer";
 import {
   REPLAY_ALL_LAYER,
   type ReplayAllLayer,

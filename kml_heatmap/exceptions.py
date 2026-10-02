@@ -42,7 +42,12 @@ class TerrainUnavailableError(KMLHeatmapError):
 
 
 class KMLParseError(KMLHeatmapError):
-    """Raised when KML parsing fails."""
+    """Raised when KML parsing fails.
+
+    The file and the line are kept as attributes, and the message does not
+    repeat them: whoever reports the error names the file (see
+    ``renderer``), and the message of lxml already holds both.
+    """
 
     def __init__(
         self,
@@ -52,12 +57,4 @@ class KMLParseError(KMLHeatmapError):
     ):
         self.file_path = file_path
         self.line_number = line_number
-        super().__init__(self._format_message(message))
-
-    def _format_message(self, message: str) -> str:
-        parts = [message]
-        if self.file_path:
-            parts.append(f"File: {self.file_path}")
-        if self.line_number is not None:
-            parts.append(f"Line: {self.line_number}")
-        return " | ".join(parts)
+        super().__init__(message)

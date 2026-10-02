@@ -8,7 +8,7 @@
  * the home base, tilting on the way down and turning slowly once there,
  * while every flight of the overview plays underneath at a few hundred
  * times its speed and at a larger size, so the year blooms out of home
- * (ReplayAllPlayer, ui/replayAll.ts). It comes down only a couple of zoom
+ * (ReplayAllPlayer, ui/replayAllPlayer.ts). It comes down only a couple of zoom
  * levels closer than the overview (HOME), where the shape of the whole
  * year shows around home. Then it settles on the overview Wrapped has
  * always shown, the flights stop, and the cards come in one after another
@@ -42,7 +42,7 @@ import type {
 import type { MapApp } from "../mapApp";
 import type { FeatureModule } from "../features";
 import type { CameraStop } from "./cameraScript";
-import type { ReplayAllPlayer } from "./replayAll";
+import type { ReplayAllPlayer } from "./replayAllPlayer";
 import { datasetIndex } from "../calculations/datasetIndex";
 import { ribbonWidthZoom } from "../calculations/lift";
 import { loadFeatures } from "../services/featureLoader";

@@ -65,7 +65,7 @@ import { frameCoalescer } from "../utils/frameCoalescer";
 import { DEGREES_TO_RADIANS, metresPerPixel } from "../utils/geometry";
 import { announceStatus } from "../utils/toast";
 import { whenIdle } from "../utils/whenIdle";
-import { cloudReachPx } from "./heatCloudLayer";
+import { cloudReachPx } from "./heatCloudShaders";
 
 /** The class of the box, styled in features.css */
 const READOUT_CLASS = "cloud-readout";

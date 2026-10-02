@@ -167,12 +167,13 @@ export function createYearDecoder(
   }
 
   /**
-   * The worker's answer to `body`, taken by `take`, or else `work` done on
-   * the main thread: where there is no worker, or it failed over the
-   * request. If the fault is in the data, the work fails the same way,
-   * with the error and not its text.
+   * The worker's answer to `body`, taken by `take`, or else `work` done on the
+   * main thread: where there is no worker, or it failed over the request
+   * (logged as what it could not do, `what`). If the fault is in the data, the
+   * work fails the same way, with the error and not its text.
    */
   const answerOf = async <T>(
+    what: string,
     body: DistributiveOmit<YearRequest, "id">,
     take: (response: YearResponse) => T | undefined,
     work: () => T,
@@ -182,24 +183,19 @@ export function createYearDecoder(
     const taken = response ? take(response) : undefined;
     if (taken !== undefined) return taken;
     if (response && "error" in response) {
-      logError("Year worker failed over a heat:", response.error);
+      logError(`Year worker could not ${what}:`, response.error);
     }
     return work();
   };
 
   return {
     async decode(bytes) {
-      if (destroyed) throw new Error("year decoder destroyed");
-      const answer = worker ? await askWorker(worker, { bytes }) : null;
-      let decoded = answer && "decoded" in answer ? answer.decoded : null;
-      if (!decoded) {
-        // A file the worker failed over is decoded again: if the file is
-        // at fault it fails the same way, with the error and not its text
-        if (answer && "error" in answer) {
-          logError("Year worker could not decode:", answer.error);
-        }
-        decoded = decodeYearBytes(bytes);
-      }
+      const decoded = await answerOf(
+        "decode",
+        { bytes },
+        (response) => ("decoded" in response ? response.decoded : undefined),
+        () => decodeYearBytes(bytes),
+      );
       for (const warning of decoded.warnings) console.warn(warning);
       return buildDatasetInSlices(decoded);
     },
@@ -207,6 +203,7 @@ export function createYearDecoder(
       // Packed here, on the page, into what is copied to the worker
       const heat = heatColumns(points, weights);
       return answerOf(
+        "draw the heat",
         { heat },
         (response) => ("drawn" in response ? response.drawn : undefined),
         () => drawHeat(heat),
@@ -215,6 +212,7 @@ export function createYearDecoder(
     linesSource(...heatLines) {
       const lines = flatLines(heatLinesAlong(...heatLines));
       return answerOf(
+        "draw the heat lines",
         { lines },
         (response) => ("source" in response ? response.source : undefined),
         () => linesSource(lines),

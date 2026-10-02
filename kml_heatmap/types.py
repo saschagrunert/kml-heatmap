@@ -29,7 +29,9 @@ FlightPathGroup = list[FlightPath]
 # an optional relative time in seconds (omitted when unavailable). ``lat``/``lon``
 # are the segment's END point; its start is the end of the previous row, and
 # the first row continues from the start point of the path (see
-# ``export_pipeline.process_path_segments``).
+# ``export_pipeline.process_path_segments``). The time, unlike the point, is
+# when the segment STARTS: the frontend's flight clock reads it so
+# (calculations/flightClock.ts).
 SegmentRow = list[float]
 
 # Number of decimals kept for exported coordinates (~1 m at the equator)

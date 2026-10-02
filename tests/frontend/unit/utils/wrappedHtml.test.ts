@@ -7,13 +7,11 @@ import {
   generateHomeBaseHtml,
   generateDestinationsHtml,
 } from "../../../../kml_heatmap/frontend/utils/wrappedHtml";
-import type {
-  YearStats,
-  AirportCount,
-} from "../../../../kml_heatmap/frontend/utils/htmlGenerators";
+import type { AirportCount } from "../../../../kml_heatmap/frontend/utils/htmlGenerators";
 import type {
   FilteredStatistics,
   FunFact,
+  YearStats,
 } from "../../../../kml_heatmap/frontend/types";
 import { icon } from "../../../../kml_heatmap/frontend/utils/icons";
 import { markup } from "../../../../kml_heatmap/frontend/utils/markup";

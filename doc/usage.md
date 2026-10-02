@@ -214,7 +214,7 @@ Targets (`make help` prints this list with the current variable values):
 - `check-obfuscation` - Check that the KML files in `INPUT_DIR` and the fixture
   flights of the visual snapshots are obfuscated
 - `hooks` - Install the pre-push hook that refuses to push KML files with real
-  dates
+  dates, and the pre-commit hooks
 - `clean` - Remove the container image (when a runtime is available) and local
   build artifacts, including the frontend build output in `kml_heatmap/static/`
   and the fixture site of the visual snapshots (`visual-site/`)
@@ -297,8 +297,7 @@ Opening `docs/index.html` from disk does not work (see
 [Hosting](hosting.md).
 
 `pip install .` also provides the `kml-heatmap` console script and ships the
-templates and static assets. `python kml-heatmap.py` still works as a legacy
-wrapper.
+templates and static assets.
 
 ## Command-line options
 

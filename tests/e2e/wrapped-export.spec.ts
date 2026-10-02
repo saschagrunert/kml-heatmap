@@ -293,7 +293,7 @@ test.describe("Wrapped and Export", () => {
       zoom: number;
     };
     expect(saved.zoom).toBe(view.zoom);
-    // Pixel-snapped by Leaflet, so close rather than equal
+    // Close rather than equal: the view has to come back, not its last digits
     expect(saved.center.lat).toBeCloseTo(view.center.lat, 3);
     expect(saved.center.lng).toBeCloseTo(view.center.lng, 3);
 

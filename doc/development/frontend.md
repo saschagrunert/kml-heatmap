@@ -160,10 +160,10 @@ Whatever has the keyboard's focus is ringed with `--focus-ring`, a token of
   HTTP (`make serve`), it does not work when opened from disk, and the map needs
   WebGL 2
 - **Production**: Minified bundles for optimal performance, with the GLSL of the
-  custom layers (`ui/*Layer.ts`) written without comments, indentation and the
-  spaces around most punctuation, line for line (`shaderPlugin` in `build.js`);
-  the build fails when a bundle exceeds its size budget (see
-  [Size budgets](budgets.md))
+  custom layers (`ui/*Layer.ts` and `ui/*Shaders.ts`) written without comments,
+  indentation and the spaces around most punctuation, line for line
+  (`shaderPlugin` in `build.js`); the build fails when a bundle exceeds its size
+  budget (see [Size budgets](budgets.md))
 - **Development**: Unminified for debugging
 - Both write a source map next to the bundle; it holds the mappings and file
   names only, not the TypeScript sources

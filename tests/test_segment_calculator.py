@@ -39,7 +39,6 @@ class TestExtractSegmentSpeeds:
         result = extract_segment_speeds([_pt(50.0, 8.5), _pt(51.0, 9.5)], None)
         assert len(result) == 1
         seg = result[0]
-        assert seg.index == 0
         assert seg.speed is None
         assert seg.timestamp is None
         assert seg.relative_time is None
@@ -72,13 +71,16 @@ class TestExtractSegmentSpeeds:
         start = parse_timestamp_epoch("2025-03-15T09:59:00Z")
         assert extract_segment_speeds(path, start)[0].relative_time == 60.0
 
-    def test_multiple_segments_indexed(self):
+    def test_one_segment_per_pair_of_points(self):
         path = [
             _pt(50.0, 8.5, ts="2025-03-15T10:00:00Z"),
             _pt(50.5, 9.0, ts="2025-03-15T10:15:00Z"),
             _pt(51.0, 9.5, ts="2025-03-15T10:30:00Z"),
         ]
-        assert [s.index for s in extract_segment_speeds(path, None)] == [0, 1]
+        assert [s.time_delta for s in extract_segment_speeds(path, None)] == [
+            900.0,
+            900.0,
+        ]
 
     def test_unrealistic_speed_is_unknown(self):
         path = [
@@ -141,11 +143,11 @@ class TestSpeedWindow:
 
     def test_sorted_and_filtered(self):
         segments = [
-            SegmentSpeed(0, 200.0, None, 100.0, 1.0, 10.0, valid=True),
-            SegmentSpeed(1, 100.0, None, 0.0, 0.0, 10.0, valid=True),  # standing
-            SegmentSpeed(2, None, None, None, 1.0, 10.0),  # no timestamp
-            SegmentSpeed(3, 150.0, None, None, 100.0, 1.0),  # implausible
-            SegmentSpeed(4, 50.0, None, 120.0, 1.0, 10.0, valid=True),
+            SegmentSpeed(200.0, None, 100.0, 1.0, 10.0, valid=True),
+            SegmentSpeed(100.0, None, 0.0, 0.0, 10.0, valid=True),  # standing
+            SegmentSpeed(None, None, None, 1.0, 10.0),  # no timestamp
+            SegmentSpeed(150.0, None, None, 100.0, 1.0),  # implausible
+            SegmentSpeed(50.0, None, 120.0, 1.0, 10.0, valid=True),
         ]
         window = SpeedWindow(segments)
         assert window.timestamps == [50.0, 100.0, 200.0]
@@ -168,24 +170,24 @@ class TestSpeedWindow:
 
     def test_window_average(self):
         segments = [
-            SegmentSpeed(0, 1000.0, None, 0.0, 1.0, 30.0, valid=True),
-            SegmentSpeed(1, 1030.0, None, 0.0, 2.0, 30.0, valid=True),
-            SegmentSpeed(2, 5000.0, None, 0.0, 100.0, 1.0, valid=True),  # outside
+            SegmentSpeed(1000.0, None, 0.0, 1.0, 30.0, valid=True),
+            SegmentSpeed(1030.0, None, 0.0, 2.0, 30.0, valid=True),
+            SegmentSpeed(5000.0, None, 0.0, 100.0, 1.0, valid=True),  # outside
         ]
         window = SpeedWindow(segments)
         assert window.totals(1010.0) == (3.0, 60.0)
         assert window.groundspeed(1010.0) == pytest.approx(3.0 / 1.852 / 60.0 * 3600)
 
     def test_unrealistic_window_speed_is_unknown(self):
-        window = SpeedWindow([SegmentSpeed(0, 1000.0, None, 0.0, 100.0, 1.0, True)])
+        window = SpeedWindow([SegmentSpeed(1000.0, None, 0.0, 100.0, 1.0, True)])
         assert window.groundspeed(1000.0) is None
 
     def test_nothing_in_the_window_is_unknown(self):
-        window = SpeedWindow([SegmentSpeed(0, 1000.0, None, 1.0, 1.0, 60.0, True)])
+        window = SpeedWindow([SegmentSpeed(1000.0, None, 1.0, 1.0, 60.0, True)])
         assert window.groundspeed(5000.0) is None
 
     def test_standing_still_is_zero_not_unknown(self):
-        window = SpeedWindow([SegmentSpeed(0, 1000.0, None, 0.0, 0.0, 60.0, True)])
+        window = SpeedWindow([SegmentSpeed(1000.0, None, 0.0, 0.0, 60.0, True)])
         assert window.groundspeed(1000.0) == 0.0
 
     def test_a_long_gap_leaves_the_minute_before_it_alone(self):
@@ -193,11 +195,11 @@ class TestSpeedWindow:
         gap entered every window it started in with all of its time."""
         km_per_second = 100 * 1.852 / SECONDS_PER_HOUR
         segments = [
-            SegmentSpeed(i, 1000.0 + i, None, 100.0, km_per_second, 1.0, True)
+            SegmentSpeed(1000.0 + i, None, 100.0, km_per_second, 1.0, True)
             for i in range(120)
         ]
-        gap = SegmentSpeed(120, 1120.0, None, 0.0, 0.0, 1800.0, True)
-        after = SegmentSpeed(121, 2920.0, None, 100.0, km_per_second, 1.0, True)
+        gap = SegmentSpeed(1120.0, None, 0.0, 0.0, 1800.0, True)
+        after = SegmentSpeed(2920.0, None, 100.0, km_per_second, 1.0, True)
         window = SpeedWindow([*segments, gap, after])
 
         assert outlasts_the_window(gap)
@@ -209,7 +211,7 @@ class TestSpeedWindow:
 
     def test_a_segment_as_long_as_the_window_stays_in_it(self):
         segment = SegmentSpeed(
-            0, 1000.0, None, 1.0, 1.0, float(SPEED_WINDOW_SECONDS), True
+            1000.0, None, 1.0, 1.0, float(SPEED_WINDOW_SECONDS), True
         )
         assert not outlasts_the_window(segment)
         assert len(SpeedWindow([segment])) == 1

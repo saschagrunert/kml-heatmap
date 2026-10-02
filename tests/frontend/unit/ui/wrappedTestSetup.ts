@@ -171,7 +171,7 @@ export function createFlightHistory() {
   );
 }
 
-/** The model names metadata.js carries for the aircraft of the history */
+/** The model names metadata.json carries for the aircraft of the history */
 const aircraftModels = {
   "D-ABCD": "Diamond DA40",
   "D-EFGH": "Cessna 172",

@@ -24,7 +24,7 @@ hashes of its dependencies, and recompiles that lock last.
 ### Runtime dependencies
 
 - `lxml` - Fast XML parsing for KML files
-- `rcssmin`, `rjsmin`, `minify-html` - Output minification (HTML/CSS/JS)
+- `rcssmin`, `minify-html` - Output minification (HTML/CSS)
 
 ## Split tracks and recordings of one flight
 

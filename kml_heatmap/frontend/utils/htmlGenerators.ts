@@ -15,8 +15,6 @@ import { formatNumber, formatTrack } from "./formatters";
 import { calculateBearing, ddToDms, type Coordinate } from "./geometry";
 import { icon, type IconName } from "./icons";
 
-export type { YearStats } from "../types";
-
 export function escapeHtml(str: string): string {
   return str
     .replace(/&/g, "&amp;")

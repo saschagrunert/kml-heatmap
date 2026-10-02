@@ -290,14 +290,15 @@ describe("the replay of all flights' layer", () => {
   it("makes its buffers anew and uploads the flights again after a lost context", () => {
     layer.setPoints(flights());
     draw();
-    const lost = vi
-      .mocked(map.on)
-      .mock.calls.find(
-        ([type]) => type === "webglcontextlost",
-      )![1] as () => void;
 
-    // A context restored is the same object, with nothing of before in it
-    lost();
+    // MapLibre takes the layer off the map before it says the context is
+    // lost; the app adds it again to the context restored, which is the
+    // same object with nothing of before in it
+    gl.isContextLost.mockReturnValue(true);
+    layer.onRemove(map, gl as unknown as WebGL2RenderingContext);
+    gl.isContextLost.mockReturnValue(false);
+    gl.isProgram.mockReturnValue(false);
+    layer.onAdd(map);
     draw();
 
     expect(gl.createVertexArray).toHaveBeenCalledTimes(2);

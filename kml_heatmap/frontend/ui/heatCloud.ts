@@ -87,12 +87,11 @@ import {
 import { dimmedHeatmapOpacity } from "./dataManager";
 import { dimsHeatCloud } from "./layerVisibility";
 import {
-  cloudExposure,
-  cloudLook,
   HEAT_CLOUD_LAYER,
   HeatCloudLayer,
   type HeatCloudStyle,
 } from "./heatCloudLayer";
+import { cloudExposure, cloudLook } from "./heatCloudShaders";
 import { followHeightBand } from "./heightBand";
 import { followCloudReadout } from "./cloudReadout";
 import { replayAllTime } from "./replayAll";

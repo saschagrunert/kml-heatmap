@@ -10,10 +10,10 @@ lock files, and CI installs the lock files. Without this check such a pull
 request passes CI while testing the old versions. The version in
 kml_heatmap/__init__.py is what `--version` and the wheel report, and
 package.json and package-lock.json carry it again for the npm side; nothing
-reads all of them, so they drift apart unnoticed until a release says two
-different things. The pre-commit hooks are not checked here: the linters and
-formatters run from the project environment, so they have no revision of
-their own to drift. Run by `make lint` and the CI lint job.
+reads all of them, so they drift apart unnoticed until the two sides name
+two different versions. The pre-commit hooks are not checked here: the
+linters and formatters run from the project environment, so they have no
+revision of their own to drift. Run by `make lint` and the CI lint job.
 """
 
 import functools

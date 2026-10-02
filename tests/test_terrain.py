@@ -13,6 +13,7 @@ import operator
 import os
 import re
 import struct
+import time
 import zlib
 from array import array
 from concurrent.futures.process import BrokenProcessPool
@@ -25,7 +26,10 @@ import pytest
 import kml_heatmap.terrain as terrain_module
 from kml_heatmap.constants import KM_TO_NAUTICAL_MILES, METERS_TO_FEET
 from kml_heatmap.exceptions import TerrainUnavailableError
+from kml_heatmap.geometry import METRES_PER_DEGREE
+from kml_heatmap.logger import logger
 from kml_heatmap.path_content import PATH_ID_BITS
+from kml_heatmap.png import PngError
 from kml_heatmap.segment_codec import (
     ALTITUDE_STEP,
     COORDINATE_SCALE,
@@ -37,18 +41,16 @@ from kml_heatmap.segment_codec import (
 from kml_heatmap.terrain import (
     TERRAIN_ZOOM,
     TILE_SIZE,
-    PngError,
     TerrariumTiles,
     TileKey,
     decode_png,
-    decode_tile_pixels,
     elevations_by_coordinate,
     ground_profile_ft,
     sample_elevations,
     sample_path_elevations,
-    terrarium_elevation,
 )
 from kml_heatmap.types import TrackPoint
+from kml_heatmap.workers import init_worker
 from tests.conftest import FlatTiles
 
 # --- A PNG encoder, the decoder's counterpart ---------------------------
@@ -313,11 +315,26 @@ class TestDecodePng:
             decode_png(short)
 
 
+def decode_tile_pixels(data, indices):
+    """The elevations of the pixels at ``indices`` of a Terrarium tile."""
+    return list(
+        terrain_module._elevations_at(terrain_module._decode_planes(data), indices)
+    )
+
+
 class TestTerrarium:
     def test_elevation_of_a_pixel(self):
-        assert terrarium_elevation(128, 0, 0) == 0
-        assert terrarium_elevation(129, 44, 128) == 300.5
-        assert terrarium_elevation(127, 255, 0) == -1
+        pixels = TILE_SIZE * TILE_SIZE
+        planes = bytearray(3 * pixels)
+        for index, rgb in enumerate([(128, 0, 0), (129, 44, 128), (127, 255, 0)]):
+            for plane, value in enumerate(rgb):
+                planes[plane * pixels + index] = value
+
+        assert list(terrain_module._elevations_at(bytes(planes), [0, 1, 2])) == [
+            0,
+            300.5,
+            -1,
+        ]
 
     @pytest.mark.parametrize("channels", [3, 4])
     def test_decodes_the_pixels_asked_for(self, channels):
@@ -1115,6 +1132,28 @@ class TestTerrariumTiles:
         assert tiles.pixels({tile: [0]}) == {}
         assert not tiles.path(tile).exists()
 
+    def test_the_temp_files_of_a_killed_build_are_removed(self, tmp_path):
+        tiles = TerrariumTiles(tmp_path)
+        tile = TileKey(10, 1, 1)
+        tiles.path(tile).write_bytes(_tile_png(3.0))
+        stale = tmp_path / ".10-1-1.png.k2j3.tmp"
+        stale_pixels = tmp_path / ".10-1-1.pixels.x9q1.tmp"
+        fresh = tmp_path / ".10-2-1.png.a8b7.tmp"
+        for path in (stale, stale_pixels, fresh):
+            path.write_bytes(b"half")
+        day_ago = time.time() - terrain_module.STALE_TEMP_SECONDS - 60
+        for path in (stale, stale_pixels):
+            os.utime(path, (day_ago, day_ago))
+
+        assert tiles.pixels({tile: [0]}) == {tile: array("d", [3.0])}
+
+        assert not stale.exists()
+        assert not stale_pixels.exists()
+        # Perhaps a write of another build still going on
+        assert fresh.exists()
+        assert tiles.remove_stale_temp_files() == 0
+        assert TerrariumTiles(tmp_path / "none").remove_stale_temp_files() == 0
+
     def test_decodes_many_tiles_in_a_pool(self, tmp_path):
         tiles = TerrariumTiles(tmp_path)
         wanted = {}
@@ -1153,7 +1192,7 @@ class TestTerrariumTiles:
         class InlinePool:
             started = 0
 
-            def __init__(self, max_workers):
+            def __init__(self, max_workers, initializer, initargs):
                 InlinePool.started += 1
 
             def __enter__(self):
@@ -1172,15 +1211,9 @@ class TestTerrariumTiles:
         assert answered == {tile: array("d", [tile.x]) for tile in wanted}
         assert InlinePool.started == (1 if pooled else 0)
 
-    @pytest.mark.parametrize(
-        "failure",
-        [BrokenProcessPool("a worker died"), OSError("no semaphores")],
-    )
-    def test_a_decoding_pool_that_dies_leaves_the_ground_out(
-        self, tmp_path, monkeypatch, caplog, failure
-    ):
-        tiles = TerrariumTiles(tmp_path)
-        # A point in each of as many tiles as start the pool
+    @staticmethod
+    def _pooled_points(tiles):
+        """A point in each of as many cached tiles as start the pool."""
         points = [
             TrackPoint(50.0, 8.0 + x * 0.5, 0.0)
             for x in range(terrain_module.DECODE_POOL_MIN_TILES)
@@ -1189,18 +1222,65 @@ class TestTerrariumTiles:
             gx, gy = _global_pixel(point.lat, point.lon)
             tiles.path(
                 TileKey(TERRAIN_ZOOM, int(gx) // TILE_SIZE, int(gy) // TILE_SIZE)
-            ).write_bytes(_tile_png())
+            ).write_bytes(_tile_png(7.0))
+        return points
+
+    def test_the_decoding_workers_log_at_the_parents_level(self, tmp_path, monkeypatch):
+        """--debug names the tiles a worker could not use."""
+        tiles = TerrariumTiles(tmp_path)
+        points = self._pooled_points(tiles)
+        pool = MagicMock(side_effect=OSError("no semaphores"))
+        monkeypatch.setattr(terrain_module, "ProcessPoolExecutor", pool)
+
+        monkeypatch.setattr(logger, "getEffectiveLevel", lambda: logging.DEBUG)
+
+        sample_path_elevations({1: points}, tiles)
+
+        kwargs = pool.call_args.kwargs
+        assert kwargs["initializer"] is init_worker
+        assert kwargs["initargs"] == (logging.DEBUG,)
+
+    @pytest.mark.parametrize(
+        "failure",
+        [BrokenProcessPool("a worker died"), OSError("no semaphores")],
+    )
+    def test_a_decoding_pool_that_dies_decodes_the_tiles_here(
+        self, tmp_path, monkeypatch, caplog, failure
+    ):
+        tiles = TerrariumTiles(tmp_path)
+        points = self._pooled_points(tiles)
         pool = MagicMock(side_effect=failure)
         monkeypatch.setattr(terrain_module, "ProcessPoolExecutor", pool)
 
         with caplog.at_level(logging.WARNING, logger="kml_heatmap"):
             by_path = sample_path_elevations({1: points}, tiles)
 
-        assert by_path == {}
+        assert list(by_path[1]) == [7.0] * len(points)
         pool.assert_called_once()
         warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
         assert len(warnings) == 1
-        assert "could not be decoded" in warnings[0].getMessage()
+        assert "decoding the tiles in this process" in warnings[0].getMessage()
+
+    def test_tiles_that_cannot_be_decoded_here_either_leave_the_ground_out(
+        self, tmp_path, monkeypatch, caplog
+    ):
+        tiles = TerrariumTiles(tmp_path)
+        points = self._pooled_points(tiles)
+        monkeypatch.setattr(
+            terrain_module,
+            "ProcessPoolExecutor",
+            MagicMock(side_effect=BrokenProcessPool("a worker died")),
+        )
+        monkeypatch.setattr(
+            terrain_module, "_decode_cached_tile", MagicMock(side_effect=MemoryError)
+        )
+
+        with caplog.at_level(logging.WARNING, logger="kml_heatmap"):
+            by_path = sample_path_elevations({1: points}, tiles)
+
+        assert by_path == {}
+        warnings = [r.getMessage() for r in caplog.records]
+        assert "could not be decoded" in warnings[-1]
 
     def test_required_terrain_fails_without_a_tile(self, monkeypatch):
         monkeypatch.setenv(terrain_module.REQUIRE_TERRAIN_ENV, "1")
@@ -1439,7 +1519,7 @@ def _ts_constant(relative, name):
         (
             "utils/geometry.ts",
             "METRES_PER_DEGREE",
-            terrain_module.METRES_PER_DEGREE,
+            METRES_PER_DEGREE,
         ),
         ("services/yearDecode.ts", "COORDINATE_SCALE", COORDINATE_SCALE),
         ("services/yearDecode.ts", "SPEED_SCALE", SPEED_SCALE),

@@ -10,6 +10,26 @@ import type { MapApp } from "../mapApp";
 import { domCache } from "../utils/domCache";
 
 /**
+ * Controls held by the replay of one flight and of all of them alike: the
+ * filters, the selection and Wrapped would change or take the map under
+ * either, and so would the other modes. Each adds its own (see
+ * ui/replayManager.ts and ui/replayAll.ts).
+ */
+export const REPLAY_HELD_CONTROL_IDS = [
+  "heatmap-btn",
+  "airports-btn",
+  "aviation-btn",
+  "wrapped-btn",
+  "year-select",
+  "aircraft-select",
+  "isolate-btn",
+  "selection-clear-btn",
+  "reset-view-btn",
+  "cross-section-btn",
+  "hotspot-tour-btn",
+] as const;
+
+/**
  * Disable the controls of `ids` for the mode `mode` ("the replay"), each
  * titled with the way to have it back, and return what gives each back as
  * it was. Setting `disabled = false` on the way out instead turned on a

@@ -107,10 +107,10 @@ describe("loadStylesheet", () => {
       });
 
     // Neither loads nor errors: still on the wire
-    const first = loadStylesheet("features.css", 30_000);
+    const first = loadStylesheet("features.css");
     first.catch(() => undefined);
     let settled = false;
-    const second = loadStylesheet("features.css", 30_000);
+    const second = loadStylesheet("features.css");
     void second.then(
       () => (settled = true),
       () => (settled = true),
@@ -143,9 +143,9 @@ describe("loadStylesheet", () => {
         return node;
       });
 
-    const first = loadStylesheet("features.css", 30_000);
+    const first = loadStylesheet("features.css");
     first.catch(() => undefined);
-    const second = loadStylesheet("features.css", 30_000);
+    const second = loadStylesheet("features.css");
     const outcome = second.then(
       () => "resolved",
       () => "rejected",
@@ -192,8 +192,8 @@ describe("loadStylesheet", () => {
         return node;
       });
 
-    const pending = loadStylesheet("stalled.css", 5000);
-    vi.advanceTimersByTime(4999);
+    const pending = loadStylesheet("stalled.css");
+    vi.advanceTimersByTime(29_999);
     expect(
       document.head.querySelector('link[data-href="stalled.css"]'),
     ).not.toBeNull();

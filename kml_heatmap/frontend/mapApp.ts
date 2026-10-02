@@ -1216,12 +1216,8 @@ export function reportInitFailure(error: unknown): void {
   }
 }
 
-// Initialize app and bind DOM event listeners
-if (typeof window !== "undefined") {
-  window.initMapApp = initMapApp;
-}
-
-// Auto-initialize when module loads
-if (typeof window !== "undefined" && window.MAP_CONFIG && window.initMapApp) {
-  window.initMapApp(window.MAP_CONFIG).catch(reportInitFailure);
+// Start the app when the page has set its configuration (map_config.js runs
+// before this module); the unit tests import the module without one
+if (typeof window !== "undefined" && window.MAP_CONFIG) {
+  initMapApp(window.MAP_CONFIG).catch(reportInitFailure);
 }

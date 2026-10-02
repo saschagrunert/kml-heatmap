@@ -287,6 +287,24 @@ class TestRenderImages:
         # Where it is published plays no part
         assert PreviewJob("c.png", one.tracks).key(b"x") == one.key(b"x")
 
+    def test_the_module_digest_follows_every_module_that_draws(
+        self, tmp_path, monkeypatch
+    ):
+        """A change to the PNG encoder draws the images again, not only one
+        to this module."""
+        package = tmp_path / "kml_heatmap"
+        package.mkdir()
+        for module in previews._DRAWING_MODULES:
+            (package / f"{module}.py").write_text(f"# {module}\n")
+        monkeypatch.setattr(previews, "__file__", str(package / "previews.py"))
+
+        first = previews._module_digest()
+        (package / "png.py").write_text("# changed\n")
+        second = previews._module_digest()
+        (package / "geometry.py").unlink()
+
+        assert len({first, second, previews._module_digest()}) == 3
+
     def test_a_broken_cache_entry_is_drawn_again(self, tmp_path, preview_cache):
         job = PreviewJob("a.png", (track_of(_circuit()),))
         render_images([job], tmp_path / "first")
@@ -641,7 +659,7 @@ class TestParityWithThePage:
     def test_the_colours_are_the_heat_cloud_s(self):
         match = re.search(
             r"\bconst CLOUD_COLOUR = \[([^\]]+)\] as const;",
-            _ts_source("ui/heatCloudLayer.ts"),
+            _ts_source("ui/heatCloudShaders.ts"),
         )
         assert match
         rates = tuple(float(rate) for rate in match.group(1).split(","))

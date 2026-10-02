@@ -24,7 +24,7 @@ import {
   REPLAY_ALL_POINT_FLOATS,
   type ReplayAllPoints,
 } from "../calculations/replayAll";
-import { LayerGl, setProjection } from "./glLayer";
+import { drawing, LayerGl, setDepth, setProjection } from "./glLayer";
 
 /** The id of the layer on the map */
 export const REPLAY_ALL_LAYER = "replay-all";
@@ -239,12 +239,10 @@ export class ReplayAllLayer implements CustomLayerInterface {
 
   onAdd(map: MapLibreMap): void {
     this.map = map;
-    map.on("webglcontextlost", this.objects.lost);
   }
 
-  onRemove(map: MapLibreMap, gl: WebGL2RenderingContext): void {
+  onRemove(_map: MapLibreMap, gl: WebGL2RenderingContext): void {
     this.map = null;
-    map.off("webglcontextlost", this.objects.lost);
     this.objects.release(gl);
   }
 
@@ -262,19 +260,12 @@ export class ReplayAllLayer implements CustomLayerInterface {
     const ratio = map.getPixelRatio();
     gl.uniform2f(u.u_heights, style.groundM, style.liftM);
     gl.uniform2f(u.u_viewport, gl.drawingBufferWidth, height);
-    const projection = options.projectionMatrix;
-    gl.uniform4f(
-      u.u_depth,
-      projection[10],
-      projection[14],
-      options.nearZ,
-      height / 2 / Math.tan(options.fov / 2),
-    );
+    setDepth(gl, u.u_depth, options, height);
     const size = ratio * style.scale;
     gl.uniform2f(u.u_size, TRAIL_HALF_WIDTH_PX * size, HEAD_RADIUS_PX * size);
 
     gl.bindVertexArray(ready.vao);
-    gl.enable(gl.BLEND);
+    drawing(gl);
     // Premultiplied, over what the map has drawn
     gl.blendFuncSeparate(
       gl.ONE,
@@ -282,10 +273,6 @@ export class ReplayAllLayer implements CustomLayerInterface {
       gl.ONE,
       gl.ONE_MINUS_SRC_ALPHA,
     );
-    gl.enable(gl.DEPTH_TEST);
-    gl.depthMask(false);
-    gl.disable(gl.CULL_FACE);
-    gl.disable(gl.STENCIL_TEST);
     // The trails, then the heads over them
     for (const head of [0, 1]) {
       gl.uniform3f(u.u_clock, style.time, Math.max(style.fade, 1), head);

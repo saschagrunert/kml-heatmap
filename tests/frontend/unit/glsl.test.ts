@@ -16,7 +16,10 @@ import {
 } from "../../../scripts/build-helpers.js";
 
 const UI_DIR = join(__dirname, "../../../kml_heatmap/frontend/ui");
-const LAYERS = readdirSync(UI_DIR).filter((name) => /Layer\.ts$/.test(name));
+/** The layers, and the shaders a layer keeps in a module of their own */
+const LAYERS = readdirSync(UI_DIR).filter((name) =>
+  /(?:Layer|Shaders)\.ts$/.test(name),
+);
 
 /**
  * The tokens of GLSL, its comments and white space left out: a word or a
@@ -48,7 +51,7 @@ describe("the shaders of the custom layers, tightened", () => {
         glslLiterals(readFileSync(join(UI_DIR, name), "utf8")).length > 0,
     );
     expect(found).toEqual(
-      expect.arrayContaining(["heatCloudLayer.ts", "replayAllLayer.ts"]),
+      expect.arrayContaining(["heatCloudShaders.ts", "replayAllLayer.ts"]),
     );
   });
 

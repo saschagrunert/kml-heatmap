@@ -60,7 +60,7 @@ function setWidth(width: number): void {
 function createMockApp() {
   const store = new AppStore({ hasTimingData: true });
   const wrappedManager = { showWrapped: vi.fn() };
-  const replayManager = { canReplay: vi.fn(() => true), toggleReplay: vi.fn() };
+  const replayManager = { toggleReplay: vi.fn() };
   const app = {
     store,
     uiToggles: {

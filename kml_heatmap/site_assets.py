@@ -23,7 +23,6 @@ from urllib.parse import quote
 
 import minify_html as mh
 import rcssmin
-import rjsmin
 
 from .cache import atomic_text_write
 from .exceptions import KMLHeatmapError
@@ -483,14 +482,10 @@ def _generate_map_config(
     bounds: dict[str, float],
     data_dir_name: str,
 ) -> None:
-    """Generate minified map_config.js from template."""
+    """Write map_config.js: one statement that sets window.MAP_CONFIG to a
+    JSON object, so no value can end a string literal early."""
     carto_api_key = _carto_api_key()
-
-    map_config_template_path = TEMPLATES_DIR / "map_config_template.js"
     map_config_dst = output_dir / "map_config.js"
-
-    with open(map_config_template_path, encoding="utf-8") as f:
-        map_config_raw = f.read()
 
     commit = build_commit()
     # The fields MapConfig in the frontend's mapApp.ts reads
@@ -507,12 +502,8 @@ def _generate_map_config(
         "commitUrl": commit.url,
     }
     # ASCII only, so the file reads the same whatever charset it is served as
-    map_config_content = string.Template(map_config_raw).substitute(
-        config=json.dumps(config, ensure_ascii=True)
-    )
-    map_config_minified: str = rjsmin.jsmin(map_config_content)
-
-    atomic_text_write(map_config_dst, map_config_minified)
+    config_json = json.dumps(config, ensure_ascii=True, separators=(",", ":"))
+    atomic_text_write(map_config_dst, f"window.MAP_CONFIG={config_json};")
 
     map_config_size = map_config_dst.stat().st_size
     logger.info(

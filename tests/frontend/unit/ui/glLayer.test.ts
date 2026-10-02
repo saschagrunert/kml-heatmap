@@ -341,7 +341,11 @@ describe("LayerGl", () => {
   describe("a lost context", () => {
     it("takes everything with it: the context restored, the same object, gets everything anew", () => {
       begin();
-      objects.lost();
+      // MapLibre takes the layer off the map before it says the context is
+      // lost, and the app adds it again once the context is back
+      gl.isContextLost.mockReturnValue(true);
+      objects.release(context());
+      gl.isContextLost.mockReturnValue(false);
       const ready = begin();
 
       expect(ready).not.toBeNull();

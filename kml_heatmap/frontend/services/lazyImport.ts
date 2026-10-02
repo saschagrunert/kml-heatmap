@@ -1,3 +1,5 @@
+import { withTimeout } from "../utils/withTimeout";
+
 /**
  * The import of a file the app fetches on first use, and of the same file
  * again after a failure.
@@ -32,6 +34,26 @@ export function importWithRetry<T>(
           import.meta.url,
         ).href
       ) as Promise<T>);
+}
+
+/**
+ * Imports by `load`, each given up on after `timeoutMs` with `message`: an
+ * import cannot be aborted. One that was rejected counts as failed, so the
+ * next names the file anew (see importWithRetry); one that merely timed out
+ * does not, since it may still finish, and the same URL then gets the
+ * module.
+ */
+export function timedImports<T>(
+  load: (failedImports: number) => Promise<T>,
+  timeoutMs: number,
+  message: string,
+): () => Promise<T> {
+  let failedImports = 0;
+  return () => {
+    const attempt = load(failedImports);
+    attempt.catch(() => failedImports++);
+    return withTimeout(attempt, timeoutMs, message);
+  };
 }
 
 /**

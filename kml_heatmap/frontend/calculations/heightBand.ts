@@ -26,6 +26,12 @@ import { formatNumber } from "../utils/formatters";
 /** The stop of a band without a top: one past the last of the stops */
 export const OPEN_TOP = HEIGHT_BAND_STOPS_FT.length;
 
+/** 0 up to `from`, 1 from `to`, and smoothly between, as GLSL's smoothstep */
+export function smoothstep(from: number, to: number, x: number): number {
+  const t = Math.min(Math.max((x - from) / (to - from), 0), 1);
+  return t * t * (3 - 2 * t);
+}
+
 /** A band, as the stops of its bottom and its top (see OPEN_TOP) */
 export interface HeightBand {
   low: number;
@@ -77,7 +83,7 @@ function fadeFt(feet: number): number {
  * The heights, in feet above ground, from which the heat of the band
  * `band` fades in, up to which it does, from which it fades out and up to
  * which it does: the part of a pixel's heat the cloud draws (see
- * ui/heatCloudLayer.ts) is `smoothstep(a, b, h) * (1 - smoothstep(c, d,
+ * ui/heatCloudShaders.ts) is `smoothstep(a, b, h) * (1 - smoothstep(c, d,
  * h))` at its height `h`. A band from the ground has all of it at the
  * ground, whose height is 0, and one without a top all of it above.
  */

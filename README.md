@@ -88,11 +88,10 @@ regenerate it first. `docs/` is a local build output and is not committed: the
 published site is built from the sources in CI once all tests pass (see
 [Development](#development)).
 
-Your KML files are read and left alone. The generated site carries no flight
-date finer than the year whatever they contain, so nothing has to be stripped
-from them first (see [Privacy](#privacy)). To scrub the files themselves as
-well, pass `--obfuscate-inputs` or run `make obfuscate`; that rewrites them in
-place and cannot be undone, so keep a copy of the originals.
+Your KML files are read and left alone, and nothing has to be stripped from them
+first (see [Privacy](#privacy)). To scrub the files themselves as well, pass
+`--obfuscate-inputs` or run `make obfuscate`; that rewrites them in place and
+cannot be undone, so keep a copy of the originals.
 
 Without podman or docker, build the frontend and run the generator from the
 checkout (see [Python usage](doc/usage.md#python-usage)). The Makefile
@@ -137,14 +136,9 @@ When a flight does not come out as expected, see
 ## Privacy
 
 The generated site carries no flight date finer than the year, whatever the KML
-files contain: a flight keeps its year and the seconds since its start, and the
-input files are read and left alone. The build fetches the elevation tiles of
-the area flown over from AWS (`--no-terrain` skips them) and the OurAirports
-database from GitHub Pages, and the page asks AWS for the tiles only while the
-3D view is on, open flightmaps for aviation charts only while the Aviation
-switch is on and EOX for satellite imagery only while the Satellite switch is
-on. [Privacy](doc/privacy.md) says what reaches the site and how to scrub the
-KML files themselves.
+files contain: a flight keeps its year and the seconds since its start.
+[Privacy](doc/privacy.md) says what reaches the site, which servers the build
+and the page ask for what, and how to scrub the KML files themselves.
 
 ## Documentation
 

@@ -127,7 +127,8 @@ const pureConstantsPlugin = {
 };
 
 /**
- * Write the shaders of the custom layers (ui/*Layer.ts) as a minified
+ * Write the shaders of the custom layers (ui/*Layer.ts, and
+ * ui/*Shaders.ts where a layer keeps them apart) as a minified
  * build ships them (tightenShaders and tightenGlsl in
  * scripts/build-helpers.js). esbuild leaves a template literal as it is
  * written, and their GLSL, some 12 KB of the feature bundle, was a sixth
@@ -141,10 +142,13 @@ const pureConstantsPlugin = {
 const shaderPlugin = {
   name: "shaders",
   setup(build) {
-    build.onLoad({ filter: /[\\/]ui[\\/]\w+Layer\.ts$/ }, async (args) => {
-      const source = await readFile(args.path, "utf8");
-      return { contents: tightenShaders(source, args.path), loader: "ts" };
-    });
+    build.onLoad(
+      { filter: /[\\/]ui[\\/]\w+(?:Layer|Shaders)\.ts$/ },
+      async (args) => {
+        const source = await readFile(args.path, "utf8");
+        return { contents: tightenShaders(source, args.path), loader: "ts" };
+      },
+    );
   },
 };
 

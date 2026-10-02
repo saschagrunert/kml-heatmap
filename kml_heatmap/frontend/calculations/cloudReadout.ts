@@ -6,7 +6,7 @@
  *
  * "Under the pointer" is the line of sight through it. The cloud is drawn
  * at the heights of the flights and adds up every glow on a pixel (see
- * CLOUD_COLOUR in ui/heatCloudLayer.ts), so a pixel shows every flight the
+ * CLOUD_COLOUR in ui/heatCloudShaders.ts), so a pixel shows every flight the
  * line of sight passes near, at any height: a circuit at 1,000 ft in front
  * of the ground under the pointer and a route at 5,000 ft beyond it alike.
  * Taking the ground under the pointer instead would miss the glow pointed
@@ -36,6 +36,7 @@ import { formatNumber } from "../utils/formatters";
 import { pluralFlights } from "../utils/htmlGenerators";
 import { heatWeight, type SegmentWeight } from "./heatLines";
 import { groundProfilesFt } from "./groundProfile";
+import { smoothstep } from "./heightBand";
 
 /** Metres of a degree of latitude, on the sphere of the map */
 const DEGREE_M = EARTH_CIRCUMFERENCE_M / 360;
@@ -78,7 +79,7 @@ const ROW_STRIDE = 2 ** 22;
  * The radius a readout is for where a CSS pixel in the middle of the map
  * spans `metresPerPx`: the one of READOUT_RADII_M nearest (by ratio) to
  * `radiusPx`, the reach of the glow of a stretch at the map's zoom (see
- * cloudReachPx in ui/heatCloudLayer.ts)
+ * cloudReachPx in ui/heatCloudShaders.ts)
  */
 export function readoutRadiusM(metresPerPx: number, radiusPx: number): number {
   const off = (radius: number): number =>
@@ -405,12 +406,6 @@ export interface CloudReadout {
    * that hold the most of the time, and the part of it they hold (0 to 1)
    */
   band: { fromFt: number; toFt: number; share: number };
-}
-
-/** 0 up to `from`, 1 from `to`, and smoothly between, as GLSL's smoothstep */
-function smoothstep(from: number, to: number, x: number): number {
-  const t = Math.min(Math.max((x - from) / (to - from), 0), 1);
-  return t * t * (3 - 2 * t);
 }
 
 /**

@@ -569,7 +569,7 @@ test.describe("Replay", () => {
     await expect(popup).toBeVisible({ timeout: 3000 });
     await expect(popup).toContainText("Current Position");
 
-    // Close popup programmatically (Leaflet popup tip intercepts DOM clicks)
+    // Closed through the marker: the test is of what the popup shows
     await page.evaluate(() => {
       window.mapApp!.replayState.airplaneMarker!.closePopup();
     });

@@ -18,7 +18,7 @@ stubs are written either way.
 The images are drawn with the standard library alone: the tracks as a glow
 weighted by the time spent on them, on the page's background, in the
 colours of the heat cloud of the 3D view (``CLOUD_COLOUR`` in
-ui/heatCloudLayer.ts), written as a palette PNG. They carry no text, no
+ui/heatCloudShaders.ts), written as a palette PNG. They carry no text, no
 date and no build stamp, and only exported flights are drawn. The same
 tracks always give the same bytes, so an image is cached under a hash of
 what it draws and of this module (see ``PreviewJob.key``).
@@ -102,7 +102,7 @@ STATE_SCHEMA_VERSION = 4
 #: the glow is laid over
 BACKGROUND = 0x14
 #: How fast each channel fills with heat, as in the heat cloud: blue first,
-#: then green, then red (``CLOUD_COLOUR`` in ui/heatCloudLayer.ts)
+#: then green, then red (``CLOUD_COLOUR`` in ui/heatCloudShaders.ts)
 CLOUD_COLOUR = (0.04, 0.26, 0.62)
 #: The heat at which red, the last channel to fill, is 95% full: white
 WHITE_HEAT = -math.log(0.05) / CLOUD_COLOUR[0]
@@ -398,12 +398,20 @@ def render_preview(tracks: Sequence[array[float]]) -> bytes:
     return _encode_png(_indices(_glow(_rasterize(tracks))))
 
 
+# The modules whose code decides the bytes of an image: this one draws it,
+# png writes it, and geometry projects its tracks
+_DRAWING_MODULES = ("previews", "png", "geometry")
+
+
 def _module_digest() -> bytes:
-    """A hash of this module, which draws the images."""
-    try:
-        return hashlib.blake2b(Path(__file__).read_bytes(), digest_size=16).digest()
-    except OSError:  # pragma: no cover - the module was read to run it
-        return b""
+    """A hash of the modules that draw the images (_DRAWING_MODULES)."""
+    digest = hashlib.blake2b(digest_size=16)
+    package = Path(__file__).parent
+    for module in _DRAWING_MODULES:
+        digest.update(module.encode())
+        with contextlib.suppress(OSError):
+            digest.update((package / f"{module}.py").read_bytes())
+    return digest.digest()
 
 
 @dataclass(frozen=True)

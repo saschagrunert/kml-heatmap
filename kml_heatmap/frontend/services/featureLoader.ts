@@ -27,11 +27,10 @@
  * When the two builds' exports no longer match, the import itself fails
  * instead, and that is an ordinary failure.
  */
-import { importWithRetry, versioned } from "./lazyImport";
+import { importWithRetry, timedImports, versioned } from "./lazyImport";
 import { loadStylesheet } from "./stylesheet";
 import { logError } from "../utils/logger";
 import { showToast } from "../utils/toast";
-import { withTimeout } from "../utils/withTimeout";
 import type { FeatureModule } from "../features";
 import type { WrappedModule } from "../wrapped";
 
@@ -110,18 +109,20 @@ function lazyBundle<T extends { BUILD?: string | undefined }>(
   cssUrl: string,
   importer: Importer<T>,
 ): LazyBundle<T> {
-  let importBundle = importer;
+  // An import cannot be aborted, so a stalled one is only given up on:
+  // the caller gets its answer and the next attempt starts over
+  const timed = (load: Importer<T>) =>
+    timedImports(
+      load,
+      LAZY_LOAD_TIMEOUT_MS,
+      `Timed out loading the ${name} bundle`,
+    );
+  let importBundle = timed(importer);
   let pending: Promise<T | null> | null = null;
   /** Set once the bundle and its stylesheet have both arrived */
   let loaded: T | null = null;
   /** Set once the bundle arrived from another build, which stays so */
   let stale = false;
-  /**
-   * Imports that were rejected. One that merely timed out is not counted:
-   * it may still finish, and asking for the same URL again then gets the
-   * module.
-   */
-  let failedImports = 0;
 
   return {
     load() {
@@ -129,18 +130,7 @@ function lazyBundle<T extends { BUILD?: string | undefined }>(
       if (stale) return Promise.resolve(noticeSiteUpdate());
       if (pending) return pending;
 
-      const bundle = importBundle(failedImports);
-      bundle.catch(() => failedImports++);
-      pending = Promise.all([
-        // An import cannot be aborted, so a stalled one is only given up
-        // on: the caller gets its answer and the next attempt starts over
-        withTimeout(
-          bundle,
-          LAZY_LOAD_TIMEOUT_MS,
-          `Timed out loading the ${name} bundle`,
-        ),
-        loadStylesheet(cssUrl, LAZY_LOAD_TIMEOUT_MS),
-      ])
+      pending = Promise.all([importBundle(), loadStylesheet(cssUrl)])
         .then(([module]) => {
           // No build in the tests and the sources, where nothing is mixed
           if (typeof __BUILD__ === "string" && module.BUILD !== __BUILD__) {
@@ -164,8 +154,7 @@ function lazyBundle<T extends { BUILD?: string | undefined }>(
       loaded = null;
       stale = false;
       siteUpdated = false;
-      failedImports = 0;
-      importBundle = next;
+      importBundle = timed(next);
     },
   };
 }

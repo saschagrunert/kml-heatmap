@@ -6,25 +6,15 @@
 import { KM_TO_NAUTICAL_MILES } from "../utils/constants";
 import { formatFlightTime, formatNumber } from "../utils/formatters";
 import { markup } from "../utils/markup";
-import {
-  aggregateAircraft,
-  filterPaths,
-  perPathSeconds,
-} from "../calculations/statistics";
-import {
-  calculateTotalDistance,
-  collectAirports,
-  filterSegmentsByPaths,
-} from "../calculations/panelStats";
+import { filterPaths } from "../calculations/statistics";
+import { collectAirports } from "../calculations/panelStats";
 import { countCountries } from "./countries";
 import { calculateDistance, type Coordinate } from "../utils/geometry";
 import type {
-  AircraftAggregate,
   AircraftModels,
   FilteredStatistics,
   FunFact,
   PathInfo,
-  PathSegment,
   YearStats,
 } from "../types";
 
@@ -123,18 +113,17 @@ export function findClosestReferenceDistance(
 }
 
 /**
- * The figures of Wrapped's title card. `filtered`, the statistics of the
- * same filter, saves the passes over every segment they share with it: the
- * distance, the flight time and the aircraft.
+ * The figures of Wrapped's title card. They take the distance, the flight
+ * time and the aircraft from `filtered`, the statistics of the same filter,
+ * rather than walk every segment again for them.
  */
 export function calculateYearStats(
   pathInfo: PathInfo[] | null,
-  segments: PathSegment[],
   year: number | string,
-  aircraftModels: AircraftModels = {},
-  aircraft: string = "all",
-  preFiltered?: { paths: PathInfo[]; segments: PathSegment[] },
-  filtered?: FilteredStatistics,
+  aircraftModels: AircraftModels,
+  aircraft: string,
+  preFiltered: { paths: PathInfo[] } | undefined,
+  filtered: FilteredStatistics,
 ): YearStats {
   const emptyResult: YearStats = {
     total_flights: 0,
@@ -156,38 +145,14 @@ export function calculateYearStats(
     return emptyResult;
   }
 
-  const filteredSegments =
-    preFiltered?.segments ?? filterSegmentsByPaths(segments, filteredPaths);
-
   // Collect airports
   const airports = collectAirports(filteredPaths);
   const airportNames = Array.from(airports);
 
-  let totalDistanceKm: number;
-  let totalSeconds = 0;
-  let aircraftList: AircraftAggregate[];
-  if (filtered) {
-    totalDistanceKm = filtered.total_distance_km;
-    totalSeconds = filtered.total_flight_time_seconds ?? 0;
-    // Copies: the model is added below, and the statistics are kept
-    aircraftList = filtered.aircraft_list.map((ac) => ({ ...ac }));
-  } else {
-    totalDistanceKm = calculateTotalDistance(filteredSegments);
-    // One grouping pass feeds both the total flight time and the
-    // per-aircraft times inside aggregateAircraft
-    const secondsByPath = perPathSeconds(
-      filteredSegments,
-      new Set(filteredPaths.map((p) => p.id)),
-    );
-    for (const secs of secondsByPath.values()) totalSeconds += secs;
-    aircraftList = aggregateAircraft(
-      filteredPaths,
-      filteredSegments,
-      secondsByPath,
-    );
-  }
-  const totalDistanceNm = totalDistanceKm * KM_TO_NAUTICAL_MILES;
-  const flightTime = formatFlightTime(totalSeconds);
+  const totalDistanceNm = filtered.total_distance_km * KM_TO_NAUTICAL_MILES;
+  const flightTime = formatFlightTime(filtered.total_flight_time_seconds ?? 0);
+  // Copies: the model is added below, and the statistics are kept
+  const aircraftList = filtered.aircraft_list.map((ac) => ({ ...ac }));
 
   // The full model name only comes from aircraft.json. An own-key lookup, so
   // a registration can never read something off the object prototype

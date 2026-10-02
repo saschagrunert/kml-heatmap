@@ -3,7 +3,7 @@
  * for how strongly each stretch (see cloudPoints in
  * calculations/heatCloud.ts) may draw the marks that show the way the
  * flights went while the pulses of the layer do not run (see
- * CLOUD_MARK_SPACING_PX in ui/heatCloudLayer.ts).
+ * CLOUD_MARK_SPACING_PX in ui/heatCloudShaders.ts).
  *
  * A mark points the way its own flight was flown. Where flights overlap
  * in both directions, a runway used both ways, a circuit flown left for
@@ -25,6 +25,8 @@
  * worth their heat rolls off to, so its circuits keep their steps of
  * colour rather than glowing as one white blob.
  */
+import { smoothstep } from "./heightBand";
+import { cellTable } from "./cellTable";
 import { heatTone } from "./heatTone";
 
 /**
@@ -46,11 +48,6 @@ const CELL_FLOATS = 5;
  * it crosses, up to this many for a stretch across many
  */
 const MOST_SAMPLES = 16;
-
-/** The slot of a cell's column and row in a table of `mask` + 1 slots */
-function slotOf(column: number, row: number, mask: number): number {
-  return (Math.imul(column, 0x9e3779b1) ^ Math.imul(row, 0x85ebca77)) & mask;
-}
 
 /**
  * The agreement of a stretch of the direction `(dx, dy)` (a unit vector)
@@ -76,78 +73,6 @@ export function agreement(
     dy * dy * sums[at + 4]!;
   if (!(axial > 0)) return 0;
   return Math.min(Math.max(along / axial, -1), 1);
-}
-
-/**
- * The cells of `cell` Mercator units, found by their column and row in a
- * table of typed arrays kept at most half full, the one found last first,
- * since the next place is in it more often than not
- */
-function cellTable(): {
-  /** Where the sums of the cell at `x` and `y` start, made if need be */
-  at(x: number, y: number, cell: number): number;
-  sums: () => Float64Array;
-} {
-  // Which cell a slot holds, from 1 (0 for none), and the column and the
-  // row of each cell, and its sums
-  let slots = new Int32Array(1 << 10);
-  let places = new Int32Array(slots.length);
-  let sums = new Float64Array((CELL_FLOATS * slots.length) / 2);
-  let made = 0;
-  let lastColumn = 0;
-  let lastRow = 0;
-  let last = -1;
-  return {
-    at(x, y, cell) {
-      const column = Math.floor(x / cell);
-      const row = Math.floor(y / cell);
-      if (last >= 0 && column === lastColumn && row === lastRow) return last;
-      let mask = slots.length - 1;
-      let slot = slotOf(column, row, mask);
-      let held = slots[slot]!;
-      while (
-        held !== 0 &&
-        (places[2 * held - 2] !== column || places[2 * held - 1] !== row)
-      ) {
-        slot = (slot + 1) & mask;
-        held = slots[slot]!;
-      }
-      if (held === 0) {
-        held = ++made;
-        if (2 * held > slots.length) {
-          // The table twice as large, with every cell in it again
-          const more = new Int32Array(places.length * 2);
-          more.set(places);
-          places = more;
-          const larger = new Float64Array(sums.length * 2);
-          larger.set(sums);
-          sums = larger;
-          slots = new Int32Array(slots.length * 2);
-          mask = slots.length - 1;
-          places[2 * held - 2] = column;
-          places[2 * held - 1] = row;
-          for (let other = 1; other <= held; other++) {
-            let free = slotOf(
-              places[2 * other - 2]!,
-              places[2 * other - 1]!,
-              mask,
-            );
-            while (slots[free] !== 0) free = (free + 1) & mask;
-            slots[free] = other;
-          }
-        } else {
-          places[2 * held - 2] = column;
-          places[2 * held - 1] = row;
-          slots[slot] = held;
-        }
-      }
-      last = (held - 1) * CELL_FLOATS;
-      lastColumn = column;
-      lastRow = row;
-      return last;
-    },
-    sums: () => sums,
-  };
 }
 
 /**
@@ -180,7 +105,7 @@ export function markStretches(
   drawn = 0,
 ): void {
   const count = values.length / floats;
-  const cells = cellTable();
+  const cells = cellTable(CELL_FLOATS);
   /** The places along the stretch from `k`, and `add` at each */
   const along = (
     k: number,
@@ -196,7 +121,10 @@ export function markStretches(
     for (let s = 0; s < samples; s++) {
       const f = (s + 0.5) / samples;
       add(
-        cells.at(x + f * dx, y + f * dy, cell),
+        cells.at(
+          Math.floor((x + f * dx) / cell),
+          Math.floor((y + f * dy) / cell),
+        ),
         1 / samples,
         dx / length,
         dy / length,
@@ -234,11 +162,7 @@ export function markStretches(
         dx = ux;
         dy = uy;
       });
-      const t = Math.min(
-        Math.max((agreement(passed, 0, dx, dy) - low) / (high - low), 0),
-        1,
-      );
-      mark = t * t * (3 - 2 * t);
+      mark = smoothstep(low, high, agreement(passed, 0, dx, dy));
       // The seconds of the cells passed, over the latitude's cosine
       const worth =
         drawn *

@@ -1,9 +1,9 @@
 /**
  * Mobile bottom bar.
  *
- * Below the mobile breakpoint the eleven floating control buttons wrap over
- * four rows and take the top third of a 390 px phone. This replaces them
- * with five tabs pinned to the bottom edge: Layers, Filter, Stats, Wrapped
+ * Below the mobile breakpoint the columns of floating controls, some twenty
+ * buttons and two selects, would cover much of a phone's map. This replaces
+ * them with five tabs pinned to the bottom edge: Layers, Filter, Stats, Wrapped
  * and More. Layers, Filter and More open a bottom sheet; Stats and Wrapped
  * drive their panels directly.
  *

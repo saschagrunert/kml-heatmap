@@ -15,7 +15,7 @@ import type { CustomRenderMethodInput } from "maplibre-gl";
  * (mercatorZfromAltitude): the app's EARTH_CIRCUMFERENCE_M is the WGS84
  * equator's
  */
-export const MAPLIBRE_EARTH_RADIUS_M = 6371008.8;
+const MAPLIBRE_EARTH_RADIUS_M = 6371008.8;
 
 /** The uniforms of MapLibre's projection prelude, set by setProjection */
 const PROJECTION_UNIFORMS = [
@@ -70,9 +70,10 @@ interface Resources<U extends string> {
 /**
  * The GL objects of a custom layer. They are made as it first draws, in a
  * frame: MapLibre keeps track of what is bound in its context, and takes it
- * up anew only after a custom layer has drawn. After a lost context
- * MapLibre adds the layer again, and what was made in the one before is
- * gone with it.
+ * up anew only after a custom layer has drawn. A lost context takes the
+ * layer off the map (MapLibre calls onRemove before it says the context is
+ * lost), the app adds it again once the context is back, and what was made
+ * in the one before is gone with it.
  */
 export class LayerGl<U extends string> {
   private resources: Resources<U> | null = null;
@@ -92,15 +93,6 @@ export class LayerGl<U extends string> {
     private readonly shaders: LayerShaders<U>,
     private readonly failed: (error: unknown) => void,
   ) {}
-
-  /**
-   * The GL objects of a lost context are gone with it, and a context
-   * restored is the same object: they are made anew in it
-   */
-  readonly lost = (): void => {
-    this.resources = null;
-    this.kept = null;
-  };
 
   /**
    * Ready to draw `data` in the frame `options`: its points uploaded where
@@ -322,6 +314,48 @@ export function setProjection(
 }
 
 /**
+ * Set the u_depth both layers' shaders read: what the projection makes of
+ * a distance from the camera (w) for the depth, the nearest a point may
+ * be, and the focal length in pixels of a drawing buffer `height` high
+ */
+export function setDepth(
+  gl: WebGL2RenderingContext,
+  location: WebGLUniformLocation | null,
+  options: CustomRenderMethodInput,
+  height: number,
+): void {
+  const projection = options.projectionMatrix;
+  gl.uniform4f(
+    location,
+    projection[10],
+    projection[14],
+    options.nearZ,
+    height / 2 / Math.tan(options.fov / 2),
+  );
+}
+
+/**
+ * The state both layers draw in, with a blend function of their own:
+ * blended, behind what is nearer of the map without hiding it, and
+ * neither culled nor stencilled. The layer turns the depth mask back on
+ * when it is done.
+ */
+export function drawing(gl: WebGL2RenderingContext): void {
+  gl.enable(gl.BLEND);
+  gl.enable(gl.DEPTH_TEST);
+  gl.depthMask(false);
+  gl.disable(gl.CULL_FACE);
+  gl.disable(gl.STENCIL_TEST);
+}
+
+/** Metres a Mercator unit spans at the latitude `lat` on MapLibre's sphere */
+export function mercatorUnitMetres(lat: number): number {
+  return (
+    2 * Math.PI * MAPLIBRE_EARTH_RADIUS_M * Math.cos((lat * Math.PI) / 180)
+  );
+}
+
+/**
  * The matrix that takes a point of the cloud, as x and y from `origin` in
  * Mercator units and a height in metres, to where `mercator` takes a point
  * in Mercator units with a height in Mercator units at the latitude `lat`
@@ -334,9 +368,7 @@ export function cloudMatrix(
   lat: number,
 ): Float32Array {
   const [x, y] = origin;
-  const metre =
-    1 /
-    (2 * Math.PI * MAPLIBRE_EARTH_RADIUS_M * Math.cos((lat * Math.PI) / 180));
+  const metre = 1 / mercatorUnitMetres(lat);
   const m = Array.from(mercator);
   const out = new Float32Array(16);
   for (let row = 0; row < 4; row++) {
