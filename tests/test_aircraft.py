@@ -179,6 +179,91 @@ class TestNotARegistration:
         assert "it holds a date" in caplog.text
 
 
+class TestAircraftType:
+    @pytest.mark.parametrize(
+        "raw",
+        [
+            "DA40",
+            "C42",
+            "P28A",
+            "B738",
+            "A20N",
+            "EC35",
+            "EC135",
+            "R44",
+            "H500",
+            "AS50",
+            "ASK21",
+            "J3",
+            "T6",
+            "Z42",
+            "DA40NG",
+            "C172S",
+            "PA-28",
+            "PA-28-181",
+            "DR400-180",
+            "ATR72-600",
+            "G-109B",
+            "LS8-18",
+            "DG-808C",
+            "DA40-NG",
+            # The designators without a digit
+            "GLID",
+            "ULAC",
+            "BALL",
+            "GYRO",
+            "SHIP",
+            "UHEL",
+            "PARA",
+            "ZZZZ",
+        ],
+    )
+    def test_a_type_designator_stays(self, raw, caplog):
+        assert _parsed(f"1_DEHYL_{raw}.kml").type == raw
+        assert "no type designator" not in caplog.text
+
+    @pytest.mark.parametrize(
+        ("raw", "aircraft_type"),
+        [
+            ("da40", "DA40"),
+            ("Bo105", "BO105"),
+            ("glid", "GLID"),
+            # A date is taken out, as from every published name
+            ("DA40 16 Aug 2026", "DA40"),
+        ],
+    )
+    def test_published_in_capitals(self, raw, aircraft_type):
+        assert _parsed(f"1_DEHYL_{raw}.kml").type == aircraft_type
+
+    @pytest.mark.parametrize(
+        "raw",
+        [
+            "DA40 mit Anna Mueller",
+            "Anna",
+            "ANNA",
+            "JOHN",
+            "MIKE",
+            "DA40-ANNA",
+            "DA40-BOB",
+            "PA-BOB",
+            "DA20 John",
+            "Cessna-172-with-Bob",
+            "PA-28-181-2",
+            "C172Ä",
+        ],
+    )
+    def test_free_text_is_dropped(self, raw, caplog):
+        """The type is published with every path and in the link previews."""
+        result = _parsed(f"3_DEHYL_{raw}.kml")
+        assert result.registration == "D-EHYL"
+        assert result.type is None
+        assert f"Ignoring the aircraft type {raw!r}" in caplog.text
+
+    def test_a_date_alone_is_no_type(self, caplog):
+        assert _parsed("1_DEHYL_16AUG26.kml").type is None
+        assert "no type designator" not in caplog.text
+
+
 class TestParseAircraftFromFilenameCharterware:
     def test_charterware_format(self):
         result = _parsed("2026-01-12_1513h_OE-AKI_LOAV-LOAV.kml")

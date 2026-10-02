@@ -4,7 +4,12 @@ import math
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from .airport_lookup import airport_icao_code, lookup_airport_country
+from .airport_lookup import (
+    airport_icao_code,
+    extract_icao_codes_from_name,
+    lookup_airport_coordinates,
+    lookup_airport_country,
+)
 from .airports import extract_airport_name
 from .cache import atomic_data_write
 from .logger import logger
@@ -20,6 +25,7 @@ __all__ = [
     "export_metadata",
     "exported_airport_names",
     "exported_country_codes",
+    "free_text_airport_names",
 ]
 
 
@@ -43,6 +49,26 @@ def _exported_airports(
 def exported_airport_names(unique_airports: list[AirportData]) -> frozenset[str]:
     """The names of the airport markers ``export_airports_data`` writes."""
     return frozenset(name for _, name in _exported_airports(unique_airports))
+
+
+def free_text_airport_names(unique_airports: list[AirportData]) -> list[str]:
+    """The exported airport names without a known ICAO code, sorted.
+
+    Only a route name gives them ("Home strip - Aunt farm"): both its sides
+    are published as written, so a route between two people ("Anna - Bob")
+    would publish their names as airports. A name counts as coded only when
+    a code in it is in the airport database: "ANNA Mueller" has the shape of
+    one, but no airport. The build and ``--list`` name them, so they can be
+    renamed.
+    """
+    return sorted(
+        name
+        for name in exported_airport_names(unique_airports)
+        if not any(
+            lookup_airport_coordinates(code) is not None
+            for code in extract_icao_codes_from_name(name)
+        )
+    )
 
 
 def exported_country_codes(unique_airports: list[AirportData]) -> list[str]:

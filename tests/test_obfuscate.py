@@ -28,6 +28,7 @@ from kml_heatmap.obfuscate import (
     obfuscate_kml_files,
     rename_charterware_files,
 )
+from kml_heatmap.parser import parse_kml_file
 
 SAMPLE_KML = """\
 <?xml version="1.0" encoding="UTF-8"?>
@@ -495,6 +496,162 @@ class TestExtendedPatterns:
         assert _whens(obfuscate_kml_content(kml)) == [
             "2025-01-01T00:00:00Z",
             "2025-01-01T00:00:15Z",
+        ]
+
+    @pytest.mark.parametrize(
+        "body",
+        [
+            # Two Placemarks, 20 minutes apart
+            (
+                "<Placemark><gx:Track>{first}</gx:Track></Placemark>"
+                "<Placemark><gx:Track>{second}</gx:Track></Placemark>"
+            ),
+            # Two tracks of one Placemark, each a path of its own
+            (
+                "<Placemark><gx:Track>{first}</gx:Track>"
+                "<gx:Track>{second}</gx:Track></Placemark>"
+            ),
+            # Tracks outside a Placemark are paths too
+            "<gx:Track>{first}</gx:Track><gx:Track>{second}</gx:Track>",
+        ],
+    )
+    def test_every_track_keeps_the_year_the_parser_gives_it(self, tmp_path, body):
+        """A track that starts after New Year must not move into the year before."""
+
+        def track(*whens):
+            return "".join(
+                f"<when>{when}</when><gx:coord>{12 + i * 0.01} 51 300</gx:coord>"
+                for i, when in enumerate(whens)
+            )
+
+        kml = (
+            '<kml xmlns="http://www.opengis.net/kml/2.2" '
+            'xmlns:gx="http://www.google.com/kml/ext/2.2"><Document>'
+            + body.format(
+                first=track("2024-12-31T23:30:00Z", "2024-12-31T23:50:00Z"),
+                second=track("2025-01-01T00:10:00Z", "2025-01-01T00:30:00Z"),
+            )
+            + "</Document></kml>"
+        )
+        kml_file = tmp_path / "new_year.kml"
+        kml_file.write_text(kml, encoding="utf-8")
+        before = [meta["year"] for meta in parse_kml_file(str(kml_file))[2]]
+
+        result = obfuscate_kml_content(kml)
+        assert result is not None
+        kml_file.write_text(result, encoding="utf-8")
+
+        assert before == [2024, 2025]
+        assert [meta["year"] for meta in parse_kml_file(str(kml_file))[2]] == before
+        assert _whens(result) == [
+            "2024-01-01T00:00:00Z",
+            "2024-01-01T00:20:00Z",
+            "2025-01-01T00:00:00Z",
+            "2025-01-01T00:20:00Z",
+        ]
+        assert check_kml_obfuscated(kml_file) == []
+
+    def test_line_strings_across_new_year_keep_their_years(self, tmp_path):
+        """A LineString takes the year of its Placemark's TimeSpan."""
+
+        def line(begin, end, lon):
+            return (
+                f"<Placemark><name>EDAQ - EDDC</name><TimeSpan><begin>{begin}"
+                f"</begin><end>{end}</end></TimeSpan><LineString><coordinates>"
+                f"{lon},51,300 {lon + 0.1},51.1,400</coordinates></LineString>"
+                "</Placemark>"
+            )
+
+        kml = (
+            '<kml xmlns="http://www.opengis.net/kml/2.2"><Document>'
+            + line("2024-12-31T23:30:00Z", "2024-12-31T23:50:00Z", 12)
+            + line("2025-01-01T00:10:00Z", "2025-01-01T00:30:00Z", 13)
+            + "</Document></kml>"
+        )
+        kml_file = tmp_path / "lines.kml"
+        kml_file.write_text(kml, encoding="utf-8")
+        before = [meta["year"] for meta in parse_kml_file(str(kml_file))[2]]
+
+        result = obfuscate_kml_content(kml)
+        assert result is not None
+        kml_file.write_text(result, encoding="utf-8")
+
+        assert before == [2024, 2025]
+        assert [meta["year"] for meta in parse_kml_file(str(kml_file))[2]] == before
+        assert check_kml_obfuscated(kml_file) == []
+
+    def test_a_multi_track_then_a_track_across_new_year(self, tmp_path):
+        """The tracks of a gx:MultiTrack are one track, the one after another."""
+        kml = (
+            '<kml xmlns="http://www.opengis.net/kml/2.2" '
+            'xmlns:gx="http://www.google.com/kml/ext/2.2"><Document>'
+            "<Placemark><gx:MultiTrack>"
+            "<gx:Track><when>2024-12-31T23:00:00Z</when>"
+            "<gx:coord>12 51 300</gx:coord><when>2024-12-31T23:10:00Z</when>"
+            "<gx:coord>12.1 51 400</gx:coord></gx:Track>"
+            "<gx:Track><when>2024-12-31T23:30:00Z</when>"
+            "<gx:coord>12.2 51 400</gx:coord><when>2024-12-31T23:40:00Z</when>"
+            "<gx:coord>12.3 51 300</gx:coord></gx:Track>"
+            "</gx:MultiTrack></Placemark>"
+            "<Placemark><gx:Track><when>2025-01-01T00:10:00Z</when>"
+            "<gx:coord>13 51 300</gx:coord><when>2025-01-01T00:30:00Z</when>"
+            "<gx:coord>13.1 51 400</gx:coord></gx:Track></Placemark>"
+            "</Document></kml>"
+        )
+        kml_file = tmp_path / "multi.kml"
+        kml_file.write_text(kml, encoding="utf-8")
+        before = [meta["year"] for meta in parse_kml_file(str(kml_file))[2]]
+
+        result = obfuscate_kml_content(kml)
+        assert result is not None
+        kml_file.write_text(result, encoding="utf-8")
+
+        assert before == [2024, 2025]
+        assert [meta["year"] for meta in parse_kml_file(str(kml_file))[2]] == before
+        assert _whens(result) == [
+            "2024-01-01T00:00:00Z",
+            "2024-01-01T00:10:00Z",
+            "2024-01-01T00:30:00Z",
+            "2024-01-01T00:40:00Z",
+            "2025-01-01T00:00:00Z",
+            "2025-01-01T00:20:00Z",
+        ]
+        assert check_kml_obfuscated(kml_file) == []
+
+    def test_a_marker_after_new_year_joins_the_flight_before(self, tmp_path):
+        """A point marker's TimeStamp is no track: it moves with its flight."""
+        kml = (
+            '<kml xmlns="http://www.opengis.net/kml/2.2" '
+            'xmlns:gx="http://www.google.com/kml/ext/2.2"><Document>'
+            "<Placemark><gx:Track><when>2024-12-31T22:00:00Z</when>"
+            "<gx:coord>12 51 300</gx:coord><when>2024-12-31T23:55:00Z</when>"
+            "<gx:coord>13 51 300</gx:coord></gx:Track></Placemark>"
+            "<Placemark><name>Landing</name>"
+            "<TimeStamp><when>2025-01-01T00:05:00Z</when></TimeStamp>"
+            "<Point><coordinates>13,51,300</coordinates></Point></Placemark>"
+            "</Document></kml>"
+        )
+        result = obfuscate_kml_content(kml)
+        assert _whens(result) == [
+            "2024-01-01T00:00:00Z",
+            "2024-01-01T01:55:00Z",
+            "2024-01-01T02:05:00Z",
+        ]
+        kml_file = tmp_path / "marker.kml"
+        kml_file.write_text(result, encoding="utf-8")
+        assert check_kml_obfuscated(kml_file) == []
+
+    def test_a_multi_track_across_new_year_stays_in_one_piece(self):
+        """The parser makes one path of it, in the year it started in."""
+        kml = (
+            "<kml><Placemark><gx:MultiTrack>"
+            "<gx:Track><when>2024-12-31T23:30:00Z</when></gx:Track>"
+            "<gx:Track><when>2025-01-01T00:10:00Z</when></gx:Track>"
+            "</gx:MultiTrack></Placemark></kml>"
+        )
+        assert _whens(obfuscate_kml_content(kml)) == [
+            "2024-01-01T00:00:00Z",
+            "2024-01-01T00:40:00Z",
         ]
 
     def test_a_flight_past_utc_midnight_stays_in_one_piece(self, tmp_path):
@@ -1625,6 +1782,19 @@ class TestUnparsableDates:
         content = "<kml><name>EDDS to EDDP - 16 Aug 2026</name></kml>"
         result = obfuscate_module.obfuscate_kml_content(content)
         assert result == "<kml><name>EDDS to EDDP - 01 Jan 2026</name></kml>"
+
+    def test_an_iso_route_date(self, tmp_path):
+        """The parser reads it as the date of the route, as it reads 16 Aug 2026."""
+        content = "<kml><name>EDDS to EDDP - 2026-08-16</name></kml>"
+        result = obfuscate_module.obfuscate_kml_content(content)
+        assert result == "<kml><name>EDDS to EDDP - 2026-01-01</name></kml>"
+        kml_file = tmp_path / "route.kml"
+        kml_file.write_text(content, encoding="utf-8")
+        assert any("Route name date" in v for v in check_kml_obfuscated(kml_file))
+        kml_file.write_text(result, encoding="utf-8")
+        assert check_kml_obfuscated(kml_file) == []
+        # A day that does not exist is left alone, as in the other form
+        assert obfuscate_kml_content("<kml><name>X - 2026-02-31</name></kml>") is None
 
     def test_unparsable_dates_alone_give_none(self):
         assert obfuscate_kml_content("<kml><name>X - 31 Feb 2026</name></kml>") is None

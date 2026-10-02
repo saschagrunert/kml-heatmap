@@ -25,7 +25,7 @@ Where:
 - `REGISTRATION` - Aircraft registration without hyphen. The hyphen is restored
   from a table of ICAO registration prefixes (`DEHYL` becomes `D-EHYL`, `OEAKI`
   becomes `OE-AKI`)
-- `TYPE` - Aircraft type (e.g., `DA40`, `C172`)
+- `TYPE` - Aircraft type designator (e.g., `DA40`, `C172`), see below
 
 A registration has to look like one (capitals and digits, at least one letter);
 a name such as `2025_summer_trip.kml` names no aircraft. A name with more than
@@ -39,6 +39,17 @@ The hyphen is restored for these nationality prefixes: `2`, `4O`, `5B`, `9A`,
 in the list, write the registration with its hyphen in the file name
 (`3_VH-ABC_C172.kml`); without it the registration is used as written. Files are
 numbered sequentially in chronological order and processed in numeric order.
+
+The type is published, so only an aircraft type designator is taken, in any case
+and published in capitals (`da40` becomes `DA40`): a base of up to six letters
+and digits that starts with a letter (`DA40`, `EC135`, `DA40NG`, `PA`), then at
+most two hyphen groups, each starting with a digit (`PA-28-181`, `DR400-180`,
+`G-109B`) or a variant of one or two letters right after a digit (`DA40-NG`),
+and a digit somewhere in it. Of the types of letters alone, only the ICAO
+designators for aircraft without a designator of their own are taken (`GLID`,
+`ULAC`, `BALL`, `GYRO`, `SHIP`, `UHEL`, `PARA`, `ZZZZ`); any other is dropped
+with a warning, a real designator as well as a name (`ANNA`), and so is anything
+else (`DA40 with Anna`, `DA40-ANNA`).
 
 Nor are times of day or weekdays: the type is published, so a `TYPE` that is one
 (`1_DEHYL_1513h.kml`, `1_DEHYL_15h13.kml`, `1_DEHYL_Saturday.kml`) is left out
@@ -329,9 +340,11 @@ Output:
 - `--list` - Print a table of every flight in the inputs (file, year, aircraft,
   airports, points, whether it has times) and, for each one the site would leave
   out, why: no year, a recording that never moves, a copy or a second recording
-  of another flight, a file that is empty or does not parse. It writes no site,
-  downloads no elevation tiles and exits with 0; the parse cache and the airport
-  database are used and filled as by a build.
+  of another flight, a file that is empty or does not parse. Below the table it
+  names the airport names without a known ICAO code the site would publish (see
+  [Privacy](privacy.md#what-reaches-the-site)). It writes no site, downloads no
+  elevation tiles and exits with 0; the parse cache and the airport database are
+  used and filled as by a build.
 - `-q`, `--quiet` - Print only warnings and errors, and one line at the end
   naming the output directory and the years in it
 - `--debug` - Show debug output (it wins over `--quiet`)
