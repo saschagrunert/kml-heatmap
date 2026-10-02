@@ -135,7 +135,7 @@ def _obfuscate_inputs(kml_files: list[str]) -> list[str]:
     """Rename and rewrite the (validated) input KML files in place for privacy.
 
     Only runs with ``--obfuscate-inputs``; see ``_generate``. Returns
-    ``kml_files`` with the new path of every renamed Charterware file. Raises
+    ``kml_files`` with the new path of every renamed file. Raises
     when a file cannot be rewritten: leaving a file the user asked to scrub
     with its real dates would be worse than not running at all.
     """
@@ -143,7 +143,7 @@ def _obfuscate_inputs(kml_files: list[str]) -> list[str]:
     from .obfuscate import (  # noqa: PLC0415
         check_kml_obfuscated,
         obfuscate_kml_files,
-        rename_charterware_files,
+        rename_dated_files,
     )
 
     valid: list[Path] = []
@@ -158,7 +158,7 @@ def _obfuscate_inputs(kml_files: list[str]) -> list[str]:
             # published, so it cannot leak anything
             logger.warning("Not obfuscating: %s", error_msg)
 
-    renamed = rename_charterware_files(valid)
+    renamed = rename_dated_files(valid)
     # Keyed by the given spelling: Path() would normalize "./a.kml" to "a.kml"
     new_names = {
         name: str(new)
@@ -184,7 +184,8 @@ def _obfuscate_inputs(kml_files: list[str]) -> list[str]:
             "Could not obfuscate every input file; refusing to continue. See "
             "the messages above: a file that is read-only or not UTF-8 has to "
             "be fixed first, and a date in a place the tool does not rewrite "
-            "(such as the file name) has to be removed by hand"
+            "(such as extended data, or a file name that is taken without "
+            "it) has to be removed by hand"
         )
 
     return [new_names.get(kml_file, kml_file) for kml_file in kml_files]
@@ -203,7 +204,7 @@ def format_listing(
     """The ``--list`` table: one line per path, and per file without one.
 
     ``free_text_airports`` are the airport names the site would publish
-    without a known ICAO code, named below the table.
+    not from the airport database, named below the table.
     """
     header = ("", "file", "year", "aircraft", "airports", "points", "timed", "note")
     lines = [
@@ -238,8 +239,8 @@ def format_listing(
     text.append(f"{published} of {len(rows)} flight(s) would be published")
     if free_text_airports:
         text.append(
-            "Airport names without a known ICAO code that would be published, as the "
-            "route names give them: "
+            "Airport names not from the airport database that would be published, "
+            "as the route names give them: "
             + ", ".join(repr(name) for name in free_text_airports)
         )
     return "\n".join(text)
@@ -411,9 +412,11 @@ and IRREVERSIBLY, so that the files on disk carry no real dates either (useful
 before committing or sharing them). All timestamps and dates are shifted so
 that every flight starts at midnight (UTC) on January 1st of its year, which
 keeps the intervals between its points but neither its date nor its time of
-day, and the creator attribute is replaced. Charterware files are
-renamed to January 1st as well (2026-01-12_1513h_OE-AKI_LOAV-LOAV.kml becomes
-2026-01-01_0000h_...). Keep a copy of the originals if you need the real
+day, and the creator attribute is replaced. Names and descriptions lose
+their other dates and times. Charterware files are renamed to January 1st as
+well (2026-01-12_1513h_OE-AKI_LOAV-LOAV.kml becomes 2026-01-01_0000h_...),
+and other file names lose their dates (1_DEHYL_DA40_16Aug.kml becomes
+1_DEHYL_DA40.kml). Keep a copy of the originals if you need the real
 dates. The same rewrite is available on its own, without generating a site, as
 `python -m kml_heatmap.obfuscate <dir>`.
 
@@ -474,7 +477,7 @@ a refused output directory, 1 when the build failed, 130 when interrupted.
         help=(
             "list every flight of the inputs with its year, aircraft, "
             "airports and points, why any would be left out, and the airport "
-            "names without a known ICAO code it would publish; writes no site and "
+            "names not from the airport database it would publish; writes no site and "
             "downloads no elevation tiles"
         ),
     )

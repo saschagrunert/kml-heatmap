@@ -41,6 +41,12 @@ flight.
 
 ## Requests to other servers
 
+**The page asks CARTO for the base map on every view**: the map tiles of the
+area in view and the fonts of their labels (`*.basemaps.cartocdn.com`), at every
+zoom and pan. CARTO sees the visitor's address and which tiles, so roughly where
+on the map they look, and the key of the site (see the end of this page). It is
+the one server outside the site that every view of the page contacts.
+
 **The build asks AWS for the elevation tiles of the area you flew over** (see
 [Elevation data](output.md#elevation-data)): tiles of about 25 km across at 50
 degrees north, fetched once and cached, with nothing else in the request. Pass
@@ -81,9 +87,19 @@ year: the intervals between its points, the gaps between its tracks and so its
 durations, speeds, landings and flight time stay exactly as they were, while
 neither its date nor its time of day is left. A flight across midnight stays in
 one piece and in the year it started in. A file holding flights on several dates
-moves each of them to midnight on January 1st of its own year. Date-bearing
-names, descriptions (a Charterware description keeps `12:00AM` as its time),
-Charterware file names and the creator field are replaced. Read-only files and
+moves each of them to midnight on January 1st of its own year. A date in a name
+that the parser reads a year from (`EDDS to EDDP - 16 Aug 2026`,
+`EDDS 2026-08-16`) moves to January 1st of its year, and every other date, part
+of a date, time of day and weekday the check would report in a name or a
+description goes (`EDDS-EDDP 16 Aug` becomes `EDDS-EDDP`); a Charterware
+description keeps its date, moved to January 1st with `12:00AM` as its time.
+Descriptions follow the same rule as names, so where a number could be a date it
+goes with the dates: `Fuel 26.08 gal` loses `26.08` and `LOWI 08-26` loses
+`08-26`. Only what stands right next to a removed date changes, so the rest of a
+description (its links, line breaks and HTML) stays as written. Charterware file
+names move to January 1st, other file names lose their dates
+(`1_DEHYL_DA40_16Aug.kml` becomes `1_DEHYL_DA40.kml`, unless that name is taken
+or nothing is left), and every creator field is replaced. Read-only files and
 symlinks are reported instead of rewritten. Obfuscated KML files still contain:
 
 - The year of each flight
@@ -94,16 +110,19 @@ symlinks are reported instead of rewritten. Obfuscated KML files still contain:
 `python -m kml_heatmap.obfuscate <dir> --check` verifies a directory: the first
 timestamp of every flight must be 00:00:00 on January 1st (a fraction of a
 second may follow), and no other date may appear anywhere in a file or its name
-(numeric, or with an English or German month name such as `16 Aug 2026` or
+(numeric, also with the year first and spaces such as `2026 08 16` or with en
+dashes, or with an English or German month name such as `16 Aug 2026` or
 `16. Mai 2026`), except the two days after January 1st that a flight past
-midnight runs into. Nor may a weekday named in full (`Saturday`, `Samstag`,
-`sonntags`): the timestamps no longer fall on it. The name of a file carries no
-time of day either (`1513h`, `1513H`, `15h13`, `0930Z`, `0930z`, `0930UTC`,
-`15:13`, `3pm`, `1430 GMT`, `1430 Zulu`, `14:30 EST`, `1430 local`,
-`0930 hours`, `14.30Z`, `0930Z-1045Z`, `14:30 +02:00`, `1430+0200`), except for
-the sequence number in the time slot of an obfuscated Charterware name, and
-neither do its names and descriptions, nor a Unix time of a past day in the text
-of an element (see
+midnight runs into. A name, a description or the name of the file holds no part
+of a date either, which the year of the flight completes (`16 Aug`, `16.08.`,
+`16/08`, `KW33`, `260816`, `03/2026`, and `Sat` next to a date). Nor may a
+weekday named in full (`Saturday`, `Samstag`, `sonntags`): the timestamps no
+longer fall on it. The name of a file carries no time of day either (`1513h`,
+`1513H`, `15h13`, `0930Z`, `0930z`, `0930UTC`, `15:13`, `3pm`, `1430 GMT`,
+`1430 Zulu`, `14:30 EST`, `1430 local`, `0930 hours`, `14.30Z`, `0930Z-1045Z`,
+`14:30 +02:00`, `1430+0200`), except for the sequence number in the time slot of
+an obfuscated Charterware name, and neither do its names and descriptions, nor a
+Unix time of a past day in the text of an element (see
 [Troubleshooting](usage.md#make-check-obfuscation-or-the-commit-hook-fails)). A
 comment or processing instruction inside a text hides nothing from the check
 (`16<!-- -->.08.2026`). The timestamps of one track (a gx:Track, the tracks of a
@@ -115,9 +134,16 @@ as the site does, even right after a flight that ended the night before, unless
 it overlaps that flight in time or its Placemark has a TimeSpan that begins
 before New Year: then it moves into the year that flight or that TimeSpan starts
 in. A recording that runs longer than those days fails the check rather than
-being cut in two. When a date cannot be removed (in a file name, say, or an
-element the tool does not rewrite), the rewrite lists it and stops rather than
-leaving a file half scrubbed.
+being cut in two, and so do legs of a trip on several days less than 12 hours
+apart in one file: the check says to split the file into one per day of flying.
+When a date cannot be removed (in an element the tool does not rewrite, say, or
+a file name that is taken without it), the rewrite lists it and stops rather
+than leaving a file half scrubbed.
+
+The commit hook (`make hooks`) runs the check before every push, and refuses a
+commit message that names a date or a weekday when its commit adds or changes a
+flight in `data/` (`Add flight 16 Aug 2026`): the history of the repository is
+as public as the files.
 
 ## What reaches the site
 
@@ -133,14 +159,20 @@ Kept in the site:
   without a code (`Home strip - Aunt farm`). A route name between two people
   (`Anna Mueller - Bob Smith`) therefore publishes their names as airports,
   unless a field with a code is next to them. The build warns with every name it
-  publishes whose code is not in the airport database, so a name that only looks
-  like one (`ANNA Mueller`) is named too, and `--list` names them below its
-  table
+  publishes that is not the name the airport database gives its code
+  (`EDDS Stuttgart`), so a name that only looks like one (`ANNA Mueller`) is
+  named too, and so is one with codes the parser could not name it by
+  (`Anna EDDS EDDF`); `--list` names them below its table. Without an airport
+  database the build cannot tell them apart and says so once
 - The aircraft registration and type of a file name (`1_DEHYL_DA40.kml`); the
-  type only when it is a type designator with a digit (`DA40`, `C172`,
-  `PA-28-181`) or one of the ICAO designators without one (`GLID`), in capitals.
-  Any other text there is dropped with a warning, a type of letters alone too
-  (see [the rule](usage.md#kml-file-naming-convention))
+  registration only when it starts with an ICAO nationality mark (`D-EHYL`,
+  `DEHYL`, `OE-AKI`, `N12345`; a mark of one letter with as many characters
+  after it as that state gives, four for `D`), so `ANNA` or `MIKE` is dropped
+  with a warning, although a name that happens to have the shape of one
+  (`DAVID`, D-AVID) is not; the type only when it is a type designator with a
+  digit (`DA40`, `C172`, `PA-28-181`) or one of the ICAO designators without one
+  (`GLID`), in capitals. Any other text there is dropped with a warning, a type
+  of letters alone too (see [the rule](usage.md#kml-file-naming-convention))
 - The order of the flights: each year lists them in input order, which is the
   order of their dates for numbered and Charterware file names. Together with
   the speeds, tracks and runways of each flight, that order narrows down when
@@ -189,7 +221,8 @@ Removed from the site:
   (`Friday Harbor`, `Thursday Island`, `Sunday Creek`); a family name such as
   `Freitag` does not
 - A registration that holds a date, a time of day or a weekday
-  (`1_16AUG26_DA40.kml`, `1_MONDAY_DA40.kml`), with a warning
+  (`1_16AUG26_DA40.kml`, `1_MONDAY_DA40.kml`), or starts with no nationality
+  mark (`1_ANNA_DA40.kml`), with a warning
 
 The CARTO key is a public client-side tile key. It is embedded in the generated
 `map_config.js` and published with the site by design, because the browser needs

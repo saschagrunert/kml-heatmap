@@ -48,6 +48,7 @@ __all__ = [
     "AirportRecord",
     "RunwayEnd",
     "airport_icao_code",
+    "database_airport_name",
     "database_fingerprint",
     "extract_icao_codes_from_name",
     "load_airport_database",
@@ -799,7 +800,7 @@ def _strip_airport_suffix(name: str) -> str:
     return name
 
 
-def _database_name(icao_code: str) -> str | None:
+def database_airport_name(icao_code: str) -> str | None:
     """The standardized name of an airport ("EDDS Stuttgart"), or None."""
     coords = lookup_airport_coordinates(icao_code)
     if coords is None:
@@ -828,7 +829,7 @@ def split_route_name(name: str | None) -> tuple[str, str] | None:
         return None
 
     icao_code = airport_icao_code(name)
-    if icao_code is not None and _database_name(icao_code) == name:
+    if icao_code is not None and database_airport_name(icao_code) == name:
         return None
 
     separators = [
@@ -853,7 +854,7 @@ class AirportNames(NamedTuple):
 
 def _standardize_single_airport(name: str) -> str:
     icao_code = airport_icao_code(name)
-    standardized = _database_name(icao_code) if icao_code else None
+    standardized = database_airport_name(icao_code) if icao_code else None
     if standardized is None:
         return name
     logger.debug("Standardized airport: %s -> %s", name, standardized)

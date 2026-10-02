@@ -11,6 +11,10 @@ Install it once per clone with `make hooks`. It needs nothing but the
 Python the project requires, and it fails closed: when it cannot run the
 check, the push is refused. `git push --no-verify` skips it.
 
+The messages of the commits that add or change a flight in data/ are
+published with it: one that names a date or a weekday ("Add flight 16 Aug
+2026") is refused as well.
+
 A push that adds exactly one flight to data/ gets a warning, not a refusal:
 the files carry no date, but the commit does, and a commit with one new
 flight in it dates that flight to about the day it was pushed.
@@ -108,6 +112,48 @@ def added_flights(repo: Path, remote: str, pushed_shas: list[str]) -> list[str]:
     return list(dict.fromkeys(name for name in names if name))
 
 
+def dated_messages(
+    repo: Path, remote: str, pushed_shas: list[str]
+) -> list[tuple[str, str]]:
+    """The dates and weekdays in the messages of the commits to flights.
+
+    Each with the commit it is in, oldest commit first: a message is
+    published with the flight its commit adds ("Add flight 16 Aug 2026").
+    """
+    if not pushed_shas:
+        return []
+    # Imported here: main() puts the checkout on the path first
+    from kml_heatmap.date_tokens import (  # noqa: PLC0415
+        find_date_tokens,
+        find_partial_date_tokens,
+        find_weekday_tokens,
+    )
+
+    output = _git(
+        repo,
+        "log",
+        "--reverse",
+        "--format=%H%x00%B%x1e",
+        *pushed_shas,
+        "--not",
+        f"--remotes={remote}",
+        "--",
+        *FLIGHT_PATHSPECS,
+    )
+    found: list[tuple[str, str]] = []
+    for record in output.decode().split("\x1e"):
+        commit, _, message = record.strip("\n").partition("\0")
+        if not commit:
+            continue
+        found.extend(
+            (commit, token)
+            for token in find_date_tokens(message, skip_near_jan_first=True)
+            + find_partial_date_tokens(message)
+            + find_weekday_tokens(message)
+        )
+    return found
+
+
 def violations_in(repo: Path, commit: str) -> dict[str, list[str]]:
     """The obfuscation violations of the KML files a commit adds or changes."""
     # Imported here: main() puts the checkout on the path first
@@ -145,6 +191,18 @@ def check(repo: Path, remote: str, lines: list[str]) -> int:
             "\nPush refused: the commits above carry real flight dates, and the\n"
             "repository is public. Run `make obfuscate`, then rewrite the\n"
             "commits (amend or rebase) so none of them holds the originals.",
+            file=sys.stderr,
+        )
+        return 1
+    messages = dated_messages(repo, remote, pushed_shas(lines))
+    for commit, token in messages:
+        print(f"  {commit[:7]} commit message: {token}", file=sys.stderr)
+    if messages:
+        print(
+            "\nPush refused: the messages of the commits above date the flights\n"
+            "they add or change, and the repository is public. Reword them\n"
+            "without the dates and weekdays: `git commit --amend` for the last\n"
+            "commit, `git rebase -i` with `reword` for an earlier one.",
             file=sys.stderr,
         )
         return 1

@@ -17,10 +17,15 @@ Dates without a timestamp move to January 1st of their own year: date-only
 timestamps, Charterware description dates ("Flight Jan 12 2026 03:01PM"
 becomes "Flight Jan 01 2026 12:00AM"), route names with dates ("EDDS to
 EDDP - 16 Aug 2026", "EDDS to EDDP - 2026-08-16") and the SkyDemon marker
-names (Log Start, Takeoff, Landing, Log Stop), which lose their time. The
+names (Log Start, Takeoff, Landing, Log Stop), which lose their time. A
+date in a name that the parser reads a year from ("16 Aug 2026",
+"2026-08-16") moves to January 1st as well; every other date, part of a
+date, time of day and weekday in a name or a description is taken out
+(``date_tokens.stray_date_spans``), as the check would report it. Every
 ``creator`` attribute is replaced with a generic value. Files are rewritten
-atomically and in place; ``rename_charterware_files`` removes the date and
-time from Charterware file names ("2026-01-12_1513h_OE-AKI_LOAV-LOAV.kml").
+atomically and in place; ``rename_dated_files`` removes the date and time
+from Charterware file names ("2026-01-12_1513h_OE-AKI_LOAV-LOAV.kml") and
+the dates from other file names ("1_DEHYL_DA40_16Aug.kml").
 """
 
 import argparse
@@ -33,18 +38,24 @@ from datetime import UTC, datetime, time, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, NamedTuple
 
+from .aircraft import parse_aircraft_from_filename
 from .cache import atomic_write
 from .constants import MAX_TIMESTAMP_DISTANCE_SECONDS
 from .date_tokens import (
     CHARTERWARE_DATE_PATTERN,
+    MAX_DAYS_AFTER_JAN_1,
     MONTHS_LONG,
     MONTHS_SHORT,
+    any_month_number,
     charterware_datetime,
     find_date_tokens,
+    find_partial_date_tokens,
     find_time_tokens,
     find_weekday_tokens,
     month_number,
     near_jan_first,
+    stray_date_spans,
+    without_spans,
 )
 from .helpers import normalize_timestamp_text, parse_iso_timestamp
 from .logger import logger
@@ -61,6 +72,7 @@ __all__ = [
     "obfuscate_kml_file",
     "obfuscate_kml_files",
     "rename_charterware_files",
+    "rename_dated_files",
 ]
 
 # An optional namespace prefix of an element name ("kml:when")
@@ -111,6 +123,24 @@ ROUTE_DATE_PATTERN = re.compile(
     r"(?:(?P<day>\d{1,2})\s+(?P<month>[A-Za-z]{3})\s+(?P<year>\d{4})"
     r"|(?P<iso_year>\d{4})-(?P<iso_month>\d{2})-(?P<iso_day>\d{2}))"
     r"(?P<tail>\s*</(?P=tag)\s*>)"
+)
+# A date in a name that the parser reads the year of a flight from: what
+# helpers.DATE_PATTERN matches, wherever it stands ("EDDS 16 Aug 2026", "16
+# Mai 2026", "2026-08-16"), and a day of one digit as well ("6 Aug 2026")
+NAME_YEAR_DATE_PATTERN = re.compile(
+    r"(?P<day>\d{1,2})\s+(?P<month>\w{3})\s+(?P<year>\d{4})|(?P<iso_year>\d{4})-\d{2}-\d{2}"
+)
+# How often a name or a description is scrubbed at most: what one pass
+# leaves may read as a date of its own
+_SCRUB_PASSES = 3
+# A name or a description, plain, in CDATA or with a comment or a processing
+# instruction inside, which a reader drops
+TEXT_ELEMENT_PATTERN = re.compile(
+    r"(<(" + _PREFIX + r"(name|description))\b[^>]*>)"
+    r"((?:<!\[CDATA\[(?s:.*?)\]\]>|<!--(?s:.*?)-->|<\?(?s:.*?)\?>|[^<])*)(</\2\s*>)"
+)
+TEXT_PART_PATTERN = re.compile(
+    r"<!\[CDATA\[(?P<cdata>(?s:.*?))\]\]>|<!--(?s:.*?)-->|<\?(?s:.*?)\?>|(?P<text>[^<]+)"
 )
 # Either quote: creator="SkyDemon" or creator='SkyDemon'
 CREATOR_PATTERN = re.compile(r"""(\screator=(?P<quote>["']))(.*?)((?P=quote))""")
@@ -417,10 +447,90 @@ def _scan_timestamps(content: str) -> _Timestamps:
     )
 
 
-def _has_real_creator(content: str) -> bool:
-    """True when the creator attribute still names the recording device."""
-    match = CREATOR_PATTERN.search(content)
-    return match is not None and match.group(3) != GENERIC_CREATOR
+def _real_creators(content: str) -> list[str]:
+    """The creator attributes that still name the recording device.
+
+    Every one: a Document may name the device behind a kml element that
+    names this tool.
+    """
+    return list(
+        dict.fromkeys(
+            match.group(3)
+            for match in CREATOR_PATTERN.finditer(content)
+            if match.group(3) != GENERIC_CREATOR
+        )
+    )
+
+
+def _element_text(raw: str) -> str:
+    """What a reader sees of an element: no comments, CDATA unwrapped."""
+    return "".join(
+        match["cdata"] if match["cdata"] is not None else html.unescape(match["text"])
+        for match in TEXT_PART_PATTERN.finditer(raw)
+        if match["cdata"] is not None or match["text"] is not None
+    )
+
+
+def _without_charterware_dates(text: str) -> str:
+    """A description with its Charterware date blanked, which the rewrite moves."""
+    return CHARTERWARE_DATE_PATTERN.sub(lambda match: " " * len(match[0]), text)
+
+
+def _name_date_on_jan_first(match: re.Match[str]) -> str:
+    """A date of a name the parser reads, moved to January 1st of its year.
+
+    The parser takes nothing but the year of it, so a day that does not
+    exist moves as well. A word that is no month name stays, and so does
+    its date: the check reports it, if it is one.
+    """
+    if match["iso_year"] is not None:
+        return f"{match['iso_year']}-01-01"
+    if any_month_number(match["month"]) is None:
+        return match.group(0)
+    return f"01 Jan {match['year']}"
+
+
+def _epoch_spans(text: str) -> list[tuple[int, int]]:
+    """The Unix times of past flights in a text (see ``_find_stray_epochs``)."""
+    return [
+        match.span()
+        for match in _EPOCH_PATTERN.finditer(text)
+        if not _epoch_is_obfuscated(match.group(1))
+    ]
+
+
+def _scrubbed_text(kind: str, text: str) -> str:
+    """A name or a description without what gives the day of a flight away.
+
+    A date of a name that the parser reads the year from moves to January
+    1st (the route names of SkyDemon, "EDDS to EDDP - 16 Aug 2026"), and
+    the rest goes: ``date_tokens.stray_date_spans`` and the Unix times. The
+    Charterware date of a description, which the rewrite has moved already,
+    stays.
+    """
+    for _ in range(_SCRUB_PASSES):
+        before = text
+        if kind == "name":
+            text = NAME_YEAR_DATE_PATTERN.sub(_name_date_on_jan_first, text)
+        scanned = _without_charterware_dates(text)
+        text = without_spans(text, stray_date_spans(scanned) + _epoch_spans(scanned))
+        if text == before:
+            break
+    return text
+
+
+def _scrub_text_element(match: re.Match[str]) -> str:
+    """A name or a description, scrubbed, in CDATA again where it was."""
+    raw = match.group(4)
+    text = _element_text(raw)
+    scrubbed = _scrubbed_text(match.group(3), text)
+    if scrubbed == text:
+        return match.group(0)
+    if "<![CDATA[" in raw and "]]>" not in scrubbed:
+        body = f"<![CDATA[{scrubbed}]]>"
+    else:
+        body = html.escape(scrubbed, quote=False)
+    return f"{match.group(1)}{body}{match.group(5)}"
 
 
 def obfuscate_kml_content(content: str) -> str | None:
@@ -461,13 +571,6 @@ def obfuscate_kml_content(content: str) -> str | None:
             match.group(1), dt.replace(month=1, day=1, hour=0, minute=0), long_month
         )
 
-    def route_on_jan_first(match: re.Match[str]) -> str:
-        if _parse_route_date(match) is None:
-            return match.group(0)
-        if match["iso_year"] is not None:
-            return f"{match['head']}{match['iso_year']}-01-01{match['tail']}"
-        return f"{match['head']}01 Jan {match['year']}{match['tail']}"
-
     def replace_creator(match: re.Match[str]) -> str:
         return f"{match.group(1)}{GENERIC_CREATOR}{match.group(4)}"
 
@@ -483,7 +586,7 @@ def obfuscate_kml_content(content: str) -> str | None:
         new_content = TIMESTAMP_PATTERN.sub(shift_timestamp, content)
     new_content = NAME_DATE_PATTERN.sub(marker_on_jan_first, new_content)
     new_content = CHARTERWARE_DATE_PATTERN.sub(description_on_jan_first, new_content)
-    new_content = ROUTE_DATE_PATTERN.sub(route_on_jan_first, new_content)
+    new_content = TEXT_ELEMENT_PATTERN.sub(_scrub_text_element, new_content)
     new_content = CREATOR_PATTERN.sub(replace_creator, new_content)
 
     return new_content if new_content != content else None
@@ -691,6 +794,90 @@ def rename_charterware_files(filepaths: Iterable[Path]) -> list[Path]:
     return [result[path] for path in paths]
 
 
+# What a file name is split into, which a removed date leaves doubled
+_NAME_SEPARATORS = re.compile(r"([-_. ])[-_. ]+")
+
+
+def _undated_stem(stem: str) -> str | None:
+    """A file name without what the check reports in it, None if unchanged.
+
+    The dates, parts of dates, times of day and weekdays go with the
+    separator they leave doubled ("1_DEHYL_DA40_16Aug" is "1_DEHYL_DA40").
+    """
+    spans = sorted(stray_date_spans(stem) + _epoch_spans(stem))
+    if not spans:
+        return None
+    kept = []
+    position = 0
+    for start, end in spans:
+        kept.append(stem[position:start])
+        position = max(position, end)
+    kept.append(stem[position:])
+    return _NAME_SEPARATORS.sub(r"\1", "".join(kept)).strip("-_. ")
+
+
+def _aircraft_of(name: str) -> tuple[str | None, str | None]:
+    """The registration and type a file name gives, without its warnings."""
+    disabled = logger.disabled
+    logger.disabled = True
+    try:
+        info = parse_aircraft_from_filename(name)
+    finally:
+        logger.disabled = disabled
+    return (info.registration, info.type) if info else (None, None)
+
+
+def rename_dated_files(filepaths: Iterable[Path]) -> list[Path]:
+    """Take the dates out of the names of KML files.
+
+    Charterware names move to January 1st (``rename_charterware_files``);
+    any other name, and the part of a Charterware name after its time slot,
+    loses its dates, parts of dates, times of day and weekdays (see
+    ``_undated_stem``). No existing file is ever replaced: a
+    name that would be taken, one with nothing left and one whose aircraft
+    would change stay and fail the check, to be renamed by hand.
+
+    Returns the given paths in their order, with the new path of every
+    renamed file.
+    """
+    result = []
+    for path in rename_charterware_files(filepaths):
+        stem = None
+        if not _is_kmz(path) and not path.is_symlink():
+            charterware = _charterware_name(path)
+            if charterware is None:
+                stem = _undated_stem(path.stem)
+            elif (rest := _undated_stem(charterware["rest"])) is not None:
+                # The date and time slot of a renamed Charterware name stay
+                head = path.stem[: charterware.start("rest")]
+                stem = head + rest if rest else None
+        if stem is None:
+            result.append(path)
+            continue
+        if not any(char.isalnum() for char in stem):
+            logger.error("Cannot rename %s: nothing is left without its dates", path)
+            result.append(path)
+            continue
+        target = path.with_name(stem + path.suffix)
+        if _aircraft_of(target.name) != _aircraft_of(path.name):
+            logger.error(
+                "Cannot rename %s to %s: the aircraft it names would change",
+                path,
+                target.name,
+            )
+            result.append(path)
+            continue
+        try:
+            _rename_exclusive(path, target)
+        except OSError as e:
+            logger.error("Cannot rename %s: %s", path, e)
+            result.append(path)
+            continue
+        logger.info("Renamed %s to %s", path.name, target.name)
+        result.append(target)
+    return result
+
+
 def find_kml_files(directory: Path) -> list[Path]:
     """List the KML files of a directory tree, the ones the generator reads.
 
@@ -727,7 +914,7 @@ def _leftover_temp_files(directory: Path) -> list[Path]:
 
 
 def _obfuscate_listed_files(kml_files: list[Path]) -> int:
-    renamed = rename_charterware_files(kml_files)
+    renamed = rename_dated_files(kml_files)
     modified = 0
     for original, path in zip(kml_files, renamed, strict=True):
         if obfuscate_kml_files([path]) or path != original:
@@ -892,6 +1079,18 @@ def _timestamp_violations(content: str) -> list[str]:
         if not _is_canonical_start(group[0])
     ]
 
+    # Legs less than FLIGHT_GAP apart are one flight, which keeps its
+    # intervals: one that runs for more days than the check lets pass has to
+    # be split by hand
+    violations.extend(
+        (
+            f"Flight runs over {(group[-1] - group[0]).days + 1} days, more "
+            f"than the {MAX_DAYS_AFTER_JAN_1 + 1} from Jan 1 the check lets "
+            "pass: split the file into one per day of flying"
+        )
+        for group in timestamps.groups
+        if group[-1] - group[0] >= timedelta(days=MAX_DAYS_AFTER_JAN_1 + 1)
+    )
     violations.extend(
         f"Timestamp not on Jan 1: {text}" for text in timestamps.dates_to_move
     )
@@ -936,11 +1135,14 @@ def check_kml_obfuscated(filepath: Path) -> list[str]:
         # A name keeps no time of day either ("1_DEHYL_1513h"): the export
         # takes it out, but the file is public. The time slot of a renamed
         # Charterware name is its sequence number.
+        stem = charterware_name["rest"] if charterware_name else filepath.stem
         violations.extend(
             f"File name contains a time of day: {text}"
-            for text in find_time_tokens(
-                charterware_name["rest"] if charterware_name else filepath.stem
-            )
+            for text in find_time_tokens(stem)
+        )
+        violations.extend(
+            f"File name contains part of a date: {text}"
+            for text in find_partial_date_tokens(stem)
         )
 
     violations.extend(
@@ -962,10 +1164,19 @@ def check_kml_obfuscated(filepath: Path) -> list[str]:
         if not _is_jan_first(_parse_route_date(match))
     )
 
-    if _has_real_creator(content):
-        match = CREATOR_PATTERN.search(content)
-        assert match is not None  # noqa: S101 - guarded by _has_real_creator
-        violations.append(f"Creator identifies the recording device: {match.group(3)}")
+    violations.extend(
+        f"Creator identifies the recording device: {creator}"
+        for creator in _real_creators(content)
+    )
+
+    # A day and month without the year, which the year of the flight
+    # completes, in what the site and the repository publish of a file
+    for match in TEXT_ELEMENT_PATTERN.finditer(content):
+        text = _without_charterware_dates(_element_text(match.group(4)))
+        violations.extend(
+            f"Name or description contains part of a date: {token}"
+            for token in find_partial_date_tokens(text)
+        )
 
     # Catch-all: any remaining date-shaped token that is not January 1st (or
     # the days a flight may run into after it). The checks above only know

@@ -672,7 +672,7 @@ class TestExportSite:
         }
         warnings = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
         assert any(
-            "2 airport name(s) without a known ICAO code" in message
+            "2 airport name(s) not from the airport database" in message
             and "'Anna Mueller', 'Bob Smith'" in message
             and "EDDF" not in message
             for message in warnings

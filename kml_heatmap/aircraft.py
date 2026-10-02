@@ -14,6 +14,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping
 
 __all__ = [
+    "NATIONALITY_MARKS",
     "REGISTRATION_PREFIXES",
     "AircraftInfo",
     "load_aircraft_data",
@@ -81,6 +82,42 @@ REGISTRATION_PREFIXES: tuple[str, ...] = tuple(
 )
 
 
+# The ICAO nationality marks a registration starts with (ICAO Annex 7), of
+# every state. "N" (United States) is read by its own rule (_N_NUMBER).
+NATIONALITY_MARKS: frozenset[str] = frozenset(
+    """
+    B C D F G I M P Z 2
+    3A 3B 3C 3D 3DC 3X 4K 4L 4O 4R 4W 4X 5A 5B 5H 5N 5R 5T 5U 5V 5W 5X 5Y
+    6O 6V 6W 6Y 7O 7P 7Q 7T 8P 8Q 8R 9A 9G 9H 9J 9K 9L 9M 9N 9Q 9U 9V 9XR
+    9Y A2 A3 A4O A5 A6 A7 A8 A9C AP C2 C3 C5 C6 C9 CC CN CP CS CU CX D2 D4
+    D6 DQ E3 E5 E7 EC EI EJ EK EP ER ES ET EW EX EY EZ H4 HA HB HC HH HI HK
+    HL HP HR HS HZ J2 J3 J5 J6 J7 J8 JA JU JY LN LV LX LY LZ OB OD OE OH OK
+    OM OO OY P2 P4 PH PJ PK PP PR PS PT PU PZ RA RDPL RP S2 S5 S7 S9 SE SP
+    ST SU SX T2 T3 T7 T8A T9 TC TF TG TI TJ TL TN TR TS TT TU TY TZ UK UN UP
+    UR V2 V3 V4 V5 V6 V7 V8 VH VN VP VQ VT XA XB XC XT XU XY YA YI YJ YK YL
+    YN YR YS YU YV Z3 ZA ZK ZP ZS ZT ZU
+    """.split()  # noqa: SIM905 - a table reads better than 190 quoted lines
+)
+# The length of what follows a mark of one character, which a name rarely
+# has: D-EHYL, G-ABCD and F-GABC have four letters, Z-WPA three. The marks
+# of two characters and more take one to five (OE-AKI, JA1234, RA-12345).
+_SINGLE_MARK_SUFFIX = {
+    "B": (3, 5),
+    "C": (4, 4),
+    "D": (4, 4),
+    "F": (4, 4),
+    "G": (4, 4),
+    "I": (4, 4),
+    "M": (4, 4),
+    "P": (3, 4),
+    "Z": (3, 3),
+    "2": (4, 4),
+}
+# A US registration: N, a digit other than zero, then digits with at most two
+# letters at the end, five characters at most (N12345, N123AB, N1430Z)
+_N_NUMBER = re.compile(r"N[1-9](?:\d{0,4}|\d{0,3}[A-Z]|\d{0,2}[A-Z]{2})")
+
+
 class AircraftInfo(NamedTuple):
     """What a KML file name says about the aircraft (see the parser below).
 
@@ -95,11 +132,12 @@ class AircraftInfo(NamedTuple):
     format: str = "numbered"
 
 
-# A registration: a nationality prefix of one or two characters (D, OE, 9A,
-# N), with or without its hyphen, then letters and digits (D-EHYL, OEAKI,
-# N12345, N123AB). In capitals, and with at least one letter: "summer" in
-# "2025_summer_trip.kml" is none.
-_REGISTRATION = re.compile(r"[A-Z0-9]{1,2}-[A-Z0-9]{1,5}|[A-Z0-9]{3,7}")
+# The shape of a registration: a nationality mark (D, OE, 9A, N, 9XR), with
+# or without its hyphen, then letters and digits (D-EHYL, OEAKI, N12345,
+# N123AB). In capitals, and with at least one letter: "summer" in
+# "2025_summer_trip.kml" is none. Which mark it starts with is up to
+# _has_nationality_mark.
+_REGISTRATION = re.compile(r"[A-Z0-9]{1,4}-[A-Z0-9]{1,5}|[A-Z0-9]{3,7}")
 _ICAO_CODE = re.compile(rf"[{ICAO_REGION_PREFIXES}][A-Z]{{3}}")
 _CHARTERWARE_DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
 _CHARTERWARE_TIME = re.compile(r"(?:[01]\d|2[0-3])[0-5]\dh")
@@ -213,6 +251,47 @@ def _is_registration(text: str, after_date: bool) -> bool:
     return not (after_date and _ICAO_CODE.fullmatch(text))
 
 
+def _fits_mark(mark: str, rest: str) -> bool:
+    if mark == "N":
+        return _N_NUMBER.fullmatch(mark + rest) is not None
+    if mark not in NATIONALITY_MARKS:
+        return False
+    low, high = _SINGLE_MARK_SUFFIX.get(mark, (1, 5))
+    return low <= len(rest) <= high
+
+
+def _has_nationality_mark(text: str) -> bool:
+    """Whether a registration starts with an ICAO nationality mark.
+
+    Before its hyphen, or any mark it starts with when written without one
+    (DEHYL, OEAKI, N12345). "ANNA" and "JOHN" start with none, and "MIKE"
+    is no M-IKE: the Isle of Man has four letters after its mark.
+    """
+    if "-" in text:
+        mark, _, rest = text.partition("-")
+        return _fits_mark(mark, rest)
+    return _N_NUMBER.fullmatch(text) is not None or any(
+        _fits_mark(text[:length], text[length:]) for length in range(1, 5)
+    )
+
+
+def _unmarked_registration(text: str, filename: str) -> bool:
+    """Whether a registration has no nationality mark, a name as often.
+
+    "ANNA" in "1_ANNA_DA40.kml" has the shape of a registration, but the
+    site would publish a name with every path. Warns about it.
+    """
+    if _has_nationality_mark(text):
+        return False
+    logger.warning(
+        "Ignoring the registration %s in %s: it starts with no ICAO "
+        "nationality mark (D-EHYL, OE-AKI, N12345), and the site would publish it",
+        text,
+        filename,
+    )
+    return True
+
+
 def _dated_registration(text: str, filename: str) -> bool:
     """Whether a registration holds a date, which it would publish.
 
@@ -281,8 +360,9 @@ def parse_aircraft_from_filename(filename: str) -> AircraftInfo | None:
 
     A numbered name whose second part is no registration (see
     ``_is_registration``) names no aircraft; a Charterware name without one
-    keeps its route. A registration that holds a date is none either (see
-    ``_dated_registration``), but the type and route stay. A type that is
+    keeps its route. A registration that holds a date or starts with no
+    nationality mark is none either (see ``_dated_registration`` and
+    ``_unmarked_registration``), but the type and route stay. A type that is
     no type designator is dropped (see ``_aircraft_type``).
     """
     name = Path(filename).stem
@@ -300,6 +380,7 @@ def parse_aircraft_from_filename(filename: str) -> AircraftInfo | None:
         return AircraftInfo(
             registration=None
             if _dated_registration(parts[1], filename)
+            or _unmarked_registration(parts[1], filename)
             else normalize_registration(parts[1]),
             type=_aircraft_type(parts[2], filename),
             format="numbered",
@@ -320,8 +401,10 @@ def parse_aircraft_from_filename(filename: str) -> AircraftInfo | None:
         # "2026-01-12_1513h_constructor_LOAV-LOAV.kml" is no aircraft, but
         # the route still names the airports
         registration = None
-        if _is_registration(parts[2], after_date=False) and not _dated_registration(
-            parts[2], filename
+        if (
+            _is_registration(parts[2], after_date=False)
+            and not _dated_registration(parts[2], filename)
+            and not _unmarked_registration(parts[2], filename)
         ):
             registration = normalize_registration(parts[2])
         else:
