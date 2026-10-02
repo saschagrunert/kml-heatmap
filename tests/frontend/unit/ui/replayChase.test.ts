@@ -78,7 +78,6 @@ describe("ReplayManager chase view", () => {
     const button = el("replay-chase-btn");
     expect(replayManager.state.chase).toBe(false);
     expect(button.getAttribute("aria-pressed")).toBe("false");
-    expect(button.title).toBe("Chase view off");
   });
 
   it("switches on from its control, pressed, and announces it", () => {
@@ -86,7 +85,6 @@ describe("ReplayManager chase view", () => {
     el("replay-chase-btn").click();
     expect(replayManager.state.chase).toBe(true);
     expect(el("replay-chase-btn").getAttribute("aria-pressed")).toBe("true");
-    expect(el("replay-chase-btn").title).toBe("Chase view on");
     expect(liveRegionText()).toBe("Chase view on, 10x");
   });
 

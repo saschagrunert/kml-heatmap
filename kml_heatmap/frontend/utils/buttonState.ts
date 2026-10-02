@@ -73,6 +73,23 @@ export function syncLegend(
 }
 
 /**
+ * Say through aria-disabled whether a control can act: it stays in the tab
+ * order to explain itself, and the stylesheet dims it. A control a mode
+ * holds (holdControls in ui/heldControls.ts, which keeps the control's own
+ * word in `data-held`) stays unavailable, and gets this back as it ends.
+ */
+export function setUnavailable(
+  control: HTMLElement,
+  unavailable: boolean,
+): void {
+  if (control.dataset["held"] === undefined) {
+    control.setAttribute("aria-disabled", String(unavailable));
+  } else {
+    control.dataset["held"] = String(unavailable);
+  }
+}
+
+/**
  * Set the text of a control button without touching its icon.
  * A button that carries no label span gets one: assigning `textContent`
  * would drop every child, the injected `svg.icon` included.

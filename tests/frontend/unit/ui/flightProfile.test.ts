@@ -12,6 +12,8 @@ import {
 } from "../../../../kml_heatmap/frontend/ui/flightProfile";
 import { REPLAY_PANEL_HEIGHT_VAR } from "../../../../kml_heatmap/frontend/ui/replayManager";
 import { toggleCrossSection } from "../../../../kml_heatmap/frontend/ui/crossSection";
+import { holdControls } from "../../../../kml_heatmap/frontend/ui/heldControls";
+import * as toast from "../../../../kml_heatmap/frontend/utils/toast";
 import {
   resetSiteData,
   siteData,
@@ -672,6 +674,27 @@ describe("flight profile", () => {
       expect(app.replayManager.toggleReplay).not.toHaveBeenCalled();
       expect(app.replayManager.seekReplay).not.toHaveBeenCalled();
       window.dispatchEvent(pointer("pointerup", 0.5));
+    });
+
+    it("does not open replay while a mode holds its control, and says why", () => {
+      // The tour holds Replay; a press on the chart went round it
+      const { app, plot } = setup();
+      const button = document.createElement("button");
+      button.id = "replay-btn";
+      document.body.append(button);
+      const release = holdControls(["replay-btn"], "the hotspot tour");
+      const toastSpy = vi.spyOn(toast, "showToast");
+
+      plot.dispatchEvent(pointer("pointerdown", 0.5));
+      window.dispatchEvent(pointer("pointerup", 0.5));
+
+      expect(app.replayManager.toggleReplay).not.toHaveBeenCalled();
+      expect(app.replayManager.seekReplay).not.toHaveBeenCalled();
+      expect(toastSpy).toHaveBeenCalledWith(
+        "End the hotspot tour to change this",
+      );
+      release();
+      button.remove();
     });
 
     it("stops where replay did not open", () => {

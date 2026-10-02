@@ -9,6 +9,7 @@ import { importWithRetry } from "../services/lazyImport";
 import { logError } from "../utils/logger";
 import { withMapStill } from "../utils/mapHelpers";
 import { showToast } from "../utils/toast";
+import { NO_TIMING_MESSAGE, STILL_LOADING_MESSAGE } from "./actions";
 import { altitudeColours, setColorLayer } from "./layerVisibility";
 
 /**
@@ -185,6 +186,15 @@ export class UIToggles {
   }
 
   toggleAirspeed(): void {
+    // Unavailable without timing data, and until the metadata says whether
+    // there is any (aria-disabled, see appInitializer): a click says why
+    // rather than turning on a layer with no speeds to draw
+    if (!this.app.hasTimingData) {
+      showToast(
+        this.app.isInitializing ? STILL_LOADING_MESSAGE : NO_TIMING_MESSAGE,
+      );
+      return;
+    }
     this.toggleColorLayer("airspeed");
   }
 

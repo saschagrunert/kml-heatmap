@@ -29,6 +29,7 @@ import {
 } from "../utils/statsFormat";
 import { icon, type IconName } from "../utils/icons";
 import { domCache } from "../utils/domCache";
+import { countryMark } from "../utils/wrappedHtml";
 import { datasetIndex } from "../calculations/datasetIndex";
 import { watchScrollEnd, type ScrollEndWatcher } from "../utils/scrollFade";
 import { setStatsTitle, STATS_PANEL_ID as PANEL_ID } from "./statsPanel";
@@ -197,24 +198,6 @@ function airportSummary(numAirports: number, numCountries: number): string {
   return airports + " in " + pluralize(numCountries, "country", "countries");
 }
 
-/**
- * The mark beside a country's name: its flag where the site carries one,
- * otherwise the ISO code as a chip. Emoji flags are not an option, whatever
- * the platform: Windows has no glyphs for them at all.
- */
-function countryMark(code: string): string {
-  const src = countryFlagSrc(code);
-  return src
-    ? '<img class="kh-stats-group-flag" src="' +
-        escapeHtml(src) +
-        '" alt="' +
-        escapeHtml(code) +
-        '" width="16" height="12" loading="lazy">'
-    : '<span class="kh-stats-group-code" aria-hidden="true">' +
-        escapeHtml(code) +
-        "</span>";
-}
-
 /** Airport list grouped by country, every entry with its code and name */
 function airportGroups(grouped: Map<string, string[]>): string {
   let html = "";
@@ -223,7 +206,9 @@ function airportGroups(grouped: Map<string, string[]>): string {
     const label = isCountry ? countryDisplayName(code) : "Other";
     html +=
       '<div class="kh-stats-group">' +
-      (isCountry ? countryMark(code) : "") +
+      (isCountry
+        ? countryMark(code, countryFlagSrc(code), "kh-stats-group", 16, 12)
+        : "") +
       '<span class="kh-stats-group-name">' +
       escapeHtml(label) +
       "</span>" +

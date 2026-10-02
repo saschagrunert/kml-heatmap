@@ -10,20 +10,22 @@ import { escapeHtml, pluralFlights, type AirportCount } from "./htmlGenerators";
 import { markFlightTimeUnits, splitAirportName } from "./statsFormat";
 import { icon, type IconName } from "./icons";
 
-/** Section heading for a Wrapped card: line icon plus label */
+/**
+ * Section heading for a Wrapped card: line icon plus label. An h2 under
+ * the dialog's h1, with the id `wrapped-<className>` its card is labelled
+ * by (map_template.html), so the card is named what it shows.
+ */
 function wrappedSectionTitle(
   className: string,
   iconName: Parameters<typeof icon>[0],
   label: string,
 ): string {
   return (
-    '<h3 class="' +
-    className +
-    '">' +
+    `<h2 id="wrapped-${className}" class="${className}">` +
     icon(iconName, 20) +
     '<span class="section-title-text">' +
     label +
-    "</span></h3>"
+    "</span></h2>"
   );
 }
 
@@ -271,6 +273,25 @@ function destinationRow(
   );
 }
 
+/**
+ * The mark beside a country's name: its flag where the site carries one
+ * (`<prefix>-flag`), otherwise the ISO code as a chip (`<prefix>-code`).
+ * Either is decoration, as the name beside it says the country: a flag
+ * with the code for its text had a screen reader say "DE Germany". Never
+ * an emoji flag: Windows ships no glyphs for them.
+ */
+export function countryMark(
+  code: string,
+  src: string | null,
+  prefix: string,
+  width: number,
+  height: number,
+): string {
+  return src
+    ? `<img class="${prefix}-flag" src="${escapeHtml(src)}" alt="" width="${width}" height="${height}" loading="lazy">`
+    : `<span class="${prefix}-code" aria-hidden="true">${escapeHtml(code)}</span>`;
+}
+
 export function generateDestinationsHtml(
   grouped: Map<string, string[]>,
   options: DestinationsOptions,
@@ -287,20 +308,9 @@ export function generateDestinationsHtml(
   for (const [code, airports] of grouped) {
     const isCountry = code !== "Other";
     const label = isCountry ? countryName(code) : "Other";
-    const flag = isCountry ? flagSrc(code) : null;
-    // A flag where the site carries one, the ISO code where it does not.
-    // Never an emoji flag: Windows ships no glyphs for them.
-    const codeHtml = !isCountry
-      ? ""
-      : flag
-        ? '<img class="country-flag" src="' +
-          escapeHtml(flag) +
-          '" alt="' +
-          escapeHtml(code) +
-          '" width="18" height="14" loading="lazy">'
-        : '<span class="country-code" aria-hidden="true">' +
-          escapeHtml(code) +
-          "</span>";
+    const codeHtml = isCountry
+      ? countryMark(code, flagSrc(code), "country", 18, 14)
+      : "";
     html +=
       '<div class="country-group">' +
       '<div class="country-group-title">' +

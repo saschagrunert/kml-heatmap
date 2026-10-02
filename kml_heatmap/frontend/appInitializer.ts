@@ -8,6 +8,7 @@ import {
   createAirportElement,
   setAirportElementHome,
 } from "./features/airports";
+import { setUnavailable } from "./utils/buttonState";
 import { domCache } from "./utils/domCache";
 import { applyMetricColors } from "./utils/htmlGenerators";
 import { createActivationFilter, toLngLat } from "./utils/mapHelpers";
@@ -116,10 +117,10 @@ export async function loadInitialData(app: MapApp): Promise<void> {
   const hasTimingData = metadata !== null && metadata.max_groundspeed_knots > 0;
   app.hasTimingData = hasTimingData;
 
-  // A restored speed layer has no speeds to draw. Its button is disabled
-  // below, and a disabled button cannot be released, so the store is put
-  // right here rather than restoring an empty layer that shows as pressed
-  // over a legend with placeholder labels.
+  // A restored speed layer has no speeds to draw. Its button is unavailable
+  // below, and an unavailable button cannot be released, so the store is
+  // put right here rather than restoring an empty layer that shows as
+  // pressed over a legend with placeholder labels.
   if (!hasTimingData && app.airspeedVisible) app.airspeedVisible = false;
 
   if (hasTimingData) {
@@ -129,14 +130,17 @@ export async function loadInitialData(app: MapApp): Promise<void> {
     };
   }
 
-  // Enable/disable airspeed button based on timing data availability
-  // (e.g., Charterware files without per-point timestamps won't have speed data)
-  // Note: Altitude visualization still works (altitude data is in coordinates)
-  // The pressed state and the opacity follow the store (see setupButtonSync);
-  // only the disabled flag is owned here.
-  const airspeedBtn = domCache.get("airspeed-btn", HTMLButtonElement);
+  // The speed layer is unavailable without timing data (e.g., Charterware
+  // files without per-point timestamps won't have speed data); altitude
+  // still works, from the coordinates. aria-disabled rather than disabled,
+  // so the button stays reachable and says why (#airspeed-reason), and a
+  // click on it as well (UIToggles.toggleAirspeed). The pressed state
+  // follows the store (see setupButtonSync); only this is owned here.
+  const airspeedBtn = domCache.get("airspeed-btn");
   if (airspeedBtn) {
-    airspeedBtn.disabled = !hasTimingData;
+    setUnavailable(airspeedBtn, !hasTimingData);
+    if (hasTimingData) airspeedBtn.removeAttribute("aria-describedby");
+    else airspeedBtn.setAttribute("aria-describedby", "airspeed-reason");
   }
 
   // Load the selected year's data; currentData is the single source of

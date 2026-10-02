@@ -557,7 +557,8 @@ describe("appInitializer", () => {
       await loadInitialData(asMapApp(app));
 
       const btn = document.getElementById("airspeed-btn") as HTMLButtonElement;
-      expect(btn.disabled).toBe(false);
+      expect(btn.getAttribute("aria-disabled")).toBe("false");
+      expect(btn.hasAttribute("aria-describedby")).toBe(false);
       // Off, and available: no style of its own, the stylesheet draws it
       expect(btn.style.opacity).toBe("");
       expect(btn.getAttribute("aria-pressed")).toBe("false");
@@ -575,7 +576,7 @@ describe("appInitializer", () => {
       expect(document.getElementById("airspeed-legend")!.hidden).toBe(false);
     });
 
-    it("disables the airspeed button without timing data", async () => {
+    it("marks the airspeed button unavailable without timing data", async () => {
       app.dataManager.loadMetadata.mockResolvedValue({
         ...metadata,
         max_groundspeed_knots: 0,
@@ -584,7 +585,10 @@ describe("appInitializer", () => {
       await loadInitialData(asMapApp(app));
 
       const btn = document.getElementById("airspeed-btn") as HTMLButtonElement;
-      expect(btn.disabled).toBe(true);
+      // aria-disabled, so it stays reachable and says why
+      expect(btn.disabled).toBe(false);
+      expect(btn.getAttribute("aria-disabled")).toBe("true");
+      expect(btn.getAttribute("aria-describedby")).toBe("airspeed-reason");
       expect(app.airspeedRange).toEqual({ min: 0, max: 200 });
     });
 
@@ -659,7 +663,7 @@ describe("appInitializer", () => {
       // No Retry on the toast: the panel on the map has the one
       expect(app.dataManager.loadData).toHaveBeenCalledWith("all");
       const btn = document.getElementById("airspeed-btn") as HTMLButtonElement;
-      expect(btn.disabled).toBe(true);
+      expect(btn.getAttribute("aria-disabled")).toBe("true");
       // The aircraft list is still settled
       expect(app.filterManager.updateAircraftDropdown).toHaveBeenCalled();
     });

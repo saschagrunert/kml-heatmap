@@ -32,8 +32,9 @@ function tourState(page: Page) {
       document.getElementById(id);
     const text = (id: string): string => byId(id)?.textContent ?? "";
     const shown = (id: string): boolean => !!byId(id)?.checkVisibility();
+    // Held: a select disabled, a button aria-disabled (ui/heldControls.ts)
     const disabled = (id: string): boolean =>
-      !!(byId(id) as HTMLButtonElement | HTMLSelectElement | null)?.disabled;
+      !!byId(id)?.matches(':disabled, [aria-disabled="true"]');
     const live = byId("hotspot-tour-live");
     return {
       panel: shown("hotspot-tour"),

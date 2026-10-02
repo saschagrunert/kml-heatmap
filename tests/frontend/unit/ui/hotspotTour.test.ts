@@ -33,6 +33,7 @@ import {
   asMapApp,
   createDataset,
   createMockApp,
+  isHeld,
   el,
   segmentOf,
   type MockApp,
@@ -189,7 +190,7 @@ describe("hotspot tour", () => {
 
     // Held, as for a replay, and the control says it runs
     for (const id of HELD) {
-      expect((el(id) as HTMLButtonElement).disabled, id).toBe(true);
+      expect(isHeld(el(id)), id).toBe(true);
     }
     expect(el("hotspot-tour-btn").getAttribute("aria-pressed")).toBe("true");
     expect(document.body.classList.contains("hotspot-tour-active")).toBe(true);
@@ -247,7 +248,7 @@ describe("hotspot tour", () => {
     expect(app.tourView).toBeNull();
     expect(panel().hidden).toBe(true);
     for (const id of HELD) {
-      expect((el(id) as HTMLButtonElement).disabled, id).toBe(false);
+      expect(isHeld(el(id)), id).toBe(false);
     }
     expect(el("hotspot-tour-btn").getAttribute("aria-pressed")).toBe("false");
     expect(document.body.classList.contains("hotspot-tour-active")).toBe(false);
@@ -540,7 +541,7 @@ describe("hotspot tour", () => {
 
     expect(toggle).toHaveBeenCalledWith(asMapApp(app));
     expect(tour.isOpen).toBe(true);
-    expect((el("cross-section-btn") as HTMLButtonElement).disabled).toBe(true);
+    expect(isHeld(el("cross-section-btn"))).toBe(true);
   });
 
   it("does not start while another has the map, nor with nothing to tour", () => {
@@ -683,12 +684,12 @@ describe("hotspot tour", () => {
   });
 
   it("gives the controls back as they were", () => {
-    (el("isolate-btn") as HTMLButtonElement).disabled = true;
+    el("isolate-btn").setAttribute("aria-disabled", "true");
 
     tour.start();
     tour.stop();
 
-    expect((el("isolate-btn") as HTMLButtonElement).disabled).toBe(true);
+    expect(isHeld(el("isolate-btn"))).toBe(true);
     expect((el("year-select") as HTMLSelectElement).disabled).toBe(false);
   });
 

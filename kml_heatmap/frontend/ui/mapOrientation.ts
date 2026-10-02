@@ -13,6 +13,7 @@
  */
 import type { Map as MapLibreMap } from "maplibre-gl";
 import type { MapApp } from "../mapApp";
+import { setUnavailable } from "../utils/buttonState";
 import { domCache } from "../utils/domCache";
 import { DEGREES_TO_RADIANS } from "../utils/geometry";
 import { isReplayCameraMove } from "../utils/mapHelpers";
@@ -231,7 +232,8 @@ export class MapOrientation {
     // With nothing to reset the button in the column is shown unavailable,
     // like Isolate and Replay: still focusable, so a keyboard user who just
     // pressed it keeps their place
-    domCache.get(COMPASS_ID)?.setAttribute("aria-disabled", String(upright));
+    const compass = domCache.get(COMPASS_ID);
+    if (compass) setUnavailable(compass, upright);
     if (!floating) return;
     // The button hides once its own click has done its work. Focus would
     // fall back to <body> with it; the map is what it acted on.

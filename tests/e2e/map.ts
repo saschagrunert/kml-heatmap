@@ -425,7 +425,8 @@ export async function hideChrome(page: Page): Promise<void> {
   await page.evaluate(() => {
     const sheet = new CSSStyleSheet();
     sheet.replaceSync(
-      "body > :not(#map), #map .maplibregl-control-container " +
+      "body > :not(main), main > :not(#map), " +
+        "#map .maplibregl-control-container " +
         "{ visibility: hidden !important; }",
     );
     document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];

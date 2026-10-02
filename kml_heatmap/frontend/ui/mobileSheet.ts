@@ -325,10 +325,19 @@ export class MobileSheet {
       textHost.append(chip);
     }
 
+    // A row that is a control is named by its label alone, and its hint
+    // describes it: from its contents its name was "Groundspeed No timing
+    // data in the flights"
+    if (spec.kind !== "select") {
+      element.setAttribute("aria-labelledby", label.id);
+    }
+
     let hint: HTMLElement | null = null;
     if (spec.hint) {
       hint = document.createElement("span");
       hint.className = "sheet-row-hint";
+      hint.id = this.id + "-" + spec.id + "-hint";
+      element.setAttribute("aria-describedby", hint.id);
       textHost.append(hint);
     }
 

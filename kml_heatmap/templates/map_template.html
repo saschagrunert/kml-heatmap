@@ -114,9 +114,16 @@
          reaches the controls before the airport markers on the map, of
          which there can be dozens; this link goes past the controls. -->
     <a href="#map" class="skip-nav">Skip to map</a>
+    <header>
+      <h1 class="visually-hidden">KML Heatmap</h1>
+    </header>
     <!-- Left control column: what the map shows you and how to pass it on.
          Icons are injected from utils/icons.ts into every [data-icon]. -->
-    <div id="left-buttons" class="control-column is-at-end">
+    <nav
+      id="left-buttons"
+      class="control-column is-at-end"
+      aria-label="View and share"
+    >
       <div
         class="control-group"
         role="group"
@@ -129,8 +136,8 @@
             class="btn-surface control-btn"
             data-action="toggleStats"
             data-icon="stats"
-            title="Toggle flight statistics panel"
-            aria-label="Toggle flight statistics panel"
+            title="Statistics: the figures and the list of the flights"
+            aria-label="Statistics: the figures and the list of the flights"
             aria-controls="stats-rail"
             aria-expanded="false"
           >
@@ -255,10 +262,14 @@
           </button>
         </div>
       </div>
-    </div>
+    </nav>
 
     <!-- Right control column: which flights are drawn and which layers -->
-    <div id="right-buttons" class="control-column is-at-end">
+    <nav
+      id="right-buttons"
+      class="control-column is-at-end"
+      aria-label="Filter, layers and map"
+    >
       <div
         class="control-group"
         role="group"
@@ -351,14 +362,17 @@
             class="btn-surface control-btn"
             data-action="toggleAirspeed"
             data-icon="speed"
-            disabled
             title="Groundspeed: colour the paths by speed over the ground"
             aria-label="Groundspeed: colour the paths by speed over the ground"
             aria-pressed="false"
+            aria-disabled="true"
           >
             <span class="control-label">Groundspeed</span>
           </button>
           <span class="ramp-chip ramp-chip-speed" aria-hidden="true"></span>
+          <!-- What describes the button on a site without timing data
+               (appInitializer.ts) -->
+          <span id="airspeed-reason" hidden>No timing data in the flights</span>
         </div>
         <div class="control-row">
           <button
@@ -445,7 +459,7 @@
           </button>
         </div>
       </div>
-    </div>
+    </nav>
 
     <!-- The compass of the phone layout, where the columns are hidden. Shown
          only while the map is turned or tilted (ui/mapOrientation.ts). -->
@@ -464,7 +478,7 @@
     <!-- Statistics rail: a collapse control plus the panel the stats manager
          fills. Hidden until the statistics are opened; the map is sized
          beside the rail rather than underneath it. -->
-    <div id="stats-rail" hidden>
+    <aside id="stats-rail" aria-labelledby="stats-rail-title" hidden>
       <div id="stats-rail-header">
         <h2 id="stats-rail-title" class="kh-stats-title">
           <span
@@ -528,7 +542,7 @@
         aria-labelledby="flights-tab"
         hidden
       ></div>
-    </div>
+    </aside>
     <div
       id="altitude-legend"
       class="color-legend"
@@ -618,55 +632,82 @@
       </details>
     </div>
 
-    <!-- What is selected, and the way out of it. A selection is only drawn
+    <!-- The toasts stack here (utils/toast.ts), ahead of the map for the
+         same reason: an error's Retry and Dismiss are buttons. Outside
+         <main>, which Wrapped's dialog makes inert while it is open, so
+         a toast still speaks and can be pressed then (wrappedManager.ts). -->
+    <div id="toast-stack" class="toast-stack"></div>
+
+    <!-- The map and what is said over it: the landmark the page is about.
+         display: contents, so it adds no box of its own (styles.css);
+         role="main" because older WebKit drops the landmark of an element
+         without a box. -->
+    <main id="map-home" role="main">
+      <!-- What is selected, and the way out of it. A selection is only drawn
          on the map where the paths themselves are drawn; at the zoom levels
          that show the heat bloom alone it had no representation at all, and
          nothing anywhere said how many flights Isolate and the shared link
          would carry. Filled by ui/pathSelection.ts. -->
-    <div id="selection-chip" hidden>
-      <span id="selection-chip-count"></span>
-      <button
-        type="button"
-        id="selection-clear-btn"
-        class="btn-surface"
-        data-icon="close"
-        title="Clear the selection"
-        aria-label="Clear the selection"
-      >
-        <span class="control-label">Clear</span>
-      </button>
-    </div>
+      <div id="selection-chip" hidden>
+        <span id="selection-chip-count"></span>
+        <button
+          type="button"
+          id="selection-clear-btn"
+          class="btn-surface"
+          data-icon="close"
+          title="Clear the selection"
+          aria-label="Clear the selection"
+        >
+          <span class="control-label">Clear</span>
+        </button>
+      </div>
 
-    <!-- Said in place of the flights when the first year could not be
+      <!-- Said in place of the flights when the first year could not be
          loaded, with the way to ask for it again (appInitializer.ts). Ahead
          of the map, like the controls: after it, its Retry was 55 presses
          of Tab away, past every airport marker. -->
-    <div id="map-empty" hidden>
-      <p>Could not load the flights</p>
-      <button
-        type="button"
-        id="map-empty-retry"
-        class="btn-surface control-btn"
-        aria-label="Retry loading the flights"
-        data-icon="reset"
-      >
-        <span class="control-label">Retry</span>
-      </button>
-    </div>
+      <div id="map-empty" hidden>
+        <p>Could not load the flights</p>
+        <button
+          type="button"
+          id="map-empty-retry"
+          class="btn-surface control-btn"
+          aria-label="Retry loading the flights"
+          data-icon="reset"
+        >
+          <span class="control-label">Retry</span>
+        </button>
+      </div>
 
-    <!-- The toasts stack here (utils/toast.ts), ahead of the map for the
-         same reason: an error's Retry and Dismiss are buttons -->
-    <div id="toast-stack" class="toast-stack"></div>
+      <div
+        id="map"
+        role="application"
+        aria-label="Flight map visualization"
+        tabindex="-1"
+      ></div>
 
-    <div
-      id="map"
-      role="application"
-      aria-label="Flight map visualization"
-      tabindex="-1"
-    ></div>
+      <!-- Loading indicator (shown/hidden by the data manager, text is updatable) -->
+      <div id="loading">
+        <div role="status" aria-live="polite">
+          <span class="loading-spinner" aria-hidden="true"></span>
+          <span id="loading-text">Loading data…</span>
+        </div>
+        <!-- Filled while year files of a known size download. Outside the live
+           region, which would otherwise announce every step of the value -->
+        <div
+          id="loading-progress"
+          role="progressbar"
+          aria-label="Download progress"
+          aria-valuemin="0"
+          aria-valuemax="100"
+          hidden
+        ></div>
+      </div>
+    </main>
 
     <!-- Toast announcements. Present from the start, so screen readers track
-         them before utils/toast.ts writes a message into one. -->
+         them before utils/toast.ts writes a message into one. Outside <main>
+         as the stack is. -->
     <div
       id="toast-status"
       class="visually-hidden"
@@ -681,24 +722,6 @@
       aria-live="assertive"
       aria-atomic="true"
     ></div>
-
-    <!-- Loading indicator (shown/hidden by the data manager, text is updatable) -->
-    <div id="loading">
-      <div role="status" aria-live="polite">
-        <span class="loading-spinner" aria-hidden="true"></span>
-        <span id="loading-text">Loading data…</span>
-      </div>
-      <!-- Filled while year files of a known size download. Outside the live
-           region, which would otherwise announce every step of the value -->
-      <div
-        id="loading-progress"
-        role="progressbar"
-        aria-label="Download progress"
-        aria-valuemin="0"
-        aria-valuemax="100"
-        hidden
-      ></div>
-    </div>
 
     <!-- Replay Controls -->
     <div id="replay-controls" role="region" aria-label="Flight replay controls">
@@ -758,8 +781,8 @@
             data-action="toggleAutoZoom"
             data-icon="autoZoom"
             data-icon-size="20"
-            title="Auto-zoom disabled"
-            aria-label="Toggle automatic zoom adjustment"
+            title="Auto-zoom: zoom in on the aircraft and keep it in view"
+            aria-label="Auto-zoom: zoom in on the aircraft and keep it in view"
             aria-pressed="false"
           ></button>
           <!-- Bound by ReplayManager, not by a data-action -->
@@ -768,7 +791,7 @@
             class="btn-surface replay-btn"
             data-icon="chase"
             data-icon-size="20"
-            title="Chase view off"
+            title="Chase view: follow the aircraft from behind"
             aria-label="Chase view: follow the aircraft from behind"
             aria-pressed="false"
           ></button>
@@ -855,7 +878,7 @@
             <section
               id="wrapped-card-facts"
               class="wrapped-square-card"
-              aria-label="Fun facts"
+              aria-labelledby="wrapped-fun-facts-title"
             >
               <div class="fun-facts" id="wrapped-fun-facts"></div>
             </section>
@@ -864,7 +887,7 @@
             <section
               id="wrapped-card-fleet"
               class="wrapped-square-card"
-              aria-label="Aircraft fleet"
+              aria-labelledby="wrapped-aircraft-fleet-title"
             >
               <div class="aircraft-fleet" id="wrapped-aircraft-fleet"></div>
             </section>
@@ -873,7 +896,7 @@
             <section
               id="wrapped-card-airports"
               class="wrapped-square-card"
-              aria-label="Airports visited"
+              aria-labelledby="wrapped-top-airports-title wrapped-airports-grid-title"
             >
               <div class="top-airports" id="wrapped-top-airports"></div>
               <div class="airports-grid" id="wrapped-airports-grid"></div>
@@ -900,7 +923,7 @@
     </div>
 
     <!-- GitHub footer -->
-    <div id="github-footer">
+    <footer id="github-footer">
       <a
         href="https://github.com/saschagrunert/kml-heatmap"
         target="_blank"
@@ -921,7 +944,7 @@
           />
         </svg>
       </a>
-    </div>
+    </footer>
 
     <!-- Deferred scripts and modules execute in document order: config,
          then the application bundle, which imports MapLibre from vendor/,

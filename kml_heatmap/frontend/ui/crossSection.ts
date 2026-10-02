@@ -639,9 +639,9 @@ function createTool(app: MapApp): Tool {
     }
     const target = map()!;
     const mapElement = document.getElementById("map");
-    // Ahead of the map, like the controls: after it, it was past every
-    // airport marker in the tab order
-    if (mapElement?.parentElement === document.body) mapElement.before(root);
+    // Ahead of the map, in the <main> that holds it: after it, it was
+    // past every airport marker in the tab order
+    if (mapElement?.closest("main")) mapElement.before(root);
     else document.body.append(root);
     addLayers(target);
     listen(target);

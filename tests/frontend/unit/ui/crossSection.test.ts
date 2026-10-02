@@ -179,7 +179,7 @@ describe("cross-section", () => {
     document.body.className = "";
     document.body.innerHTML = `
       <button id="cross-section-btn" aria-pressed="false"></button>
-      <div id="map"></div>`;
+      <main><div id="map"></div></main>`;
     vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({
       createImageData: (width: number, height: number) => ({
         data: new Uint8ClampedArray(width * height * 4),

@@ -3,9 +3,12 @@
  * behind it, the map hand-over and the timers.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { resetSiteData } from "../../../../kml_heatmap/frontend/state/siteData";
 import { WrappedManager } from "../../../../kml_heatmap/frontend/ui/wrappedManager";
 import {
+  TOAST_ALERT_ID,
   TOAST_STACK_ID,
   TOAST_STATUS_ID,
   showToast,
@@ -309,6 +312,26 @@ describe("WrappedManager dialog", () => {
       expect(
         document.getElementById(TOAST_STACK_ID)!.hasAttribute("inert"),
       ).toBe(false);
+    });
+
+    it("keeps the toasts of the real page out of what it makes inert", () => {
+      // In the page's <main> they went inert with it (regression)
+      wrappedManager.destroy();
+      document.body.innerHTML = new DOMParser().parseFromString(
+        readFileSync(
+          join(process.cwd(), "kml_heatmap/templates/map_template.html"),
+          "utf8",
+        ),
+        "text/html",
+      ).body.innerHTML;
+      wrappedManager = new WrappedManager(asMapApp(mockApp));
+
+      wrappedManager.showWrapped();
+
+      expect(document.querySelector("main")!.hasAttribute("inert")).toBe(true);
+      for (const id of [TOAST_STACK_ID, TOAST_STATUS_ID, TOAST_ALERT_ID]) {
+        expect(document.getElementById(id)!.closest("[inert]"), id).toBeNull();
+      }
     });
 
     it("leaves the loading indicator to the data manager", () => {

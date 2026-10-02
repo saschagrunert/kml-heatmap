@@ -658,19 +658,22 @@ describe("ReplayManager playback", () => {
       const btn = el("replay-autozoom-btn");
       expect(btn.classList.contains("active")).toBe(true);
       expect(btn.getAttribute("aria-pressed")).toBe("true");
-      expect(btn.title).toBe("Auto-zoom enabled");
     });
 
     it("toggles autoZoom off", () => {
       replayManager.state.autoZoom = true;
+      const btn = el("replay-autozoom-btn");
+      btn.title = "Auto-zoom: zoom in on the aircraft and keep it in view";
 
       replayManager.toggleAutoZoom();
 
       expect(replayManager.state.autoZoom).toBe(false);
-      const btn = el("replay-autozoom-btn");
       expect(btn.classList.contains("active")).toBe(false);
       expect(btn.getAttribute("aria-pressed")).toBe("false");
-      expect(btn.title).toBe("Auto-zoom disabled");
+      // The title says what the control does, aria-pressed whether it is on
+      expect(btn.title).toBe(
+        "Auto-zoom: zoom in on the aircraft and keep it in view",
+      );
     });
 
     it("does not persist state", () => {

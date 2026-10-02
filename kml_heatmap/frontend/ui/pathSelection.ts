@@ -5,7 +5,7 @@ import type { Map as MapLibreMap, PaddingOptions, Point } from "maplibre-gl";
 import type { MapApp } from "../mapApp";
 import { segmentsForPathIds } from "../calculations/statistics";
 import { loadFeatures } from "../services/featureLoader";
-import { applyToggleButtonState } from "../utils/buttonState";
+import { applyToggleButtonState, setUnavailable } from "../utils/buttonState";
 import { AUTO_ZOOM_FOLLOW } from "../utils/constants";
 import { domCache } from "../utils/domCache";
 import { segmentBounds } from "../utils/geometry";
@@ -359,9 +359,6 @@ export class PathSelection {
 
     applyToggleButtonState(btn, this.app.isolateSelection);
     // Still focusable, like the replay button, but announced as unavailable
-    btn.setAttribute(
-      "aria-disabled",
-      String(this.app.selectedPathIds.size === 0),
-    );
+    setUnavailable(btn, this.app.selectedPathIds.size === 0);
   }
 }

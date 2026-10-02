@@ -599,6 +599,14 @@ export function asMapApp(app: MockApp): MapApp {
 }
 
 /**
+ * Whether a control cannot act the way a replay or the tour holds it
+ * (ui/heldControls.ts): a select disabled, a button aria-disabled
+ */
+export function isHeld(control: Element | null): boolean {
+  return !!control?.matches(':disabled, [aria-disabled="true"]');
+}
+
+/**
  * Wire the store-driven toggle buttons, legends and layers the way MapApp
  * does (setupButtonSync, followLayerVisibility), for tests that assert on
  * the state a manager causes through the store. The colour layers are the

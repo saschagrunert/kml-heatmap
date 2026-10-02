@@ -93,6 +93,19 @@ export function followReplayAvailability(app: MapApp): void {
 }
 
 /**
+ * Hand the keyboard's focus to the open rail: to its selected tab, or to
+ * the panel while the tabs wait for their code (ui/flightList.ts).
+ */
+export function focusStatsRail(): void {
+  const tabs = domCache.get("stats-rail-tabs");
+  const target =
+    tabs && !tabs.hidden
+      ? tabs.querySelector<HTMLElement>('[aria-selected="true"]')
+      : domCache.get("stats-panel");
+  target?.focus();
+}
+
+/**
  * Hand focus to the first reachable statistics trigger when the rail that
  * holds it is about to be hidden. Without this the browser drops focus to
  * `<body>` and the next Tab restarts at the top of the document, ahead of
