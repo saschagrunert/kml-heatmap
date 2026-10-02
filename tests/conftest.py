@@ -30,13 +30,25 @@ FIXTURE_AIRPORTS_CSV = Path(__file__).parent / "fixtures" / "airports.csv"
 FIXTURE_RUNWAYS_CSV = Path(__file__).parent / "fixtures" / "runways.csv"
 
 
+def parse_kml_file(kml_file, cache_path=None):
+    """Parse a KML file, without the cache, into ``(coordinates, paths, metadata)``.
+
+    The result is stored in the cache entry ``cache_path`` with the landings
+    of its paths, as a build stores it (see ``renderer._parse_with_error_handling``).
+    """
+    from kml_heatmap.landings import path_landings
+    from kml_heatmap.parser import parse_and_cache
+
+    return parse_and_cache(kml_file, cache_path, path_landings)[0]
+
+
 def parse_kml_coordinates(kml_file):
     """Parse a KML file as the pipeline does, from the parse cache if it has it."""
-    from kml_heatmap.parser import load_cached_kml, parse_kml_file
+    from kml_heatmap.parser import load_cached_entry
 
-    cached, cache_path = load_cached_kml(kml_file)
+    cached, cache_path = load_cached_entry(kml_file)
     if cached is not None:
-        return cached
+        return cached.coordinates, cached.path_groups, cached.path_metadata
     return parse_kml_file(kml_file, cache_path)
 
 

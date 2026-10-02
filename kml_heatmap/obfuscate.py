@@ -1047,7 +1047,8 @@ def _find_stray_dates(content: str) -> list[str]:
 def _find_stray_times(content: str, stray_dates: list[str]) -> list[str]:
     """The times of day in a name or a description ("Flight 14:30").
 
-    The obfuscator does not take them out: they have to go by hand. The
+    The rewrite takes them out of names and descriptions
+    (``stray_date_spans``); anywhere else they have to go by hand. The
     timestamps, which ``_timestamp_violations`` checks, and the description
     dates of Charterware, which the rewrite puts at 12:00AM, are left out,
     and so are the dates already reported: the year of the next one in a
@@ -1196,8 +1197,8 @@ def check_kml_obfuscated(filepath: Path) -> list[str]:
         else f"Date not on Jan 1: {text}"
         for text in stray_dates
     )
-    # The obfuscator neither moves a weekday along with the timestamps nor
-    # takes one out: it has to go by hand
+    # The rewrite takes a weekday out of the names and descriptions
+    # (stray_date_spans); one anywhere else has to go by hand
     violations.extend(
         f"Weekday gives the day of the flight away, remove it: {text}"
         for text in find_weekday_tokens(unescaped)

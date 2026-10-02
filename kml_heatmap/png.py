@@ -19,6 +19,7 @@ __all__ = [
     "chunk",
     "chunks",
     "decode_png",
+    "ihdr_fields",
 ]
 
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
@@ -121,7 +122,7 @@ def _unfilter(raw: bytes, width: int, height: int, bpp: int) -> bytearray:  # no
     return out
 
 
-def _header(body: bytes) -> tuple[int, ...]:
+def ihdr_fields(body: bytes) -> tuple[int, ...]:
     """The seven fields of an IHDR chunk."""
     if len(body) != 13:
         raise PngError("PNG header has the wrong length")
@@ -142,7 +143,7 @@ def decode_png(data: bytes) -> tuple[int, int, int, bytearray]:
     compressed = bytearray()
     for kind, body in chunks(data):
         if kind == b"IHDR":
-            header = _header(body)
+            header = ihdr_fields(body)
         elif kind == b"IDAT":
             compressed += body
         elif kind == b"IEND":

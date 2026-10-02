@@ -260,6 +260,18 @@ class TestFindTimeTokens:
             ("EDDS 3pm", ["3pm"]),
             ("EDDS 3 p.m.", ["3 p.m."]),
             ("EDDS_11.30am", ["11.30am"]),
+            # The morning in capitals, which German "am" never is
+            ("Flight at 10 AM", ["10 AM"]),
+            ("Flight at 10 A.M.", ["10 A.M."]),
+            ("Flight at 10AM", ["10AM"]),
+            # Both ends of a range, the second after a hyphen
+            ("EDAW 10 AM-12 PM EDAQ", ["10 AM", "12 PM"]),
+            ("10 pm-12 pm", ["10 pm", "12 pm"]),
+            ("10am-12pm", ["10am", "12pm"]),
+            ("10AM-12PM", ["10AM", "12PM"]),
+            ("10 am-12 pm", ["10 am", "12 pm"]),
+            ("10:30am-1:15pm", ["10:30am", "1:15pm"]),
+            ("9 a.m.-5 p.m.", ["9 a.m.", "5 p.m."]),
             ("EDDS-1513Z", ["1513Z"]),
             # After a date in any form, whether or not the date counts
             ("Log_2026-01-01_1430", ["1430"]),
@@ -341,6 +353,12 @@ class TestFindTimeTokens:
             "EDDS 1h30 flight",
             "EDDS 1.5h",
             "Flug 3 am Rhein",
+            "EDDS 1 AMSTERDAM",
+            # After a hyphen without a time before it: a type or a registration
+            "Mi-8 PM",
+            "PA-1 PM",
+            "Mi-8PM",
+            "3 am-Treffen",
             "Squawk 7000",
             "FL100 1430",
             "2026-08-16",
@@ -407,6 +425,12 @@ class TestStripDates:
             # " am" after it is German for "at the", and stays
             ("16.08.2026, 15.13 am Platz", "am Platz"),
             ("Takeoff 3:15 pm", "Takeoff"),
+            ("Flight at 10 AM", "Flight at"),
+            ("Off blocks 10 AM", "Off blocks"),
+            ("Block 10am-12pm EDDS", "Block - EDDS"),
+            ("Block 10 am-12 pm EDDS", "Block - EDDS"),
+            ("Block 9 a.m.-5 p.m. EDDS", "Block - EDDS"),
+            ("Mi-8 PM", "Mi-8 PM"),
             ("Mayfield 12", "Mayfield 12"),
             ("DA40", "DA40"),
             # A day and month without the year, in either order

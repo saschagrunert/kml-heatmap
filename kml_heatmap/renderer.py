@@ -71,6 +71,9 @@ __all__ = [
     "ParsedFile",
     "create_progressive_heatmap",
     "foreign_output_error",
+    "load_cached",
+    "no_flight_reason",
+    "parse_inline",
 ]
 
 # Files that are not in the parse cache are parsed in this process up to
@@ -165,7 +168,7 @@ def _parse_with_error_handling(
     return ParsedFile(kml_file, len(coordinates), path_groups, path_metadata, landings)
 
 
-def _load_cached(kml_file: str) -> ParsedFile | Path | None:
+def load_cached(kml_file: str) -> ParsedFile | Path | None:
     """The parse result of a file from the parse cache.
 
     On a miss the cache entry to store the parse in, or None without one.
@@ -195,7 +198,7 @@ def _load_or_parse(kml_file: str, _cache_path: Path | None = None) -> ParsedFile
     enabled = gc.isenabled()
     gc.disable()
     try:
-        cached = _load_cached(kml_file)
+        cached = load_cached(kml_file)
         if isinstance(cached, ParsedFile):
             return cached
         return _parse_with_error_handling(kml_file, cached)
@@ -204,7 +207,7 @@ def _load_or_parse(kml_file: str, _cache_path: Path | None = None) -> ParsedFile
             gc.enable()
 
 
-def _parse_inline(kml_file: str, cache_path: Path | None) -> ParsedFile:
+def parse_inline(kml_file: str, cache_path: Path | None) -> ParsedFile:
     """Parse a file in this process, with the error handling of a worker."""
     try:
         return _parse_with_error_handling(kml_file, cache_path)
@@ -272,7 +275,7 @@ def _parse_in_pool(
                 # so every other file would fail the same way
                 executor.shutdown(wait=True, cancel_futures=True)
                 raise
-            # As in _parse_inline: one file's bug, named with its traceback
+            # As in parse_inline: one file's bug, named with its traceback
             except Exception:  # noqa: BLE001
                 kml_file = future_to_file[future]
                 logger.exception("Unexpected error processing %s", kml_file)
@@ -319,7 +322,7 @@ def _load_or_parse_here(
     # The files to parse, with the cache entry to store each one in
     uncached: list[tuple[str, Path | None]] = []
     for kml_file in valid_files:
-        cached = _load_cached(kml_file)
+        cached = load_cached(kml_file)
         if isinstance(cached, ParsedFile):
             record(cached)
         else:
@@ -332,7 +335,7 @@ def _load_or_parse_here(
         _parse_in_pool(uncached, record, airports)
     else:
         for kml_file, cache_path in uncached:
-            record(_parse_inline(kml_file, cache_path))
+            record(parse_inline(kml_file, cache_path))
 
 
 @contextlib.contextmanager
@@ -445,7 +448,7 @@ def _parse_kml_files(
         )
     without_flight = 0
     for parsed in results:
-        reason = _no_flight_reason(parsed)
+        reason = no_flight_reason(parsed)
         if reason is not None:
             logger.error("%s: %s", parsed.kml_file, reason)
             without_flight += 1
@@ -459,7 +462,7 @@ def _parse_kml_files(
     return all_path_groups, all_path_metadata, all_landings
 
 
-def _no_flight_reason(parsed: ParsedFile) -> str | None:
+def no_flight_reason(parsed: ParsedFile) -> str | None:
     """Why a file with coordinates gives the export no path, None if it does.
 
     Such a file fails the run like one without coordinates: its points
@@ -739,7 +742,7 @@ def create_progressive_heatmap(
     # Stage 1: Validate and parse. A file that cannot be used fails the run:
     # a site published without one of the flights, and exit status 0, would
     # hide it until someone notices the flight is missing. So does a file
-    # that parses but holds no flight to export (see _no_flight_reason).
+    # that parses but holds no flight to export (see no_flight_reason).
     valid_files = []
     for kml_file in kml_files:
         is_valid, error_msg = validate_kml_file(kml_file)

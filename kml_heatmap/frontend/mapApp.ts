@@ -500,9 +500,14 @@ export class MapApp {
 
     // The line of a cross-section the link or the last visit had, which
     // the tool opens on (ui/crossSection.ts). Neither it nor Wrapped opens
-    // over a load that failed, where they would show nothing but zeros.
+    // over a load that failed, where they would show nothing but zeros, and
+    // the line goes with it as Wrapped's flag does below: the saves and
+    // Copy link would hand on a cross-section nobody sees.
     const loaded = this.currentData !== null;
-    if (this.crossSectionLine && loaded) this.toggleCrossSection();
+    if (this.crossSectionLine) {
+      if (loaded) this.toggleCrossSection();
+      else this.crossSectionLine = "";
+    }
 
     // Restore wrapped panel state if it was open
     const state = this.savedState;

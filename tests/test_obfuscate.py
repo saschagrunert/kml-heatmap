@@ -29,7 +29,7 @@ from kml_heatmap.obfuscate import (
     rename_charterware_files,
     rename_dated_files,
 )
-from kml_heatmap.parser import parse_kml_file
+from tests.conftest import parse_kml_file
 
 SAMPLE_KML = """\
 <?xml version="1.0" encoding="UTF-8"?>
@@ -2079,6 +2079,16 @@ class TestNamesAndDescriptions:
                 "<name>log 1710406320</name>",
                 "Unix time not at midnight on Jan 1, remove it: 1710406320",
                 "<name>log</name>",
+            ),
+            (
+                "<name>EDAW 10am-12pm EDAQ</name>",
+                "Time of day gives the flight away, remove it: 12pm",
+                "<name>EDAW EDAQ</name>",
+            ),
+            (
+                "<description>Off blocks 10 AM, on blocks 11 PM</description>",
+                "Time of day gives the flight away, remove it: 10 AM",
+                "<description>Off blocks, on blocks</description>",
             ),
             (
                 "<description>Flown on 16 Aug, back by 18:00</description>",

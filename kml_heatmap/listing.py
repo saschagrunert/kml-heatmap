@@ -12,7 +12,7 @@ from .airports import deduplicate_airports
 from .data_exporter import ExportSelection, select_exported_paths
 from .export_writers import free_text_airport_names
 from .path_content import is_exportable_path
-from .renderer import ParsedFile, _load_cached, _no_flight_reason, _parse_inline
+from .renderer import ParsedFile, load_cached, no_flight_reason, parse_inline
 from .validation import validate_kml_file
 
 if TYPE_CHECKING:
@@ -118,16 +118,14 @@ def list_flights(kml_files: Sequence[str]) -> Listing:
         if not is_valid:
             rows.append(FlightListing(kml_file, skipped=error_msg or "not valid"))
             continue
-        cached = _load_cached(kml_file)
+        cached = load_cached(kml_file)
         entry = (
-            cached
-            if isinstance(cached, ParsedFile)
-            else _parse_inline(kml_file, cached)
+            cached if isinstance(cached, ParsedFile) else parse_inline(kml_file, cached)
         )
         if entry.point_count == 0:
             rows.append(FlightListing(kml_file, skipped="failed to parse"))
         elif not entry.path_groups:
-            rows.append(FlightListing(kml_file, skipped=_no_flight_reason(entry) or ""))
+            rows.append(FlightListing(kml_file, skipped=no_flight_reason(entry) or ""))
         else:
             parsed.append(entry)
 
