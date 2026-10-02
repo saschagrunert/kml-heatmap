@@ -6,8 +6,8 @@ from typing import TYPE_CHECKING
 
 from .airport_lookup import (
     airport_icao_code,
-    extract_icao_codes_from_name,
-    lookup_airport_coordinates,
+    database_airport_name,
+    load_airport_database,
     lookup_airport_country,
 )
 from .airports import extract_airport_name
@@ -51,23 +51,35 @@ def exported_airport_names(unique_airports: list[AirportData]) -> frozenset[str]
     return frozenset(name for _, name in _exported_airports(unique_airports))
 
 
+def _is_database_name(name: str) -> bool:
+    """Whether a name is the one the airport database gives its code."""
+    icao_code = airport_icao_code(name)
+    return icao_code is not None and database_airport_name(icao_code) == name
+
+
 def free_text_airport_names(unique_airports: list[AirportData]) -> list[str]:
-    """The exported airport names without a known ICAO code, sorted.
+    """The exported airport names that are no airport database name, sorted.
 
     Only a route name gives them ("Home strip - Aunt farm"): both its sides
     are published as written, so a route between two people ("Anna - Bob")
-    would publish their names as airports. A name counts as coded only when
-    a code in it is in the airport database: "ANNA Mueller" has the shape of
-    one, but no airport. The build and ``--list`` name them, so they can be
-    renamed.
+    would publish their names as airports. The parser names every airport it
+    finds in the database by its code and the database's name ("EDDS
+    Stuttgart"), so any other name holds text of its own: "ANNA Mueller" has
+    the shape of a code but is no airport, and "Anna EDDS EDDF" holds codes
+    but was published as written. The build and ``--list`` name them, so
+    they can be renamed. Without an airport database no name can be told
+    apart, so none is listed and one warning says so.
     """
+    if not load_airport_database():
+        logger.warning(
+            "Cannot check the published airport names for free text: the "
+            "airport database is empty"
+        )
+        return []
     return sorted(
         name
         for name in exported_airport_names(unique_airports)
-        if not any(
-            lookup_airport_coordinates(code) is not None
-            for code in extract_icao_codes_from_name(name)
-        )
+        if not _is_database_name(name)
     )
 
 

@@ -681,9 +681,10 @@ class TestObfuscationFailsClosed:
         input_dir = tmp_path / "input"
         input_dir.mkdir()
         # A date in a place the obfuscation does not rewrite
-        kml = input_dir / "2024-03-14 EDAQ.kml"
+        kml = input_dir / "flight.kml"
         kml.write_text(
-            '<?xml version="1.0"?><kml><when>2024-01-01T00:00:00Z</when></kml>',
+            '<?xml version="1.0"?><kml><when>2024-01-01T00:00:00Z</when>'
+            "<ExtendedData>2024-03-14</ExtendedData></kml>",
             encoding="utf-8",
         )
 
@@ -694,7 +695,7 @@ class TestObfuscationFailsClosed:
 
         err = capsys.readouterr().err
         assert "Not obfuscated: " in err
-        assert "File name contains a date: 2024-03-14" in err
+        assert "Date not on Jan 1: 2024-03-14" in err
         assert "removed by hand" in err
 
     def test_lists_a_few_dates_and_counts_the_rest(self, tmp_path, capsys):
@@ -732,7 +733,7 @@ ok  61_DELGD_C182.kml  2025  D-ELGD    EDBA Arnstadt-Alkersleben - EDAQ Halle-Op
 ok  75_DEHYL_DA40.kml  2026  D-EHYL    EDAQ Halle-Oppin - EDAQ Halle-Oppin                        469     yes    published
 --  90_DEAGJ_DA20.kml  -     -         -                                                          0       no     File is empty: <dir>/90_DEAGJ_DA20.kml
 5 of 7 flight(s) would be published
-Airport names without a known ICAO code that would be published, as the route names give them: 'EDAW Roitzschjora', 'EDBA Arnstadt-Alkersleben'
+Airport names not from the airport database that would be published, as the route names give them: 'EDAW Roitzschjora', 'EDBA Arnstadt-Alkersleben'
 """  # noqa: E501
 
 
@@ -761,10 +762,10 @@ class TestList:
     def test_names_the_airports_without_a_code(self):
         text = format_listing([FlightListing("a.kml", 2025)], ["Anna", "Bob Smith"])
         assert text.splitlines()[-1] == (
-            "Airport names without a known ICAO code that would be published, as the "
-            "route names give them: 'Anna', 'Bob Smith'"
+            "Airport names not from the airport database that would be published, "
+            "as the route names give them: 'Anna', 'Bob Smith'"
         )
-        assert "ICAO" not in format_listing([FlightListing("a.kml", 2025)])
+        assert "airport database" not in format_listing([FlightListing("a.kml", 2025)])
 
     def test_the_symbols_on_a_terminal(self, monkeypatch):
         monkeypatch.setattr("sys.stdout.isatty", lambda: True)

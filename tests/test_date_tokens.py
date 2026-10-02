@@ -6,10 +6,13 @@ from hypothesis import strategies as st
 
 from kml_heatmap.date_tokens import (
     find_date_tokens,
+    find_partial_date_tokens,
     find_time_tokens,
     find_weekday_tokens,
     month_number,
+    stray_date_spans,
     strip_dates,
+    without_spans,
 )
 
 
@@ -782,3 +785,130 @@ class TestStripDates:
 def test_month_number():
     assert month_number("aug") == month_number("August") == 8
     assert month_number("Flight") is None
+
+
+class TestDashesAndTheYearFirst:
+    """An en dash or a Unicode hyphen stands for the hyphen."""
+
+    @pytest.mark.parametrize("dash", ["\u2010", "\u2011", "\u2012", "\u2013"])
+    def test_dashes(self, dash):
+        text = f"EDDS 16{dash}08{dash}2026 14:30"
+        assert find_date_tokens(text) == [f"16{dash}08{dash}2026"]
+        assert strip_dates(text) == "EDDS"
+
+    def test_a_time_after_a_dashed_date_keeps_its_text(self):
+        assert find_time_tokens("2026\u201308\u201316 14:30") == ["14:30"]
+
+    @pytest.mark.parametrize(
+        "text", ["Flug 2026 08 16", "Flug 2026 - 08 - 16", "Flug 2026 8 16"]
+    )
+    def test_the_year_first_with_spaces(self, text):
+        assert find_date_tokens(text, skip_near_jan_first=True) == [text[5:]]
+        assert strip_dates(text) == "Flug"
+
+    @pytest.mark.parametrize("text", ["2026 01 01", "2026 1 2", "Flug 2026 01 03"])
+    def test_the_year_first_near_jan_first(self, text):
+        assert find_date_tokens(text, skip_near_jan_first=True) == []
+
+    @pytest.mark.parametrize("text", ["2026 8 1", "FL 2026 13 40", "2026 08 1600"])
+    def test_numbers_in_a_row_that_are_no_date(self, text):
+        assert find_date_tokens(text) == []
+
+
+class TestFindPartialDateTokens:
+    """What the year of the flight completes to its date."""
+
+    @pytest.mark.parametrize(
+        ("text", "found"),
+        [
+            ("EDDS-EDDP 16 Aug", ["16 Aug"]),
+            ("Rundflug 16.08.", ["16.08."]),
+            ("1_DEHYL_16Aug", ["16Aug"]),
+            ("Trip 16/08", ["16/08"]),
+            ("KW33 trip", ["KW33"]),
+            ("DOF 260816", ["260816"]),
+            ("Season 03/2026", ["03/2026"]),
+            ("Sat 16 Aug", ["Sat 16 Aug"]),
+            # Next to a date of January 1st the weekday gives the day away
+            ("Sat 01 Jan 2026", ["Sat"]),
+        ],
+    )
+    def test_found(self, text, found):
+        assert find_partial_date_tokens(text) == found
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "EDDS 01 Jan",
+            "Takeoff: 2025-01-01",
+            "Rundflug 01.01.",
+            "Rundflug 02.01.",
+            "Trip 01/01",
+            "KW1",
+            "DOF 260101",
+            "Season 01/2026",
+            "EDAQ Halle-Oppin - EDAQ Halle-Oppin",
+            "100_DEAGJ_DA20",
+            "RWY 08/26",
+        ],
+    )
+    def test_none(self, text):
+        assert find_partial_date_tokens(text) == []
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "KW05 Gettysburg Regional Airport - KW22 Upshur County",
+            "EDDS to KW05",
+            "KW05 Gettysburg Regional Airport",
+        ],
+    )
+    def test_us_airport_codes_are_no_weeks(self, text):
+        assert find_partial_date_tokens(text) == []
+        assert strip_dates(text) == text
+
+    @pytest.mark.parametrize("text", ["KW33 Ausflug", "Trip KW33", "Trip KW33 - EDDS"])
+    def test_weeks_outside_a_route_side(self, text):
+        assert find_partial_date_tokens(text) == ["KW33"]
+
+    def test_a_two_digit_year_needs_a_boundary(self):
+        assert find_date_tokens("DA40_16_08") == []
+        assert find_date_tokens("DEHYL_16_08_26") == ["16_08_26"]
+
+    def test_dates_are_not_parts(self):
+        """A date with its year is find_date_tokens' to report."""
+        assert find_partial_date_tokens("EDDS 16 Aug 2026") == []
+
+
+class TestStrayDateSpans:
+    """What the obfuscator takes out of a name or a description."""
+
+    @pytest.mark.parametrize(
+        ("text", "left"),
+        [
+            ("EDDS 16 Aug 2026 14:30 Sunday", "EDDS"),
+            ("EDDS-EDDP 16 Aug", "EDDS-EDDP"),
+            ("Rundflug 16.08.", "Rundflug"),
+            ("Flug 2026 08 16", "Flug"),
+            ("EDDS 16\u201308\u20132026", "EDDS"),
+            # A date of January 1st stays, what gives the day away goes
+            ("Takeoff: 2025-01-01", "Takeoff: 2025-01-01"),
+            ("Sat 01 Jan 2026 14:30", "01 Jan 2026"),
+            ("Flight at 1430Z", "Flight at"),
+            (
+                "EDAQ Halle-Oppin - EDAQ Halle-Oppin",
+                "EDAQ Halle-Oppin - EDAQ Halle-Oppin",
+            ),
+        ],
+    )
+    def test_left(self, text, left):
+        assert without_spans(text, stray_date_spans(text)) == left
+
+    def test_a_url_and_line_breaks_stay(self):
+        text = "https://x.org/a//b on 16 Aug\n\nBob,, Carl"
+        assert without_spans(text, stray_date_spans(text)) == (
+            "https://x.org/a//b on\n\nBob,, Carl"
+        )
+
+    def test_nothing_to_take_out_keeps_the_text(self):
+        assert without_spans("  as  it was ", []) == "  as  it was "

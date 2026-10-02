@@ -1,6 +1,7 @@
 """Tests for export_writers module."""
 
 from typing import Any
+from unittest.mock import patch
 
 import pytest
 
@@ -221,7 +222,7 @@ class TestFreeTextAirportNames:
 
     def test_names_without_a_known_code(self):
         airports = [
-            _airport("EDDF Frankfurt"),
+            _airport("EDDF Frankfurt Main"),
             _airport("Home strip - Aunt farm", is_at_path_end=True),
             # The shape of a code, but no airport in the database
             _airport("ANNA Mueller"),
@@ -236,3 +237,20 @@ class TestFreeTextAirportNames:
 
     def test_none_for_coded_names(self):
         assert free_text_airport_names([_airport("EDDF Frankfurt Main")]) == []
+
+    def test_text_beside_a_known_code(self):
+        """A name the parser could not take a code of is published as written."""
+        airports = [
+            _airport("Anna EDDS EDDF"),
+            _airport("EDDF Frankfurt with Anna"),
+            _airport("EDDF Frankfurt Main"),
+        ]
+        assert free_text_airport_names(airports) == [
+            "Anna EDDS EDDF",
+            "EDDF Frankfurt with Anna",
+        ]
+
+    def test_without_an_airport_database(self, caplog):
+        with patch("kml_heatmap.export_writers.load_airport_database", return_value={}):
+            assert free_text_airport_names([_airport("Anna - Bob")]) == []
+        assert "Cannot check the published airport names" in caplog.text

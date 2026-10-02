@@ -153,13 +153,35 @@ class TestNotARegistration:
             ("2_N123AB_C172.kml", "N123AB"),
             ("3_VHABC_C172.kml", "VHABC"),
             ("20250601_DEHYL_DA40.kml", "D-EHYL"),
-            # Only after a date does a code count as an airport
-            ("7_EDDS_C172.kml", "EDDS"),
-            ("20251399_EDDS_C172.kml", "EDDS"),
+            # Only after a date does a code count as an airport: ESSA is
+            # Stockholm, and ES-SA in Estonia
+            ("7_ESSA_C172.kml", "ES-SA"),
+            ("20251399_ESSA_C172.kml", "ES-SA"),
+            ("2_2GIGI_PA28.kml", "2-GIGI"),
+            ("3_9XR-ABC_C172.kml", "9XR-ABC"),
+            ("4_N1430Z_PA28.kml", "N1430Z"),
         ],
     )
     def test_registrations(self, name, registration):
         assert _parsed(name).registration == registration
+
+    @pytest.mark.parametrize(
+        "registration",
+        ["ANNA", "JOHN", "MIKE", "DAVE", "DIRK", "BOB", "EDDS", "GREGOR", "N0123"],
+    )
+    def test_no_nationality_mark(self, registration, caplog):
+        """A name has the shape of a registration, but starts with no mark."""
+        result = _parsed(f"1_{registration}_DA40.kml")
+        assert result.registration is None
+        assert result.type == "DA40"
+        assert f"Ignoring the registration {registration}" in caplog.text
+        assert "nationality mark" in caplog.text
+
+    def test_a_charterware_name_without_a_mark_keeps_its_route(self, caplog):
+        assert _parsed("2026-01-01_0000h_ANNA_LOAV-LOAV.kml") == AircraftInfo(
+            None, None, "LOAV-LOAV", "charterware"
+        )
+        assert "Ignoring the registration ANNA" in caplog.text
 
     @pytest.mark.parametrize(
         ("name", "aircraft_type"),

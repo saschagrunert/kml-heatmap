@@ -176,6 +176,57 @@ class TestSingleFlightWarning:
         assert "KMZ archive" in capsys.readouterr().err
 
 
+class TestCommitMessages:
+    """A message is published with the flight its commit adds."""
+
+    def test_refuses_a_dated_message(self, repo, capsys):
+        sha = commit(
+            repo,
+            {"data/2.kml": CLEAN_KML, "data/3.kml": CLEAN_KML},
+            "Add the flights of 16 Aug 2026, Sunday",
+        )
+        assert run_check(repo, push_of(sha)) == 1
+        err = capsys.readouterr().err
+        assert f"{sha[:7]} commit message: 16 Aug 2026" in err
+        assert f"{sha[:7]} commit message: Sunday" in err
+        assert "git commit --amend" in err
+
+    @pytest.mark.parametrize("message", ["Flights of 16 Aug", "Trip KW33"])
+    def test_refuses_a_part_of_a_date(self, repo, message):
+        sha = commit(repo, {"data/2.kml": CLEAN_KML, "data/3.kml": CLEAN_KML}, message)
+        assert run_check(repo, push_of(sha)) == 1
+
+    def test_passes_an_airport_code_that_looks_like_a_week(self, repo):
+        sha = commit(
+            repo,
+            {"data/2.kml": CLEAN_KML, "data/3.kml": CLEAN_KML},
+            "KW05 Gettysburg - KW22 Upshur",
+        )
+        assert run_check(repo, push_of(sha)) == 0
+
+    def test_passes_an_undated_message(self, repo):
+        sha = commit(
+            repo,
+            {"data/2.kml": CLEAN_KML, "data/3.kml": CLEAN_KML},
+            "Add two flights to EDDS",
+        )
+        assert run_check(repo, push_of(sha)) == 0
+
+    def test_ignores_messages_of_commits_without_flights(self, repo):
+        sha = commit(repo, {"README.md": "x"}, "Docs of 16 Aug 2026")
+        assert run_check(repo, push_of(sha)) == 0
+
+    def test_skips_messages_the_remote_already_has(self, repo):
+        sha = commit(
+            repo,
+            {"data/2.kml": CLEAN_KML, "data/3.kml": CLEAN_KML},
+            "Flights of 2026-08-16",
+        )
+        git(repo, "update-ref", "refs/remotes/origin/main", sha)
+        later = commit(repo, {"README.md": "x"})
+        assert run_check(repo, push_of(later)) == 0
+
+
 class TestMain:
     def test_fails_closed_when_it_cannot_check(self, monkeypatch, capsys):
         def broken(*_args):

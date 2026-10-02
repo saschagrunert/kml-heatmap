@@ -501,7 +501,7 @@ def _map_extent(
 
 
 def _warn_free_text_airports(unique_airports: list[AirportData]) -> None:
-    """Name the airports the site publishes without a known ICAO code, if any.
+    """Name the airports the site publishes not from the airport database, if any.
 
     They come from route names as written (see
     ``export_writers.free_text_airport_names``), which may be no airports.
@@ -509,7 +509,7 @@ def _warn_free_text_airports(unique_airports: list[AirportData]) -> None:
     names = free_text_airport_names(unique_airports)
     if names:
         logger.warning(
-            "Publishing %d airport name(s) without a known ICAO code, as the route "
+            "Publishing %d airport name(s) not from the airport database, as the route "
             "names give them: %s. Rename a placemark whose route names no "
             "airport (see doc/privacy.md)",
             len(names),
@@ -632,7 +632,7 @@ class Listing:
     """What ``--list`` prints: a row per path, and the free-text airports.
 
     ``free_text_airports`` are the airport names the site would publish
-    without a known ICAO code (see ``export_writers.free_text_airport_names``).
+    not from the airport database (see ``export_writers.free_text_airport_names``).
     """
 
     rows: list[FlightListing]
@@ -694,7 +694,7 @@ def list_flights(kml_files: Sequence[str]) -> Listing:
     files are parsed as a build parses them (through the parse cache), and
     the copies and second recordings are found the same way
     (``select_exported_paths``), as are the airports, of which the ones
-    without a known ICAO code are listed too. No elevation tile is fetched and
+    not from the airport database are listed too. No elevation tile is fetched and
     nothing is written but the parse cache.
     """
     rows: list[FlightListing] = []

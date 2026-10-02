@@ -10,14 +10,16 @@ Numeric dates: 2024-03-14, 2024.03.14, 14.03.2024, 14/03/2024, 14-03-2024,
 14_03_2024, 14 03 2024, 14 - 03 - 2024, 3/14/2024, 14.03.24, 2024/3/14,
 2024-3-4, the compact 20240314 (with the time right after it as well,
 202403141430), the year and month 2024-03, the ISO week 2024-W11 and
-2024W11, a calendar week with its year (KW11 2024, Week 11 2024, W11 2024)
-and the ordinal date 2024-074. With a month name: "14 Mar 2024", "14th March
-2024", "the 14th of March 2024", "14-MAR-2024", "14/Mar/2024", "March 14,
-2024", "Mar/14/2024", "Mar14_2024", "2024/Mar/14" and "March 2024", with a
-two-digit year "14 Mar 24", "14-MAR-24" and "14MAR24", and in German, day
-first: "14. März 2024", "14.Mrz.2024", "14-Okt-2024" and "Mai 2024". And the
-date of flight of an ICAO flight plan, "DOF/240314". A weekday named in full
-("Sunday", "Sonntag") gives the day away as well (``find_weekday_tokens``).
+2024W11, a calendar week with its year (KW11 2024, Week 11 2024, W11 2024),
+the ordinal date 2024-074 and the year first with spaces (2024 03 14). An en
+dash or a Unicode hyphen may stand for the hyphen. With a month name: "14
+Mar 2024", "14th March 2024", "the 14th of March 2024", "14-MAR-2024",
+"14/Mar/2024", "March 14, 2024", "Mar/14/2024", "Mar14_2024", "2024/Mar/14"
+and "March 2024", with a two-digit year "14 Mar 24", "14-MAR-24" and
+"14MAR24", and in German, day first: "14. März 2024", "14.Mrz.2024",
+"14-Okt-2024" and "Mai 2024". And the date of flight of an ICAO flight plan,
+"DOF/240314". A weekday named in full ("Sunday", "Sonntag") gives the day
+away as well (``find_weekday_tokens``).
 
 Names lose more than that (``strip_dates``): a day and month without the
 year ("16 Aug", "16. Mai", "16.08.", "26.08", "16.8", "16/08", "16-08",
@@ -33,7 +35,11 @@ hours", "14:30:00.5Z", "14:30 +02:00", "1430+0200"). The common zones count,
 not every one there is. "14.30" alone stays: it is a decimal as often ("fuel
 14.30"), and only goes with a zone, the local time or the hours ("14.30Z",
 "14.30L", "14.30 hrs"). The obfuscator's check reports the times of day in
-file names (``find_time_tokens``) and the weekdays anywhere.
+file names (``find_time_tokens``) and the weekdays anywhere, and in names,
+descriptions and file names the parts of a date as well
+(``find_partial_date_tokens``): the year of the flight completes them. The
+obfuscator takes all of it out of names and descriptions
+(``stray_date_spans``).
 
 Where a name could hold a date or something else, it loses the date: a
 decimal such as "fuel 16.8" goes with the dates it looks like. Two numbers
@@ -58,13 +64,17 @@ __all__ = [
     "MAX_DAYS_AFTER_JAN_1",
     "MONTHS_LONG",
     "MONTHS_SHORT",
+    "any_month_number",
     "charterware_datetime",
     "find_date_tokens",
+    "find_partial_date_tokens",
     "find_time_tokens",
     "find_weekday_tokens",
     "month_number",
     "near_jan_first",
+    "stray_date_spans",
     "strip_dates",
+    "without_spans",
 ]
 
 # The obfuscator moves a flight to midnight on January 1st, and a flight
@@ -138,6 +148,11 @@ _WEEK = r"(?:0?[1-9]|[1-4]\d|5[0-3])"
 _HHMM = r"(?:[01]\d|2[0-3])[0-5]\d(?:[0-5]\d)?"
 # What stands between the day and the month of a date written with spaces
 _SPACED = r"(?:\s+(?:[./_-]\s*)?|[./_-]\s+)"
+# The dashes a date is written with besides the hyphen: the hyphen and the
+# non-breaking hyphen of Unicode, the figure dash and the en dash. The
+# patterns read them as the hyphen; each is a single character, so the
+# positions of what they find stay those of the text.
+_DASHES = str.maketrans(dict.fromkeys("\u2010\u2011\u2012\u2013", "-"))
 
 
 def _numeric_patterns(skip_near_jan_first: bool) -> tuple[re.Pattern[str], ...]:
@@ -177,12 +192,19 @@ def _numeric_patterns(skip_near_jan_first: bool) -> tuple[re.Pattern[str], ...]:
             + r"(?=\d(?!\d)|\d{2}(?P=sep)\d(?!\d))"
             + r"(?:0?[1-9]|1[0-2])(?P=sep)(?:0?[1-9]|[12]\d|3[01])(?!\d|\.\d)"
         ),
-        # Day first or month first, with a two- or four-digit year, and
-        # 16_08_2026 from a file name
+        # Day first or month first, with a four-digit year, and 16_08_2026
+        # from a file name
         re.compile(
             r"(?<![\d.])"
-            + unless(r"0?1(?P<skip>[./_-])0?1(?P=skip)\d{2}(?:\d{2})?(?!\d|\.\d)")
-            + r"\d{1,2}(?P<sep>[./_-])\d{1,2}(?P=sep)\d{2}(?:\d{2})?(?!\d|\.\d)"
+            + unless(r"0?1(?P<skip>[./_-])0?1(?P=skip)\d{4}(?!\d|\.\d)")
+            + r"\d{1,2}(?P<sep>[./_-])\d{1,2}(?P=sep)\d{4}(?!\d|\.\d)"
+        ),
+        # The same with a two-digit year, not right after a letter: in
+        # "DA40_16_08" or "DA40-16-08-2026" the type ends in 40
+        re.compile(
+            r"(?<![^\W_]|\.)"
+            + unless(r"0?1(?P<skip>[./_-])0?1(?P=skip)\d{2}(?!\d|\.\d)")
+            + r"\d{1,2}(?P<sep>[./_-])\d{1,2}(?P=sep)\d{2}(?!\d|\.\d)"
         ),
         # The same with spaces, "16 08 2026" and "16 - 08 - 2026": only a
         # real day and month, not both of one digit, and a year of this or
@@ -194,6 +216,14 @@ def _numeric_patterns(skip_near_jan_first: bool) -> tuple[re.Pattern[str], ...]:
             + r"(?!\d\D+\d(?!\d))"
             + r"\d{1,2}(?P<sep>\s+(?:[./_-]\s*)?|[./_-]\s+)\d{1,2}(?P=sep)"
             + r"(?:19|20)\d{2}(?!\d|[.,]\d)"
+        ),
+        # The year first with spaces, "2026 08 16" and "2026 - 08 - 16": the
+        # same shape the other way round
+        re.compile(
+            r"(?<![\w.])(?:19|20)\d{2}(?P<sep>\s+(?:[./_-]\s*)?|[./_-]\s+)"
+            + unless(r"0?1\s*[./_-]?\s*0?(?:" + short_days + r")(?!\d)")
+            + r"(?!\d(?P=sep)\d(?!\d))"
+            + rf"{_MONTH}(?P=sep){_DAY}(?!\d|[.,]\d)"
         ),
         # 2024-03 (a year and month), 2024-W11 and 2024W11 (an ISO week) and
         # 2024-074 (an ordinal date); January, the first week and the first
@@ -298,14 +328,15 @@ _TEXT_MONTH_SHORT_YEAR = re.compile(
     r"(?P=sep)(?P<year1>\d{2})(?![\d:]|\.\d)"
 )
 # A day and month in German notation, "16.08.", with the year left out, and
-# "26.08" or "16.8" without the last dot when the day has two digits: 118.30
-# is a frequency and 1.2 a version, which the digits and dots around keep
-# out. After a word that says it is a version ("firmware 12.10") it is one
-# (see _day_month_dotted_spans).
+# "26.08" or "16.8" without the last dot when the day has two digits, with
+# an underscore around it as in a file name ("EDDS_16.08"): 118.30 is a
+# frequency and 1.2 a version, which the digits and dots around keep out.
+# After a word that says it is a version ("firmware 12.10") it is one (see
+# _day_month_dotted_spans).
 _DAY_MONTH_DOTTED = re.compile(
     r"(?<![\d.])(?:0?[1-9]|[12]\d|3[01])\.(?:0?[1-9]|1[0-2])\.(?![\d.])|"
-    r"(?<![\w.])(?:(?:0[1-9]|[12]\d|3[01])\.(?:0[1-9]|1[0-2])|"
-    r"(?:[12]\d|3[01])\.[1-9])(?![\w.]|,\d)"
+    r"(?<![^\W_]|\.)(?:(?:0[1-9]|[12]\d|3[01])\.(?:0[1-9]|1[0-2])|"
+    r"(?:[12]\d|3[01])\.[1-9])(?![^\W_]|\.|,\d)"
 )
 _VERSION_WORD = re.compile(
     r"(?i:\b(?:v|ver|version|firmware|fw|software|sw|release|build|update|app"
@@ -401,6 +432,29 @@ _TIME_OF_DAY_WORDS = re.compile(
 # year of the flight completes ("Week 3" of a course goes as well). "W33"
 # alone stays: it is the code of an airport in the US as often.
 _WEEK_ONLY = re.compile(rf"(?<![A-Za-z\d])(?:(?i:KW)\s?|(?i:week)\s*){_WEEK}(?![\w])")
+# "KW05" is an airport in the US as well (Gettysburg), where a route side
+# starts: at the start of a route name or after its separator, or at the
+# start of a name that says it is an airport
+_AIRPORT_KW = re.compile(r"KW\d{2}")
+_ROUTE_SEPARATOR = re.compile(r"\s+(?:-|to)\s+")
+_SIDE_START = re.compile(r"\s(?:-|to)\s+\Z")
+_AIRPORT_WORD = re.compile(r"\b(?:Airport|Airfield|Airpark|Field|Strip|Heliport)\b")
+
+
+def _week_only_spans(text: str) -> list[tuple[int, int]]:
+    """The calendar weeks without a year (``_WEEK_ONLY``), no airport codes."""
+    spans = []
+    for match in _WEEK_ONLY.finditer(text):
+        if _AIRPORT_KW.fullmatch(match.group(0)):
+            before = text[: match.start()]
+            starts_side = not before.strip() or _SIDE_START.search(before)
+            is_route = _ROUTE_SEPARATOR.search(text) is not None
+            if starts_side and (is_route or _AIRPORT_WORD.search(text)):
+                continue
+        spans.append(match.span())
+    return spans
+
+
 # A time of day without a colon: "1430Z" (and "1430z"), "1430 UTC", "1430
 # GMT", "1430 EST" and the other zones, the local "1430L", "1430 LT" and
 # "1430 local", the "1430h" of a Charterware file name, "1430hrs" and "0930
@@ -599,11 +653,19 @@ def _day_month_dotted_spans(text: str) -> list[tuple[int, int]]:
 
 
 def _with_time_after(text: str, spans: list[tuple[int, int]]) -> list[tuple[int, int]]:
-    """The spans of dates, each with the time of day that follows it."""
+    """The spans of dates, each with the time of day that follows it.
+
+    The year of the next date in a list ("2026-08-16 2026-08-17") is no time
+    of the one before it.
+    """
+    starts = {start for start, _ in spans}
     extended = []
     for start, end in spans:
         time = _TIME_AFTER_DATE.match(text, end)
-        extended.append((start, time.end() if time else end))
+        overlaps = time is not None and any(
+            end < other < time.end() for other in starts
+        )
+        extended.append((start, time.end() if time and not overlaps else end))
     return extended
 
 
@@ -630,7 +692,8 @@ def _german_month_number(name: str) -> int | None:
     return _GERMAN_MONTH_NUMBERS.get(name.lower())
 
 
-def _any_month_number(name: str) -> int | None:
+def any_month_number(name: str) -> int | None:
+    """The number of an English or German month name, in any case."""
     return month_number(name) or _german_month_number(name)
 
 
@@ -680,31 +743,161 @@ def _date_spans(text: str) -> list[tuple[int, int]]:
     return spans
 
 
+def _full_date_spans(text: str, skip_near_jan_first: bool) -> list[tuple[int, int]]:
+    """The spans of ``find_date_tokens`` in a text whose dashes are hyphens."""
+    numeric = _NUMERIC_STRAY if skip_near_jan_first else _NUMERIC_ALL
+    spans = [match.span() for pattern in numeric for match in pattern.finditer(text)]
+    spans.extend(
+        _text_month_spans(_TEXT_MONTH, text, skip_near_jan_first)
+        + _text_month_spans(
+            _TEXT_MONTH_GERMAN, text, skip_near_jan_first, _german_month_number
+        )
+        + _text_month_spans(
+            _TEXT_MONTH_SHORT_YEAR, text, skip_near_jan_first, any_month_number
+        )
+    )
+    spans.extend(
+        match.span()
+        for match in _FLIGHT_PLAN_DATE.finditer(text)
+        if not skip_near_jan_first
+        or not near_jan_first(int(match["month"]), int(match["day"]))
+    )
+    return spans
+
+
 def find_date_tokens(text: str, *, skip_near_jan_first: bool = False) -> list[str]:
     """The date-like tokens of a text, in the order of the patterns.
 
     With ``skip_near_jan_first`` the dates within ``MAX_DAYS_AFTER_JAN_1``
     days after January 1st are left out: those of an obfuscated file.
     """
-    numeric = _NUMERIC_STRAY if skip_near_jan_first else _NUMERIC_ALL
-    found = [match.group(0) for pattern in numeric for match in pattern.finditer(text)]
-    found.extend(
+    return [
         text[start:end]
-        for start, end in _text_month_spans(_TEXT_MONTH, text, skip_near_jan_first)
-        + _text_month_spans(
-            _TEXT_MONTH_GERMAN, text, skip_near_jan_first, _german_month_number
+        for start, end in _full_date_spans(text.translate(_DASHES), skip_near_jan_first)
+    ]
+
+
+def _numbers(text: str) -> list[int]:
+    return [int(number) for number in re.findall(r"\d+", text)]
+
+
+def _partial_near_jan_first(kind: str, text: str) -> bool:
+    """Whether a part of a date (``_partial_date_spans``) is of January 1st.
+
+    As with the numeric shapes of a full date, those without a month name
+    only pass as January 1st itself: "02/01" is February 1st in the US.
+    """
+    numbers = _numbers(text)
+    if kind == "dotted":
+        return near_jan_first(numbers[1], numbers[0])
+    if kind == "slashed":
+        return numbers[:2] == [1, 1]
+    if kind == "week":
+        return numbers[-1] == 1
+    if kind == "six":
+        digits = "".join(str(number) for number in numbers).zfill(6)
+        return near_jan_first(int(digits[2:4]), int(digits[4:])) or near_jan_first(
+            int(digits[2:4]), int(digits[:2])
         )
-        + _text_month_spans(
-            _TEXT_MONTH_SHORT_YEAR, text, skip_near_jan_first, _any_month_number
+    # A month and a year, either way round
+    return 1 in numbers
+
+
+def _partial_date_spans(text: str, skip_near_jan_first: bool) -> list[tuple[int, int]]:
+    """The parts of dates that ``strip_dates`` takes out besides the dates.
+
+    A day and a month without the year, a calendar week without it, six
+    digits that are a date and a month with its year, found in ``text``
+    (whose dashes are hyphens) once its dates are out. With
+    ``skip_near_jan_first`` those of January 1st are left out.
+    """
+    rest = _blank(text, _with_time_after(text, _date_spans(text)))
+    spans = _text_month_spans(
+        _TEXT_MONTH_WITHOUT_YEAR, rest, skip_near_jan_first
+    ) + _text_month_spans(
+        _TEXT_MONTH_GERMAN_WITHOUT_YEAR,
+        rest,
+        skip_near_jan_first,
+        _german_month_number,
+    )
+    for kind, found in (
+        ("dotted", _day_month_dotted_spans(rest)),
+        ("slashed", _day_month_slashed_spans(rest)),
+        ("week", _week_only_spans(rest)),
+        ("six", [match.span() for match in _SIX_DIGIT_DATE.finditer(rest)]),
+        ("month", [match.span() for match in _MONTH_YEAR.finditer(rest)]),
+    ):
+        spans.extend(
+            (start, end)
+            for start, end in found
+            if not (
+                skip_near_jan_first and _partial_near_jan_first(kind, rest[start:end])
+            )
         )
-    )
-    found.extend(
-        match.group(0)
-        for match in _FLIGHT_PLAN_DATE.finditer(text)
-        if not skip_near_jan_first
-        or not near_jan_first(int(match["month"]), int(match["day"]))
-    )
+    return spans
+
+
+def find_partial_date_tokens(text: str) -> list[str]:
+    """The parts of dates in a name that are no January 1st.
+
+    "16 Aug", "16.08.", "16/08", "KW33", "260816" and "03/2026" name the day
+    or the month of a flight once the year of the flight completes them,
+    and so does an abbreviated weekday next to a date ("Sat" in "Sat 01 Jan
+    2026"). The obfuscator's check reports them in names, descriptions and
+    file names, which the site and the repository publish.
+    """
+    plain = text.translate(_DASHES)
+    dates = _date_spans(plain)
+    partial = _partial_date_spans(plain, skip_near_jan_first=True)
+    found = [text[start:end] for start, end in _with_weekday_around(plain, partial)]
+    for (start, end), (before, after) in zip(
+        dates, _with_weekday_around(plain, dates), strict=True
+    ):
+        found.extend(
+            text[low:high].strip(" ,_.()[]")
+            for low, high in ((before, start), (end, after))
+            if high > low
+        )
     return found
+
+
+def stray_date_spans(text: str) -> list[tuple[int, int]]:
+    """Where a name or a description gives the day of a flight away.
+
+    Everything the obfuscator's check reports in it: the dates that are no
+    January 1st (``find_date_tokens`` with ``skip_near_jan_first``), the
+    parts of dates (``find_partial_date_tokens``), the times of day, those
+    after a date of January 1st included, the weekdays and the abbreviated
+    weekdays next to a date. The dates of January 1st stay: the parser may
+    read the year of a flight from them.
+    """
+    plain = text.translate(_DASHES)
+    dates = _date_spans(plain)
+    stray = set(_full_date_spans(plain, skip_near_jan_first=True))
+    with_times = _with_time_after(plain, dates)
+    spans: list[tuple[int, int]] = []
+    for (start, end), (before, after) in zip(
+        dates, _with_weekday_around(plain, with_times), strict=True
+    ):
+        if (start, end) in stray:
+            spans.append((before, after))
+        else:
+            # The date of January 1st stays, what stands around it goes
+            spans.extend(
+                span for span in ((before, start), (end, after)) if span[1] > span[0]
+            )
+    partial = _partial_date_spans(plain, skip_near_jan_first=True)
+    spans.extend(_with_weekday_around(plain, _with_time_after(plain, partial)))
+    rest = _blank(
+        plain,
+        with_times + _partial_date_spans(plain, skip_near_jan_first=False),
+    )
+    spans.extend(
+        match.span()
+        for pattern in (_TIME_OF_DAY, _TIME_OF_DAY_WORDS, _COMPACT_TIME, _WEEKDAY)
+        for match in pattern.finditer(rest)
+    )
+    return spans
 
 
 def find_weekday_tokens(text: str) -> list[str]:
@@ -724,16 +917,17 @@ def find_time_tokens(text: str) -> list[str]:
     Charterware name becomes a sequence number), and in the content of a
     file without its timestamps, which start every flight at midnight.
     """
-    dates = _date_spans(text)
-    with_times = _with_time_after(text, dates)
-    found = [
-        text[end:stop].lstrip("-_, \t")
-        for (_, end), (_, stop) in zip(dates, with_times, strict=True)
-        if stop > end
-    ]
-    rest = _blank(text, with_times)
+    plain = text.translate(_DASHES)
+    dates = _date_spans(plain)
+    with_times = _with_time_after(plain, dates)
+    found = []
+    for (_, end), (_, stop) in zip(dates, with_times, strict=True):
+        if stop > end:
+            time = plain[end:stop]
+            found.append(text[stop - len(time.lstrip("-_, \t")) : stop])
+    rest = _blank(plain, with_times)
     found.extend(
-        match.group(0).strip()
+        text[match.start() : match.end()].strip()
         for pattern in (_TIME_OF_DAY, _TIME_OF_DAY_WORDS, _COMPACT_TIME)
         for match in pattern.finditer(rest)
     )
@@ -751,6 +945,7 @@ def strip_dates(text: str | None) -> str | None:
     "Sonntag", and "Sat" or "Sa." next to a date). The separators the date
     stood between go with it ("EDDS to EDDP - 16 Aug 2026" is "EDDS to
     EDDP"). A name without a single letter left says nothing and is None.
+    A dash other than the hyphen comes out as one where the name changes.
 
     Runway designators (RWY 08/26, 07L/25R), frequencies (118.500),
     altitudes and squawks (7000, FL100) are no dates and stay, and so are
@@ -758,25 +953,28 @@ def strip_dates(text: str | None) -> str | None:
     """
     if not text:
         return None
-    spans = _date_spans(text)
+    plain = text.translate(_DASHES)
+    spans = _date_spans(plain)
     # The common case, and the one that keeps a name exactly as it was
     if (
         not spans
-        and not _TEXT_MONTH_WITHOUT_YEAR.search(text)
-        and not _TEXT_MONTH_GERMAN_WITHOUT_YEAR.search(text)
-        and not _day_month_dotted_spans(text)
-        and not _day_month_slashed_spans(text)
-        and not _WEEK_ONLY.search(text)
-        and not _SIX_DIGIT_DATE.search(text)
-        and not _MONTH_YEAR.search(text)
-        and not _TIME_OF_DAY.search(text)
-        and not _TIME_OF_DAY_WORDS.search(text)
-        and not _COMPACT_TIME.search(text)
-        and not _WEEKDAY.search(text)
+        and not _TEXT_MONTH_WITHOUT_YEAR.search(plain)
+        and not _TEXT_MONTH_GERMAN_WITHOUT_YEAR.search(plain)
+        and not _day_month_dotted_spans(plain)
+        and not _day_month_slashed_spans(plain)
+        and not _week_only_spans(plain)
+        and not _SIX_DIGIT_DATE.search(plain)
+        and not _MONTH_YEAR.search(plain)
+        and not _TIME_OF_DAY.search(plain)
+        and not _TIME_OF_DAY_WORDS.search(plain)
+        and not _COMPACT_TIME.search(plain)
+        and not _WEEKDAY.search(plain)
     ):
         return text if any(c.isalpha() for c in text) else None
 
-    stripped = _blank(text, _with_weekday_around(text, _with_time_after(text, spans)))
+    stripped = _blank(
+        plain, _with_weekday_around(plain, _with_time_after(plain, spans))
+    )
     stripped = _blank(
         stripped,
         _with_weekday_around(
@@ -792,7 +990,7 @@ def strip_dates(text: str | None) -> str | None:
                 )
                 + _day_month_dotted_spans(stripped)
                 + _day_month_slashed_spans(stripped)
-                + [match.span() for match in _WEEK_ONLY.finditer(stripped)]
+                + _week_only_spans(stripped)
                 + [match.span() for match in _SIX_DIGIT_DATE.finditer(stripped)]
                 + [match.span() for match in _MONTH_YEAR.finditer(stripped)],
             )
@@ -802,11 +1000,84 @@ def strip_dates(text: str | None) -> str | None:
         )
         + [match.span() for match in _WEEKDAY.finditer(stripped)],
     )
-    stripped = _EMPTY_BRACKETS.sub(" ", stripped)
-    stripped = _DOUBLE_SEPARATORS.sub(lambda m: f" {m.group(1)} ", stripped)
-    stripped = _SPACES.sub(" ", stripped)
-    stripped = _EDGE_SEPARATORS.sub("", stripped)
+    stripped = _tidy(stripped)
     return stripped if any(c.isalpha() for c in stripped) else None
+
+
+def _tidy(text: str) -> str:
+    """What is left around removed dates, without the separators they left."""
+    text = _EMPTY_BRACKETS.sub(" ", text)
+    text = _DOUBLE_SEPARATORS.sub(lambda m: f" {m.group(1)} ", text)
+    text = _SPACES.sub(" ", text)
+    return _EDGE_SEPARATORS.sub("", text)
+
+
+# What stands between the words around a removed date, which goes with it
+_JOINT = re.compile(r"[ \t\r\n,;:/|_-]*")
+
+
+def _merged(text: str, spans: list[tuple[int, int]]) -> list[tuple[int, int]]:
+    """Spans sorted and joined where only separators stand between them."""
+    merged: list[tuple[int, int]] = []
+    for start, end in sorted(span for span in spans if span[1] > span[0]):
+        if merged and _JOINT.fullmatch(text, merged[-1][1], start):
+            merged[-1] = (merged[-1][0], max(merged[-1][1], end))
+        else:
+            merged.append((start, end))
+    return merged
+
+
+def _joint(before: str, after: str) -> str:
+    """What joins the text around a removed date: one of the separators.
+
+    A line break where one stood ("16 Aug\nback"), else a separator other
+    than a space where one stood (" - ", ", "), else a space where one
+    stood, else nothing.
+    """
+    for joint in (before, after):
+        if "\n" in joint:
+            return joint[joint.index("\n") :].rstrip(" \t") or "\n"
+    for joint in (before, after):
+        if joint.strip():
+            return joint
+    return " " if before or after else ""
+
+
+def without_spans(text: str, spans: list[tuple[int, int]]) -> str:
+    """``text`` without ``spans``, with the separators around each joined.
+
+    Only what stands right next to a removed span changes: the separators
+    on its two sides become one ("EDDS - 16 Aug 2026 - EDDF" is "EDDS -
+    EDDF"), and brackets left empty go. A URL, a line break or a double
+    comma elsewhere stays as it was. The text itself where there is
+    nothing to take out.
+    """
+    if not spans:
+        return text
+    kept = ""
+    position = 0
+    for span_start, span_end in _merged(text, spans):
+        if span_end <= position:
+            continue
+        head = text[position : max(span_start, position)]
+        tail = _JOINT.match(text, span_end)
+        assert tail is not None  # noqa: S101 - the pattern matches empty
+        resume = tail.end()
+        core = head.rstrip(" \t\r\n,;:/|_-")
+        joint_after = text[span_end:resume]
+        # Brackets around nothing but the date go with it: "Trip (16 Aug)"
+        if core.endswith(("(", "[")) and text[resume : resume + 1] in (")", "]"):
+            head = core[:-1]
+            core = head.rstrip(" \t\r\n,;:/|_-")
+            after = _JOINT.match(text, resume + 1)
+            assert after is not None  # noqa: S101 - the pattern matches empty
+            joint_after = text[resume + 1 : after.end()]
+            resume = after.end()
+        joint_before = head[len(core) :]
+        at_an_end = not (kept or core) or resume >= len(text)
+        kept += core + ("" if at_an_end else _joint(joint_before, joint_after))
+        position = resume
+    return kept + text[position:]
 
 
 def _blank(text: str, spans: list[tuple[int, int]]) -> str:

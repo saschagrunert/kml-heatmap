@@ -27,6 +27,7 @@ from kml_heatmap.obfuscate import (
     obfuscate_kml_file,
     obfuscate_kml_files,
     rename_charterware_files,
+    rename_dated_files,
 )
 from kml_heatmap.parser import parse_kml_file
 
@@ -1739,7 +1740,11 @@ class TestCLI:
 
 
 class TestUnparsableDates:
-    """Dates the patterns match but the calendar rejects are left untouched."""
+    """Dates the patterns match but the calendar rejects.
+
+    In a name they move to January 1st, since the parser reads their year;
+    elsewhere they stay as they are.
+    """
 
     def test_description_with_unknown_month(self):
         content = (
@@ -1770,13 +1775,16 @@ class TestUnparsableDates:
         assert "16 Foo 2025" in result
 
     def test_route_name_with_invalid_day(self):
+        """The parser reads the year of a day that does not exist as well."""
         content = (
             "<kml><when>2025-03-03T08:00:00Z</when>"
             "<name>EDDS to EDDP - 31 Feb 2025</name></kml>"
         )
         result = obfuscate_module.obfuscate_kml_content(content)
-        assert result is not None
-        assert "31 Feb 2025" in result
+        assert result == (
+            "<kml><when>2025-01-01T00:00:00Z</when>"
+            "<name>EDDS to EDDP - 01 Jan 2025</name></kml>"
+        )
 
     def test_route_only_document(self):
         content = "<kml><name>EDDS to EDDP - 16 Aug 2026</name></kml>"
@@ -1793,11 +1801,14 @@ class TestUnparsableDates:
         assert any("Route name date" in v for v in check_kml_obfuscated(kml_file))
         kml_file.write_text(result, encoding="utf-8")
         assert check_kml_obfuscated(kml_file) == []
-        # A day that does not exist is left alone, as in the other form
-        assert obfuscate_kml_content("<kml><name>X - 2026-02-31</name></kml>") is None
+        # A day that does not exist moves, as in the other form
+        assert (
+            obfuscate_kml_content("<kml><name>X - 2026-02-31</name></kml>")
+            == "<kml><name>X - 2026-01-01</name></kml>"
+        )
 
     def test_unparsable_dates_alone_give_none(self):
-        assert obfuscate_kml_content("<kml><name>X - 31 Feb 2026</name></kml>") is None
+        assert obfuscate_kml_content("<kml><name>X - 31 Foo 2026</name></kml>") is None
         assert (
             obfuscate_kml_content(
                 "<kml><description>Flight Foo 12 2026 03:01PM</description></kml>"
@@ -2013,3 +2024,316 @@ class TestErrorBranches:
             assert obfuscate_module.obfuscate_kml_file(kml_file) is True
         # Once for the temp file, once for the directory entry
         assert len(calls) == 2
+
+
+def _kml(body):
+    return f"<kml><when>2026-01-01T00:00:00Z</when>{body}</kml>"
+
+
+class TestNamesAndDescriptions:
+    """What the check reports in a name or a description, the rewrite fixes."""
+
+    @pytest.mark.parametrize(
+        ("body", "violation", "fixed"),
+        [
+            (
+                "<name>EDDS-EDDP 16 Aug</name>",
+                "Name or description contains part of a date: 16 Aug",
+                "<name>EDDS-EDDP</name>",
+            ),
+            (
+                "<name>Rundflug 16.08.</name>",
+                "Name or description contains part of a date: 16.08.",
+                "<name>Rundflug</name>",
+            ),
+            (
+                "<name>Flug 2026 08 16</name>",
+                "Date not on Jan 1: 2026 08 16",
+                "<name>Flug</name>",
+            ),
+            (
+                "<name>EDDS 16\u201308\u20132026</name>",
+                "Date not on Jan 1: 16\u201308\u20132026",
+                "<name>EDDS</name>",
+            ),
+            (
+                "<name>EDDS 16 Aug 2026</name>",
+                "Date not on Jan 1: 16 Aug 2026",
+                "<name>EDDS 01 Jan 2026</name>",
+            ),
+            (
+                "<name>Sunday 14:30 local</name>",
+                "Weekday gives the day of the flight away, remove it: Sunday",
+                "<name></name>",
+            ),
+            (
+                "<name>log 1710406320</name>",
+                "Unix time not at midnight on Jan 1, remove it: 1710406320",
+                "<name>log</name>",
+            ),
+            (
+                "<description>Flown on 16 Aug, back by 18:00</description>",
+                "Name or description contains part of a date: 16 Aug",
+                "<description>Flown on, back by</description>",
+            ),
+            (
+                "<name><![CDATA[Trip 16/08 <b>]]></name>",
+                "Name or description contains part of a date: 16/08",
+                "<name><![CDATA[Trip <b>]]></name>",
+            ),
+            (
+                "<name>Trip 16<!-- -->.08.2026 &amp; back</name>",
+                "Date not on Jan 1: 16.08.2026",
+                "<name>Trip &amp; back</name>",
+            ),
+        ],
+    )
+    def test_the_rewrite_fixes_what_the_check_reports(
+        self, tmp_path, body, violation, fixed
+    ):
+        kml_file = tmp_path / "flight.kml"
+        kml_file.write_text(_kml(body), encoding="utf-8")
+        assert violation in check_kml_obfuscated(kml_file)
+
+        assert obfuscate_kml_content(_kml(body)) == _kml(fixed)
+        kml_file.write_text(_kml(fixed), encoding="utf-8")
+        assert check_kml_obfuscated(kml_file) == []
+
+    def test_a_name_keeps_the_year_the_parser_reads(self, tmp_path):
+        kml_file = tmp_path / "flight.kml"
+        kml_file.write_text(
+            "<kml><Placemark><name>EDDS 16 Aug 2026</name><LineString>"
+            "<coordinates>9.2,48.7,400 9.3,48.8,500 9.4,48.9,600</coordinates>"
+            "</LineString></Placemark></kml>",
+            encoding="utf-8",
+        )
+        assert [meta["year"] for meta in parse_kml_file(str(kml_file))[2]] == [2026]
+
+        assert obfuscate_kml_file(kml_file)
+        assert "<name>EDDS 01 Jan 2026</name>" in kml_file.read_text(encoding="utf-8")
+        assert [meta["year"] for meta in parse_kml_file(str(kml_file))[2]] == [2026]
+        assert check_kml_obfuscated(kml_file) == []
+
+    @pytest.mark.parametrize(
+        ("name", "moved"),
+        [
+            ("EDDS - EDDF - 16 Mai 2026", "EDDS - EDDF - 01 Jan 2026"),
+            ("EDDS 16 Dez 2026", "EDDS 01 Jan 2026"),
+            ("EDDS 16 aug 2026", "EDDS 01 Jan 2026"),
+            ("EDDS 31 Feb 2025", "EDDS 01 Jan 2025"),
+            ("EDDS 2026-02-31", "EDDS 2026-01-01"),
+        ],
+    )
+    def test_every_date_the_parser_reads_moves(self, tmp_path, name, moved):
+        """German months too: deleting the date would lose the year."""
+        assert obfuscate_kml_content(f"<kml><name>{name}</name></kml>") == (
+            f"<kml><name>{moved}</name></kml>"
+        )
+
+    def test_a_word_that_is_no_month_keeps_its_date(self):
+        assert obfuscate_kml_content("<kml><name>X - 16 Foo 2026</name></kml>") is None
+
+    @pytest.mark.parametrize(
+        ("description", "scrubbed"),
+        [
+            (
+                "See https://example.org/a//b, Bob,, Carl -- a () b, 16 Aug",
+                "See https://example.org/a//b, Bob,, Carl -- a () b",
+            ),
+            ("Out 16 Aug\nback home\n\nfuel 30", "Out\nback home\n\nfuel 30"),
+            ("Trip (16 Aug) home, then 18:00 tea", "Trip home, then tea"),
+            ("A - 16 Aug - B", "A - B"),
+        ],
+    )
+    def test_only_what_is_next_to_a_date_changes(self, description, scrubbed):
+        content = f"<kml><description>{description}</description></kml>"
+        assert obfuscate_kml_content(content) == (
+            f"<kml><description>{scrubbed}</description></kml>"
+        )
+
+    def test_cdata_stays_cdata(self):
+        content = (
+            '<kml><description><![CDATA[<a href="https://x.org/p">log</a> '
+            "16 Aug]]></description></kml>"
+        )
+        assert obfuscate_kml_content(content) == (
+            '<kml><description><![CDATA[<a href="https://x.org/p">log</a>]]>'
+            "</description></kml>"
+        )
+
+    def test_a_list_of_dates(self, tmp_path):
+        content = "<kml><name>EDDS 2026-08-16 2026-08-17</name></kml>"
+        result = obfuscate_kml_content(content)
+        assert result == "<kml><name>EDDS 2026-01-01 2026-01-01</name></kml>"
+        assert obfuscate_kml_content(result) is None
+
+    @given(
+        st.lists(
+            st.sampled_from(
+                [
+                    "EDDS",
+                    "-",
+                    "16 Aug",
+                    "2026-08-16",
+                    "16 Mai 2026",
+                    "14:30",
+                    "Sunday",
+                    "KW33",
+                    "(",
+                    ")",
+                    ",",
+                    "Sat",
+                    "16.08.",
+                    "2026",
+                    "Bob",
+                ]
+            ),
+            max_size=8,
+        )
+    )
+    def test_the_rewrite_is_idempotent(self, words):
+        content = f"<kml><name>{' '.join(words)}</name></kml>"
+        once = obfuscate_kml_content(content) or content
+        assert obfuscate_kml_content(once) is None
+
+    def test_a_charterware_description_keeps_its_date(self):
+        description = (
+            "<description>Flight Jan 12 2026 03:01PM path of OE-AKI, Sunday"
+            "</description>"
+        )
+        assert obfuscate_kml_content(_kml(description)) == _kml(
+            "<description>Flight Jan 01 2026 12:00AM path of OE-AKI</description>"
+        )
+
+    def test_an_obfuscated_name_stays_as_it_is(self):
+        assert obfuscate_kml_content(_kml("<name>Log Start: 2026-01-01</name>")) is None
+        assert obfuscate_kml_content(_kml("<name>EDDS 01 Jan 2026</name>")) is None
+
+
+class TestCreators:
+    def test_every_creator_is_checked_and_replaced(self, tmp_path):
+        content = (
+            '<kml creator="kml-heatmap"><Document creator="SkyDemon Mobile">'
+            "<when>2026-01-01T00:00:00Z</when></Document></kml>"
+        )
+        kml_file = tmp_path / "flight.kml"
+        kml_file.write_text(content, encoding="utf-8")
+        assert check_kml_obfuscated(kml_file) == [
+            "Creator identifies the recording device: SkyDemon Mobile"
+        ]
+
+        result = obfuscate_kml_content(content)
+        assert result is not None
+        assert "SkyDemon" not in result
+        kml_file.write_text(result, encoding="utf-8")
+        assert check_kml_obfuscated(kml_file) == []
+
+
+class TestFlightsOfSeveralDays:
+    def test_legs_on_several_days_have_to_be_split(self, tmp_path):
+        # Every leg starts less than twelve hours after the one before ends
+        legs = "".join(
+            f"<Placemark><gx:Track><when>{start}</when><when>{end}</when>"
+            "</gx:Track></Placemark>"
+            for start, end in (
+                ("2026-08-16T08:00:00Z", "2026-08-16T20:00:00Z"),
+                ("2026-08-17T06:00:00Z", "2026-08-17T18:00:00Z"),
+                ("2026-08-18T04:00:00Z", "2026-08-18T16:00:00Z"),
+                ("2026-08-19T02:00:00Z", "2026-08-19T10:00:00Z"),
+            )
+        )
+        content = f'<kml xmlns:gx="http://www.google.com/kml/ext/2.2">{legs}</kml>'
+        kml_file = tmp_path / "trip.kml"
+        kml_file.write_text(obfuscate_kml_content(content) or content, encoding="utf-8")
+        violations = check_kml_obfuscated(kml_file)
+        assert (
+            "Flight runs over 4 days, more than the 3 from Jan 1 the check lets "
+            "pass: split the file into one per day of flying"
+        ) in violations
+
+
+class TestRenameDatedFiles:
+    def test_a_date_leaves_the_name(self, tmp_path):
+        dated = tmp_path / "1_DEHYL_DA40_16Aug.kml"
+        dated.write_text(_kml(""), encoding="utf-8")
+        assert check_kml_obfuscated(dated) == [
+            "File name contains part of a date: 16Aug"
+        ]
+
+        assert rename_dated_files([dated]) == [tmp_path / "1_DEHYL_DA40.kml"]
+        assert not dated.exists()
+        assert check_kml_obfuscated(tmp_path / "1_DEHYL_DA40.kml") == []
+
+    @pytest.mark.parametrize(
+        ("name", "renamed"),
+        [
+            ("Flight 2026-08-16 1430Z.kml", "Flight.kml"),
+            ("EDDS_Sunday_16.08.kml", "EDDS.kml"),
+            ("trip-KW33.KML", "trip.KML"),
+        ],
+    )
+    def test_names(self, tmp_path, name, renamed):
+        path = tmp_path / name
+        path.write_text(_kml(""), encoding="utf-8")
+        assert rename_dated_files([path]) == [tmp_path / renamed]
+
+    def test_a_name_without_a_date_stays(self, tmp_path):
+        path = tmp_path / "1_DEHYL_DA40.kml"
+        path.write_text(_kml(""), encoding="utf-8")
+        assert rename_dated_files([path]) == [path]
+
+    def test_no_file_is_replaced(self, tmp_path, caplog):
+        taken = tmp_path / "1_DEHYL_DA40.kml"
+        taken.write_text("mine", encoding="utf-8")
+        dated = tmp_path / "1_DEHYL_DA40_16Aug.kml"
+        dated.write_text(_kml(""), encoding="utf-8")
+
+        assert rename_dated_files([dated]) == [dated]
+        assert taken.read_text(encoding="utf-8") == "mine"
+        assert "Cannot rename" in caplog.text
+
+    def test_a_name_that_is_only_a_date_stays(self, tmp_path, caplog):
+        path = tmp_path / "16Aug.kml"
+        path.write_text(_kml(""), encoding="utf-8")
+        assert rename_dated_files([path]) == [path]
+        assert "nothing is left" in caplog.text
+
+    def test_charterware_names_move_to_jan_first(self, tmp_path):
+        path = tmp_path / CHARTERWARE_NAME
+        path.write_text(_kml(""), encoding="utf-8")
+        assert rename_dated_files([path]) == [
+            tmp_path / "2026-01-01_0000h_OE-AKI_LOAV-LOAV.kml"
+        ]
+
+    @pytest.mark.parametrize(
+        ("name", "renamed"),
+        [
+            ("1_DEHYL_DA40_16_08.kml", "1_DEHYL_DA40.kml"),
+            ("1_D-EHYL_DA40-16-08-2026.kml", "1_D-EHYL_DA40.kml"),
+        ],
+    )
+    def test_a_type_with_digits_stays(self, tmp_path, name, renamed):
+        path = tmp_path / name
+        path.write_text(_kml(""), encoding="utf-8")
+        assert rename_dated_files([path]) == [tmp_path / renamed]
+
+    def test_no_rename_changes_the_aircraft(self, tmp_path, caplog):
+        # Without its date the third part would be a type of its own
+        path = tmp_path / "1_DEHYL_16Aug_DA40.kml"
+        path.write_text(_kml(""), encoding="utf-8")
+        assert rename_dated_files([path]) == [path]
+        assert "the aircraft it names would change" in caplog.text
+
+    def test_the_rest_of_a_charterware_name_loses_its_dates(self, tmp_path):
+        path = tmp_path / "2026-01-12_1513h_OE-AKI_LOAV-LOAV_Sunday.kml"
+        path.write_text(_kml(""), encoding="utf-8")
+        renamed = tmp_path / "2026-01-01_0000h_OE-AKI_LOAV-LOAV.kml"
+        assert rename_dated_files([path]) == [renamed]
+        assert check_kml_obfuscated(renamed) == []
+
+    def test_make_obfuscate_fixes_the_name(self, tmp_path):
+        (tmp_path / "3_DEAGJ_DA20_Sat_16.08.kml").write_text(_kml(""), encoding="utf-8")
+        with patch("sys.argv", ["obfuscate", str(tmp_path)]):
+            main()
+        assert [path.name for path in tmp_path.iterdir()] == ["3_DEAGJ_DA20.kml"]
+        assert check_directory_obfuscated(tmp_path) == {}

@@ -28,9 +28,18 @@ Where:
 - `TYPE` - Aircraft type designator (e.g., `DA40`, `C172`), see below
 
 A registration has to look like one (capitals and digits, at least one letter);
-a name such as `2025_summer_trip.kml` names no aircraft. A name with more than
-three parts (`7_DEAGJ_DA20_copy.kml`) keeps the first three and drops the rest
-with a warning. Flight dates are not included in filenames for privacy.
+a name such as `2025_summer_trip.kml` names no aircraft. It is published with
+every flight, so it also has to start with an ICAO nationality mark: the part
+before its hyphen, or any mark it starts with when written without one (`DEHYL`,
+`OEAKI`, `9HABC`, `VH-ABC`). A mark of one character takes as many after it as
+that state gives (four for `D`, `F`, `G`, `I`, `M`, `C` and `2`, three for `Z`),
+and a US registration is `N` with a digit other than zero and at most two
+letters at the end (`N12345`, `N123AB`). Anything else (`1_ANNA_DA40.kml`,
+`1_MIKE_DA40.kml`) is dropped with a warning and the type stays; a name that
+happens to have the shape of a registration (`DAVID`, D-AVID) still passes. A
+name with more than three parts (`7_DEAGJ_DA20_copy.kml`) keeps the first three
+and drops the rest with a warning. Flight dates are not included in filenames
+for privacy.
 
 The hyphen is restored for these nationality prefixes: `2`, `4O`, `5B`, `9A`,
 `9H`, `CS`, `D`, `E7`, `EC`, `EI`, `ES`, `EW`, `F`, `G`, `HA`, `HB`, `I`, `LN`,
@@ -342,10 +351,10 @@ Output:
   airports, points, whether it has times) and, for each one the site would leave
   out, why: no year, a recording that never moves, a copy or a second recording
   of another flight, a file that is empty or does not parse. Below the table it
-  names the airport names without a known ICAO code the site would publish (see
-  [Privacy](privacy.md#what-reaches-the-site)). It writes no site, downloads no
-  elevation tiles and exits with 0; the parse cache and the airport database are
-  used and filled as by a build.
+  names the airport names not from the airport database the site would publish
+  (see [Privacy](privacy.md#what-reaches-the-site)). It writes no site,
+  downloads no elevation tiles and exits with 0; the parse cache and the airport
+  database are used and filled as by a build.
 - `-q`, `--quiet` - Print only warnings and errors, and one line at the end
   naming the output directory and the years in it
 - `--debug` - Show debug output (it wins over `--quiet`)
@@ -356,9 +365,12 @@ Privacy:
   and irreversibly, so that the files on disk carry no real dates either. Off by
   default: the generated site never carries a flight date finer than the year
   whatever the inputs hold (see [Privacy](privacy.md)), so this is about the KML
-  files, not about what gets published. Keep a copy of the originals first. A
-  `.kmz` input is refused: the dates inside a zip archive can be neither checked
-  nor rewritten, so unzip it and keep the `.kml` file.
+  files, not about what gets published. Like `make obfuscate`, it also takes the
+  dates out of names, descriptions and file names and renames the files that
+  held one (see [Privacy](privacy.md#obfuscating-the-kml-files-themselves)).
+  Keep a copy of the originals first. A `.kmz` input is refused: the dates
+  inside a zip archive can be neither checked nor rewritten, so unzip it and
+  keep the `.kml` file.
 - `--private` - Ask search engines not to index the site: the page gets a
   `<meta name="robots" content="noindex, nofollow">` (the link preview pages
   carry `noindex` in every build). The site stays public to anyone who has the
@@ -574,16 +586,21 @@ the flights, the statistics and Replay work over the black map.
 
 ### `make check-obfuscation` or the commit hook fails
 
-Run `make obfuscate`, then check again. When a date cannot be removed (in a file
-name, or in an element the tool does not rewrite), the rewrite names the file
-and the date and stops rather than leaving it half scrubbed; remove the date by
-hand. The same goes for a weekday anywhere in a file or its name and a time of
-day in a file name (`1_DEHYL_1513h.kml`) or anywhere in a file besides its
-timestamps, such as a placemark name or description (`Evening flight 18:30`,
-`Aunt farm 1430 GMT`, `0930 hours`): the tool rewrites neither. Four digits that
-are a year and a time at once, such as `2026 local` (20:26), count as a time. A
-duration written like a time of day (`Flight time 1:25`) cannot be told from one
-and has to go as well. A place named after a weekday other than `Friday Harbor`,
+Run `make obfuscate`, then check again. It takes the dates, parts of dates,
+times of day and weekdays out of names, descriptions and file names
+(`1_DEHYL_DA40_16Aug.kml` becomes `1_DEHYL_DA40.kml`). When a date cannot be
+removed (in an element the tool does not rewrite, or from a file name that is
+taken without it or has nothing left), the rewrite names the file and the date
+and stops rather than leaving it half scrubbed; remove the date by hand. The
+same goes for a weekday or a time of day anywhere else in a file besides its
+timestamps. A trip whose legs on several days are less than 12 hours apart is
+one flight that runs past the days after January 1st: split the file into one
+per day of flying, as the check says. The commit hook also refuses a commit
+message that dates a flight it adds or changes (`Add flight 16 Aug 2026`):
+reword it with `git commit --amend` or a rebase. Four digits that are a year and
+a time at once, such as `2026 local` (20:26), count as a time. A duration
+written like a time of day (`Flight time 1:25`) cannot be told from one and has
+to go as well. A place named after a weekday other than `Friday Harbor`,
 `Thursday Island` and `Sunday Creek` needs another name as well.
 
 A number of ten or thirteen digits in the text of an element (not in an

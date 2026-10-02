@@ -27,6 +27,8 @@ Rename a SkyDemon export to `N_REGISTRATION_TYPE.kml` and copy it into `data/`:
   in `data/` (`ls data | sort -n | tail -n 1`). The numbers keep the flights in
   chronological order, and the files are processed in that order.
 - `REGISTRATION` is the registration without its hyphen (`DEHYL` for `D-EHYL`).
+  It must start with an ICAO nationality mark (`D`, `OE`, `N`); anything else
+  there (`ANNA`) is dropped with a warning.
 - `TYPE` is the aircraft type designator (`DA40`, `C172`). It must hold a digit
   (`GLID` and the other ICAO designators without one aside); any other text
   there is dropped with a warning (see
@@ -65,15 +67,17 @@ files hold. The files in `data/` are committed to a public repository, though,
 so they must not carry real dates or times either. `make obfuscate` rewrites
 them in place, irreversibly: every flight moves to start at midnight (UTC) on
 January 1st of its year (the intervals between its points stay, its time of day
-does not), dates in placemark names and descriptions and the creator field are
-replaced, and a Charterware file is renamed to `YYYY-01-01_NNNNh_...` with a
-sequence number in place of the time. Files that are already obfuscated are left
-as they are; files obfuscated by an earlier version, which kept the time of day,
-fail the check until `make obfuscate` has moved them to midnight. Keep a copy of
-the original export if you want the real dates. It runs locally and needs the
-Python environment from [CONTRIBUTING.md](../CONTRIBUTING.md);
-`--obfuscate-inputs` does the same as part of a build. See [Privacy](privacy.md)
-for what is kept.
+does not), a date in a placemark name that gives the flight its year moves to
+January 1st, every other date, time of day and weekday in names and descriptions
+goes, the creator field is replaced, a Charterware file is renamed to
+`YYYY-01-01_NNNNh_...` with a sequence number in place of the time, and any
+other file name loses its dates (`1_DEHYL_DA40_16Aug.kml` becomes
+`1_DEHYL_DA40.kml`). Files that are already obfuscated are left as they are;
+files obfuscated by an earlier version, which kept the time of day, fail the
+check until `make obfuscate` has moved them to midnight. Keep a copy of the
+original export if you want the real dates. It runs locally and needs the Python
+environment from [CONTRIBUTING.md](../CONTRIBUTING.md); `--obfuscate-inputs`
+does the same as part of a build. See [Privacy](privacy.md) for what is kept.
 
 ## 5. Build and preview the site
 
@@ -127,8 +131,10 @@ git add data/
 git commit -s -m "chore: add flight 104"
 ```
 
-`git add data/` picks up renamed Charterware files and `aircraft.json` as well.
-Install the hooks once: with the pre-commit hooks (see
+`git add data/` picks up renamed files and `aircraft.json` as well, and the
+originals the renames removed. Write the commit message without a date or a
+weekday: the pre-push hook refuses one that dates the flights it adds. Install
+the hooks once: with the pre-commit hooks (see
 [CONTRIBUTING.md](../CONTRIBUTING.md)) the commit fails while a file in `data/`
 is not obfuscated, and the pre-push hook (`make hooks`, which needs only Python)
 refuses to push a commit that carries one. The `obfuscation` CI job catches the
