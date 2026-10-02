@@ -197,8 +197,14 @@ def _symbol(ok: bool) -> str:
     return "ok" if ok else "--"
 
 
-def format_listing(rows: Sequence[FlightListing]) -> str:
-    """The ``--list`` table: one line per path, and per file without one."""
+def format_listing(
+    rows: Sequence[FlightListing], free_text_airports: Sequence[str] = ()
+) -> str:
+    """The ``--list`` table: one line per path, and per file without one.
+
+    ``free_text_airports`` are the airport names the site would publish
+    without a known ICAO code, named below the table.
+    """
     header = ("", "file", "year", "aircraft", "airports", "points", "timed", "note")
     lines = [
         (
@@ -230,6 +236,12 @@ def format_listing(rows: Sequence[FlightListing]) -> str:
     ]
     published = sum(1 for row in rows if not row.skipped)
     text.append(f"{published} of {len(rows)} flight(s) would be published")
+    if free_text_airports:
+        text.append(
+            "Airport names without a known ICAO code that would be published, as the "
+            "route names give them: "
+            + ", ".join(repr(name) for name in free_text_airports)
+        )
     return "\n".join(text)
 
 
@@ -241,7 +253,8 @@ def _list(paths: list[str]) -> None:
     kml_files, _ = _collect_kml_files(paths)
     if not kml_files:
         raise InvalidInputError("No KML files specified or found!")
-    print(format_listing(list_flights(kml_files)))
+    listing = list_flights(kml_files)
+    print(format_listing(listing.rows, listing.free_text_airports))
 
 
 def _generate(
@@ -459,8 +472,9 @@ a refused output directory, 1 when the build failed, 130 when interrupted.
         action="store_true",
         help=(
             "list every flight of the inputs with its year, aircraft, "
-            "airports and points, and why any would be left out; writes no "
-            "site and downloads no elevation tiles"
+            "airports and points, why any would be left out, and the airport "
+            "names without a known ICAO code it would publish; writes no site and "
+            "downloads no elevation tiles"
         ),
     )
     output.add_argument(

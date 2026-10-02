@@ -27,7 +27,10 @@ Rename a SkyDemon export to `N_REGISTRATION_TYPE.kml` and copy it into `data/`:
   in `data/` (`ls data | sort -n | tail -n 1`). The numbers keep the flights in
   chronological order, and the files are processed in that order.
 - `REGISTRATION` is the registration without its hyphen (`DEHYL` for `D-EHYL`).
-- `TYPE` is the aircraft type designator (`DA40`, `C172`).
+- `TYPE` is the aircraft type designator (`DA40`, `C172`). It must hold a digit
+  (`GLID` and the other ICAO designators without one aside); any other text
+  there is dropped with a warning (see
+  [the rule](usage.md#kml-file-naming-convention)).
 
 For example, the flight after `103_DESST_C172.kml` in D-EHYL is
 `104_DEHYL_DA40.kml`. A Charterware file keeps its own name. The full rules are

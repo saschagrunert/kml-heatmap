@@ -720,6 +720,8 @@ class TestObfuscationFailsClosed:
 
 FIXTURE_FLIGHTS = Path(__file__).parent / "fixtures" / "visual"
 
+# EDAW and EDBA are not in the small airport database of the tests, so their
+# names count as free text there
 LISTING = """\
     file               year  aircraft  airports                                                   points  timed  note
 ok  1_DEAGJ_DA20.kml   2025  D-EAGJ    EDAQ Halle-Oppin - EDAQ Halle-Oppin                        612     yes    published
@@ -730,6 +732,7 @@ ok  61_DELGD_C182.kml  2025  D-ELGD    EDBA Arnstadt-Alkersleben - EDAQ Halle-Op
 ok  75_DEHYL_DA40.kml  2026  D-EHYL    EDAQ Halle-Oppin - EDAQ Halle-Oppin                        469     yes    published
 --  90_DEAGJ_DA20.kml  -     -         -                                                          0       no     File is empty: <dir>/90_DEAGJ_DA20.kml
 5 of 7 flight(s) would be published
+Airport names without a known ICAO code that would be published, as the route names give them: 'EDAW Roitzschjora', 'EDBA Arnstadt-Alkersleben'
 """  # noqa: E501
 
 
@@ -753,6 +756,14 @@ class TestList:
         tiles.assert_not_called()
         assert not (tmp_path / "docs").exists()
         assert sorted(path.name for path in flights.iterdir()) == before
+
+    def test_names_the_airports_without_a_code(self):
+        text = format_listing([FlightListing("a.kml", 2025)], ["Anna", "Bob Smith"])
+        assert text.splitlines()[-1] == (
+            "Airport names without a known ICAO code that would be published, as the "
+            "route names give them: 'Anna', 'Bob Smith'"
+        )
+        assert "ICAO" not in format_listing([FlightListing("a.kml", 2025)])
 
     def test_the_symbols_on_a_terminal(self, monkeypatch):
         monkeypatch.setattr("sys.stdout.isatty", lambda: True)

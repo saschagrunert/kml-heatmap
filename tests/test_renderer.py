@@ -646,6 +646,38 @@ class TestExportSite:
             "EDDK Cologne Bonn",
         ]
 
+    def test_names_the_airports_without_a_code(self, tmp_path, parse_data, caplog):
+        """A route between two people publishes their names as airports."""
+        path = [TrackPoint(50.0, 8.0, 100.0), TrackPoint(51.0, 9.0, 200.0)]
+        metadata: list[PathMetadata] = [
+            {
+                "year": 2025,
+                "start_point": [50.0, 8.0, 100.0],
+                "airport_name": "EDDF Frankfurt Main - EDDK Cologne Bonn",
+            },
+            {
+                "year": 2025,
+                "start_point": [52.0, 10.0, 100.0],
+                "airport_name": "Anna Mueller - Bob Smith",
+            },
+        ]
+        moved = [TrackPoint(52.0, 10.0, 100.0), TrackPoint(52.5, 10.5, 200.0)]
+        out = tmp_path / "out"
+
+        _export_site([path, moved], metadata, out / "index.html", out / "data")
+
+        airports = parse_data(out / "data" / "airports.json")["airports"]
+        assert {"Anna Mueller", "Bob Smith"} <= {
+            airport["name"] for airport in airports
+        }
+        warnings = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
+        assert any(
+            "2 airport name(s) without a known ICAO code" in message
+            and "'Anna Mueller', 'Bob Smith'" in message
+            and "EDDF" not in message
+            for message in warnings
+        ), warnings
+
     def test_a_dropped_recording_adds_no_airport_and_no_extent(
         self, tmp_path, parse_data
     ):
@@ -1409,7 +1441,7 @@ class TestListFlights:
             _write_kml(tmp_path / "5.kml", template="not valid xml <"),
         ]
 
-        rows = list_flights(files)
+        rows = list_flights(files).rows
 
         assert [(Path(row.file).name, row.skipped) for row in rows] == [
             ("1_DEAGJ_DA20.kml", ""),
@@ -1431,6 +1463,23 @@ class TestListFlights:
         assert rows[1].airports == "somewhere"
         assert rows[2].airports == "EDAQ Halle-Oppin"
 
+    def test_names_the_airports_without_a_code(self, tmp_path):
+        """The airports the build would publish, of the published paths only."""
+        people = TRACK_KML.replace("EDAQ - EDDC", "Anna Mueller - Bob Smith")
+        files = [
+            _write_kml(tmp_path / "1_DEAGJ_DA20.kml", template=people),
+            # Never published, so neither is its name
+            _write_kml(
+                tmp_path / "2_DEAGJ_DA20.kml",
+                template=UNDATED_KML.replace("somewhere", "Carl - Dora"),
+            ),
+        ]
+
+        assert list_flights(files).free_text_airports == ["Anna Mueller", "Bob Smith"]
+        # Next to a field with a code, the names are that field's
+        coded = _write_kml(tmp_path / "3_DEAGJ_DA20.kml")
+        assert list_flights([coded, *files]).free_text_airports == []
+
     def test_a_second_recording_of_a_flight(self, tmp_path, monkeypatch):
         files = [
             _write_kml(tmp_path / "1_DEAGJ_DA20.kml"),
@@ -1442,7 +1491,7 @@ class TestListFlights:
             lambda by_year, *_: {2025: by_year[2025]},
         )
 
-        rows = list_flights(files)
+        rows = list_flights(files).rows
 
         assert rows[1].skipped == "the same flight as another recording"
 

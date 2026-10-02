@@ -9,6 +9,7 @@ from kml_heatmap.export_writers import (
     export_airports_data,
     export_metadata,
     exported_country_codes,
+    free_text_airport_names,
 )
 
 
@@ -213,3 +214,25 @@ class TestExportedCountryCodes:
 
     def test_skips_what_no_country_is_known_for(self):
         assert exported_country_codes([_airport("Some Field")]) == []
+
+
+class TestFreeTextAirportNames:
+    """The published airport names the build warns about."""
+
+    def test_names_without_a_known_code(self):
+        airports = [
+            _airport("EDDF Frankfurt"),
+            _airport("Home strip - Aunt farm", is_at_path_end=True),
+            # The shape of a code, but no airport in the database
+            _airport("ANNA Mueller"),
+            _airport("Bob Smith - MIKE", is_at_path_end=True),
+        ]
+
+        assert free_text_airport_names(airports) == [
+            "ANNA Mueller",
+            "Aunt farm",
+            "MIKE",
+        ]
+
+    def test_none_for_coded_names(self):
+        assert free_text_airport_names([_airport("EDDF Frankfurt Main")]) == []

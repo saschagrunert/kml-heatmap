@@ -16,11 +16,11 @@ holds every flight to that start (see ``_timestamp_violations``).
 Dates without a timestamp move to January 1st of their own year: date-only
 timestamps, Charterware description dates ("Flight Jan 12 2026 03:01PM"
 becomes "Flight Jan 01 2026 12:00AM"), route names with dates ("EDDS to
-EDDP - 16 Aug 2026") and the SkyDemon marker names (Log Start, Takeoff,
-Landing, Log Stop), which lose their time. The ``creator`` attribute is
-replaced with a generic value. Files are rewritten atomically and in place;
-``rename_charterware_files`` removes the date and time from Charterware file
-names ("2026-01-12_1513h_OE-AKI_LOAV-LOAV.kml").
+EDDP - 16 Aug 2026", "EDDS to EDDP - 2026-08-16") and the SkyDemon marker
+names (Log Start, Takeoff, Landing, Log Stop), which lose their time. The
+``creator`` attribute is replaced with a generic value. Files are rewritten
+atomically and in place; ``rename_charterware_files`` removes the date and
+time from Charterware file names ("2026-01-12_1513h_OE-AKI_LOAV-LOAV.kml").
 """
 
 import argparse
@@ -105,10 +105,13 @@ CHECK_NAME_DATE_PATTERN = re.compile(_MARKER_DATE_RE + r"\d{4}\s+" + _MARKER_TIM
 DESCRIPTION_DATE_PATTERN = re.compile(
     r"(Flight\s+)([A-Za-z]{3,9})\s+(\d{1,2})\s+(\d{4})\s+(\d{1,2}):(\d{2})(AM|PM)"
 )
-# Route name with date: "<name>EDDS to EDDP - 16 Aug 2026</name>"
+# Route name with date: "<name>EDDS to EDDP - 16 Aug 2026</name>", or in the
+# ISO form the parser reads too ("EDDS to EDDP - 2026-08-16", see
+# helpers.DATE_PATTERN)
 ROUTE_DATE_PATTERN = re.compile(
     r"(?P<head><(?P<tag>" + _PREFIX + r"name)\b[^>]*>[^<]*?\s-\s)"
-    r"(?P<day>\d{1,2})\s+(?P<month>[A-Za-z]{3})\s+(?P<year>\d{4})"
+    r"(?:(?P<day>\d{1,2})\s+(?P<month>[A-Za-z]{3})\s+(?P<year>\d{4})"
+    r"|(?P<iso_year>\d{4})-(?P<iso_month>\d{2})-(?P<iso_day>\d{2}))"
     r"(?P<tail>\s*</(?P=tag)\s*>)"
 )
 # Either quote: creator="SkyDemon" or creator='SkyDemon'
@@ -126,9 +129,10 @@ MINUTES_PER_DAY = 24 * 60
 TEMP_FILE_PATTERN = re.compile(r"^\..*\.kml\.[^.]+\.tmp$", re.IGNORECASE)
 
 # Timestamps further apart than this belong to different flights, unless they
-# are in the same Placemark (see _timestamp_groups)
+# are in the same track (see _timestamp_groups)
 FLIGHT_GAP = timedelta(hours=12)
-# Closer than this, timestamps are one flight even across New Year
+# Closer than this, a timestamp outside every track joins the flight before it
+# even across New Year
 CONTINUOUS_GAP = timedelta(hours=2)
 
 # Coordinate lists: most of a track's text, and numbers only
@@ -137,6 +141,18 @@ COORDINATES_PATTERN = re.compile(
 )
 
 PLACEMARK_PATTERN = re.compile(r"<(" + _PREFIX + r"Placemark)\b.*?</\1\s*>", re.DOTALL)
+# What the parser makes one path of: a gx:MultiTrack, else a gx:Track (see
+# parser_gx_track._flights)
+MULTI_TRACK_PATTERN = re.compile(
+    r"<(" + _PREFIX + r"MultiTrack)\b.*?</\1\s*>", re.DOTALL
+)
+TRACK_PATTERN = re.compile(r"<(" + _PREFIX + r"Track)\b.*?</\1\s*>", re.DOTALL)
+# A point marker: a Placemark with a Point and no path, whose TimeStamp is no
+# track but joins the flight it belongs to (see _timestamp_groups)
+POINT_PATTERN = re.compile(r"<" + _PREFIX + r"Point\b")
+PATH_GEOMETRY_PATTERN = re.compile(
+    r"<" + _PREFIX + r"(?:LineString|Track|MultiTrack)\b"
+)
 
 
 def _timestamp_text(raw: str) -> str:
@@ -209,12 +225,17 @@ def _format_description_date(prefix: str, dt: datetime, long_month: bool) -> str
 
 
 def _parse_route_date(match: re.Match[str]) -> datetime | None:
-    """Parse a route name date match ("16 Aug 2026") into a UTC datetime."""
-    month = month_number(match["month"])
+    """Parse a route name date match ("16 Aug 2026", "2026-08-16") in UTC."""
+    if match["iso_year"] is not None:
+        year, day = int(match["iso_year"]), int(match["iso_day"])
+        month: int | None = int(match["iso_month"])
+    else:
+        year, day = int(match["year"]), int(match["day"])
+        month = month_number(match["month"])
     if month is None:
         return None
     try:
-        return datetime(int(match["year"]), month, int(match["day"]), tzinfo=UTC)
+        return datetime(year, month, day, tzinfo=UTC)
     except ValueError:
         return None
 
@@ -237,36 +258,43 @@ def _is_canonical_start(dt: datetime | None) -> bool:
 
 
 def _timestamp_groups(
-    timestamps: Iterable[datetime], placemarks: Iterable[Iterable[datetime]]
+    timestamps: Iterable[datetime], tracks: Iterable[Iterable[datetime]]
 ) -> list[list[datetime]]:
     """Group timestamps into flights, each sorted, in the order of their start.
 
-    A Placemark is one piece of a flight however long it runs, and so is each
-    timestamp outside a Placemark. Pieces in time order join the flight
-    before them when they overlap it, when they follow it within
-    ``CONTINUOUS_GAP`` (a pause within one flight), or when they follow it within
-    ``FLIGHT_GAP`` in the same UTC year; a flight on January 1st must not
-    move into the year of the flight that ended the night before. A flight is
-    never split: one that runs past the days after January 1st keeps its
-    intervals and fails the check instead of running backwards in time.
+    A track is one piece of a flight however long it runs, and so is each
+    timestamp outside one. A track is what the parser makes a path of, and
+    gives the year of its start: a gx:Track, the tracks of a gx:MultiTrack
+    together, and a Placemark for the timestamps of no track in it (the
+    TimeSpan of a LineString); a point marker's TimeStamp (a Placemark with
+    a Point and no path) is outside every track. Pieces in time order join
+    the flight before them when they overlap it, or when they follow it
+    within ``FLIGHT_GAP`` in the same UTC year: a track that starts on
+    January 1st must not move into the year of the flight that ended the
+    night before, since the parser keeps it in its own. Only a timestamp
+    outside every track joins within ``CONTINUOUS_GAP`` across New Year too:
+    no path takes its year from it. A flight is never split: one that runs
+    past the days after January 1st keeps its intervals and fails the check
+    instead of running backwards in time.
 
-    A timestamp of a Placemark more than ``MAX_TIMESTAMP_DISTANCE_SECONDS``
-    from the median of the Placemark is a clock error, as the parser has it
-    (a logger's clock at its default date until the GPS fix): it is a piece
-    of its own, so it neither holds the flight back from moving nor stays
+    A timestamp of a track more than ``MAX_TIMESTAMP_DISTANCE_SECONDS`` from
+    the median of the track is a clock error, as the parser has it (a
+    logger's clock at its default date until the GPS fix): it is a piece of
+    its own, so it neither holds the flight back from moving nor stays
     behind with a date of its own.
     """
     pieces: list[list[datetime]] = []
-    for placemark in placemarks:
-        piece = sorted(set(placemark))
+    for track in tracks:
+        piece = sorted(set(track))
         if not piece:
             continue
         median = piece[len(piece) // 2]
         limit = timedelta(seconds=MAX_TIMESTAMP_DISTANCE_SECONDS)
         pieces.append([dt for dt in piece if abs(dt - median) <= limit])
         pieces.extend([dt] for dt in piece if abs(dt - median) > limit)
-    in_placemark = {dt for piece in pieces for dt in piece}
-    pieces.extend([dt] for dt in set(timestamps) - in_placemark)
+    in_track = {dt for piece in pieces for dt in piece}
+    loose = set(timestamps) - in_track
+    pieces.extend([dt] for dt in loose)
     pieces.sort()
 
     groups: list[list[datetime]] = []
@@ -275,8 +303,8 @@ def _timestamp_groups(
         start = piece[0]
         if group_end is not None and (
             start <= group_end
-            or start - group_end <= CONTINUOUS_GAP
             or (start - group_end <= FLIGHT_GAP and start.year == groups[-1][0].year)
+            or (start in loose and start - group_end <= CONTINUOUS_GAP)
         ):
             groups[-1].extend(piece)
             group_end = max(group_end, piece[-1])
@@ -337,15 +365,47 @@ class _Timestamps(NamedTuple):
     not_understood: list[str]
 
 
+def _is_point_marker(placemark: str) -> bool:
+    """Whether a Placemark is a point marker (a Point and no path)."""
+    return (
+        POINT_PATTERN.search(placemark) is not None
+        and PATH_GEOMETRY_PATTERN.search(placemark) is None
+    )
+
+
+class _Spans:
+    """The spans of the matches of an element, to find the one at a position."""
+
+    def __init__(self, matches: Iterable[re.Match[str]]) -> None:
+        self.spans = [match.span() for match in matches]
+        self.starts = [start for start, _ in self.spans]
+
+    def holding(self, position: int) -> int | None:
+        """The index of the span that holds ``position``, None for none."""
+        index = bisect_right(self.starts, position) - 1
+        if index >= 0 and position < self.spans[index][1]:
+            return index
+        return None
+
+
 def _scan_timestamps(content: str) -> _Timestamps:
     first_text: dict[datetime, str] = {}
     has_utc_offset = False
     has_loose_text = False
     dates_to_move: list[str] = []
     not_understood: list[str] = []
-    spans = [match.span() for match in PLACEMARK_PATTERN.finditer(content)]
-    span_starts = [start for start, _ in spans]
-    placemarks: list[list[datetime]] = [[] for _ in spans]
+    # The innermost of a gx:MultiTrack, a gx:Track and a Placemark that is no
+    # point marker holds the timestamp's track (see _timestamp_groups)
+    containers = [
+        _Spans(MULTI_TRACK_PATTERN.finditer(content)),
+        _Spans(TRACK_PATTERN.finditer(content)),
+        _Spans(
+            match
+            for match in PLACEMARK_PATTERN.finditer(content)
+            if not _is_point_marker(match.group(0))
+        ),
+    ]
+    tracks: dict[tuple[int, int], list[datetime]] = {}
     for match in TIMESTAMP_PATTERN.finditer(content):
         text = _timestamp_text(match.group(3))
         if text != match.group(3):
@@ -355,15 +415,17 @@ def _scan_timestamps(content: str) -> _Timestamps:
             first_text.setdefault(dt, text)
             if not has_utc_offset:
                 has_utc_offset = UTC_OFFSET_PATTERN.search(text) is not None
-            index = bisect_right(span_starts, match.start()) - 1
-            if index >= 0 and match.start() < spans[index][1]:
-                placemarks[index].append(dt)
+            for kind, spans in enumerate(containers):
+                index = spans.holding(match.start())
+                if index is not None:
+                    tracks.setdefault((kind, index), []).append(dt)
+                    break
         elif (moved := _date_only_on_jan_first(text)) is not None:
             if moved != text:
                 dates_to_move.append(text)
         elif text and not YEAR_ONLY_PATTERN.fullmatch(text):
             not_understood.append(text)
-    groups = _timestamp_groups(first_text, placemarks)
+    groups = _timestamp_groups(first_text, tracks.values())
     return _Timestamps(
         first_text,
         groups,
@@ -421,6 +483,8 @@ def obfuscate_kml_content(content: str) -> str | None:
     def route_on_jan_first(match: re.Match[str]) -> str:
         if _parse_route_date(match) is None:
             return match.group(0)
+        if match["iso_year"] is not None:
+            return f"{match['head']}{match['iso_year']}-01-01{match['tail']}"
         return f"{match['head']}01 Jan {match['year']}{match['tail']}"
 
     def replace_creator(match: re.Match[str]) -> str:

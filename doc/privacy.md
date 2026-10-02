@@ -106,12 +106,18 @@ neither do its names and descriptions, nor a Unix time of a past day in the text
 of an element (see
 [Troubleshooting](usage.md#make-check-obfuscation-or-the-commit-hook-fails)). A
 comment or processing instruction inside a text hides nothing from the check
-(`16<!-- -->.08.2026`). Timestamps within one Placemark, or no more than 12
-hours apart, count as one flight and are never split; a recording that runs
-longer than those days fails the check rather than being cut in two. When a date
-cannot be removed (in a file name, say, or an element the tool does not
-rewrite), the rewrite lists it and stops rather than leaving a file half
-scrubbed.
+(`16<!-- -->.08.2026`). The timestamps of one track (a gx:Track, the tracks of a
+gx:MultiTrack, or a Placemark without either that is no point marker) count as
+one flight and are never split, and so do tracks no more than 12 hours apart in
+one year; the TimeStamp of a point marker joins the flight before it within two
+hours, across New Year too. A track that starts after New Year keeps its year,
+as the site does, even right after a flight that ended the night before, unless
+it overlaps that flight in time or its Placemark has a TimeSpan that begins
+before New Year: then it moves into the year that flight or that TimeSpan starts
+in. A recording that runs longer than those days fails the check rather than
+being cut in two. When a date cannot be removed (in a file name, say, or an
+element the tool does not rewrite), the rewrite lists it and stops rather than
+leaving a file half scrubbed.
 
 ## What reaches the site
 
@@ -123,9 +129,23 @@ Kept in the site:
   and the field and runway of each touchdown, without a time
 - Flight time per year and per aircraft
 - Airport names: a placemark name that holds an ICAO code (`EDDS`,
-  `EDAQ Halle-Oppin`), and the airports of a route name
-  (`Home strip - Aunt farm`)
-- The aircraft registration and type of a file name (`1_DEHYL_DA40.kml`)
+  `EDAQ Halle-Oppin`), and both sides of a route name as written, with or
+  without a code (`Home strip - Aunt farm`). A route name between two people
+  (`Anna Mueller - Bob Smith`) therefore publishes their names as airports,
+  unless a field with a code is next to them. The build warns with every name it
+  publishes whose code is not in the airport database, so a name that only looks
+  like one (`ANNA Mueller`) is named too, and `--list` names them below its
+  table
+- The aircraft registration and type of a file name (`1_DEHYL_DA40.kml`); the
+  type only when it is a type designator with a digit (`DA40`, `C172`,
+  `PA-28-181`) or one of the ICAO designators without one (`GLID`), in capitals.
+  Any other text there is dropped with a warning, a type of letters alone too
+  (see [the rule](usage.md#kml-file-naming-convention))
+- The order of the flights: each year lists them in input order, which is the
+  order of their dates for numbered and Charterware file names. Together with
+  the speeds, tracks and runways of each flight, that order narrows down when
+  each one was flown, for someone who compares them with weather archives or the
+  flights of others
 - The same again in the link preview pages of each year and flight (their year,
   airports and aircraft), and images of the tracks
 

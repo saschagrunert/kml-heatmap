@@ -34,7 +34,11 @@ from .exceptions import (
     KMLParseError,
     OutputRefusedError,
 )
-from .export_writers import exported_airport_names, exported_country_codes
+from .export_writers import (
+    exported_airport_names,
+    exported_country_codes,
+    free_text_airport_names,
+)
 from .logger import logger
 from .parser import load_cached_kml, parse_kml_file, parse_size
 from .parser_cache import prune_stale_cache_entries
@@ -57,12 +61,14 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Iterator, Sequence
 
     from .airport_lookup import AirportRecord
+    from .airports import AirportData
     from .terrain import TileSource
     from .types import FlightPathGroup, PathMetadata, TrackPoint
 
 __all__ = [
     "CoordinateExtent",
     "FlightListing",
+    "Listing",
     "ParsedFile",
     "create_progressive_heatmap",
     "foreign_output_error",
@@ -494,6 +500,23 @@ def _map_extent(
     return extent
 
 
+def _warn_free_text_airports(unique_airports: list[AirportData]) -> None:
+    """Name the airports the site publishes without a known ICAO code, if any.
+
+    They come from route names as written (see
+    ``export_writers.free_text_airport_names``), which may be no airports.
+    """
+    names = free_text_airport_names(unique_airports)
+    if names:
+        logger.warning(
+            "Publishing %d airport name(s) without a known ICAO code, as the route "
+            "names give them: %s. Rename a placemark whose route names no "
+            "airport (see doc/privacy.md)",
+            len(names),
+            ", ".join(repr(name) for name in names),
+        )
+
+
 def _export_site(
     all_path_groups: FlightPathGroup,
     all_path_metadata: list[PathMetadata],
@@ -535,6 +558,7 @@ def _export_site(
         [all_path_groups[index] for index in exported_indices],
     )
     logger.info("  Found %d unique airports", len(unique_airports))
+    _warn_free_text_airports(unique_airports)
 
     # The countries of the exported airports, and the flags the site can
     # publish of them, which metadata.json lists
@@ -603,6 +627,18 @@ class FlightListing:
     skipped: str = ""
 
 
+@dataclass(frozen=True)
+class Listing:
+    """What ``--list`` prints: a row per path, and the free-text airports.
+
+    ``free_text_airports`` are the airport names the site would publish
+    without a known ICAO code (see ``export_writers.free_text_airport_names``).
+    """
+
+    rows: list[FlightListing]
+    free_text_airports: list[str] = field(default_factory=list)
+
+
 def _listed_airports(metadata: PathMetadata) -> str:
     start, end = metadata.get("start_airport"), metadata.get("end_airport")
     if start or end:
@@ -649,7 +685,7 @@ def _skip_reason(
     return "the same flight as another recording"
 
 
-def list_flights(kml_files: Sequence[str]) -> list[FlightListing]:
+def list_flights(kml_files: Sequence[str]) -> Listing:
     """What the site would hold of every file, without writing anything.
 
     Every path gets a row with its year, aircraft, airports, points and
@@ -657,8 +693,9 @@ def list_flights(kml_files: Sequence[str]) -> list[FlightListing]:
     is invalid, does not parse or holds no path gets a row of its own. The
     files are parsed as a build parses them (through the parse cache), and
     the copies and second recordings are found the same way
-    (``select_exported_paths``). No elevation tile is fetched and nothing
-    is written but the parse cache.
+    (``select_exported_paths``), as are the airports, of which the ones
+    without a known ICAO code are listed too. No elevation tile is fetched and
+    nothing is written but the parse cache.
     """
     rows: list[FlightListing] = []
     parsed: list[ParsedFile] = []
@@ -705,7 +742,12 @@ def list_flights(kml_files: Sequence[str]) -> list[FlightListing]:
         )
     order = {kml_file: position for position, kml_file in enumerate(kml_files)}
     rows.sort(key=lambda row: order.get(row.file, len(order)))
-    return rows
+    # The airports of the build: those of the published paths alone
+    published = selection.exported()
+    airports = deduplicate_airports(
+        [metadata[index] for index in published], [paths[index] for index in published]
+    )
+    return Listing(rows, free_text_airport_names(airports))
 
 
 def foreign_output_error(output_file: str | Path, data_dir: str | Path) -> str | None:

@@ -103,6 +103,21 @@ _REGISTRATION = re.compile(r"[A-Z0-9]{1,2}-[A-Z0-9]{1,5}|[A-Z0-9]{3,7}")
 _ICAO_CODE = re.compile(rf"[{ICAO_REGION_PREFIXES}][A-Z]{{3}}")
 _CHARTERWARE_DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
 _CHARTERWARE_TIME = re.compile(r"(?:[01]\d|2[0-3])[0-5]\dh")
+# An aircraft type is an ICAO type designator (DA40, C172, P28A, EC135), maybe
+# with a variant (DA40NG, C172S) or hyphen groups (PA-28-181, DR400-180,
+# G-109B), and holds a digit: a word of letters alone is as often a name
+# ("ANNA"), so only the ICAO designators without one are taken
+# (see _is_type_designator). Anything else is free text ("DA40 mit Anna"),
+# which the site would publish.
+_TYPE_BASE = re.compile(r"[A-Z][A-Z0-9]{0,5}")
+# A hyphen group starts with a digit (PA-28, LS8-18), or is a variant of one or
+# two letters right after a digit (DA40-NG)
+_TYPE_GROUP = re.compile(r"\d[A-Z0-9]{0,4}|[A-Z]{1,2}")
+_TYPE_MAX_GROUPS = 2
+# The ICAO designators for aircraft without a type designator of their own
+_SPECIAL_TYPES = frozenset(
+    {"BALL", "GLID", "GYRO", "PARA", "SHIP", "UHEL", "ULAC", "ZZZZ"}
+)
 
 
 def load_aircraft_data(aircraft_file: Path) -> dict[str, str]:
@@ -213,6 +228,50 @@ def _dated_registration(text: str, filename: str) -> bool:
     return True
 
 
+def _is_type_designator(text: str) -> bool:
+    """Whether an upper-case text is an aircraft type designator.
+
+    A base (DA40, PA, G) and at most two hyphen groups, each starting with a
+    digit or a variant of one or two letters after a digit; and a digit in
+    it, unless it is one of the designators that have none (GLID).
+    """
+    if text in _SPECIAL_TYPES:
+        return True
+    base, *groups = text.split("-")
+    if len(groups) > _TYPE_MAX_GROUPS or not _TYPE_BASE.fullmatch(base):
+        return False
+    previous = base
+    for group in groups:
+        if not _TYPE_GROUP.fullmatch(group) or (
+            group[0].isalpha() and not previous[-1].isdigit()
+        ):
+            return False
+        previous = group
+    return any(char.isdigit() for char in text)
+
+
+def _aircraft_type(text: str, filename: str) -> str | None:
+    """The aircraft type of a numbered file name, None where it has none.
+
+    A date is taken out of it, as everywhere a name is published (a type
+    that is only a date is none); what is left must be a type designator in
+    any case (see ``_is_type_designator``), which is published in capitals,
+    else it is dropped with a warning.
+    """
+    aircraft_type = strip_dates(text)
+    if not aircraft_type:
+        return None
+    if aircraft_type.isascii() and _is_type_designator(aircraft_type.upper()):
+        return aircraft_type.upper()
+    logger.warning(
+        "Ignoring the aircraft type %r in %s: it is no type designator "
+        "(DA40, C172), and the site would publish it",
+        aircraft_type,
+        filename,
+    )
+    return None
+
+
 def parse_aircraft_from_filename(filename: str) -> AircraftInfo | None:
     """Parse aircraft information from KML filename, None for a name without.
 
@@ -223,7 +282,8 @@ def parse_aircraft_from_filename(filename: str) -> AircraftInfo | None:
     A numbered name whose second part is no registration (see
     ``_is_registration``) names no aircraft; a Charterware name without one
     keeps its route. A registration that holds a date is none either (see
-    ``_dated_registration``), but the type and route stay.
+    ``_dated_registration``), but the type and route stay. A type that is
+    no type designator is dropped (see ``_aircraft_type``).
     """
     name = Path(filename).stem
     parts = name.split("_")
@@ -241,7 +301,7 @@ def parse_aircraft_from_filename(filename: str) -> AircraftInfo | None:
             registration=None
             if _dated_registration(parts[1], filename)
             else normalize_registration(parts[1]),
-            type=parts[2],
+            type=_aircraft_type(parts[2], filename),
             format="numbered",
         )
 
