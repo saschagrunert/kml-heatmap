@@ -32,7 +32,7 @@
   "//dependencies": "Vendored into the page by scripts/vendor.js and published with the site",
   "dependencies": {
     "html-to-image": "1.11.13",
-    "lucide": "1.47.0",
+    "lucide": "1.48.0",
     "maplibre-gl": "6.11.2"
   },
   "devDependencies": {
