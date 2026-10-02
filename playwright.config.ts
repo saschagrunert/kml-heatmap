@@ -86,6 +86,11 @@ export default defineConfig<object, SiteOptions>({
       // The bar and sheet only exist below the breakpoint; the visual
       // snapshots have a project of their own
       testIgnore: /(mobile|visual)\.spec\.ts$/,
+      // Software WebGL with four browsers on the runner: the slowest specs
+      // (Wrapped's intro, the error-free scans, the cross-section, the
+      // selections) took 70 to 80 % of the old 30 s on green runs, and one
+      // of them timed out on three runs that changed nothing it drives
+      timeout: 45000,
       use: {
         ...devices["Desktop Chrome"],
         ...launchOptions,

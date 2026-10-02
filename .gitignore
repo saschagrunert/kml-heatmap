@@ -10,11 +10,12 @@ AGENTS.md
 
 # Generated sites, never committed: docs/ is the default OUTPUT_DIR of
 # `make build`, out/ the output of the examples in doc/usage.md, site/ the
-# one the deploy job publishes and visual-site/ the one the visual
-# snapshots are compared against.
+# one the deploy job publishes, e2e-sites/ the two the e2e jobs test and
+# visual-site/ the one the visual snapshots are compared against.
 /docs/
 /out/
 /site/
+/e2e-sites/
 /visual-site/
 
 # Python

@@ -58,6 +58,9 @@ playwright-report
 *.kml
 *.kmz
 docs
+out
+site
+e2e-sites
 visual-site
 data
 kml_test_*

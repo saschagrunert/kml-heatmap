@@ -570,6 +570,17 @@ def _tile_png(elevation=250.0):
 
 
 @pytest.fixture(autouse=True)
+def no_retry_pauses(monkeypatch):
+    """The pauses between the attempts of a fetch are skipped.
+
+    A test that fails a tile on every attempt would otherwise sleep through
+    the whole backoff, seven seconds of it; the tests of the pauses record
+    them with a patch of their own.
+    """
+    monkeypatch.setattr("kml_heatmap.terrain.time.sleep", lambda _: None)
+
+
+@pytest.fixture(autouse=True)
 def no_proxy_environment(monkeypatch):
     """No proxy of the machine running the tests reaches the fetch."""
     for name in ("https_proxy", "HTTPS_PROXY", "no_proxy", "NO_PROXY"):
@@ -781,7 +792,6 @@ class TestTerrariumTiles:
 
         connections.answer = staticmethod(answer)
         monkeypatch.setattr(terrain_module, "FETCH_WORKERS", 1)
-        monkeypatch.setattr("kml_heatmap.terrain.time.sleep", lambda _: None)
         wanted = {TileKey(10, x, 1): [0] for x in range(3)}
 
         answered = TerrariumTiles(tmp_path).pixels(wanted)
@@ -795,7 +805,6 @@ class TestTerrariumTiles:
         """Every tile's attempts and pauses would take minutes for a run."""
         connections.answer = staticmethod(lambda path: FakeResponse(503, b"later"))
         monkeypatch.setattr(terrain_module, "FETCH_WORKERS", 1)
-        monkeypatch.setattr("kml_heatmap.terrain.time.sleep", lambda _: None)
         wanted = {TileKey(10, x, 1): [0] for x in range(10)}
         tiles = TerrariumTiles(tmp_path)
 
@@ -820,7 +829,6 @@ class TestTerrariumTiles:
 
         connections.answer = staticmethod(answer)
         monkeypatch.setattr(terrain_module, "FETCH_WORKERS", 1)
-        monkeypatch.setattr("kml_heatmap.terrain.time.sleep", lambda _: None)
         wanted = {TileKey(10, x, 1): [0] for x in range(10)}
         tiles = TerrariumTiles(tmp_path)
 
@@ -914,13 +922,12 @@ class TestTerrariumTiles:
         ],
     )
     def test_refuses_a_redirect_off_the_host_or_off_https(
-        self, tmp_path, monkeypatch, connections, target
+        self, tmp_path, connections, target
     ):
         """The request must not end up at a host nobody chose."""
         connections.answer = staticmethod(
             lambda path: FakeResponse(301, b"", {"Location": target})
         )
-        monkeypatch.setattr("kml_heatmap.terrain.time.sleep", lambda _: None)
 
         assert TerrariumTiles(tmp_path).pixels({TileKey(10, 1, 1): [0]}) == {}
         assert all(path.endswith("/10/1/1.png") for path in connections.requests)
@@ -938,7 +945,6 @@ class TestTerrariumTiles:
 
         connections.answer = staticmethod(answer)
         monkeypatch.setattr(terrain_module, "FETCH_WORKERS", 1)
-        monkeypatch.setattr("kml_heatmap.terrain.time.sleep", lambda _: None)
         wanted = {TileKey(10, x, 1): [0] for x in range(3)}
         tiles = TerrariumTiles(tmp_path)
 
@@ -948,15 +954,12 @@ class TestTerrariumTiles:
         assert len(connections.requests) == 3
         assert not tiles._offline.is_set()
 
-    def test_gives_up_after_too_many_redirects(
-        self, tmp_path, monkeypatch, connections
-    ):
+    def test_gives_up_after_too_many_redirects(self, tmp_path, connections):
         connections.answer = staticmethod(
             lambda path: FakeResponse(
                 307, b"", {"Location": "https://s3.amazonaws.com" + path + "/again"}
             )
         )
-        monkeypatch.setattr("kml_heatmap.terrain.time.sleep", lambda _: None)
 
         assert TerrariumTiles(tmp_path).pixels({TileKey(10, 1, 1): [0]}) == {}
 
@@ -964,7 +967,6 @@ class TestTerrariumTiles:
         self, tmp_path, monkeypatch, connections
     ):
         monkeypatch.setattr(terrain_module, "TILE_URL", "http://host/{z}/{x}/{y}.png")
-        monkeypatch.setattr("kml_heatmap.terrain.time.sleep", lambda _: None)
 
         assert TerrariumTiles(tmp_path).pixels({TileKey(10, 1, 1): [0]}) == {}
         assert connections.requests == []

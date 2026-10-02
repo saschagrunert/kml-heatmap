@@ -2,8 +2,9 @@
 
 The build helpers `build.js` imports, the repository consistency check, the
 pre-push hook, the test data generator, the builder of the site the visual
-snapshots use and the list of the slowest e2e tests of a CI run. The JavaScript
-files are type-checked with `tsconfig.node.json` (`npm run typecheck`).
+snapshots use, the check of the files a generated site needs and the list of the
+slowest e2e tests of a CI run. The JavaScript files are type-checked with
+`tsconfig.node.json` (`npm run typecheck`).
 
 ## generate_test_data.py
 
@@ -125,6 +126,23 @@ so nothing is downloaded) and the tile API key. Run `npm run build` first.
 
 ```bash
 python scripts/build_visual_site.py
+```
+
+## check_site_files.py
+
+Checks that a generated site has every file the page loads (the page, its
+configuration, the five bundles, the three stylesheets, the vendored MapLibre
+modules and `data/metadata.json`), each of them not empty, or with `--package`,
+that the installed `kml_heatmap` package ships the template and the same assets
+and none of their source maps. CI runs it on the wheel it installed and on the
+site that wheel generates (the `packaging` job) and on the sites the container
+image generates (the `container` job), from the one list in the script. Run
+`--package` with the Python of the environment the package is installed in,
+outside the checkout, so the installed package is imported and not the sources.
+
+```bash
+python scripts/check_site_files.py docs
+python scripts/check_site_files.py --package
 ```
 
 ## e2e_durations.js

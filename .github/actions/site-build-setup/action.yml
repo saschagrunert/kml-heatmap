@@ -1,0 +1,69 @@
+---
+# What the jobs that build a site from data/ do before they build it: Python
+# and Node.js with their caches, the dependencies, the JavaScript bundles,
+# and the caches of the OurAirports database and the elevation tiles. The
+# unit, e2e-sites and site jobs of test.yml use it, after their checkout.
+name: Set up a site build
+description: Install the dependencies, build the bundles and restore the caches a site build reads
+inputs:
+  python-lock:
+    description: The lock file to install with pip, which also keys the pip cache
+    required: true
+runs:
+  using: composite
+  steps:
+    # The pip cache is keyed by the lock file this job installs: a key shared
+    # by every job held only what the first job to save it had downloaded
+    - name: Set up Python
+      uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      with:
+        python-version-file: .python-version
+        cache: pip
+        cache-dependency-path: ${{ inputs.python-lock }}
+    - name: Set up Node.js
+      uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      with:
+        node-version-file: .nvmrc
+        cache: npm
+    - name: Install Python dependencies
+      shell: bash
+      env:
+        PYTHON_LOCK: ${{ inputs.python-lock }}
+      run: pip install --require-hashes -r "$PYTHON_LOCK"
+    - name: Install npm dependencies
+      shell: bash
+      run: npm ci
+    - name: Build the JavaScript bundle
+      shell: bash
+      run: npm run build
+    - name: Compute the weekly cache key
+      id: week
+      shell: bash
+      run: echo "week=$(date +%G-%V)" >> "$GITHUB_OUTPUT"
+    # Only the CSVs: a failed download leaves a marker file behind that
+    # suppresses retries for an hour, and a cache saved with it would hand
+    # that to every job restoring it. During an outage the build falls back
+    # to an earlier week's copy.
+    - name: Cache the OurAirports database
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: |
+          ~/.cache/kml-heatmap/airports.csv
+          ~/.cache/kml-heatmap/runways.csv
+        key: ourairports-${{ steps.week.outputs.week }}
+        restore-keys: ourairports-
+    # The elevation tiles the ground under the flights is sampled from
+    # (kml_heatmap/terrain.py), with the decoded pixels of each beside it
+    # (.pixels): about 90 MB for data/, half of it each. A tile never
+    # changes upstream, so the cache of the last set of flights is restored
+    # for the next and only the tiles of new flights are downloaded; it is
+    # saved again under the new set. A tile that failed to download is
+    # simply not in it, so no failure is carried over. The pixels carry the
+    # CRC of their tile and a version of their layout, and a file that does
+    # not match either is decoded again, so they need no key of their own.
+    - name: Cache the elevation tiles
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ~/.cache/kml-heatmap/terrain
+        key: terrain-${{ hashFiles('data/*.kml') }}
+        restore-keys: terrain-
