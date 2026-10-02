@@ -167,11 +167,18 @@ export interface CloudPoints {
 
 /** The Mercator x and y (0 to 1) of a `[lat, lng]` point */
 export function mercatorOf([lat, lng]: Readonly<Coordinate>): [number, number] {
+  return [mercatorX(lng), mercatorY(lat)];
+}
+
+/** The Mercator x (0 to 1) of a longitude, as mercatorOf's */
+export function mercatorX(lng: number): number {
+  return (lng + 180) / 360;
+}
+
+/** The Mercator y (0 to 1) of a latitude, as mercatorOf's */
+export function mercatorY(lat: number): number {
   const sin = Math.sin(lat * DEGREES_TO_RADIANS);
-  return [
-    (lng + 180) / 360,
-    0.5 - Math.log((1 + sin) / (1 - sin)) / (4 * Math.PI),
-  ];
+  return 0.5 - Math.log((1 + sin) / (1 - sin)) / (4 * Math.PI);
 }
 
 /** The `[lng, lat]` of the Mercator x and y (0 to 1), as mercatorOf's */

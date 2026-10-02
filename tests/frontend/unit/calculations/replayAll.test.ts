@@ -4,7 +4,7 @@
  * at, the step from one curve to the next left out; and the camera that
  * fits them on a tilted map.
  */
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import {
   fitTilted,
   REPLAY_ALL_POINT_FLOATS,
@@ -13,7 +13,9 @@ import {
   type ReplayAllPoints,
 } from "../../../../kml_heatmap/frontend/calculations/replayAll";
 import { mercatorOf } from "../../../../kml_heatmap/frontend/calculations/heatCloud";
+import * as clockModule from "../../../../kml_heatmap/frontend/calculations/flightClock";
 import { flightClock } from "../../../../kml_heatmap/frontend/calculations/flightClock";
+import { heatWeight } from "../../../../kml_heatmap/frontend/calculations/heatLines";
 import { smoothFlights } from "../../../../kml_heatmap/frontend/calculations/smoothing";
 import type { PathSegment } from "../../../../kml_heatmap/frontend/types";
 
@@ -73,6 +75,17 @@ function column(points: ReplayAllPoints, f: number): number[] {
 }
 
 describe("replayAllPoints", () => {
+  it("weighs the curves as the heat cloud does, so both keep one weighing", () => {
+    const pieces = vi.spyOn(clockModule, "chainPieces");
+    try {
+      build([...flight(1, 47), ...flight(2, 48)]);
+      expect(pieces).toHaveBeenCalledTimes(2);
+      for (const call of pieces.mock.calls) expect(call[5]).toBe(heatWeight);
+    } finally {
+      pieces.mockRestore();
+    }
+  });
+
   it("gives every point the seconds into its flight, from 0", () => {
     const points = build(flight(1, 47));
     const times = column(points, 4);

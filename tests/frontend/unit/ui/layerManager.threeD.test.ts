@@ -10,7 +10,10 @@ import type { LayerManager } from "../../../../kml_heatmap/frontend/ui/layerMana
 import type { PathSegment } from "../../../../kml_heatmap/frontend/types";
 import { createDataset, createSegment, type MockApp } from "../../testHelpers";
 import { liftOffsetPx } from "../../../../kml_heatmap/frontend/calculations/lift";
-import { heldGroundedFlights } from "../../../../kml_heatmap/frontend/calculations/groundProfile";
+import {
+  groundedFlights,
+  heldGroundedFlights,
+} from "../../../../kml_heatmap/frontend/calculations/groundProfile";
 import { REPLAY_CAMERA_MOVE } from "../../../../kml_heatmap/frontend/utils/mapHelpers";
 import {
   type RunFeature,
@@ -34,16 +37,27 @@ const featureBundle = vi.hoisted(() => ({
 vi.mock("../../../../kml_heatmap/frontend/services/featureLoader", async () => {
   const { followTerrain } =
     await import("../../../../kml_heatmap/frontend/ui/terrain");
+  const { ribbonFeatures } =
+    await import("../../../../kml_heatmap/frontend/ui/pathRibbons");
+  const { heldGroundedFlights, releaseGroundedFlights, releaseGroundProfiles } =
+    await import("../../../../kml_heatmap/frontend/calculations/groundProfile");
   const { followHeatCloud, followSelectionRibbons } = featureBundle;
+  const bundle = {
+    followTerrain,
+    followHeatCloud,
+    followSelectionRibbons,
+    ribbonFeatures,
+    heldGroundedFlights,
+    releaseGroundedFlights,
+    releaseGroundProfiles,
+  };
   return {
+    loadedFeatures: () =>
+      featureBundle.available && !featureBundle.held ? bundle : null,
     loadFeatures: vi.fn(() =>
       featureBundle.held
         ? new Promise<never>(() => {})
-        : Promise.resolve(
-            featureBundle.available
-              ? { followTerrain, followHeatCloud, followSelectionRibbons }
-              : null,
-          ),
+        : Promise.resolve(featureBundle.available ? bundle : null),
     ),
   };
 });
@@ -88,7 +102,7 @@ describe("LayerManager 3D view", () => {
     const RIBBONS_SELECTED = "paths-altitude-selected-3d";
 
     /** A climb from the ground at 1000 ft to 1100 ft, then level */
-    function drawClimb(): void {
+    async function drawClimb(): Promise<void> {
       mockApp.currentData = createDataset(
         [{ id: 1, year: 2025 }],
         [
@@ -124,6 +138,8 @@ describe("LayerManager 3D view", () => {
       mockApp.map!.jumpTo({ center: [16.015, 48] });
       mockApp.store.set("threeDVisible", true);
       mockApp.altitudeLayer.setVisible(true);
+      // Cut by the feature bundle, which the 3D view fetches
+      await terrainCode();
       drawMode(layerManager, "altitude");
     }
 
@@ -140,10 +156,10 @@ describe("LayerManager 3D view", () => {
       return Math.hypot(dLng, dLat);
     };
 
-    it("writes each run as ribbon pieces of the same run in place of its line", () => {
+    it("writes each run as ribbon pieces of the same run in place of its line", async () => {
       // Close in, where the ribbons are cut as the data has them
       mockApp.map!.jumpTo({ zoom: 13 });
-      drawClimb();
+      await drawClimb();
 
       // To a source of their own, which is not simplified
       expect(features(ALTITUDE)).toEqual([]);
@@ -155,9 +171,9 @@ describe("LayerManager 3D view", () => {
       }
     });
 
-    it("stands the ribbon on the flight's ground and slopes it with the climb", () => {
+    it("stands the ribbon on the flight's ground and slopes it with the climb", async () => {
       mockApp.map!.jumpTo({ zoom: 13 });
-      drawClimb();
+      await drawClimb();
 
       // The ground of this flight is where it spent the lowest of its time,
       // 1000 ft: level on it, then 100 ft of climb cut into pieces of 20 ft,
@@ -167,8 +183,8 @@ describe("LayerManager 3D view", () => {
       ]);
     });
 
-    it("writes no ribbon outside the 3D view", () => {
-      drawClimb();
+    it("writes no ribbon outside the 3D view", async () => {
+      await drawClimb();
       mockApp.store.set("threeDVisible", false);
 
       expect(ribbons()).toEqual([]);
@@ -177,7 +193,7 @@ describe("LayerManager 3D view", () => {
 
     it("draws the ribbons a few pixels wide, cut again for another zoom level", async () => {
       mockApp.map!.jumpTo({ zoom: 7.2 });
-      drawClimb();
+      await drawClimb();
       await terrainCode();
       const at7 = ribbonWidthM();
       const writes = setDataCalls(RIBBONS);
@@ -202,7 +218,7 @@ describe("LayerManager 3D view", () => {
 
     it("leaves the zooms of the replay's camera to its own rest", async () => {
       mockApp.map!.jumpTo({ zoom: 7.2 });
-      drawClimb();
+      await drawClimb();
       await terrainCode();
       const writes = setDataCalls(RIBBONS);
 
@@ -219,7 +235,7 @@ describe("LayerManager 3D view", () => {
       // Beyond the level of the deepest elevation tiles, where only the
       // width of the ribbons changes
       mockApp.map!.jumpTo({ zoom: 12.2 });
-      drawClimb();
+      await drawClimb();
       await terrainCode();
       await landed();
       settled();
@@ -243,7 +259,7 @@ describe("LayerManager 3D view", () => {
 
     it("draws the flights as lines zoomed in close, and lifts them again further out", async () => {
       mockApp.map!.jumpTo({ zoom: 16.5 });
-      drawClimb();
+      await drawClimb();
       await terrainCode();
       expect(ribbons().length).toBeGreaterThan(0);
 
@@ -259,8 +275,8 @@ describe("LayerManager 3D view", () => {
       expect(ribbons().length).toBeGreaterThan(0);
     });
 
-    it("leaves the ribbons be as the map zooms while the flights are flat", () => {
-      drawClimb();
+    it("leaves the ribbons be as the map zooms while the flights are flat", async () => {
+      await drawClimb();
       mockApp.store.set("threeDVisible", false);
       const writes = setDataCalls(RIBBONS);
 
@@ -270,15 +286,21 @@ describe("LayerManager 3D view", () => {
       expect(setDataCalls(RIBBONS)).toBe(writes);
     });
 
-    it("draws the ribbons as strong as the lines, dimmed like them", () => {
-      drawClimb();
+    it("draws the ribbons as strong as the lines, dimmed like them", async () => {
+      await drawClimb();
+      // Shown once the map has drawn them on their ground (ui/terrain.ts)
+      await landed();
+      settled();
 
       expect(paint(RIBBONS)["fill-extrusion-opacity"]).toBe(0.85);
       expect(paint(ALTITUDE)["line-opacity"]).toBe(0.85);
     });
 
-    it("keeps the ribbons of the selected flights off the main layer, like the lines", () => {
-      drawClimb();
+    it("keeps the ribbons of the selected flights off the main layer, like the lines", async () => {
+      await drawClimb();
+      // Shown once the map has drawn them on their ground (ui/terrain.ts)
+      await landed();
+      settled();
       mockApp.altitudeVisible = true;
       mockApp.selectedPathIds.add(1);
       layerManager.updateSelectionStyles();
@@ -293,8 +315,11 @@ describe("LayerManager 3D view", () => {
       expect(paint(RIBBONS_SELECTED)["fill-extrusion-opacity"]).toBe(1);
     });
 
-    it("looks for the ribbons under the pointer only in the 3D view", () => {
-      drawClimb();
+    it("looks for the ribbons under the pointer only in the 3D view", async () => {
+      await drawClimb();
+      // Shown once the map has drawn them on their ground (ui/terrain.ts)
+      await landed();
+      settled();
 
       layerManager.hitTest(new Point(100, 50));
       expect(mockApp.map!.queryRenderedFeatures).toHaveBeenLastCalledWith(
@@ -311,7 +336,7 @@ describe("LayerManager 3D view", () => {
     });
 
     it("finds the flight of a ribbon under the pointer", async () => {
-      drawClimb();
+      await drawClimb();
       await terrainCode();
       await landed();
       settled();
@@ -325,7 +350,7 @@ describe("LayerManager 3D view", () => {
     });
 
     it("finds no ribbon while they are hidden on their way to another ground, and takes that for no empty map", async () => {
-      drawClimb();
+      await drawClimb();
       await terrainCode();
       await landed();
       mockApp.map!.renderedFeatures = [
@@ -348,7 +373,7 @@ describe("LayerManager 3D view", () => {
 
     it("writes nothing again as the map zooms on among the flat lines", async () => {
       mockApp.map!.jumpTo({ zoom: 17.2 });
-      drawClimb();
+      await drawClimb();
       await terrainCode();
       const writes = setDataCalls(ALTITUDE);
 
@@ -368,7 +393,7 @@ describe("LayerManager 3D view", () => {
 
     it("cuts each source again for the zoom level it was written at", async () => {
       mockApp.map!.jumpTo({ zoom: 7.2 });
-      drawClimb();
+      await drawClimb();
       await terrainCode();
       const at7 = ribbonWidthM();
 
@@ -385,7 +410,7 @@ describe("LayerManager 3D view", () => {
 
     it("writes neither the selection nor the flights isolate mode hides for isolation alone", async () => {
       mockApp.map!.jumpTo({ zoom: 7.2 });
-      drawClimb();
+      await drawClimb();
       await terrainCode();
       mockApp.altitudeVisible = true;
       mockApp.selectedPathIds.add(1);
@@ -430,17 +455,25 @@ describe("LayerManager 3D view", () => {
       expect(drawnWrites(RIBBONS)).toBe(main + 1);
     });
 
-    it("leaves a mode the replay hides as it is, and draws it again as it shows", () => {
+    it("leaves a mode the replay hides as it is, and draws it again as it shows", async () => {
       mockApp.map!.jumpTo({ zoom: 8.2 });
-      drawClimb();
-      const writes = setDataCalls(RIBBONS);
+      await drawClimb();
+      /** The writes of the ribbons that held any, not those that emptied them */
+      const cuts = (): number =>
+        mockApp
+          .map!.source(RIBBONS)
+          .setData.mock.calls.filter(
+            ([data]) => (data as GeoJSON.FeatureCollection).features.length,
+          ).length;
+      const writes = cuts();
 
-      // Hidden, not cleared, as the replay does it
+      // Hidden, not cleared, as the replay does it: nothing is cut for it,
+      // and its ribbons are let go of on another level (see releaseRibbons)
       mockApp.altitudeLayer.setVisible(false);
       mockApp.map!.jumpTo({ zoom: 9.1 });
       mockApp.map!.emit("zoomend");
       mockApp.store.set("threeDVisible", false);
-      expect(setDataCalls(RIBBONS)).toBe(writes);
+      expect(cuts()).toBe(writes);
       expect(setDataCalls(ALTITUDE)).toBe(0);
 
       // Shown again, a change of the selection draws it as a whole, flat
@@ -451,9 +484,24 @@ describe("LayerManager 3D view", () => {
       expect(features(ALTITUDE)).toHaveLength(1);
     });
 
+    it("lets go of the flights another feature smoothed on the flat map as the data changes", () => {
+      // Replay all smooths the flights on the flat map, with the bundle it
+      // fetched for itself; the 3D view never came on
+      const old = mockApp.currentData!.path_segments;
+      groundedFlights(old, false, 0);
+      expect(heldGroundedFlights()).toBe(old);
+
+      // Another year, drawn flat
+      mockApp.currentData = createDataset([{ id: 1, year: 2025 }], [...old]);
+      mockApp.altitudeLayer.setVisible(true);
+      drawMode(layerManager, "altitude");
+
+      expect(heldGroundedFlights()).toBeNull();
+    });
+
     it("lets the smoothed flights go once nothing lifted needs them", async () => {
       const smoothed = heldGroundedFlights;
-      drawClimb();
+      await drawClimb();
       expect(smoothed()).not.toBeNull();
 
       mockApp.store.set("threeDVisible", false);
@@ -629,7 +677,7 @@ describe("LayerManager 3D view", () => {
     });
 
     it("cuts and writes the flights again as the 3D view comes and goes", async () => {
-      drawClimb();
+      await drawClimb();
       await terrainCode();
       const writes = setDataCalls(ALTITUDE);
 

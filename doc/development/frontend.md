@@ -28,8 +28,8 @@ the flights is in [Rendering](rendering.md) and [Heat](heat.md), the tests in
     altitude and speed modes are `ui/layerManager.ts`, which decides what is
     written when, with the modes and the cut into runs in `ui/pathRuns.ts`, the
     look of a selection, the colour ranges and the legends in `ui/pathLook.ts`,
-    what the ribbons of the 3D view are cut for in `ui/pathRibbons.ts` and what
-    is under the pointer in `ui/pathHover.ts`
+    the cut of the ribbons of the 3D view in `ui/pathRibbons.ts`, which comes
+    with the feature bundle, and what is under the pointer in `ui/pathHover.ts`
   - `utils/` - Formatters, colour scales, geometry helpers and the icon set.
     Every mark in the interface is an inline SVG: an icon font is out (the
     page's CSP allows no external font), and emoji render at a different weight,
@@ -65,21 +65,22 @@ opens on as the page does).
 
 `npm run build` produces five bundles. `mapApp.bundle.js` starts the map,
 `features.bundle.js` holds Replay, the relief, the heat cloud and the ribbons of
-a selection of the 3D view, the satellite imagery, the profile of a single
-selected flight, the cross-section (`ui/crossSection.ts`, with its corridor,
-chart, words and elements in the `ui/crossSection*.ts` modules beside it; the
-first visit carries only its control in the View group and its row in the
-phone's More sheet) and the hotspot tour (`ui/hotspotTour.ts`, with its places
-found in `calculations/hotspots.ts`, carried the same way), and
-`wrapped.bundle.js` holds Wrapped, the content of the statistics panel and the
-flight list of its Flights tab (the rail itself is part of the app, and says it
-is loading until the bundle is in; see `ui/statsPanel.ts`); the page imports
-each of the last two the first time one of its features is opened, and both as
-soon as Wrapped's button is pointed at or focused, for its intro
-(`ui/wrappedIntro.ts`), unless the system asks for reduced motion.
-`shared.bundle.js` is the app itself and everything the lazy bundles use of it.
-`yearWorker.bundle.js` is a build of its own, which decodes the year files and
-writes the heat sources off the main thread (see
+the 3D view (of every flight and of a selection: the 3D view cuts the flights
+once it has arrived, and draws them flat when it cannot be loaded), the
+satellite imagery, the profile of a single selected flight, the cross-section
+(`ui/crossSection.ts`, with its corridor, chart, words and elements in the
+`ui/crossSection*.ts` modules beside it; the first visit carries only its
+control in the View group and its row in the phone's More sheet) and the hotspot
+tour (`ui/hotspotTour.ts`, with its places found in `calculations/hotspots.ts`,
+carried the same way), and `wrapped.bundle.js` holds Wrapped, the content of the
+statistics panel and the flight list of its Flights tab (the rail itself is part
+of the app, and says it is loading until the bundle is in; see
+`ui/statsPanel.ts`); the page imports each of the last two the first time one of
+its features is opened, and both as soon as Wrapped's button is pointed at or
+focused, for its intro (`ui/wrappedIntro.ts`), unless the system asks for
+reduced motion. `shared.bundle.js` is the app itself and everything the lazy
+bundles use of it. `yearWorker.bundle.js` is a build of its own, which decodes
+the year files and writes the heat sources off the main thread (see
 [The year worker](data.md#the-year-worker)).
 
 ### Shared chunk

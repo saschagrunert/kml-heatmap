@@ -409,11 +409,18 @@ export class ReplayCamera {
   /** The frame the rest is looked for in, while one is pending */
   private restFrame: number | null = null;
 
+  /** Whether the camera is moving the map for a frame of `follow` */
+  private framing = false;
+
   /**
    * A map that turns under a paused airplane changes where its track
-   * points on screen, and no frame of the replay comes to say so
+   * points on screen, and no frame of the replay comes to say so. The
+   * moves of a frame's own camera do not count: the frame turns the icon
+   * once they are done (see follow).
    */
-  private readonly onMapMove = (): void => this.turnIcon();
+  private readonly onMapMove = (): void => {
+    if (!this.framing) this.turnIcon();
+  };
 
   /**
    * @param onTrailStale - The trail's ribbons were cut for another zoom
@@ -441,9 +448,21 @@ export class ReplayCamera {
     return this.iconDiv;
   }
 
-  /** Put the airplane where it is and turn it to where it heads */
-  follow(heading: AirplaneHeading): void {
+  /**
+   * Put the airplane where it is and turn it to where it heads, once
+   * `moveCamera` has moved the map for the frame. Each of its jumps fires
+   * a `move`, which would otherwise turn the icon once more each time.
+   */
+  follow(heading: AirplaneHeading, moveCamera?: () => void): void {
     this.heading = heading;
+    if (moveCamera) {
+      this.framing = true;
+      try {
+        moveCamera();
+      } finally {
+        this.framing = false;
+      }
+    }
     this.turnIcon();
   }
 

@@ -17,9 +17,15 @@ import {
 } from "../utils/geometry";
 import { FEET_TO_METERS } from "../utils/constants";
 import { chainPieces, type FlightClock } from "./flightClock";
-import { lngLatOfMercator, mercatorOf } from "./heatCloud";
+import {
+  lngLatOfMercator,
+  mercatorOf,
+  mercatorX,
+  mercatorY,
+} from "./heatCloud";
+import { heatWeight } from "./heatLines";
 import { liftExaggeration } from "./lift";
-import type { SmoothedFlights } from "./smoothing";
+import type { SmoothedFlights, SmoothedLine } from "./smoothing";
 
 /**
  * The points of a flight's curve are kept this many pixels apart at most,
@@ -83,7 +89,12 @@ export function replayAllPoints(
   level: number,
 ): ReplayAllPoints {
   const exaggeration = liftExaggeration(level);
-  const values: number[] = [];
+  // The points are picked first, and the bounds with them, which the
+  // origin is taken from; then they are written straight into the array
+  // the layer is given. The index into its curve of every point kept,
+  // curve after curve, and each curve with the end of its points in it.
+  const kept: number[] = [];
+  const curves: { line: SmoothedLine; times: Float64Array; end: number }[] = [];
   const played = new Set<number>();
   let duration = 0;
   let west = Infinity;
@@ -108,7 +119,16 @@ export function replayAllPoints(
       played.add(pathId);
       duration = Math.max(duration, seconds);
       const { points, heights, ground } = chain;
-      const { times } = chainPieces(segments, flights, i, end, clock);
+      // Weighed as the heat cloud weighs them, which keeps one weighing of
+      // the curve for both: the times are the same for every weighing
+      const { times } = chainPieces(
+        segments,
+        flights,
+        i,
+        end,
+        clock,
+        heatWeight,
+      );
       const pixelM =
         metresPerPixel(detail + 0.5) *
         Math.cos(points[0]![0] * DEGREES_TO_RADIANS);
@@ -118,17 +138,16 @@ export function replayAllPoints(
       const heightAt = (j: number): number => (ground?.[j] ?? 0) + heights[j]!;
       let keptFt = heightAt(0);
       let along = 0;
-      const push = (j: number, joins: number): void => {
+      const keep = (j: number): void => {
         const [lat, lng] = points[j]!;
         west = Math.min(west, lng);
         east = Math.max(east, lng);
         south = Math.min(south, lat);
         north = Math.max(north, lat);
-        const [x, y] = mercatorOf(points[j]!);
-        values.push(x, y, ground?.[j] ?? 0, heights[j]!, times[j]!, joins);
+        kept.push(j);
         keptFt = heightAt(j);
       };
-      push(0, 1);
+      keep(0);
       const last = points.length - 1;
       for (let j = 1; j <= last; j++) {
         along += planarMetres(points[j - 1]!, points[j]!);
@@ -137,26 +156,38 @@ export function replayAllPoints(
           along >= stepM ||
           Math.abs(heightAt(j) - keptFt) >= heightStepFt
         ) {
-          push(j, j === last ? 0 : 1);
+          keep(j);
           along = 0;
         }
       }
+      curves.push({ line: chain, times, end: kept.length });
     }
     i = end;
   }
   const size = REPLAY_ALL_POINT_FLOATS;
-  const total = values.length / size;
+  const total = kept.length;
   let origin: [number, number] = [0.5, 0.5];
   if (total > 0) {
     const [x0, y0] = mercatorOf([north, west]);
     const [x1, y1] = mercatorOf([south, east]);
     origin = [(x0 + x1) / 2, (y0 + y1) / 2];
   }
-  const points = new Float32Array(values.length);
-  for (let k = 0; k < values.length; k += size) {
-    points[k] = values[k]! - origin[0];
-    points[k + 1] = values[k + 1]! - origin[1];
-    for (let f = 2; f < size; f++) points[k + f] = values[k + f]!;
+  const points = new Float32Array(total * size);
+  let n = 0;
+  for (const { line, times, end } of curves) {
+    const { ground, heights } = line;
+    // Every point joins the next but the last of its curve
+    for (; n < end; n++) {
+      const j = kept[n]!;
+      const [lat, lng] = line.points[j]!;
+      const k = n * size;
+      points[k] = mercatorX(lng) - origin[0];
+      points[k + 1] = mercatorY(lat) - origin[1];
+      points[k + 2] = ground?.[j] ?? 0;
+      points[k + 3] = heights[j]!;
+      points[k + 4] = times[j]!;
+      points[k + 5] = n < end - 1 ? 1 : 0;
+    }
   }
   return {
     points,

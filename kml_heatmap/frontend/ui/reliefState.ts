@@ -9,7 +9,8 @@
  * written in the order the map needs them, the visit of a level the
  * ribbons are cut in, whether they show, and the sources that hold them.
  * It comes with the app: the relief's code comes with the feature bundle,
- * and the layer manager cuts ribbons before it has arrived.
+ * and the layer manager writes the relief's switches before it has
+ * arrived, and the ribbons once it has (their cut comes with it too).
  */
 import type { AppStore } from "../state/store";
 import { MAP_SOURCES } from "../utils/constants";

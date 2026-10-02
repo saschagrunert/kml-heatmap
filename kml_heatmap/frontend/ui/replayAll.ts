@@ -124,6 +124,9 @@ export class ReplayAllControls {
   readonly player: ReplayAllPlayer;
   private readonly app: MapApp;
   private panel: HTMLElement | null = null;
+  /** The parts of the panel every frame writes, found as it is built */
+  private playButton: HTMLElement | null = null;
+  private clock: HTMLElement | null = null;
   private slider: HTMLInputElement | null = null;
   private open = false;
   /** The clock as last written, so a frame writes it only when it changes */
@@ -365,7 +368,7 @@ export class ReplayAllControls {
       }
       return;
     }
-    const play = panel.querySelector<HTMLElement>("#replay-all-play-btn");
+    const play = this.playButton;
     if (play && play.dataset["icon"] !== (player.playing ? "pause" : "play")) {
       setControlIcon(play, player.playing ? "pause" : "play");
       nameButton(
@@ -381,8 +384,7 @@ export class ReplayAllControls {
     const text = replayAllClock(time);
     if (text !== this.shown) {
       this.shown = text;
-      const clock = panel.querySelector("#replay-all-clock");
-      if (clock) clock.textContent = text;
+      if (this.clock) this.clock.textContent = text;
       slider.setAttribute("aria-valuetext", text);
     }
   }
@@ -412,8 +414,10 @@ export class ReplayAllControls {
       }
     });
 
+    this.playButton = play;
     const clock = document.createElement("div");
     clock.id = "replay-all-clock";
+    this.clock = clock;
 
     // The clock as a slider: a drag holds it where the thumb is, and lets
     // it play on as the pointer lets go if it played; a click jumps, and

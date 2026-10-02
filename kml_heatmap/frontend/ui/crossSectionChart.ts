@@ -26,6 +26,7 @@ import {
   type CrossSection,
   type LineFrame,
 } from "../calculations/crossSection";
+import { nthSmallest } from "../calculations/heatCloud";
 import { formatDuration } from "../utils/duration";
 import { formatNumber } from "../utils/formatters";
 import { toLngLat } from "../utils/mapHelpers";
@@ -87,17 +88,20 @@ export function densityColour(
   out[at + 3] = 255 * (alphaFrom + (alphaTo - alphaFrom) * f);
 }
 
-/** The seconds of the cell the colours reach white at */
+/**
+ * The seconds of the cell the colours reach white at. A selection rather
+ * than a sort: it runs every frame a handle of the line is dragged.
+ */
 export function densityReference(seconds: Float64Array): number {
-  // A typed array sorts by value, and fast
-  const filled = seconds.filter((value) => value > 0).sort();
+  const filled = seconds.filter((value) => value > 0);
   if (!filled.length) return 0;
-  return filled[
+  return nthSmallest(
+    filled,
     Math.min(
       filled.length - 1,
       Math.floor(filled.length * DENSITY_REFERENCE_QUANTILE),
-    )
-  ]!;
+    ),
+  );
 }
 
 /** The chart of a section, and what the tool does with it */
@@ -159,6 +163,8 @@ export function createChart(
 
   /** The seconds of the cell the colours reach white at */
   let densityRef = 0;
+  /** The density image's pixels, made once and cleared for each section */
+  let image: ImageData | null = null;
   /** The place on the map the pointer on the chart stands for */
   let dot: Marker | null = null;
 
@@ -177,7 +183,8 @@ export function createChart(
     const density = smoothCells(shown.seconds, COLUMNS, ROWS);
     densityRef = densityReference(density);
     if (context) {
-      const image = context.createImageData(COLUMNS, ROWS);
+      if (image) image.data.fill(0);
+      else image = context.createImageData(COLUMNS, ROWS);
       for (let row = 0; row < ROWS; row++) {
         for (let column = 0; column < COLUMNS; column++) {
           const value = density[row * COLUMNS + column]!;

@@ -424,16 +424,27 @@ const featureBundle = vi.hoisted(() => ({
 vi.mock("../../../../kml_heatmap/frontend/services/featureLoader", async () => {
   const { followTerrain } =
     await import("../../../../kml_heatmap/frontend/ui/terrain");
+  const { ribbonFeatures } =
+    await import("../../../../kml_heatmap/frontend/ui/pathRibbons");
+  const { heldGroundedFlights, releaseGroundedFlights, releaseGroundProfiles } =
+    await import("../../../../kml_heatmap/frontend/calculations/groundProfile");
   const { followHeatCloud, followSelectionRibbons } = featureBundle;
+  const bundle = {
+    followTerrain,
+    followHeatCloud,
+    followSelectionRibbons,
+    ribbonFeatures,
+    heldGroundedFlights,
+    releaseGroundedFlights,
+    releaseGroundProfiles,
+  };
   return {
+    loadedFeatures: () =>
+      featureBundle.available && !featureBundle.held ? bundle : null,
     loadFeatures: vi.fn(() =>
       featureBundle.held
         ? new Promise<never>(() => {})
-        : Promise.resolve(
-            featureBundle.available
-              ? { followTerrain, followHeatCloud, followSelectionRibbons }
-              : null,
-          ),
+        : Promise.resolve(featureBundle.available ? bundle : null),
     ),
   };
 });
@@ -668,6 +679,7 @@ describe("LayerManager on the relief", () => {
       mockApp.map!.jumpTo({ zoom: 14.1 });
       mockApp.map!.emit("zoomend", REPLAY_CAMERA_MOVE);
       const before = writes();
+      const ribbonsBefore = setDataCalls(RIBBONS);
 
       // It closes, and the camera eases back to the view of before
       mockApp.map!.isMoving.mockReturnValue(true);
@@ -681,7 +693,7 @@ describe("LayerManager on the relief", () => {
       mockApp.map!.emit("zoomend");
       mockApp.map!.emit("moveend");
       // Cut once, for the level the move has ended on
-      expect(setDataCalls(RIBBONS) - before).toBeGreaterThan(0);
+      expect(setDataCalls(RIBBONS) - ribbonsBefore).toBe(1);
       expect(writes() - before).toBe(1);
       expect(features(RIBBONS).length).toBeGreaterThan(0);
       expect(new Set(features(RIBBONS).map((f) => f.properties.l))).toEqual(
@@ -917,19 +929,20 @@ describe("LayerManager on the relief", () => {
       expect(Math.max(...heights())).toBe(2000);
     });
 
-    it("cuts the flights for the new level on the flat map without the relief's code", async () => {
+    it("cuts the flights for the new level once the code has come after all", async () => {
       featureBundle.available = false;
       await drawOverHills(7.2);
-      const before = writes().length;
+      expect(features(RIBBONS)).toEqual([]);
 
+      // The next zoom tries again
+      featureBundle.available = true;
       mockApp.map!.jumpTo({ zoom: 8.2 });
       mockApp.map!.emit("zoomend");
       await new Promise((resolve) => setTimeout(resolve));
 
-      expect(mockApp.terrainActive).toBe(false);
-      expect(writes().slice(before)).toEqual([heights().length]);
+      expect(mockApp.terrainActive).toBe(true);
+      expect(features(ALTITUDE)).toEqual([]);
       expect(exaggerations()).toEqual(new Set([liftExaggeration(8)]));
-      expect(Math.max(...heights())).toBe(2600);
     });
 
     it("hides the ribbons until the map has drawn them on their new ground", async () => {
@@ -1105,12 +1118,41 @@ describe("LayerManager on the relief", () => {
       expect(shading()).toBe("none");
     });
 
-    it("leaves the flights on the flat map without the feature bundle", async () => {
+    it("cuts the ribbons on the globe once the feature bundle has come, which cuts them", async () => {
+      featureBundle.held = true;
+      mockApp.globeVisible = true;
+      await drawOverHills(11, false);
+      const lines = setDataCalls(ALTITUDE);
+
+      mockApp.store.set("threeDVisible", true);
+      layerManager.syncModes(true);
+      expect(setDataCalls(RIBBONS)).toBe(0);
+      expect(setDataCalls(ALTITUDE)).toBe(lines);
+
+      // Arrived for the next zoom
+      featureBundle.held = false;
+      mockApp.map!.jumpTo({ zoom: 11.2 });
+      mockApp.map!.emit("zoomend");
+      await new Promise((resolve) => setTimeout(resolve));
+      expect(mockApp.terrainActive).toBe(false);
+      expect(features(RIBBONS).length).toBeGreaterThan(0);
+      expect(features(ALTITUDE)).toEqual([]);
+    });
+
+    it("draws the flights as lines on the flat map without the feature bundle, which cuts the ribbons", async () => {
       featureBundle.available = false;
       await drawOverHills(11);
 
       expect(mockApp.terrainActive).toBe(false);
-      expect(Math.max(...heights())).toBe(2600);
+      expect(features(RIBBONS)).toEqual([]);
+      expect(features(ALTITUDE).length).toBeGreaterThan(0);
+
+      // Not even zoomed in further, on another level
+      mockApp.map!.jumpTo({ zoom: 12.1 });
+      mockApp.map!.emit("zoomend");
+      await new Promise((resolve) => setTimeout(resolve));
+      expect(features(RIBBONS)).toEqual([]);
+      expect(features(ALTITUDE).length).toBeGreaterThan(0);
     });
 
     it("builds the relief anew after a lost WebGL context", async () => {

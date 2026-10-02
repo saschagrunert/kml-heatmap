@@ -24,6 +24,7 @@ vi.mock("../../../../kml_heatmap/frontend/services/dataLoader", () => ({
 // The profile of a picked flight comes with the feature bundle, which
 // the view waits for before it frames the flight
 vi.mock("../../../../kml_heatmap/frontend/services/featureLoader", () => ({
+  loadedFeatures: () => null,
   loadFeatures: vi.fn(() => Promise.resolve(null)),
 }));
 

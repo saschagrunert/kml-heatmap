@@ -926,6 +926,17 @@ describe("the replay of all flights", () => {
       );
     });
 
+    it("looks up none of its parts in a frame", () => {
+      controls.show();
+      frames.run();
+      const lookups = vi.spyOn(panel(), "querySelector");
+
+      frames.run(100, 4);
+
+      expect(clock()).toBe("0:01 into every flight");
+      expect(lookups).not.toHaveBeenCalled();
+    });
+
     it("jumps to where its slider is moved, and plays on from there", () => {
       controls.show();
       const slider = document.getElementById(

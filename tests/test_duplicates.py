@@ -1,9 +1,22 @@
 """Tests for duplicates module."""
 
 import logging
+from math import floor
 from typing import Any, cast
 
-from kml_heatmap.duplicates import _Timed, drop_overlapping_paths, same_flight
+from hypothesis import given
+from hypothesis import strategies as st
+
+from kml_heatmap.duplicates import (
+    _CELL_DEGREES,
+    _MIN_AGREEING,
+    _SHIFT_TOLERANCE_S,
+    _clock_known,
+    _clock_shifts,
+    _Timed,
+    drop_overlapping_paths,
+    same_flight,
+)
 from kml_heatmap.types import TrackPoint
 
 # East at 50 m/s (97 kt) at 50 degrees north
@@ -142,6 +155,13 @@ class TestDropOverlappingPaths:
         ]
         assert _drop([first, later]) == {2025: [0, 1]}
 
+    def test_recordings_that_never_moved_fast_are_two(self):
+        """Two taxi-only recordings at one field on clocks of their own: a
+        flight is told apart by the time it moved, and neither did."""
+        taxi = [TrackPoint(50.0, 8.0 + 0.0001 * t, 100.0, float(t)) for t in range(600)]
+        again = [p._replace(lat=50.00001) for p in taxi]
+        assert _drop([taxi, again]) == {2025: [0, 1]}
+
     def test_recordings_without_times_are_not_compared(self):
         untimed = [p._replace(ts=None) for p in _recording(1000.0, 3600.0)]
         assert _drop([untimed, list(untimed)]) == {2025: [0, 1]}
@@ -208,6 +228,78 @@ class TestSameFlight:
         assert second is not None
         assert same_flight(first, second, shift=-1000.0)
         assert not same_flight(first, second, shift=-900.0)
+
+
+class TestClockKnown:
+    def test_a_start_in_the_days_after_new_year_may_be_any_clock(self):
+        assert _clock_known(JUNE_2025)
+        assert not _clock_known(JANUARY_2025 + 3600.0)
+
+    def test_a_start_no_date_holds_is_not_the_real_clock(self):
+        # Past the year 9999, and not a number at all
+        assert not _clock_known(1e20)
+        assert not _clock_known(float("nan"))
+
+
+def _shifts_looking_everywhere(first, second):
+    """``_clock_shifts`` without the cells ``reach`` rules out first."""
+    shifts = sorted(
+        near - moment
+        for moment, lat, lon in first.samples()
+        if (near := second.time_near(lat, lon)) is not None
+    )
+    groups: list[list[float]] = []
+    for shift in shifts:
+        if groups and shift - groups[-1][-1] <= _SHIFT_TOLERANCE_S:
+            groups[-1].append(shift)
+        else:
+            groups.append([shift])
+    return [
+        group[len(group) // 2]
+        for group in sorted(groups, key=len, reverse=True)
+        if len(group) >= _MIN_AGREEING
+    ]
+
+
+_WALK = st.lists(
+    st.tuples(st.floats(-0.003, 0.003), st.floats(-0.003, 0.003), st.floats(1.0, 60.0)),
+    min_size=2,
+    max_size=40,
+)
+
+
+def _walk(steps, lat=50.0, lon=8.0):
+    """A recording from (lat, lon) by the steps of ``_WALK``."""
+    points, time = [], 0.0
+    for north, east, seconds in steps:
+        points.append(TrackPoint(lat, lon, 500.0, time))
+        lat, lon, time = lat + north, lon + east, time + seconds
+    points.append(TrackPoint(lat, lon, 500.0, time))
+    return _Timed.of(points)
+
+
+class TestReach:
+    @given(_WALK, st.floats(-0.02, 0.02), st.floats(-0.02, 0.02))
+    def test_holds_every_place_time_near_finds(self, steps, north, east):
+        recording = _walk(steps)
+        assert recording is not None
+        lat, lon = 50.0 + north, 8.0 + east
+        cell = (
+            floor(lat / _CELL_DEGREES),
+            floor(lon * recording.lon_scale / _CELL_DEGREES),
+        )
+        if recording.time_near(lat, lon) is not None:
+            assert cell in recording.reach()
+
+    @given(_WALK, st.floats(-0.005, 0.005), st.floats(-0.005, 0.005))
+    def test_rules_out_no_shift(self, steps, north, east):
+        """The same way, from a place up to 550 m off: near enough for a
+        shift at some moments, and too far at others."""
+        first = _walk(steps)
+        second = _walk(steps, lat=50.0 + north, lon=8.0 + east)
+        assert first is not None
+        assert second is not None
+        assert _clock_shifts(first, second) == _shifts_looking_everywhere(first, second)
 
 
 class TestMoving:

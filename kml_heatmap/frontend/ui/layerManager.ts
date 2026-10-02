@@ -41,8 +41,8 @@
  * as the 3D view and its relief come and go, and as a zoom or a pan ends.
  * What it does that with lives next to it: the modes, their state and the
  * cut into runs (ui/pathRuns.ts), the look of a selection, the colour
- * ranges and the legends (ui/pathLook.ts) and what the ribbons of the 3D
- * view are cut for (ui/pathRibbons.ts).
+ * ranges and the legends (ui/pathLook.ts), and the cut of the ribbons of
+ * the 3D view (ui/pathRibbons.ts), which comes with the feature bundle.
  */
 import type {
   GeoJSONSource,
@@ -68,27 +68,22 @@ import {
   whenContextRestored,
   type LngLatTuple,
 } from "../utils/mapHelpers";
-import { loadFeatures } from "../services/featureLoader";
+import { loadedFeatures, loadFeatures } from "../services/featureLoader";
 import {
   followsLevel,
   isLiftedAt,
   reliefLevel,
   ribbonWidthZoom,
 } from "../calculations/lift";
-import {
-  heldGroundedFlights,
-  releaseGroundedFlights,
-  releaseGroundProfiles,
-} from "../calculations/groundProfile";
-import { ribbonOf, ribbonProperties } from "../calculations/ribbons";
 import { appendCurve, flatCurves } from "../calculations/curves";
 import {
   CULL_FROM_ZOOM,
   leavesBox,
-  overlaps,
+  ribbonsTopM,
   VIEW_SPARE,
   viewBox,
 } from "../utils/viewBox";
+import type { FeatureModule } from "../features";
 import { PathHover, type DrawnRuns, type RunsOnLayer } from "./pathHover";
 import {
   CONFIGS,
@@ -112,7 +107,14 @@ import {
   resolveColorRange,
   updateLegend,
 } from "./pathLook";
-import { runBox, smoothedFlights, topM } from "./pathRibbons";
+
+/**
+ * How high the highest flight may be drawn above its ground, in metres,
+ * in the 3D view: no higher than its altitude
+ */
+function topM(app: MapApp): number {
+  return ribbonsTopM(app.altitudeRange.max, app.reliefLevel);
+}
 
 export class LayerManager implements PathHitTester {
   private app: MapApp;
@@ -129,8 +131,14 @@ export class LayerManager implements PathHitTester {
   private listeningTo: MapLibreMap | null = null;
   /** The flight under the pointer, and its values (ui/pathHover.ts) */
   readonly pathHover: PathHover;
-  /** The relief's code has been loaded and follows terrainActive */
-  private terrainLoaded = false;
+  /**
+   * The feature bundle, once it has arrived for the 3D view: its relief
+   * follows terrainActive, and it cuts the ribbons (ui/pathRibbons.ts).
+   * The flights it holds smoothed (calculations/groundProfile.ts) are let
+   * go of through loadedFeatures, whatever fetched it: Replay all on the
+   * flat map smooths them too.
+   */
+  private features: FeatureModule | null = null;
   /** A cut of the flights waits for the relief's code (see syncTerrain) */
   private cutAwaited = false;
   /** Stops restyling the ribbons as the relief's code shows or hides them */
@@ -218,7 +226,7 @@ export class LayerManager implements PathHitTester {
     // flights and the ground of every level only the 3D view needs are let
     // go with it.
     app.store.subscribe("threeDVisible", (threeD) => {
-      if (!threeD) releaseGroundProfiles();
+      if (!threeD) loadedFeatures()?.releaseGroundProfiles();
       if (this.syncTerrain() !== null) this.redrawVisibleModes();
     });
     app.store.subscribe("globeVisible", () => {
@@ -416,9 +424,7 @@ export class LayerManager implements PathHitTester {
   syncModes(rebuild = false): void {
     const data = this.app.currentData;
     const awaiting =
-      this.app.threeDVisible &&
-      !this.terrainLoaded &&
-      this.syncTerrain() === null;
+      this.app.threeDVisible && !this.features && this.syncTerrain() === null;
     for (const mode of MODES) {
       const handle = this.handleOf(mode);
       const wanted = this.app[`${mode}Visible`];
@@ -499,7 +505,7 @@ export class LayerManager implements PathHitTester {
       MODES.every((other) => !this.state[other].segments) &&
       !(this.app.heatCloud && this.app.heatmapVisible)
     ) {
-      releaseGroundedFlights();
+      loadedFeatures()?.releaseGroundedFlights();
     }
     this.pathHover.rehoverOnIdle();
   }
@@ -538,10 +544,12 @@ export class LayerManager implements PathHitTester {
     // empty is not worth cutting its tiles again
     if (runs.length === 0 && table.written === null) return;
 
-    // Zoomed in close the 3D view draws the lines (see LIFT_MAX_ZOOM)
+    // Zoomed in close the 3D view draws the lines (see LIFT_MAX_ZOOM), and
+    // so it does without the feature bundle that cuts the ribbons, which
+    // could not be loaded (see syncTerrain)
     const threeD = this.app.threeDVisible;
-    const lifted = threeD && isLiftedAt(map.getZoom());
-    const id = lifted ? config.ribbons[set] : config.sources[set];
+    const ribbons = threeD && isLiftedAt(map.getZoom()) ? this.features : null;
+    const id = ribbons ? config.ribbons[set] : config.sources[set];
     // Lifted or flat, the runs are in one source, and leave the other
     if (table.written !== null && table.written !== id) {
       void map
@@ -551,61 +559,40 @@ export class LayerManager implements PathHitTester {
 
     const moved = table.written !== null && table.written !== id;
     const segments = state.segments ?? [];
-    // Every flight smoothed at its height, in the 3D view (see lift.ts),
-    // and the ribbons as wide as the zoom asks
-    const smoothed = lifted ? smoothedFlights(this.app, segments) : null;
+    // In the 3D view the ribbons are as wide as the zoom asks
     const widthZoom = ribbonWidthZoom(map.getZoom());
     table.widthZoom = threeD ? widthZoom : null;
     // Zoomed in, the ribbons around the view only
     const box =
-      smoothed && widthZoom >= CULL_FROM_ZOOM
+      ribbons && widthZoom >= CULL_FROM_ZOOM
         ? viewBox(map, topM(this.app), VIEW_SPARE)
         : null;
     table.box = box;
-    const level = this.app.reliefLevel;
+    // In the 3D view each run is a ribbon at its height, at every zoom
+    // (see ui/pathRibbons.ts); flat, a line along the curve through the
+    // fixes (see calculations/curves.ts)
     const features: GeoJSON.Feature<
       GeoJSON.LineString | GeoJSON.MultiPolygon,
       PathRunProperties
-    >[] = [];
-    // Flat, along the curve through the fixes (see calculations/curves.ts)
-    const curves = smoothed ? null : flatCurves(segments);
-    runs.forEach((run, r) => {
-      const properties = { r, g, pathId: run.pathId, color: run.color };
-      if (!smoothed) {
+    >[] = ribbons
+      ? ribbons.ribbonFeatures(this.app, segments, runs, g, widthZoom, box)
+      : [];
+    const curves = ribbons ? null : flatCurves(segments);
+    if (curves) {
+      runs.forEach((run, r) => {
         const coordinates: LngLatTuple[] = [
           toLngLat(segments[run.start]!.coords[0]),
         ];
         for (let i = run.start; i < run.end; i++) {
-          appendCurve(coordinates, curves!, i);
+          appendCurve(coordinates, curves, i);
         }
         features.push({
           type: "Feature",
-          properties,
+          properties: { r, g, pathId: run.pathId, color: run.color },
           geometry: { type: "LineString", coordinates },
         });
-        return;
-      }
-      // In the 3D view the run is a ribbon at its height, at every zoom, cut
-      // from its flight's smoothed curve so it meets the runs on either side
-      // without a seam, for the pixels of the zoom
-      if (box && !overlaps(box, runBox(run, smoothed))) return;
-      for (const piece of ribbonOf(
-        smoothed,
-        run.start,
-        run.end,
-        widthZoom,
-        true,
-      )) {
-        features.push({
-          type: "Feature",
-          properties: {
-            ...properties,
-            ...ribbonProperties(piece, level, this.app.relief.epoch),
-          },
-          geometry: piece.geometry,
-        });
-      }
-    });
+      });
+    }
     table.written = runs.length === 0 ? null : id;
     const source = map.getSource<GeoJSONSource>(id);
     if (!source) return;
@@ -641,8 +628,9 @@ export class LayerManager implements PathHitTester {
     state.segments = data.path_segments;
     state.dirty = false;
     // The flights of another dataset are smoothed anew when they are lifted
-    const held = heldGroundedFlights();
-    if (held && held !== data.path_segments) releaseGroundedFlights();
+    const bundle = loadedFeatures();
+    const held = bundle?.heldGroundedFlights();
+    if (held && held !== data.path_segments) bundle?.releaseGroundedFlights();
     this.setRuns(
       config,
       "main",
@@ -726,12 +714,13 @@ export class LayerManager implements PathHitTester {
    * (see followsLevel) or are out of sight. The globe leaves the relief out
    * (MapLibre 6.10 breaks the ribbons up on it) and only shades it
    * (reliefShaded), over the flat ground the ribbons stand on there. Its
-   * code comes with the feature bundle, which is fetched the first time
-   * either is wanted: until it has arrived the relief is not drawn and the
-   * cut is left to its arrival (cutAwaited), or to its failure, after which
-   * the flights stay on the flat map. Cut on the flat ground first, they
-   * would be cut twice in a row, and the map's worker hold both cuts at
-   * once.
+   * code, and the code that cuts the ribbons, come with the feature
+   * bundle, which is fetched the first time the 3D view is wanted, on the
+   * map or on the globe: until it has arrived the relief is not drawn and
+   * the cut is left to its arrival (cutAwaited), or to its failure, after
+   * which the flights are drawn as lines on the flat map. Cut on the flat
+   * ground first, they would be cut twice in a row, and the map's worker
+   * hold both cuts at once.
    */
   private syncTerrain(): boolean | null {
     const map = this.listeningTo;
@@ -740,27 +729,26 @@ export class LayerManager implements PathHitTester {
     const level = map ? reliefLevel(map.getZoom()) : this.app.reliefLevel;
     const relief = this.app.relief;
     relief.shade(shaded);
-    if (shaded && !this.terrainLoaded) {
+    if (shaded && !this.features) {
       void loadFeatures().then((features) => {
-        if (this.destroyed || this.terrainLoaded) return;
+        if (this.destroyed || this.features) return;
         if (features) {
           features.followTerrain(this.app);
           features.followHeatCloud(this.app);
           features.followSelectionRibbons(this.app);
-          this.terrainLoaded = true;
+          this.features = features;
         }
         // A failure is tried again by the next zoom, not from here
         if ((features && this.syncTerrain()) || this.cutAwaited) {
           this.redrawVisibleModes();
         }
       });
-      if (wanted) {
-        // Nothing follows the level before the code has arrived, but a cut
-        // of the flights meanwhile, on the flat map, is lifted by it
-        relief.moveTo(level);
-        this.cutAwaited = true;
-        return null;
-      }
+      // Nothing follows the level before the code has arrived, and nothing
+      // cuts the ribbons, on the globe either: the cut of the flights waits
+      // for it, and one meanwhile, on the flat map, is lifted by it
+      relief.moveTo(level);
+      this.cutAwaited = true;
+      return null;
     }
     const was = this.app.reliefLevel;
     const moved = shaded && level !== was;

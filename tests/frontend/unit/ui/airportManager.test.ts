@@ -36,6 +36,7 @@ vi.mock("../../../../kml_heatmap/frontend/ui/airportFlights", () => ({
   listFlights,
 }));
 vi.mock("../../../../kml_heatmap/frontend/services/featureLoader", () => ({
+  loadedFeatures: () => null,
   loadFeatures,
 }));
 vi.mock(

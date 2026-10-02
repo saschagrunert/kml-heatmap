@@ -700,13 +700,14 @@ export class ReplayRenderer {
       exaggeration: liftExaggeration(this.app.reliefLevel),
       state,
     };
-    if (
-      !this.camera.chaseAirplane(heading, isManualSeek) &&
-      (state.playing || isManualSeek)
-    ) {
-      this.camera.keepAirplaneInView(state, position, isManualSeek);
-    }
-    this.camera.follow(heading);
+    this.camera.follow(heading, () => {
+      if (
+        !this.camera.chaseAirplane(heading, isManualSeek) &&
+        (state.playing || isManualSeek)
+      ) {
+        this.camera.keepAirplaneInView(state, position, isManualSeek);
+      }
+    });
   }
 
   /**

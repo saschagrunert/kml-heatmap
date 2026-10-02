@@ -14,6 +14,7 @@ import {
   FEATURES_CSS_URL,
   SITE_UPDATED_MESSAGE,
   WRAPPED_CSS_URL,
+  loadedFeatures,
   loadFeatures,
   loadWrapped,
   resetFeatureLoader,
@@ -69,6 +70,25 @@ describe("loadFeatures", () => {
   it("imports the bundle and returns its exports", async () => {
     await expect(loadFeatures()).resolves.toBe(features);
     expect(importFeatures).toHaveBeenCalledTimes(1);
+  });
+
+  it("hands out the bundle once it has arrived, without fetching it", async () => {
+    expect(loadedFeatures()).toBeNull();
+    expect(importFeatures).not.toHaveBeenCalled();
+
+    const pending = loadFeatures();
+    expect(loadedFeatures()).toBeNull();
+    await pending;
+
+    expect(loadedFeatures()).toBe(features);
+  });
+
+  it("hands out nothing for a bundle that could not be loaded", async () => {
+    importFeatures.mockRejectedValue(new Error("offline"));
+
+    await loadFeatures();
+
+    expect(loadedFeatures()).toBeNull();
   });
 
   it("fetches the stylesheet alongside the bundle", async () => {
