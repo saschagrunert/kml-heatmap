@@ -14,6 +14,7 @@ import type {
 import { ZOOM_OFFSET } from "./constants";
 import { DEGREES_TO_RADIANS, focalLengthPx } from "./geometry";
 import { withTimeout } from "./withTimeout";
+import { safeAreaInsets } from "./safeArea";
 
 /** A position the way the data files carry it: latitude first */
 export type LatLon = readonly [lat: number, lon: number, ...rest: number[]];
@@ -432,7 +433,8 @@ export function slideMapBesideRail(
  * pixels clear of every edge. Leaflet did this by itself (autoPan); MapLibre
  * opens a popup wherever its anchor is, half outside the map if need be.
  * A popup larger than the map is aligned at its top left, where it starts
- * to read.
+ * to read. Where the map fills the screen, the edges are those of the safe
+ * area, clear of the status bar and the home indicator.
  */
 export function panPopupIntoView(
   map: MapLibreMap,
@@ -443,6 +445,11 @@ export function panPopupIntoView(
   if (!popup.isOpen()) return;
   const box = popup.getElement().getBoundingClientRect();
   const frame = map.getContainer().getBoundingClientRect();
+  const safe = safeAreaInsets();
+  const top = Math.max(frame.top, safe.top);
+  const left = Math.max(frame.left, safe.left);
+  const right = Math.min(frame.right, window.innerWidth - safe.right);
+  const bottom = Math.min(frame.bottom, window.innerHeight - safe.bottom);
 
   const overflow = (before: number, after: number): number => {
     // The near edge wins when both are out, so the content's start shows
@@ -450,12 +457,12 @@ export function panPopupIntoView(
     return after > 0 ? after : 0;
   };
   const dx = overflow(
-    box.left - (frame.left + padding),
-    box.right - (frame.right - padding),
+    box.left - (left + padding),
+    box.right - (right - padding),
   );
   const dy = overflow(
-    box.top - (frame.top + padding),
-    box.bottom - (frame.bottom - padding),
+    box.top - (top + padding),
+    box.bottom - (bottom - padding),
   );
   if (dx === 0 && dy === 0) return;
   if (map.getPitch() === 0 && map.getProjection()?.type !== "globe") {

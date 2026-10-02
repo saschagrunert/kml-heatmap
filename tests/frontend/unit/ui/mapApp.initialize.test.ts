@@ -7,7 +7,10 @@ import {
   MAP_STALL_MESSAGE,
   MAP_STALL_MS,
   MapApp,
+  startViewPadding,
 } from "../../../../kml_heatmap/frontend/mapApp";
+import { resetSafeArea } from "../../../../kml_heatmap/frontend/utils/safeArea";
+import { measureSafeArea } from "../../testHelpers";
 import {
   Marker as MockMarker,
   resetMapLibreMock,
@@ -1220,5 +1223,35 @@ describe("MapApp.initialize", () => {
       expect(mockMap(app).options).not.toHaveProperty("center");
       expect(mockMap(app).options).not.toHaveProperty("zoom");
     });
+  });
+});
+
+describe("startViewPadding", () => {
+  /** Have the safe area's probe measure `top` and `bottom` */
+  const insets = (top: number, bottom: number) =>
+    measureSafeArea({ top, bottom });
+
+  beforeEach(() => resetSafeArea());
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+    document.documentElement.style.removeProperty("--mobile-bar-h");
+    resetSafeArea();
+  });
+
+  it("counts no inset on top of what the panels' padding holds already", () => {
+    // mapChromePadding takes the safe area in (see its own tests)
+    insets(59, 34);
+
+    expect(startViewPadding(document.body)).toEqual(START_PADDING);
+  });
+
+  it("keeps the flights clear of a phone's bar, by its height in the stylesheet", () => {
+    insets(59, 34);
+    vi.stubGlobal("matchMedia", (query: string) => ({ matches: true, query }));
+    document.documentElement.style.setProperty("--mobile-bar-h", "56px");
+
+    // The bar is not on the page yet when the first view is fitted
+    expect(startViewPadding(document.body).bottom).toBe(48 + 56);
   });
 });

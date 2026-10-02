@@ -16,10 +16,12 @@ import {
   asMapApp,
   createDataset,
   createMockApp,
+  measureSafeArea,
   type MockApp,
 } from "../../testHelpers";
 import { resetMapLibreMock } from "../../../mocks/maplibre-gl";
 import { LIVE_REGION_DELAY_MS } from "../../../../kml_heatmap/frontend/utils/toast";
+import { resetSafeArea } from "../../../../kml_heatmap/frontend/utils/safeArea";
 
 /**
  * A flight of `path_id` across 8° E along `lat`, 1,000 ft above the ground
@@ -419,6 +421,22 @@ describe("the readout of the heat cloud", () => {
         /^About \d+ min within 1 km: 2 flights, mostly \d+ to 1,\d00 ft AGL$/,
       ),
     );
+  });
+
+  it("stays inside the safe area where the map fills the screen", () => {
+    resetSafeArea();
+    // A phone held sideways: the island at the left, the status bar above
+    measureSafeArea({ top: 59, left: 20 });
+    try {
+      enter3D();
+      touch();
+      click(0, 0);
+      // Not at 0, 28 under the finger as on a screen without insets
+      expect(box()!.style.transform).toBe("translate(20px, 59px)");
+    } finally {
+      vi.restoreAllMocks();
+      resetSafeArea();
+    }
   });
 
   it("keeps clear of the panels over the map where it can", () => {

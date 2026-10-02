@@ -55,6 +55,7 @@ import { applyGradientTokens } from "./utils/colors";
 import { renderControlIcons } from "./utils/icons";
 import {
   createActivationFilter,
+  cssVar,
   DOUBLE_TAP_MS,
   followContextLoss,
   isOnMarker,
@@ -66,6 +67,8 @@ import {
   whenStyleReady,
 } from "./utils/mapHelpers";
 import { prefersReducedMotion } from "./utils/motion";
+import { isPhoneLayout } from "./utils/device";
+import { resetSafeArea } from "./utils/safeArea";
 import {
   DEFAULT_ZOOM,
   HEATMAP_LAYER_IDS,
@@ -172,14 +175,22 @@ const START_VIEW_PADDING = 48;
  * a selection's fit is. A flat 48 pixels left the tracks at the left edge
  * under the left column on a narrow window. The columns alone: the legend
  * and the chip come and go with the data and the selection, and counted,
- * Reset view landed on another camera than the first visit had.
+ * Reset view landed on another camera than the first visit had. On a
+ * phone clear as well of the bar, by its height in the stylesheet: the
+ * first view is fitted before the bar is on the page.
  */
-function startViewPadding(container: HTMLElement): Required<PaddingOptions> {
-  return mapChromePadding(
+export function startViewPadding(
+  container: HTMLElement,
+): Required<PaddingOptions> {
+  const padding = mapChromePadding(
     { getContainer: () => container },
     START_VIEW_PADDING,
     CONTROL_COLUMNS,
   );
+  // --mobile-bar-h stays a plain px value: a calc() would read as 0 here
+  if (isPhoneLayout())
+    padding.bottom += parseFloat(cssVar("--mobile-bar-h")) || 0;
+  return padding;
 }
 
 /** Delay before a Wrapped panel restored from state opens again */
@@ -397,6 +408,8 @@ export class MapApp {
   constructor(config: MapConfig) {
     this.store = new AppStore();
     this.config = config;
+    // A probe a torn-down app left measures again for this one
+    resetSafeArea();
 
     // Non-store state
     this.isInitializing = true;
@@ -558,6 +571,7 @@ export class MapApp {
       this.wrappedRestoreTimer = null;
     }
     this.lifetime.abort();
+    resetSafeArea(true);
     if (this.map) {
       const { moveend, zoomend, click } = this.mapHandlers;
       if (moveend) this.map.off("moveend", moveend);

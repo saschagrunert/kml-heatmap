@@ -6,6 +6,7 @@ import {
   initMapApp,
   reportInitFailure,
 } from "../../../../kml_heatmap/frontend/mapApp";
+import { safeAreaInsets } from "../../../../kml_heatmap/frontend/utils/safeArea";
 import { STORE_ACCESSOR_KEYS } from "../../../../kml_heatmap/frontend/state/store";
 import type { KMLDataset } from "../../../../kml_heatmap/frontend/types";
 import { createSegment } from "../../testHelpers";
@@ -321,6 +322,24 @@ describe("MapApp", () => {
           .destroy,
       ).toHaveBeenCalled();
       vi.useRealTimers();
+    });
+
+    it("takes the safe area's probe along", () => {
+      const app = new MapApp(config);
+      app.mobileBar = null;
+      safeAreaInsets();
+      expect(document.getElementById("safe-area-probe")).not.toBeNull();
+
+      app.destroy();
+
+      expect(document.getElementById("safe-area-probe")).toBeNull();
+      // A late frame puts no probe back
+      safeAreaInsets();
+      expect(document.getElementById("safe-area-probe")).toBeNull();
+      // A new app measures again
+      new MapApp(config).mobileBar = null;
+      safeAreaInsets();
+      expect(document.getElementById("safe-area-probe")).not.toBeNull();
     });
   });
 });
