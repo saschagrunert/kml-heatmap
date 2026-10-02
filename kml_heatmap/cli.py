@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, NoReturn
 
 from . import __version__
+from .constants import CACHE_DIR_ENV
 from .exceptions import (
     InvalidInputError,
     KMLHeatmapError,
@@ -26,7 +27,7 @@ from .validation import find_kml_files, validate_kml_file, validate_output_dir
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from .renderer import FlightListing
+    from .listing import FlightListing
 
 # Obfuscation violations listed per file before the rest are summarized
 MAX_REPORTED_VIOLATIONS = 5
@@ -35,9 +36,6 @@ MAX_REPORTED_VIOLATIONS = 5
 EXIT_FAILED = 1
 EXIT_USAGE = 2
 EXIT_INTERRUPTED = 130
-
-# Read by kml_heatmap.cache when it is first imported
-CACHE_DIR_ENV = "KML_HEATMAP_CACHE_DIR"
 
 
 def _fatal(message: str, status: int = EXIT_FAILED) -> NoReturn:
@@ -249,7 +247,7 @@ def format_listing(
 def _list(paths: list[str]) -> None:
     """Print what a build of ``paths`` would publish, and write nothing."""
     # Needs lxml and reads the cache directory, see _generate
-    from .renderer import list_flights  # noqa: PLC0415
+    from .listing import list_flights  # noqa: PLC0415
 
     kml_files, _ = _collect_kml_files(paths)
     if not kml_files:

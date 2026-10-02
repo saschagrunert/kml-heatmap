@@ -3,7 +3,11 @@
 import logging
 import pickle
 import zipfile
-from unittest.mock import mock_open, patch
+from concurrent.futures import Future
+from concurrent.futures.process import BrokenProcessPool
+from unittest.mock import MagicMock, mock_open, patch
+
+import pytest
 
 import kml_heatmap.airport_lookup as lookup_module
 import kml_heatmap.workers as workers_module
@@ -179,3 +183,104 @@ class TestAvailableMemory:
             patch.object(workers_module, "_host_available_bytes", return_value=None),
         ):
             assert workers_module._available_memory_bytes() == 0
+
+
+class TestDefaultWorkerCount:
+    def _count(self, tmp_path, cpu_max, cpus=16):
+        if cpu_max is not None:
+            (tmp_path / "cpu.max").write_text(cpu_max)
+        with (
+            patch.object(workers_module, "CGROUP_DIR", str(tmp_path)),
+            patch("os.process_cpu_count", return_value=cpus),
+        ):
+            return workers_module.default_worker_count()
+
+    def test_a_cpu_quota_limits_the_workers(self, tmp_path):
+        """docker run --cpus=2 on a host of 16 CPUs."""
+        assert self._count(tmp_path, "200000 100000\n") == 2
+
+    def test_part_of_a_cpu_counts_as_one(self, tmp_path):
+        assert self._count(tmp_path, "150000 100000\n") == 2
+        assert self._count(tmp_path, "10000 100000\n") == 1
+
+    def test_no_quota_keeps_every_cpu(self, tmp_path):
+        assert self._count(tmp_path, "max 100000\n") == 16
+        assert self._count(tmp_path, None) == 16
+        assert self._count(tmp_path, "garbage") == 16
+
+    def test_jobs_limit_the_workers_further(self, tmp_path):
+        workers_module.configure_workers(1)
+        try:
+            assert self._count(tmp_path, "400000 100000\n") == 1
+        finally:
+            workers_module.configure_workers(None)
+
+
+def _double(value):
+    return value * 2
+
+
+def _broken_future(*_args, **_kwargs):
+    future: Future[int] = Future()
+    future.set_exception(BrokenProcessPool("a worker died"))
+    return future
+
+
+class TestWorkerPool:
+    def test_a_pool_that_cannot_start_works_here(self, caplog):
+        with (
+            patch.object(
+                workers_module,
+                "ProcessPoolExecutor",
+                MagicMock(side_effect=OSError("no semaphores")),
+            ),
+            workers_module.WorkerPool(2, "testing") as pool,
+        ):
+            assert pool.fell_back
+            assert pool.submit(_double, 2).result() == 4
+            assert list(pool.map(_double, [1, 2])) == [2, 4]
+        assert "processes for testing failed (no semaphores)" in caplog.text
+
+    def test_a_pool_that_cannot_start_its_workers_works_here(self):
+        pool_class = MagicMock()
+        pool_class.return_value.submit.side_effect = OSError("no processes")
+        with (
+            patch.object(workers_module, "ProcessPoolExecutor", pool_class),
+            workers_module.WorkerPool(2, "testing") as pool,
+        ):
+            assert pool.submit(_double, 3).result() == 6
+            assert pool.fell_back
+        pool_class.return_value.shutdown.assert_called_once()
+
+    def test_a_broken_pool_does_the_task_again_here(self, caplog):
+        pool_class = MagicMock()
+        pool_class.return_value.submit.side_effect = _broken_future
+        with (
+            patch.object(workers_module, "ProcessPoolExecutor", pool_class),
+            workers_module.WorkerPool(2, "testing") as pool,
+        ):
+            futures = [pool.submit(_double, value) for value in (1, 2)]
+            assert [
+                pool.result(f, _double, v) for f, v in zip(futures, (1, 2), strict=True)
+            ] == [2, 4]
+        # Once, however many tasks it broke
+        assert caplog.text.count("going on in this process") == 1
+
+    def test_a_task_that_fails_here_fails_its_future(self):
+        with (
+            patch.object(
+                workers_module, "ProcessPoolExecutor", MagicMock(side_effect=OSError)
+            ),
+            workers_module.WorkerPool(1, "testing") as pool,
+        ):
+            future = pool.submit(int, "not a number")
+            with pytest.raises(ValueError, match="not a number"):
+                future.result()
+
+    def test_the_workers_get_the_initializer(self):
+        pool_class = MagicMock()
+        with patch.object(workers_module, "ProcessPoolExecutor", pool_class):
+            workers_module.WorkerPool(3, "testing", (logging.DEBUG,)).shutdown()
+        pool_class.assert_called_once_with(
+            max_workers=3, initializer=init_worker, initargs=(logging.DEBUG,)
+        )

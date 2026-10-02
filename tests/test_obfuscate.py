@@ -1251,6 +1251,15 @@ class TestCheckObfuscated:
         assert list(violations) == [".a.kml.x1y2z3.tmp"]
         assert "Leftover temporary file" in violations[".a.kml.x1y2z3.tmp"][0]
 
+    def test_directory_check_sees_hidden_files(self, tmp_path):
+        """A hidden file would be published by a build all the same."""
+        (tmp_path / ".old").mkdir()
+        (tmp_path / ".2_y.kml").write_text(SAMPLE_KML, encoding="utf-8")
+        (tmp_path / ".old" / "1_x.kml").write_text(SAMPLE_KML, encoding="utf-8")
+        (tmp_path / "._1_x.kml").write_bytes(b"\x00\x05\x16\x07 macOS metadata")
+
+        assert set(check_directory_obfuscated(tmp_path)) == {".2_y.kml", ".old/1_x.kml"}
+
     def test_directory_check_includes_subdirectories(self, tmp_path):
         """The generator reads subdirectories, so the check has to see them."""
         (tmp_path / "sub" / "deeper").mkdir(parents=True)

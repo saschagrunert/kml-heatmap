@@ -15,7 +15,7 @@ from .cache import atomic_data_write
 from .logger import logger
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Mapping, Sequence
 
     from .airports import AirportData
     from .types import AirportMarker, SiteMetadata
@@ -148,7 +148,7 @@ def export_metadata(
     year_file_bytes: dict[str, int],
     aircraft_models: Mapping[str, str],
     output_dir: str,
-    available_flags: list[str] | None = None,
+    available_flags: Sequence[str],
 ) -> tuple[str, int]:
     """Export metadata.json.
 
@@ -156,6 +156,8 @@ def export_metadata(
     filter. It needs the years and their file sizes before loading any year,
     the groundspeed range for the speed scale, the aircraft models, which
     only aircraft.json knows, and the flags the site was able to publish.
+    Those have no default, as in ``export_all_data``: a caller that forgot
+    them would publish a site without a flag.
     """
     if not math.isfinite(min_groundspeed_knots):
         min_groundspeed_knots = 0.0
@@ -170,7 +172,7 @@ def export_metadata(
         "aircraft_models": dict(aircraft_models),
         # Which countries the site carries a flag for. A build without the
         # flag files publishes none, and the frontend falls back to the code.
-        "available_flags": list(available_flags or []),
+        "available_flags": list(available_flags),
     }
 
     meta_file = Path(output_dir) / "metadata.json"

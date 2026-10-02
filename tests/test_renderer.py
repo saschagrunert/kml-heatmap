@@ -12,7 +12,7 @@ from concurrent.futures import Future
 from concurrent.futures.process import BrokenProcessPool
 from pathlib import Path
 from typing import cast
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from lxml import html as lxml_html
@@ -20,12 +20,15 @@ from lxml import html as lxml_html
 import kml_heatmap.cache as cache_module
 import kml_heatmap.data_exporter as exporter_module
 from kml_heatmap import path_content
+from kml_heatmap.data_exporter import export_all_data
 from kml_heatmap.exceptions import (
     ExportError,
     InvalidInputError,
     KMLHeatmapError,
     OutputRefusedError,
 )
+from kml_heatmap.landings import FlightLandings
+from kml_heatmap.listing import list_flights
 from kml_heatmap.previews import encode_path_id
 from kml_heatmap.renderer import (
     CoordinateExtent,
@@ -36,7 +39,6 @@ from kml_heatmap.renderer import (
     _parse_kml_files,
     _parse_with_error_handling,
     create_progressive_heatmap,
-    list_flights,
 )
 from kml_heatmap.site_output import STAGING_PREFIX
 from kml_heatmap.types import PathMetadata, TrackPoint
@@ -210,8 +212,8 @@ class TestParseWithoutAPool:
             _write_kml(tmp_path / "10_DEAGJ_DA20.kml", 2026),
             _write_kml(tmp_path / "2_DEAGJ_DA20.kml", 2025),
         ]
-        with patch("kml_heatmap.renderer.ProcessPoolExecutor", _NoPool):
-            _, metadata = _parse_kml_files(files)
+        with patch("kml_heatmap.workers.ProcessPoolExecutor", _NoPool):
+            _, metadata, _ = _parse_kml_files(files)
         assert [m["year"] for m in metadata] == [2026, 2025]
 
     def test_cached_files_are_read_here_and_only_the_rest_goes_to_the_pool(
@@ -231,9 +233,9 @@ class TestParseWithoutAPool:
 
         with (
             patch.object(pool, "submit", submit),
-            patch("kml_heatmap.renderer.ProcessPoolExecutor", pool),
+            patch("kml_heatmap.workers.ProcessPoolExecutor", pool),
         ):
-            _, metadata = _parse_kml_files([cached, fresh])
+            _, metadata, _ = _parse_kml_files([cached, fresh])
         assert submitted == [fresh]
         assert [m["year"] for m in metadata] == [2025, 2026]
 
@@ -260,7 +262,7 @@ class TestParseWithoutAPool:
         files = [_write_kml(tmp_path / f"{i}_DEAGJ_DA20.kml", 2025) for i in (1, 2)]
         first = _parse_kml_files(files)
         monkeypatch.setattr("kml_heatmap.renderer.INLINE_PARSE_MAX_BYTES", -1)
-        with patch("kml_heatmap.renderer.ProcessPoolExecutor", _NoPool):
+        with patch("kml_heatmap.workers.ProcessPoolExecutor", _NoPool):
             assert _parse_kml_files(files) == first
 
     def test_an_uncached_file_is_hashed_once(self, tmp_path):
@@ -279,16 +281,20 @@ class TestParseWithoutAPool:
             _parse_kml_files(files)
             assert sorted(hashed) == ["1_DEAGJ_DA20.kml", "2_DEAGJ_DA20.kml"]
             hashed.clear()
-            # And the entry was written: the next run reads it
-            with patch(
-                "kml_heatmap.renderer.parse_kml_file", side_effect=AssertionError
+            # And the entry was written, with the landings: the next run
+            # reads it, and finds no landing either
+            with (
+                patch(
+                    "kml_heatmap.renderer.parse_and_cache", side_effect=AssertionError
+                ),
+                patch("kml_heatmap.renderer.path_landings", side_effect=AssertionError),
             ):
                 _parse_kml_files(files)
 
     def test_unreadable_cache_is_a_miss(self, tmp_path):
         kml_file = _write_kml(tmp_path / "1_DEAGJ_DA20.kml")
-        with patch("kml_heatmap.renderer.load_cached_kml", side_effect=OSError):
-            _, metadata = _parse_kml_files([kml_file])
+        with patch("kml_heatmap.renderer.load_cached_entry", side_effect=OSError):
+            _, metadata, _ = _parse_kml_files([kml_file])
         assert len(metadata) == 1
 
     def test_pipeline_error_inline_stops_the_run(self, tmp_path):
@@ -357,7 +363,7 @@ class _FakeExecutor:
         return future
 
     def shutdown(self, wait=True, cancel_futures=False):
-        self.cancelled = cancel_futures
+        self.cancelled = self.cancelled or cancel_futures
 
 
 class _InlineExecutor(_FakeExecutor):
@@ -384,7 +390,7 @@ class TestParseKmlFiles:
             _write_kml(tmp_path / "2_DEAGJ_DA20.kml", 2025),
         ]
 
-        paths, metadata = _parse_kml_files(files)
+        paths, metadata, _ = _parse_kml_files(files)
 
         assert len(paths) == 2
         assert [m["filename"] for m in metadata] == [
@@ -429,7 +435,7 @@ class TestParseKmlFiles:
 
     def test_a_path_without_a_year_next_to_a_flight_is_no_error(self, tmp_path):
         """The file still has a flight to export; the path is left out later."""
-        paths, metadata = _parse_kml_files(
+        paths, metadata, _ = _parse_kml_files(
             [_write_kml(tmp_path / "1.kml", template=PARTLY_DATED_KML)]
         )
         assert len(paths) == 2
@@ -444,10 +450,10 @@ class TestParseKmlFiles:
         ]
         pools = iter([_FakeExecutor(BrokenProcessPool("crashed")), _InlineExecutor()])
         with patch(
-            "kml_heatmap.renderer.ProcessPoolExecutor",
+            "kml_heatmap.workers.ProcessPoolExecutor",
             side_effect=lambda *args, **kwargs: next(pools),
         ):
-            paths, metadata = _parse_kml_files(files)
+            paths, metadata, _ = _parse_kml_files(files)
 
         assert len(paths) == 2
         assert [m["filename"] for m in metadata] == [
@@ -462,7 +468,7 @@ class TestParseKmlFiles:
         kml_file = _write_kml(tmp_path / "1_DEAGJ_DA20.kml")
         with (
             patch(
-                "kml_heatmap.renderer.ProcessPoolExecutor",
+                "kml_heatmap.workers.ProcessPoolExecutor",
                 _FakeExecutor(BrokenProcessPool("crashed")),
             ),
             pytest.raises(KMLHeatmapError, match=r"crashed on .*1_DEAGJ_DA20"),
@@ -474,18 +480,66 @@ class TestParseKmlFiles:
         kml_file = _write_kml(tmp_path / "1_DEAGJ_DA20.kml")
         executor = _FakeExecutor(KMLHeatmapError("Airport database unavailable"))
         with (
-            patch("kml_heatmap.renderer.ProcessPoolExecutor", executor),
+            patch("kml_heatmap.workers.ProcessPoolExecutor", executor),
             pytest.raises(KMLHeatmapError, match="Airport database unavailable"),
         ):
             _parse_kml_files([kml_file])
         assert executor.cancelled
         assert "Traceback" not in capsys.readouterr().err
 
+    def test_a_pool_that_cannot_start_parses_here(self, tmp_path, caplog):
+        """No semaphores in a sandbox: the files are parsed all the same."""
+        files = [_write_kml(tmp_path / f"{i}_DEAGJ_DA20.kml") for i in (1, 2)]
+        with patch(
+            "kml_heatmap.workers.ProcessPoolExecutor",
+            MagicMock(side_effect=OSError("no semaphores")),
+        ):
+            paths, _, _ = _parse_kml_files(files)
+
+        assert len(paths) == 2
+        assert "going on in this process" in caplog.text
+
+    def test_a_worker_out_of_memory_parses_one_file_at_a_time(self, tmp_path):
+        """The retry runs each file alone, in a worker of its own."""
+        kml_file = _write_kml(tmp_path / "1_DEAGJ_DA20.kml")
+        pools = [_FakeExecutor(MemoryError()), _InlineExecutor()]
+        with patch(
+            "kml_heatmap.workers.ProcessPoolExecutor", MagicMock(side_effect=pools)
+        ):
+            paths, _, _ = _parse_kml_files([kml_file])
+
+        assert len(paths) == 1
+
+    def test_a_file_out_of_memory_costs_no_other_parse(self, tmp_path):
+        """f1 to f9 are parsed once; only f0 goes again, on its own."""
+        files = [_write_kml(tmp_path / f"{i}_DEAGJ_DA20.kml") for i in range(10)]
+        parsed: list[str] = []
+
+        class Pool(_InlineExecutor):
+            def submit(self, fn, *args):
+                future: Future[object] = Future()
+                if args[0] == files[0] and files[0] not in parsed:
+                    parsed.append(files[0])
+                    future.set_exception(MemoryError())
+                else:
+                    parsed.append(args[0])
+                    future.set_result(fn(*args))
+                return future
+
+        with patch(
+            "kml_heatmap.workers.ProcessPoolExecutor",
+            MagicMock(side_effect=lambda *_a, **_k: Pool()),
+        ):
+            paths, _, _ = _parse_kml_files(files)
+
+        assert len(paths) == 10
+        assert sorted(parsed) == sorted([files[0], *files])
+
     def test_unexpected_worker_error_is_logged(self, tmp_path, capsys):
         kml_file = _write_kml(tmp_path / "1_DEAGJ_DA20.kml")
         with (
             patch(
-                "kml_heatmap.renderer.ProcessPoolExecutor",
+                "kml_heatmap.workers.ProcessPoolExecutor",
                 _FakeExecutor(RuntimeError("unexpected")),
             ),
             pytest.raises(KMLHeatmapError, match="No coordinates"),
@@ -550,10 +604,14 @@ class TestDropPathsWithoutYear:
             ],
         )
 
-        kept_paths, kept_metadata = _drop_paths_without_year(paths, metadata)
+        kept_paths, kept_metadata, kept = _drop_paths_without_year(
+            paths, metadata, ["a", "b", "c"]
+        )
 
         assert kept_paths == [paths[0]]
         assert kept_metadata == [metadata[0]]
+        # The landings of the paths kept still belong to them
+        assert kept == ["a"]
         err = capsys.readouterr().err
         assert "b.kml (Somewhere)" in err
         assert "c.kml" in err
@@ -561,6 +619,43 @@ class TestDropPathsWithoutYear:
 
 @pytest.mark.usefixtures("bundle")
 class TestExportSite:
+    def test_the_landings_stay_with_their_paths(self, tmp_path, parse_data):
+        """A path without a year first: the landings of the next one are its own."""
+        undated = [TrackPoint(52.0, 10.0, 1.0), TrackPoint(52.1, 10.1, 2.0)]
+        dated = [TrackPoint(50.0, 8.0, 100.0), TrackPoint(51.0, 9.0, 200.0)]
+        metadata: list[PathMetadata] = [
+            {"year": None, "start_point": [52.0, 10.0, 1.0], "airport_name": ""},
+            {"year": 2025, "start_point": [50.0, 8.0, 100.0], "airport_name": ""},
+        ]
+        landings = [
+            FlightLandings(landings=9, touchdowns=[("XXXX", None)]),
+            FlightLandings(landings=1, touchdowns=[("EDDK", "14L")]),
+        ]
+        out = tmp_path / "out"
+
+        _export_site(
+            [undated, dated],
+            metadata,
+            out / "index.html",
+            out / "data",
+            landings=landings,
+        )
+
+        info = parse_data(out / "data" / "2025" / "data.json")["path_info"]
+        assert [(p["landings"], p["touchdowns"]) for p in info] == [
+            (1, [["EDDK", "14L"]])
+        ]
+
+    def test_landings_of_other_paths_are_refused(self, tmp_path):
+        path = [TrackPoint(50.0, 8.0, 100.0), TrackPoint(51.0, 9.0, 200.0)]
+        metadata: list[PathMetadata] = [
+            {"year": 2025, "start_point": [50.0, 8.0, 100.0], "airport_name": ""}
+        ]
+        with pytest.raises(ValueError, match="one per path"):
+            export_all_data(
+                [path], metadata, [], tmp_path, landings=[], available_flags=[]
+            )
+
     def test_exports_and_excludes_yearless_paths(self, tmp_path, parse_data):
         coords = [
             TrackPoint(50.0, 8.0, 100.0),
@@ -804,6 +899,22 @@ class TestCreateProgressiveHeatmap:
             )
         assert "Refusing" in str(failure.value)
         assert not (tmp_path / "airports.json").exists()
+
+    def test_a_symlink_in_the_site_is_a_refusal(self, tmp_path):
+        """Not a failed build: the CLI exits with 2 for it, as documented."""
+        kml_file = _write_kml(tmp_path / "input" / "1_DEAGJ_DA20.kml")
+        out = tmp_path / "out"
+        victim = tmp_path / "victim.json"
+        victim.write_text("precious")
+        (out / "data").mkdir(parents=True)
+        (out / "data" / "airports.json").symlink_to(victim)
+
+        with pytest.raises(OutputRefusedError, match="symlink"):
+            create_progressive_heatmap(
+                [kml_file], str(out / "index.html"), str(out / "data")
+            )
+
+        assert victim.read_text() == "precious"
 
     def test_refuses_when_aircraft_json_dir_overlaps(self, tmp_path):
         input_dir = tmp_path / "input"

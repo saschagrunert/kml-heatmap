@@ -21,8 +21,8 @@ from kml_heatmap.exceptions import (
     KMLHeatmapError,
     OutputRefusedError,
 )
+from kml_heatmap.listing import FlightListing
 from kml_heatmap.logger import logger, set_info_stream, set_log_level
-from kml_heatmap.renderer import FlightListing
 from kml_heatmap.terrain import TerrariumTiles
 
 MINIMAL_KML = "<?xml version='1.0'?><kml></kml>"

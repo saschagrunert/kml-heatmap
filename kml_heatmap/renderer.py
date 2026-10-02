@@ -12,18 +12,17 @@ import gc
 import os
 import pickle  # nosec B403
 import time
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import as_completed
 from concurrent.futures.process import BrokenProcessPool
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from .aircraft import merge_aircraft_data
-from .airport_lookup import load_airport_database
+from .airport_lookup import load_airport_database, load_runway_database
 from .airports import deduplicate_airports
 from .data_exporter import (
     ExportResult,
-    ExportSelection,
     export_all_data,
     select_exported_paths,
 )
@@ -39,8 +38,9 @@ from .export_writers import (
     exported_country_codes,
     free_text_airport_names,
 )
+from .landings import path_landings
 from .logger import logger
-from .parser import load_cached_kml, parse_kml_file, parse_size
+from .parser import load_cached_entry, parse_and_cache, parse_size
 from .parser_cache import prune_stale_cache_entries
 from .path_content import is_exportable_path
 from .previews import SITE_URL_ENV, normalize_site_url, write_previews
@@ -55,24 +55,22 @@ from .site_assets import (
 )
 from .site_output import STABLE_MTIMES_ENV, SiteOutput
 from .validation import foreign_site_files, validate_kml_file, validate_output_dir
-from .workers import default_worker_count, init_worker, parse_worker_count
+from .workers import WorkerPool, default_worker_count, parse_worker_count
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Iterator, Sequence
 
     from .airport_lookup import AirportRecord
     from .airports import AirportData
+    from .landings import FlightLandings
     from .terrain import TileSource
     from .types import FlightPathGroup, PathMetadata, TrackPoint
 
 __all__ = [
     "CoordinateExtent",
-    "FlightListing",
-    "Listing",
     "ParsedFile",
     "create_progressive_heatmap",
     "foreign_output_error",
-    "list_flights",
 ]
 
 # Files that are not in the parse cache are parsed in this process up to
@@ -143,6 +141,9 @@ class ParsedFile:
     point_count: int = 0
     path_groups: FlightPathGroup = field(default_factory=list)
     path_metadata: list[PathMetadata] = field(default_factory=list)
+    # The landings of every path, found with the parse and kept in the
+    # parse cache (see landings.path_landings); None for an entry without
+    landings: list[FlightLandings | None] | None = None
 
 
 def _parse_with_error_handling(
@@ -151,14 +152,17 @@ def _parse_with_error_handling(
     """Parse a KML file in a worker and reduce the result for the parent.
 
     ``cache_path`` is the parse cache entry the parent looked up and missed
-    (see ``parser.load_cached_kml``); the result is stored there.
+    (see ``parser.load_cached_entry``); the result is stored there, with
+    the landings of its paths.
     """
     try:
-        coordinates, path_groups, path_metadata = parse_kml_file(kml_file, cache_path)
+        (coordinates, path_groups, path_metadata), landings = parse_and_cache(
+            kml_file, cache_path, path_landings
+        )
     except (OSError, ValueError, TypeError, KMLParseError) as e:
         logger.error("Error processing %s: %s", kml_file, e)
         return ParsedFile(kml_file)
-    return ParsedFile(kml_file, len(coordinates), path_groups, path_metadata)
+    return ParsedFile(kml_file, len(coordinates), path_groups, path_metadata, landings)
 
 
 def _load_cached(kml_file: str) -> ParsedFile | Path | None:
@@ -167,13 +171,18 @@ def _load_cached(kml_file: str) -> ParsedFile | Path | None:
     On a miss the cache entry to store the parse in, or None without one.
     """
     try:
-        cached, cache_path = load_cached_kml(kml_file)
+        cached, cache_path = load_cached_entry(kml_file)
     except OSError:
         return None
     if cached is None:
         return cache_path
-    coordinates, path_groups, path_metadata = cached
-    return ParsedFile(kml_file, len(coordinates), path_groups, path_metadata)
+    return ParsedFile(
+        kml_file,
+        len(cached.coordinates),
+        cached.path_groups,
+        cached.path_metadata,
+        cached.landings,
+    )
 
 
 def _load_or_parse(kml_file: str, _cache_path: Path | None = None) -> ParsedFile:
@@ -236,10 +245,11 @@ def _parse_in_pool(
     database = pickle.dumps(airports, protocol=pickle.HIGHEST_PROTOCOL)
     done: set[str] = set()
     pool_broken = False
-    with ProcessPoolExecutor(
-        max_workers=parse_worker_count(kml_files),
-        initializer=init_worker,
-        initargs=(level, database),
+    # The files a worker ran out of memory on, parsed again one at a time
+    out_of_memory: list[str] = []
+    # A pool that cannot start parses here (see WorkerPool)
+    with WorkerPool(
+        parse_worker_count(kml_files), "parsing the KML files", (level, database)
     ) as executor:
         future_to_file = {
             executor.submit(parse, f, cache_paths[f]): f for f in kml_files
@@ -247,9 +257,14 @@ def _parse_in_pool(
         for future in as_completed(future_to_file):
             try:
                 parsed = future.result()
+            except MemoryError:
+                # Out of memory while others parsed large files at the same
+                # time; the other files go on
+                out_of_memory.append(future_to_file[future])
+                continue
             except BrokenProcessPool:
-                # Usually a worker killed for running out of memory while
-                # others parsed large files at the same time
+                # Usually a worker killed for running out of memory: every
+                # file not parsed yet is lost with the pool
                 pool_broken = True
                 break
             except KMLHeatmapError:
@@ -265,24 +280,25 @@ def _parse_in_pool(
             done.add(parsed.kml_file)
             record(parsed)
 
-    if pool_broken:
+    if pool_broken or out_of_memory:
         remaining = [f for f in kml_files if f not in done]
         logger.warning(
-            "  A parser worker process crashed; parsing the %d remaining "
+            "  A parser worker process %s; parsing the %d remaining "
             "file(s) one at a time",
+            "crashed" if pool_broken else "ran out of memory",
             len(remaining),
         )
         # Still in a worker: a file that is too large to parse must not take
         # the main process down with it, and one at a time names the file
-        with ProcessPoolExecutor(
-            max_workers=1, initializer=init_worker, initargs=(level, database)
+        with WorkerPool(
+            1, "parsing the KML files one at a time", (level, database)
         ) as executor:
             for kml_file in remaining:
                 try:
                     parsed = executor.submit(
                         parse, kml_file, cache_paths[kml_file]
                     ).result()
-                except BrokenProcessPool:
+                except BrokenProcessPool, MemoryError:
                     raise KMLHeatmapError(
                         f"A parser worker process crashed on {kml_file}, possibly "
                         "out of memory; run with --debug for details"
@@ -344,7 +360,7 @@ def _collector_paused() -> Iterator[None]:
 
 def _parse_kml_files(
     valid_files: list[str],
-) -> tuple[FlightPathGroup, list[PathMetadata]]:
+) -> tuple[FlightPathGroup, list[PathMetadata], list[FlightLandings | None]]:
     """Parse KML files and merge the results in input order.
 
     Files the parse cache holds are read from it in this process: a worker
@@ -355,13 +371,19 @@ def _parse_kml_files(
 
     The input order decides the path ids, so the merge must not depend on
     which worker finished first or on the file names: two directories may
-    well contain files with the same name.
+    well contain files with the same name. Returns the paths, their
+    metadata and their landings (see ``landings.path_landings``).
     """
     parse_start = time.time()
     # Load (and if needed download) the airport database once in the parent:
     # the workers get it from here instead of each reading the CSV, and the
     # cache keys below see the same database as they do
     airports = load_airport_database()
+    # The runways as well: the landings of a parse are found at the fields
+    # of both, and the cache keys cover both (see database_fingerprint)
+    load_runway_database()
+    if not airports:
+        logger.warning("No airport database: the landings are not counted")
     prune_stale_cache_entries()
 
     results: list[ParsedFile] = []
@@ -395,10 +417,16 @@ def _parse_kml_files(
         total_points = 0
         all_path_groups: FlightPathGroup = []
         all_path_metadata: list[PathMetadata] = []
+        all_landings: list[FlightLandings | None] = []
         for parsed in results:
             total_points += parsed.point_count
             all_path_groups.extend(parsed.path_groups)
             all_path_metadata.extend(parsed.path_metadata)
+            all_landings.extend(
+                parsed.landings
+                if parsed.landings is not None
+                else path_landings(parsed.path_groups)
+            )
 
     parse_time = time.time() - parse_start
     logger.info(
@@ -428,7 +456,7 @@ def _parse_kml_files(
         )
 
     logger.info("\nTotal points: %d", total_points)
-    return all_path_groups, all_path_metadata
+    return all_path_groups, all_path_metadata, all_landings
 
 
 def _no_flight_reason(parsed: ParsedFile) -> str | None:
@@ -458,13 +486,18 @@ def _no_flight_reason(parsed: ParsedFile) -> str | None:
     return None
 
 
-def _drop_paths_without_year(
-    all_path_groups: FlightPathGroup, all_path_metadata: list[PathMetadata]
-) -> tuple[FlightPathGroup, list[PathMetadata]]:
-    """Exclude paths whose year cannot be determined, with a warning each."""
-    kept_groups: FlightPathGroup = []
-    kept_metadata: list[PathMetadata] = []
-    for path, metadata in zip(all_path_groups, all_path_metadata, strict=True):
+def _drop_paths_without_year[T](
+    all_path_groups: FlightPathGroup,
+    all_path_metadata: list[PathMetadata],
+    per_path: Sequence[T] | None = None,
+) -> tuple[FlightPathGroup, list[PathMetadata], list[T] | None]:
+    """Exclude paths whose year cannot be determined, with a warning each.
+
+    ``per_path``, one entry per path (its landings), keeps the entries of
+    the paths kept, so that they still belong to them; None stays None.
+    """
+    kept: list[int] = []
+    for index, metadata in enumerate(all_path_metadata):
         if metadata.get("year") is None:
             logger.warning(
                 "Excluding path without a determinable year: %s (%s)",
@@ -472,9 +505,12 @@ def _drop_paths_without_year(
                 metadata.get("airport_name") or "unnamed",
             )
             continue
-        kept_groups.append(path)
-        kept_metadata.append(metadata)
-    return kept_groups, kept_metadata
+        kept.append(index)
+    return (
+        [all_path_groups[index] for index in kept],
+        [all_path_metadata[index] for index in kept],
+        None if per_path is None else [per_path[index] for index in kept],
+    )
 
 
 def _map_extent(
@@ -526,6 +562,7 @@ def _export_site(
     terrain: TileSource | None = None,
     site_url: str | None = None,
     private: bool = False,
+    landings: Sequence[FlightLandings | None] | None = None,
 ) -> ExportResult:
     """Export the data, render the page and package its assets.
 
@@ -534,8 +571,8 @@ def _export_site(
     ``terrain`` is handed to ``export_all_data``, ``site_url`` (normalized,
     see ``previews.normalize_site_url``) to the link previews.
     """
-    all_path_groups, all_path_metadata = _drop_paths_without_year(
-        all_path_groups, all_path_metadata
+    all_path_groups, all_path_metadata, landings = _drop_paths_without_year(
+        all_path_groups, all_path_metadata, landings
     )
     # Once per path, for every stage that only looks at the exported ones
     exportable = [is_exportable_path(path) for path in all_path_groups]
@@ -583,6 +620,7 @@ def _export_site(
             terrain=terrain,
             selection=selection,
             available_flags=available_flags,
+            landings=landings,
         )
         # The page opens on the latest year, see resolveYearSelection
         render_html(
@@ -611,143 +649,6 @@ def _export_site(
         site.publish(result.years)
 
     return result
-
-
-@dataclass(frozen=True)
-class FlightListing:
-    """One row of ``--list``: a path of an input file, or a file without one."""
-
-    file: str
-    year: int | None = None
-    aircraft: str = ""
-    airports: str = ""
-    points: int = 0
-    timed: bool = False
-    #: Why the site leaves it out, "" for a path it publishes
-    skipped: str = ""
-
-
-@dataclass(frozen=True)
-class Listing:
-    """What ``--list`` prints: a row per path, and the free-text airports.
-
-    ``free_text_airports`` are the airport names the site would publish
-    not from the airport database (see ``export_writers.free_text_airport_names``).
-    """
-
-    rows: list[FlightListing]
-    free_text_airports: list[str] = field(default_factory=list)
-
-
-def _listed_airports(metadata: PathMetadata) -> str:
-    start, end = metadata.get("start_airport"), metadata.get("end_airport")
-    if start or end:
-        return f"{start or '?'} - {end or '?'}"
-    return metadata.get("airport_name") or ""
-
-
-def _listed_paths(
-    parsed: list[ParsedFile],
-) -> tuple[FlightPathGroup, list[PathMetadata], list[str]]:
-    """Every path of the parsed files, with the file each came from."""
-    paths: FlightPathGroup = []
-    metadata: list[PathMetadata] = []
-    files: list[str] = []
-    for entry in parsed:
-        paths.extend(entry.path_groups)
-        metadata.extend(entry.path_metadata)
-        files.extend([entry.kml_file] * len(entry.path_groups))
-    return paths, metadata, files
-
-
-def _skip_reason(
-    index: int,
-    exportable: bool,
-    selection: ExportSelection,
-    exported: set[int],
-    metadata: PathMetadata,
-) -> str:
-    """Why the path at ``index`` is not published, "" when it is."""
-    if metadata.get("year") is None:
-        return "no determinable year"
-    if not exportable:
-        return "stays on one spot"
-    if index in exported:
-        return ""
-    # Copies are only looked for within a year (see drop_duplicate_paths)
-    content = selection.contents.get(index)
-    same_year = selection.paths_by_year.get(metadata.get("year") or 0, [])
-    if content is not None and any(
-        other in exported and selection.contents.get(other) == content
-        for other in same_year
-    ):
-        return "an exact copy of another file's flight"
-    return "the same flight as another recording"
-
-
-def list_flights(kml_files: Sequence[str]) -> Listing:
-    """What the site would hold of every file, without writing anything.
-
-    Every path gets a row with its year, aircraft, airports, points and
-    whether it has times, and the reason it would be left out; a file that
-    is invalid, does not parse or holds no path gets a row of its own. The
-    files are parsed as a build parses them (through the parse cache), and
-    the copies and second recordings are found the same way
-    (``select_exported_paths``), as are the airports, of which the ones
-    not from the airport database are listed too. No elevation tile is fetched and
-    nothing is written but the parse cache.
-    """
-    rows: list[FlightListing] = []
-    parsed: list[ParsedFile] = []
-    # Once, before the files: its download messages come first, and the
-    # parse cache keys see the same database as a build
-    load_airport_database()
-    for kml_file in kml_files:
-        is_valid, error_msg = validate_kml_file(kml_file)
-        if not is_valid:
-            rows.append(FlightListing(kml_file, skipped=error_msg or "not valid"))
-            continue
-        cached = _load_cached(kml_file)
-        entry = (
-            cached
-            if isinstance(cached, ParsedFile)
-            else _parse_inline(kml_file, cached)
-        )
-        if entry.point_count == 0:
-            rows.append(FlightListing(kml_file, skipped="failed to parse"))
-        elif not entry.path_groups:
-            rows.append(FlightListing(kml_file, skipped=_no_flight_reason(entry) or ""))
-        else:
-            parsed.append(entry)
-
-    paths, metadata, files = _listed_paths(parsed)
-    exportable = [is_exportable_path(path) for path in paths]
-    selection = select_exported_paths(paths, metadata, exportable)
-    exported = set(selection.exported())
-    for index, (path, meta) in enumerate(zip(paths, metadata, strict=True)):
-        rows.append(
-            FlightListing(
-                file=files[index],
-                year=meta.get("year"),
-                aircraft=meta.get("aircraft_registration")
-                or meta.get("aircraft_type")
-                or "",
-                airports=_listed_airports(meta),
-                points=len(path),
-                timed=any(point.ts is not None for point in path),
-                skipped=_skip_reason(
-                    index, exportable[index], selection, exported, meta
-                ),
-            )
-        )
-    order = {kml_file: position for position, kml_file in enumerate(kml_files)}
-    rows.sort(key=lambda row: order.get(row.file, len(order)))
-    # The airports of the build: those of the published paths alone
-    published = selection.exported()
-    airports = deduplicate_airports(
-        [metadata[index] for index in published], [paths[index] for index in published]
-    )
-    return Listing(rows, free_text_airport_names(airports))
 
 
 def foreign_output_error(output_file: str | Path, data_dir: str | Path) -> str | None:
@@ -859,7 +760,7 @@ def create_progressive_heatmap(
 
     try:
         try:
-            all_path_groups, all_path_metadata = _parse_kml_files(valid_files)
+            all_path_groups, all_path_metadata, landings = _parse_kml_files(valid_files)
         except (ValueError, OSError) as e:
             raise ExportError(str(e)) from e
 
@@ -875,6 +776,7 @@ def create_progressive_heatmap(
                 terrain=terrain,
                 site_url=site_url,
                 private=private,
+                landings=landings,
             )
         except InvalidInputError, OutputRefusedError:
             raise

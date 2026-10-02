@@ -323,7 +323,8 @@ the version and exits.
 
 - `path` - KML or KMZ files and/or directories. Directories are scanned with
   their subdirectories for `.kml` and `.kmz` files (case-insensitive) and
-  processed in numeric order per directory. `aircraft.json` is looked up next to
+  processed in numeric order per directory; the AppleDouble files of macOS
+  (`._1_x.kml`) and `.git` are skipped. `aircraft.json` is looked up next to
   every input file and above it (see
   [Aircraft model data](#aircraft-model-data)). A path that does not exist is an
   error, and a file named twice is read once.
@@ -394,7 +395,7 @@ Network and cache:
   when a download after 30 days fails.
 - `--jobs N` - Use at most `N` worker processes for parsing, decoding elevation
   tiles, exporting and drawing the link previews (default: one per CPU the
-  process may use)
+  process may use, within a container's CPU quota)
 
 ### How the output directory is written
 

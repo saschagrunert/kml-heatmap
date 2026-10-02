@@ -527,7 +527,7 @@ class AirportDatabases:
         # The last fingerprint computed, keyed by the file's path and stat:
         # hashing the database takes a few milliseconds, and the parse
         # cache asks for the fingerprint once per KML file
-        self._fingerprint: tuple[tuple[str, int, int, int], str] | None = None
+        self._fingerprint: tuple[list[tuple[str, int, int, int]], str] | None = None
 
     def use(self, airports: dict[str, AirportRecord]) -> None:
         """Use a database another process loaded instead of loading it here."""
@@ -627,31 +627,43 @@ class AirportDatabases:
             return runways
 
     def fingerprint(self) -> str:
-        """A short token that changes whenever the cached airport database does.
+        """A short token that changes whenever a cached database does.
 
-        A hash of the content: the database is downloaded again every
+        The airports and the runways: a parse finds the landings of its
+        flights at the fields of both (see ``landings.path_landings``). A
+        hash of the content: the databases are downloaded again every
         ``CACHE_MAX_AGE_DAYS``, and a download with the same bytes must not
         invalidate every parse cache entry, as its new modification time
         would.
 
-        Returns ``"nodb"`` while there is no cached database, so results
-        computed without one are told apart from results computed with it.
+        Returns ``"nodb"`` while there is no cached airport database, so
+        results computed without one are told apart from results computed
+        with it. A missing runway database counts as an empty one.
         """
-        try:
-            stat = CACHE_FILE.stat()
-        except OSError:
-            return "nodb"
-        key = (str(CACHE_FILE), stat.st_size, stat.st_mtime_ns, stat.st_ino)
+        files = (CACHE_FILE, RUNWAYS_CACHE_FILE)
+        key: list[tuple[str, int, int, int]] = []
+        for path in files:
+            try:
+                stat = path.stat()
+            except OSError:
+                if path == CACHE_FILE:
+                    return "nodb"
+                continue
+            key.append((str(path), stat.st_size, stat.st_mtime_ns, stat.st_ino))
         memo = self._fingerprint
         if memo is not None and memo[0] == key:
             return memo[1]
-        try:
-            with open(CACHE_FILE, "rb") as database:
-                digest = hashlib.file_digest(database, "sha256").hexdigest()[:8]
-        except OSError:
-            return "nodb"
-        self._fingerprint = (key, digest)
-        return digest
+        digest = hashlib.sha256()
+        for path in files:
+            try:
+                with open(path, "rb") as database:
+                    digest.update(hashlib.file_digest(database, "sha256").digest())
+            except OSError:
+                if path == CACHE_FILE:
+                    return "nodb"
+        token = digest.hexdigest()[:8]
+        self._fingerprint = (key, token)
+        return token
 
 
 #: The databases of this process

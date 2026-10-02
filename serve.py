@@ -13,6 +13,7 @@ BIND_HOST = os.environ.get("BIND_HOST", "127.0.0.1")
 OPEN_URL = os.environ.get("OPEN_URL") or f"http://localhost:{PORT}/"
 
 CORS_ORIGIN = os.environ.get("CORS_ORIGIN", "")
+_DEFAULT_PORTS = {"http": 80, "https": 443}
 
 
 def _split_origin(value: str) -> tuple[SplitResult, int | None] | None:
@@ -29,8 +30,10 @@ def cors_origin(value: str) -> str:
 
     ``*``, or one origin: a scheme, a host and an optional port, nothing
     after them but a slash, which is dropped (a browser sends the origin
-    without it). Anything else is refused rather than sent on as it is: a
-    header value with a line break in it would be a header of its own.
+    without it), as is the default port of the scheme (80 for http, 443 for
+    https), which a browser leaves out too. Anything else is refused rather
+    than sent on as it is: a header value with a line break in it would be
+    a header of its own.
     """
     value = value.strip()
     if value in ("", "*"):
@@ -57,7 +60,9 @@ def cors_origin(value: str) -> str:
     if ":" in host:
         host = f"[{host}]"
     origin = f"{parts.scheme}://{host}"
-    return f"{origin}:{port}" if port is not None else origin
+    if port is None or port == _DEFAULT_PORTS[parts.scheme]:
+        return origin
+    return f"{origin}:{port}"
 
 
 class CORSHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):

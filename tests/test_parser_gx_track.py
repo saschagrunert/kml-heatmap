@@ -298,6 +298,18 @@ class TestProcessGxTrack:
         assert meta["aircraft_registration"] == "D-EAGJ"
         assert meta["start_point"] == [50.0, 8.5, 300.0]
 
+    def test_a_track_of_one_point_is_no_path(self):
+        # As a LineString of one point: the point counts for the heat only
+        doc = _document()
+        pm = _placemark(doc, name="EDDS")
+        track = _track(pm, ["8.5 50.0 300"], ["2025-03-01T10:00:00Z"])
+
+        coordinates, path_groups, path_metadata = _run([track])
+
+        assert len(coordinates) == 1
+        assert path_groups == []
+        assert path_metadata == []
+
     def test_two_tracks_in_one_placemark(self):
         doc = _document()
         pm = _placemark(doc, name="Two legs")
@@ -347,10 +359,14 @@ class TestProcessGxTrack:
     def test_metadata_per_placemark(self):
         doc = _document()
         first = _track(
-            _placemark(doc, name="EDAQ"), ["8.5 50.0 300"], ["2025-03-01T10:00:00Z"]
+            _placemark(doc, name="EDAQ"),
+            ["8.5 50.0 300", "8.6 50.1 300"],
+            ["2025-03-01T10:00:00Z", "2025-03-01T10:01:00Z"],
         )
         second = _track(
-            _placemark(doc, name="EDMV"), ["9.0 51.0 400"], ["2026-03-01T10:00:00Z"]
+            _placemark(doc, name="EDMV"),
+            ["9.0 51.0 400", "9.1 51.1 400"],
+            ["2026-03-01T10:00:00Z", "2026-03-01T10:01:00Z"],
         )
 
         _, _, path_metadata = _run([first, second])
@@ -360,14 +376,17 @@ class TestProcessGxTrack:
             "EDMV Vilshofen",
         ]
         assert [m["year"] for m in path_metadata] == [2025, 2026]
-        assert [m["end_timestamp"] for m in path_metadata] == [None, None]
+        assert [m["end_timestamp"] for m in path_metadata] == [
+            "2025-03-01T10:01:00Z",
+            "2026-03-01T10:01:00Z",
+        ]
 
     def test_track_without_timestamps_uses_placemark_metadata(self):
         doc = _document()
         pm = _placemark(
             doc, name="Flight", description="Flight Jan 12 2026 03:01PM path of OE-AKI"
         )
-        track = _track(pm, ["8.5 50.0 300"])
+        track = _track(pm, ["8.5 50.0 300", "8.6 50.1 300"])
 
         _, _, path_metadata = _run([track])
 
@@ -375,7 +394,7 @@ class TestProcessGxTrack:
         assert path_metadata[0]["year"] == 2026
 
     def test_track_outside_placemark(self):
-        track = _track(_document(), ["8.5 50.0 300"])
+        track = _track(_document(), ["8.5 50.0 300", "8.6 50.1 300"])
 
         _, path_groups, path_metadata = _run([track])
 

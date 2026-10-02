@@ -8,6 +8,8 @@ import tempfile
 from pathlib import Path
 from typing import IO, TYPE_CHECKING, Any
 
+from .constants import CACHE_DIR_ENV
+
 if TYPE_CHECKING:
     from collections.abc import Callable
 
@@ -29,7 +31,7 @@ def _default_cache_dir() -> Path:
         return Path(tempfile.gettempdir()) / "kml-heatmap-cache"
 
 
-_cache_dir_env = os.environ.get("KML_HEATMAP_CACHE_DIR")
+_cache_dir_env = os.environ.get(CACHE_DIR_ENV)
 CACHE_DIR = Path(_cache_dir_env) if _cache_dir_env else _default_cache_dir()
 
 

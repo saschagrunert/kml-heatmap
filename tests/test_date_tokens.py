@@ -400,6 +400,12 @@ class TestStripDates:
             ("Runway 09/27 EDDS 25R", "Runway 09/27 EDDS 25R"),
             ("Flugplatz 2000", "Flugplatz 2000"),
             ("EDDS 08:50 Z", "EDDS"),
+            # The half of the day goes with the time after a date
+            ("Flight 8/16/26 2:30 PM home", "Flight home"),
+            ("Flight 8/16/26 2:30 p.m. home", "Flight home"),
+            ("16.08.2026 9:30am EDDS", "EDDS"),
+            # " am" after it is German for "at the", and stays
+            ("16.08.2026, 15.13 am Platz", "am Platz"),
             ("Takeoff 3:15 pm", "Takeoff"),
             ("Mayfield 12", "Mayfield 12"),
             ("DA40", "DA40"),

@@ -148,6 +148,7 @@ class TestExportMetadata:
             "year_file_bytes": {"2024": 10, "2025": 20},
             "aircraft_models": {"D-EHYL": "Diamond Star", "D-EAGJ": "Katana"},
             "output_dir": str(tmp_path),
+            "available_flags": [],
         }
         kwargs.update(overrides)
         return export_metadata(**kwargs)

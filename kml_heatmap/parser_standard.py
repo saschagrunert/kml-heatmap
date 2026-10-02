@@ -105,8 +105,6 @@ def process_standard_coordinates(
             element_coords += 1
 
         if len(current_path) > 1:
-            # No synthetic timestamps for Charterware files: their coordinates
-            # are not at fixed intervals.
             path_groups.append(current_path)
             path_metadata.append(
                 _build_path_metadata_dict(

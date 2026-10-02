@@ -21,6 +21,7 @@ and any other entry goes once it has not been used for ``CACHE_MAX_AGE_DAYS``.
 """
 
 import contextlib
+import dataclasses
 import functools
 import hashlib
 import json
@@ -33,6 +34,7 @@ from typing import TYPE_CHECKING, Any, NamedTuple
 
 from .airport_lookup import database_fingerprint
 from .cache import CACHE_DIR, atomic_bytes_write
+from .landings import FlightLandings
 from .logger import logger
 from .types import FlightPath, FlightPathGroup, PathMetadata, TrackPoint
 
@@ -52,9 +54,10 @@ __all__ = [
     "save_to_cache",
 ]
 
-# Bump whenever the serialized structure or its encoding changes (6: zstd).
+# Bump whenever the serialized structure or its encoding changes (6: zstd,
+# 7: the landings of the paths).
 # Entries of any other version are pruned (see prune_stale_cache_entries).
-CACHE_FORMAT_VERSION = 6
+CACHE_FORMAT_VERSION = 7
 # The name an entry ends in, and how hard it is compressed: level 3 is
 # zstd's default, most of the saving at a fraction of the time of the
 # higher ones
@@ -75,6 +78,7 @@ _PARSER_MODULES = (
     "date_tokens",
     "geometry",
     "helpers",
+    "landings",
     "parser",
     "parser_cache",
     "parser_common",
@@ -218,6 +222,9 @@ class CachedParse(NamedTuple):
     path_groups: FlightPathGroup
     path_metadata: list[PathMetadata]
     warnings: list[tuple[int, str]]
+    # The landings of every path (see landings.path_landings), None for an
+    # entry stored without them
+    landings: list[FlightLandings | None] | None = None
 
 
 def encode_entry(data: Any) -> bytes:
@@ -231,15 +238,45 @@ def decode_entry(data: bytes) -> Any:
     return json.loads(zstd.decompress(data))
 
 
+def _landings_to_json(landings: FlightLandings | None) -> dict[str, Any] | None:
+    return None if landings is None else dataclasses.asdict(landings)
+
+
+def _landings_from_json(item: Any, paths: int) -> list[FlightLandings | None]:
+    """The landings of an entry, one per path."""
+    if not isinstance(item, list) or len(item) != paths:
+        raise TypeError("landings must be a list of one per path")
+    return [
+        None
+        if entry is None
+        else FlightLandings(
+            **{
+                **entry,
+                "touchdowns": [
+                    (str(ident), None if runway is None else str(runway))
+                    for ident, runway in entry["touchdowns"]
+                ],
+            }
+        )
+        for entry in item
+    ]
+
+
 def _point_from_json(item: Any) -> TrackPoint:
     lat, lon, alt, ts = item
     return TrackPoint(float(lat), float(lon), alt, ts)
 
 
-def _metadata_list(value: Any) -> list[PathMetadata]:
-    """The path metadata of an entry, which has to be a list."""
+def _metadata_list(value: Any, paths: int) -> list[PathMetadata]:
+    """The path metadata of an entry, a list of one per path.
+
+    Every path has its metadata, in the same order: an entry that holds more
+    of one than of the other is no parse of the file.
+    """
     if not isinstance(value, list):
         raise TypeError("path_metadata must be a list")
+    if len(value) != paths:
+        raise ValueError("path_groups and path_metadata differ in length")
     return value
 
 
@@ -264,8 +301,13 @@ def load_cached_parse(cache_path: Path) -> CachedParse | None:
             ]
             for path in cached["path_groups"]
         ]
-        path_metadata = _metadata_list(cached["path_metadata"])
+        path_metadata = _metadata_list(cached["path_metadata"], len(path_groups))
         warnings = [(int(level), str(message)) for level, message in cached["warnings"]]
+        landings = (
+            _landings_from_json(cached["landings"], len(path_groups))
+            if "landings" in cached
+            else None
+        )
     except (
         json.JSONDecodeError,
         zstd.ZstdError,
@@ -282,7 +324,7 @@ def load_cached_parse(cache_path: Path) -> CachedParse | None:
 
     with contextlib.suppress(OSError):
         os.utime(cache_path)
-    return CachedParse(coordinates, path_groups, path_metadata, warnings)
+    return CachedParse(coordinates, path_groups, path_metadata, warnings, landings)
 
 
 def save_to_cache(
@@ -291,8 +333,13 @@ def save_to_cache(
     path_groups: FlightPathGroup,
     path_metadata: list[PathMetadata],
     warnings: Sequence[tuple[int, str]] = (),
+    landings: Sequence[FlightLandings | None] | None = None,
 ) -> None:
     """Save parse results to cache, with the warnings the parse logged.
+
+    ``landings``, one per path, are kept with them (see
+    ``landings.path_landings``); an entry without them gets them found
+    again by the build.
 
     The parser appends every path point to the coordinate list as well, so a
     path is stored as the indices of its points. A point that is not in the
@@ -304,15 +351,16 @@ def save_to_cache(
         index = index_by_id.get(id(point))
         return list(point) if index is None else index
 
-    data = encode_entry(
-        {
-            "version": CACHE_FORMAT_VERSION,
-            "coordinates": [list(point) for point in coordinates],
-            "path_groups": [[encode(point) for point in path] for path in path_groups],
-            "path_metadata": path_metadata,
-            "warnings": [list(warning) for warning in warnings],
-        }
-    )
+    entry: dict[str, Any] = {
+        "version": CACHE_FORMAT_VERSION,
+        "coordinates": [list(point) for point in coordinates],
+        "path_groups": [[encode(point) for point in path] for path in path_groups],
+        "path_metadata": path_metadata,
+        "warnings": [list(warning) for warning in warnings],
+    }
+    if landings is not None:
+        entry["landings"] = [_landings_to_json(item) for item in landings]
+    data = encode_entry(entry)
     try:
         atomic_bytes_write(cache_path, data)
     except OSError as e:

@@ -1,0 +1,16 @@
+#!/bin/sh
+# kml-heatmap pre-push hook: `make hooks` installs a copy, and replaces a
+# copy it finds by this line, or a link an older `make hooks` made.
+# It runs scripts/pre_push.py of the worktree the push comes from. All
+# worktrees of a clone share one hooks directory, and a link into the
+# worktree that installed it would dangle once that worktree is removed,
+# which git skips without a word. No check to run refuses the push;
+# `git push --no-verify` skips it.
+root=$(git rev-parse --show-toplevel) || exit 1
+script="$root/scripts/pre_push.py"
+if [ ! -f "$script" ]; then
+  echo "pre-push: $script is missing, so the KML files cannot be checked." >&2
+  echo "Refusing the push; \`git push --no-verify\` skips the check." >&2
+  exit 1
+fi
+exec python3 "$script" "$@"

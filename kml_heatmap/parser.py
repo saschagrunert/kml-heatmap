@@ -13,7 +13,12 @@ from .aircraft import parse_aircraft_from_filename
 from .constants import KML_NAMESPACE, KML_NAMESPACES
 from .exceptions import KMLParseError
 from .logger import logger
-from .parser_cache import get_cache_key, load_cached_parse, save_to_cache
+from .parser_cache import (
+    CachedParse,
+    get_cache_key,
+    load_cached_parse,
+    save_to_cache,
+)
 from .parser_common import (
     NON_MSL_ALTITUDE_MODES,
     altitude_mode,
@@ -27,11 +32,16 @@ from .parser_standard import process_standard_coordinates
 from .validation import MAX_KML_FILE_SIZE
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from .landings import FlightLandings
     from .types import FlightPath, FlightPathGroup, PathMetadata, PlacemarkMetadata
 
 __all__ = [
     "ParseResult",
+    "load_cached_entry",
     "load_cached_kml",
+    "parse_and_cache",
     "parse_kml_file",
     "parse_size",
 ]
@@ -403,10 +413,10 @@ class _WarningRecorder(logging.Handler):
         self.warnings.append((record.levelno, record.getMessage()))
 
 
-def load_cached_kml(kml_file: str) -> tuple[ParseResult | None, Path | None]:
-    """The cached parse result of a KML file (None on a miss) and its entry.
+def load_cached_entry(kml_file: str) -> tuple[CachedParse | None, Path | None]:
+    """The cached parse of a KML file (None on a miss) and its entry.
 
-    The entry is where ``parse_kml_file`` stores a fresh parse, which saves
+    The entry is where ``parse_and_cache`` stores a fresh parse, which saves
     hashing the file a second time; None when there is no cache. A hit logs
     the warnings of the parse that was cached again.
     """
@@ -419,14 +429,31 @@ def load_cached_kml(kml_file: str) -> tuple[ParseResult | None, Path | None]:
     _log_parse_result(kml_file, cached.coordinates, cached.path_groups, cached=True)
     for level, message in cached.warnings:
         logger.log(level, "%s", message)
+    return cached, cache_path
+
+
+def load_cached_kml(kml_file: str) -> tuple[ParseResult | None, Path | None]:
+    """The cached parse result of a KML file (None on a miss) and its entry.
+
+    See ``load_cached_entry``.
+    """
+    cached, cache_path = load_cached_entry(kml_file)
+    if cached is None:
+        return None, cache_path
     return (cached.coordinates, cached.path_groups, cached.path_metadata), cache_path
 
 
-def parse_kml_file(kml_file: str, cache_path: Path | None = None) -> ParseResult:
+def parse_and_cache(
+    kml_file: str,
+    cache_path: Path | None = None,
+    landings_of: Callable[[FlightPathGroup], list[FlightLandings | None]] | None = None,
+) -> tuple[ParseResult, list[FlightLandings | None] | None]:
     """Parse a KML file and store the result in the cache entry ``cache_path``.
 
-    The cache is not looked up (see ``load_cached_kml``). The warnings of the
-    parse are stored with the result.
+    The cache is not looked up (see ``load_cached_entry``). The warnings of
+    the parse are stored with the result, and so are the landings of its
+    paths that ``landings_of`` finds (see ``landings.path_landings``),
+    which are returned with it: None without it.
     """
     recorder = _WarningRecorder()
     logger.addHandler(recorder)
@@ -434,9 +461,18 @@ def parse_kml_file(kml_file: str, cache_path: Path | None = None) -> ParseResult
         result = _parse_kml(kml_file)
     finally:
         logger.removeHandler(recorder)
+    landings = landings_of(result[1]) if landings_of is not None else None
     if cache_path:
-        save_to_cache(cache_path, *result, recorder.warnings)
-    return result
+        save_to_cache(cache_path, *result, recorder.warnings, landings)
+    return result, landings
+
+
+def parse_kml_file(kml_file: str, cache_path: Path | None = None) -> ParseResult:
+    """Parse a KML file and store the result in the cache entry ``cache_path``.
+
+    See ``parse_and_cache``, which keeps the landings of the paths as well.
+    """
+    return parse_and_cache(kml_file, cache_path)[0]
 
 
 def _parse_kml(kml_file: str) -> ParseResult:

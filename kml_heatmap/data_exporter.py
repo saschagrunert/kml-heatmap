@@ -3,8 +3,8 @@
 Exports flight data to JSON files for the browser frontend:
 - <year>/data.json: per-year path info and segments
 - airports.json: deduplicated airport locations
-- metadata.json: years, year file sizes, the groundspeed range and the aircraft
-  models
+- metadata.json: years, year file sizes, the groundspeed range, the aircraft
+  models and the countries it carries a flag for (``available_flags``)
 
 The frontend computes every flight statistic from the year files, so the
 export keeps no statistics of its own beyond the groundspeed range.
@@ -33,7 +33,6 @@ from concurrent.futures import (
     FIRST_COMPLETED,
     Executor,
     Future,
-    ProcessPoolExecutor,
     wait,
 )
 from concurrent.futures.process import BrokenProcessPool
@@ -51,7 +50,7 @@ from .export_writers import (
     export_metadata,
     exported_airport_names,
 )
-from .landings import detect_landings
+from .landings import detect_landings, log_landings
 from .logger import logger
 from .path_content import (
     assign_path_ids,
@@ -72,7 +71,7 @@ from .terrain import (
     ground_profile_ft,
     sample_path_elevations,
 )
-from .workers import default_worker_count, init_worker
+from .workers import WorkerPool, default_worker_count
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -519,9 +518,9 @@ def _fail(
         executor.shutdown(wait=True, cancel_futures=True)
     for year, indices in job.parts_per_year.items():
         _remove_parts(job.output_dir, year, indices)
-    if isinstance(exc, OSError | KMLHeatmapError | BrokenProcessPool):
+    if isinstance(exc, OSError | KMLHeatmapError | BrokenProcessPool | MemoryError):
         # Expected failures (a full disk, a worker killed for running out
-        # of memory) are reported in one line
+        # of memory, or out of it) are reported in one line
         logger.debug("Error processing year %s", plan.year, exc_info=exc)
     else:
         logger.exception("  Error processing year %s", plan.year)
@@ -546,10 +545,10 @@ def _run_pooled(
     """Run the chunks in a process pool, a few of them queued at a time."""
     chunk_results: list[ChunkResult] = []
     workers = max(1, min(len(plans), max_workers))
-    with ProcessPoolExecutor(
-        max_workers=workers,
-        initializer=init_worker,
-        initargs=(logger.getEffectiveLevel(),),
+    # A pool that cannot start, or breaks, writes the chunks here, one after
+    # the other (see WorkerPool)
+    with WorkerPool(
+        workers, "writing the year files", (logger.getEffectiveLevel(),)
     ) as executor:
         # Submitting every chunk at once would pickle the whole dataset into
         # the executor's queue while the main process still holds it; a
@@ -571,7 +570,9 @@ def _run_pooled(
             for future in done:
                 plan = pending.pop(future)
                 try:
-                    result = future.result()
+                    result = executor.result(
+                        future, process_year_chunk, *job.arguments(plan)
+                    )
                 except Exception as exc:
                     raise _fail(job, plan, exc, executor) from exc
                 chunk_results.append(result)
@@ -628,6 +629,7 @@ def export_all_data(
     selection: ExportSelection | None = None,
     *,
     available_flags: Sequence[str],
+    landings: Sequence[FlightLandings | None] | None = None,
 ) -> ExportResult:
     """Write the data files into ``output_dir``.
 
@@ -643,8 +645,11 @@ def export_all_data(
     ``site_assets.available_country_flags``), which metadata.json lists.
     They have no default: without them the stats and Wrapped show country
     codes where the site has flags, and a caller that forgot them would not
-    notice.
+    notice. ``landings`` are those of every path, found with the parse (see
+    ``landings.path_landings``); without them they are found here.
     """
+    if landings is not None and len(landings) != len(all_path_groups):
+        raise ValueError("The landings have to be one per path")
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
 
@@ -670,14 +675,21 @@ def export_all_data(
         if terrain is not None and path_ids
         else None
     )
-    # Here as well: the export workers have no airport database
-    landings = (
-        detect_landings({index: all_path_groups[index] for index in path_ids})
-        if path_ids
-        else {}
-    )
+    # Here as well when the parse did not find them: the export workers have
+    # no airport database
+    if landings is None:
+        found = (
+            detect_landings({index: all_path_groups[index] for index in path_ids})
+            if path_ids
+            else {}
+        )
+    else:
+        found = {
+            index: path for index in path_ids if (path := landings[index]) is not None
+        }
+        log_landings(found)
     max_workers = default_worker_count()
-    plans = _plan_chunks(paths_by_year, path_ids, max_workers, elevations, landings)
+    plans = _plan_chunks(paths_by_year, path_ids, max_workers, elevations, found)
 
     logger.info(
         "\n  Processing %d year(s) in %d chunk(s)...", len(paths_by_year), len(plans)

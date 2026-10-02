@@ -16,7 +16,7 @@ import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING, Self
 
-from .exceptions import KMLHeatmapError
+from .exceptions import KMLHeatmapError, OutputRefusedError
 from .logger import logger
 from .validation import is_protected_directory
 
@@ -55,8 +55,8 @@ _CONTENT_MTIME_EPOCH = 1_000_000_000
 _CONTENT_MTIME_RANGE = 1 << 28
 
 
-def _refuse_symlink(path: Path) -> ValueError:
-    return ValueError(
+def _refuse_symlink(path: Path) -> OutputRefusedError:
+    return OutputRefusedError(
         f"Refusing to write through the symlink {path}; "
         "remove it or choose a different output directory"
     )
@@ -78,14 +78,16 @@ def _check_target(root: Path, relative: Path) -> None:
         if not child.exists():
             break
         if not child.is_dir():
-            raise ValueError(f"Refusing to write into {child}: not a directory")
+            raise OutputRefusedError(f"Refusing to write into {child}: not a directory")
         directory = child
     else:
         target = root / relative
         if target.is_symlink():
             raise _refuse_symlink(target)
         if target.exists() and not target.is_file():
-            raise ValueError(f"Refusing to replace {target}: not a regular file")
+            raise OutputRefusedError(
+                f"Refusing to replace {target}: not a regular file"
+            )
     if not os.access(directory, os.W_OK | os.X_OK):
         raise PermissionError(errno.EACCES, os.strerror(errno.EACCES), str(directory))
 
@@ -248,7 +250,9 @@ class SiteOutput:
             (data_dir, self.data_dir),
         ):
             if is_protected_directory(resolved):
-                raise ValueError(f"Refusing to use dangerous output directory: {given}")
+                raise OutputRefusedError(
+                    f"Refusing to use dangerous output directory: {given}"
+                )
         self.site_files = tuple(site_files)
         self.site_patterns = tuple(site_patterns)
         self.stable_mtimes = stable_mtimes

@@ -2,7 +2,7 @@
 
 import logging
 from math import floor
-from typing import Any, cast
+from typing import Any, ClassVar, cast
 
 from hypothesis import given
 from hypothesis import strategies as st
@@ -350,3 +350,45 @@ class TestTimeNear:
         near = recording.time_near(50.001, 8.0 + SPEED * 90.0)
         assert near is not None
         assert abs(near - 90.0) < 0.01
+
+
+def _wrapped(path):
+    """The fixes with their longitudes from -180 to 180, as a file has them."""
+    return [p._replace(lon=(p.lon + 180) % 360 - 180) for p in path]
+
+
+class TestAntimeridian:
+    # East from 179.5 at 16 degrees south, across the line after a while
+    START: ClassVar[dict[str, float]] = {"lat": -16.0, "lon": 179.5}
+
+    def test_a_crossing_has_the_cells_of_its_way(self):
+        path = _wrapped(_recording(1000.0, 3600.0, **self.START))
+        assert path[0].lon > 0 > path[-1].lon
+        recording = _Timed.of(path)
+        assert recording is not None
+        # Indexed as one short way, not as a line around the whole world
+        assert len(recording._index()) < 1000
+        assert recording.lons[-1] > 180
+
+    def test_two_recordings_of_a_crossing_count_once(self):
+        """Obfuscated, so lined up by where they were; one starts after the
+        line, the other before it."""
+        coarse = _wrapped(_recording(1000.0, 3600.0, **self.START))
+        fine = _wrapped(
+            [
+                p._replace(lat=-16.0001, lon=179.5 + SPEED * (p.ts - 1000.0))
+                for p in _recording(1800.0, 2800.0, step_s=3.0)
+            ]
+        )
+        assert fine[0].lon < 0
+        assert _drop([coarse, fine]) == {2025: [1]}
+
+    def test_another_way_across_is_another_flight(self):
+        out = _wrapped(_recording(1000.0, 3600.0, **self.START))
+        north = _wrapped(
+            [
+                p._replace(lat=-16.0 + SPEED * (p.ts - 1000.0), lon=179.9)
+                for p in _recording(1000.0, 3600.0)
+            ]
+        )
+        assert _drop([out, north]) == {2025: [0, 1]}

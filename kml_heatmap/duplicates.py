@@ -35,6 +35,7 @@ from typing import TYPE_CHECKING, NamedTuple
 from .date_tokens import near_jan_first
 from .geometry import KM_PER_DEGREE, haversine_distance
 from .logger import logger
+from .path_content import without_paths
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -151,7 +152,20 @@ class _Timed:
         if len(points) < 2 or points[-1][0] <= points[0][0]:
             return None
         times, lats, lons = (list(column) for column in zip(*points, strict=True))
-        return cls(times, lats, lons, _clock_known(times[0]))
+        return cls(times, lats, _unwrapped(lons), _clock_known(times[0]))
+
+    @property
+    def middle_lon(self) -> float:
+        return (self.box[2] + self.box[3]) / 2
+
+    def own_lon(self, lon: float) -> float:
+        """``lon`` on the copy of the world the recording is on.
+
+        Its longitudes run on past 180 where it crosses the antimeridian
+        (see ``_unwrapped``); a place of another recording is moved by
+        whole turns to the side of the line it is on.
+        """
+        return _beside(lon, self.middle_lon)
 
     @property
     def duration(self) -> float:
@@ -227,7 +241,7 @@ class _Timed:
         line between them. Of lines as close, the earliest counts.
         """
         cells = self._index()
-        east_of = lon * self.lon_scale
+        east_of = self.own_lon(lon) * self.lon_scale
         row, column = floor(lat / _CELL_DEGREES), floor(east_of / _CELL_DEGREES)
         nearest_time = None
         nearest_distance = _NEAR_DEGREES**2
@@ -322,6 +336,33 @@ def _index_lines(
     return cells
 
 
+def _unwrapped(lons: list[float]) -> list[float]:
+    """The longitudes of a recording, running on past 180 across the line.
+
+    A flight across the antimeridian would otherwise jump from 180 to -180
+    between two fixes: its line would cross the whole world, and the cells
+    it passes through (see ``_index_lines``) would be counted in hundreds
+    of thousands. A recording that does not cross keeps its longitudes as
+    they are, to the last bit.
+    """
+    unwrapped: list[float] = []
+    offset = 0.0
+    previous = lons[0]
+    for lon in lons:
+        if abs(lon - previous) > 180:
+            offset -= 360 * round((lon - previous) / 360)
+        previous = lon
+        unwrapped.append(lon + offset)
+    return unwrapped
+
+
+def _beside(lon: float, reference: float) -> float:
+    """``lon`` moved by whole turns to within 180 degrees of ``reference``."""
+    if abs(lon - reference) <= 180:
+        return lon
+    return lon - 360 * round((lon - reference) / 360)
+
+
 def _clock_known(start: float) -> bool:
     """Whether a recording that starts at ``start`` runs on the real clock.
 
@@ -379,12 +420,16 @@ def _clock_shifts(first: _Timed, second: _Timed) -> list[float]:
     may be found near (``reach``) tell before any of its lines is looked
     at. The cell of a place is the one ``time_near`` looks in.
     """
-    reach, lon_scale = second.reach(), second.lon_scale
-    near_places = [
-        (moment, lat, lon)
-        for moment, lat, lon in first.samples()
-        if (floor(lat / _CELL_DEGREES), floor(lon * lon_scale / _CELL_DEGREES)) in reach
-    ]
+    reach, lon_scale, middle = second.reach(), second.lon_scale, second.middle_lon
+    near_places: list[tuple[float, float, float]] = []
+    for moment, lat, place_lon in first.samples():
+        # On the second's copy of the world (see _Timed.own_lon)
+        lon = (
+            place_lon if abs(place_lon - middle) <= 180 else _beside(place_lon, middle)
+        )
+        cell = (floor(lat / _CELL_DEGREES), floor(lon * lon_scale / _CELL_DEGREES))
+        if cell in reach:
+            near_places.append((moment, lat, lon))
     if len(near_places) < _MIN_AGREEING:
         return []
     shifts: list[float] = []
@@ -421,7 +466,12 @@ def _one_flight(first: _Timed, second: _Timed) -> bool:
         return False
     south, north, west, east = first_moving.box
     box = second_moving.box
-    if box[0] > north or box[1] < south or box[2] > east or box[3] < west:
+    # The two boxes on one copy of the world, should either cross the line
+    turn = (
+        _beside(second_moving.middle_lon, first_moving.middle_lon)
+        - second_moving.middle_lon
+    )
+    if box[0] > north or box[1] < south or box[2] + turn > east or box[3] + turn < west:
         return False
     # The moments are spread over the shorter one, most of which the other
     # one shares if they are of one flight
@@ -502,14 +552,4 @@ def drop_overlapping_paths(
                 kept.remove(other)
             if index not in dropped:
                 kept.append(index)
-    if not dropped:
-        return dict(paths_by_year)
-    kept_by_year = {
-        year: [index for index in indices if index not in dropped]
-        for year, indices in paths_by_year.items()
-    }
-    return {
-        year: indices
-        for year, indices in kept_by_year.items()
-        if any(index in exported for index in indices)
-    }
+    return without_paths(paths_by_year, dropped, exported)

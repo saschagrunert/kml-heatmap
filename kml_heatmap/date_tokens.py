@@ -35,10 +35,10 @@ hours", "14:30:00.5Z", "14:30 +02:00", "1430+0200"). The common zones count,
 not every one there is. "14.30" alone stays: it is a decimal as often ("fuel
 14.30"), and only goes with a zone, the local time or the hours ("14.30Z",
 "14.30L", "14.30 hrs"). The obfuscator's check reports the times of day in
-file names (``find_time_tokens``) and the weekdays anywhere, and in names,
-descriptions and file names the parts of a date as well
-(``find_partial_date_tokens``): the year of the flight completes them. The
-obfuscator takes all of it out of names and descriptions
+names, the descriptions and the file names (``find_time_tokens``) and the
+weekdays anywhere, and in names, descriptions and file names the parts of a
+date as well (``find_partial_date_tokens``): the year of the flight completes
+them. The obfuscator takes all of it out of names and descriptions
 (``stray_date_spans``).
 
 Where a name could hold a date or something else, it loses the date: a
@@ -478,13 +478,15 @@ _COMPACT_TIME = re.compile(
 # of an ISO timestamp, whose T would be left behind otherwise, the "1430" of
 # 20260816-1430, 2026-08-16_1430 and 202608161430, the "14-30" of
 # 2026-08-16-14-30 and the "15.13" of "16.08.2026, 15.13", with fractions of
-# a second and a UTC offset. Only a date that ends in a digit has a time
-# right after it.
+# a second, the half of the day ("8/16/26 2:30 PM"; a lowercase "am" only
+# right after the time, since " am" is German for "at the") and a UTC
+# offset. Only a date that ends in a digit has a time right after it.
 _TIME_AFTER_DATE = re.compile(
     rf"(?:(?:[-_]|,?\s+|T|(?<=\d))(?:{_HHMM}|"
     r"(?:[01]?\d|2[0-3])(?P<tsep>[:.])[0-5]\d(?:(?P=tsep)[0-5]\d)?)|"
     r"(?P<dsep>[-_])(?:[01]\d|2[0-3])(?P=dsep)[0-5]\d(?:(?P=dsep)[0-5]\d)?)"
-    rf"(?:[.,]\d+)?{_HOURS}?(?:{_ZONE}|{_OFFSET})?"
+    r"(?:[.,]\d+)?(?:(?:\s*(?:[AP]\.?M\.?|[ap]\.m\.|pm)|am)(?![A-Za-z]))?"
+    rf"{_HOURS}?(?:{_ZONE}|{_OFFSET})?"
     r"(?![A-Za-z\d:])"
 )
 # A weekday gives the day of a flight away along with its year and the

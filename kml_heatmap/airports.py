@@ -327,7 +327,12 @@ class AirportDeduplicator:
         return lat_cells, min(lon_cells, max_lon_cells)
 
     def _find_nearby_airport(self, lat: float, lon: float) -> int | None:
-        """Find airport within threshold using spatial grid."""
+        """The nearest airport within the threshold, from the spatial grid.
+
+        The nearest rather than the first found: two fields can lie closer
+        to each other than the threshold, and an end at one of them belongs
+        to that one.
+        """
         grid_key = self._get_grid_key(lat, lon)
         lat_cells, lon_cells = self._search_cells(lat)
         # Wrapped around the antimeridian; near a pole the search can cover
@@ -336,15 +341,17 @@ class AirportDeduplicator:
             (grid_key[1] + dlon) % self._lon_cell_count
             for dlon in range(-lon_cells, lon_cells + 1)
         )
+        nearest: int | None = None
+        nearest_km = AIRPORT_DISTANCE_THRESHOLD_KM
         for dlat in range(-lat_cells, lat_cells + 1):
             for lon_key in lon_keys:
                 neighbor_key = (grid_key[0] + dlat, lon_key)
                 for apt_idx in self.spatial_grid.get(neighbor_key, ()):
                     airport = self.unique_airports[apt_idx]
                     dist = haversine_distance(lat, lon, airport.lat, airport.lon)
-                    if dist < AIRPORT_DISTANCE_THRESHOLD_KM:
-                        return apt_idx
-        return None
+                    if dist < nearest_km:
+                        nearest, nearest_km = apt_idx, dist
+        return nearest
 
     def _add_to_grid(self, lat: float, lon: float, airport_idx: int) -> None:
         """Add airport to spatial grid."""

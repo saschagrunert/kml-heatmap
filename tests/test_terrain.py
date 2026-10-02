@@ -23,7 +23,11 @@ from unittest.mock import MagicMock
 
 import pytest
 
+import kml_heatmap.png as png_module
 import kml_heatmap.terrain as terrain_module
+import kml_heatmap.terrain_fetch as fetch_module
+import kml_heatmap.terrain_pixels as pixels_module
+import kml_heatmap.workers as workers_module
 from kml_heatmap.constants import KM_TO_NAUTICAL_MILES, METERS_TO_FEET
 from kml_heatmap.exceptions import TerrainUnavailableError
 from kml_heatmap.geometry import METRES_PER_DEGREE
@@ -258,7 +262,7 @@ class TestDecodePng:
             decode_png(data)
 
     def test_refuses_a_header_too_large_for_a_tile(self):
-        side = terrain_module.MAX_PNG_SIDE + 1
+        side = png_module.MAX_PNG_SIDE + 1
         data = encode_png(2, 2, bytes(12), header=(side, 1, 8, 2, 0, 0, 0))
 
         with pytest.raises(PngError, match="too large"):
@@ -318,7 +322,7 @@ class TestDecodePng:
 def decode_tile_pixels(data, indices):
     """The elevations of the pixels at ``indices`` of a Terrarium tile."""
     return list(
-        terrain_module._elevations_at(terrain_module._decode_planes(data), indices)
+        pixels_module._elevations_at(pixels_module._decode_planes(data), indices)
     )
 
 
@@ -330,7 +334,7 @@ class TestTerrarium:
             for plane, value in enumerate(rgb):
                 planes[plane * pixels + index] = value
 
-        assert list(terrain_module._elevations_at(bytes(planes), [0, 1, 2])) == [
+        assert list(pixels_module._elevations_at(bytes(planes), [0, 1, 2])) == [
             0,
             300.5,
             -1,
@@ -571,7 +575,7 @@ def connections(monkeypatch):
     FakeConnection.connections = 0
     FakeConnection.closed = 0
     FakeConnection.requests = []
-    monkeypatch.setattr(terrain_module, "HTTPSConnection", FakeConnection)
+    monkeypatch.setattr(fetch_module, "HTTPSConnection", FakeConnection)
     return FakeConnection
 
 
@@ -594,7 +598,7 @@ def no_retry_pauses(monkeypatch):
     the whole backoff, seven seconds of it; the tests of the pauses record
     them with a patch of their own.
     """
-    monkeypatch.setattr("kml_heatmap.terrain.time.sleep", lambda _: None)
+    monkeypatch.setattr("kml_heatmap.terrain_fetch.time.sleep", lambda _: None)
 
 
 @pytest.fixture(autouse=True)
@@ -620,7 +624,7 @@ class TestHttpsProxy:
     @pytest.fixture
     def tunnelled(self, monkeypatch):
         monkeypatch.setattr(self.Tunnelled, "connections", 0)
-        monkeypatch.setattr(terrain_module, "HTTPSConnection", self.Tunnelled)
+        monkeypatch.setattr(fetch_module, "HTTPSConnection", self.Tunnelled)
         return self.Tunnelled
 
     def test_a_proxy_tunnels_to_the_host(
@@ -710,7 +714,7 @@ class TestTerrariumTiles:
         self, tmp_path, monkeypatch, connections
     ):
         """A handshake per tile would take longer than the tiles themselves."""
-        monkeypatch.setattr(terrain_module, "FETCH_WORKERS", 1)
+        monkeypatch.setattr(fetch_module, "FETCH_WORKERS", 1)
         opened = []
         original = connections.__init__
 
@@ -729,7 +733,7 @@ class TestTerrariumTiles:
         assert opened == [
             (
                 "s3.amazonaws.com",
-                terrain_module.FETCH_TIMEOUT_SECONDS,
+                fetch_module.FETCH_TIMEOUT_SECONDS,
                 tiles._ssl_context,
             )
         ]
@@ -742,14 +746,14 @@ class TestTerrariumTiles:
                 seen["headers"] = headers
                 super().request(method, path, headers)
 
-        monkeypatch.setattr(terrain_module, "HTTPSConnection", Recording)
+        monkeypatch.setattr(fetch_module, "HTTPSConnection", Recording)
         TerrariumTiles(tmp_path).pixels({TileKey(10, 1, 1): [0]})
         assert seen["headers"]["User-Agent"].startswith("kml-heatmap/")
 
     def test_pixels_that_cannot_be_kept_are_decoded_again(self, tmp_path, caplog):
         """Keeping them is a saving for the next build, never a failure."""
         with caplog.at_level(logging.DEBUG, logger="kml_heatmap"):
-            terrain_module._keep_pixel_planes(
+            pixels_module._keep_pixel_planes(
                 tmp_path / "missing" / "10-546-341.png", b"png", b"planes"
             )
         assert "Cannot keep the pixels of 10-546-341.png" in caplog.text
@@ -761,7 +765,7 @@ class TestTerrariumTiles:
                 return FakeResponse(403, b"Forbidden")
             return FakeResponse(200, _tile_png(10.0))
 
-        monkeypatch.setattr(terrain_module, "HTTPSConnection", _answers(answer))
+        monkeypatch.setattr(fetch_module, "HTTPSConnection", _answers(answer))
         wanted = {TileKey(10, 1, 1): [0], TileKey(10, 2, 1): [0]}
 
         answered = TerrariumTiles(tmp_path).pixels(wanted)
@@ -784,16 +788,16 @@ class TestTerrariumTiles:
             raise error
 
         connections.answer = staticmethod(answer)
-        monkeypatch.setattr(terrain_module, "FETCH_WORKERS", 1)
-        monkeypatch.setattr(terrain_module, "FETCH_RETRY_SECONDS", 0.0)
+        monkeypatch.setattr(fetch_module, "FETCH_WORKERS", 1)
+        monkeypatch.setattr(fetch_module, "FETCH_RETRY_SECONDS", 0.0)
         wanted = {TileKey(10, x, 1): [0] for x in range(5)}
 
         assert TerrariumTiles(tmp_path).pixels(wanted) == {}
         # Every attempt of the first tile, and none of the others
-        assert len(connections.requests) == terrain_module.FETCH_ATTEMPTS
+        assert len(connections.requests) == fetch_module.FETCH_ATTEMPTS
         # A fresh connection for every attempt: the old one is in no known
         # state after a failure on the way
-        assert connections.connections == terrain_module.FETCH_ATTEMPTS
+        assert connections.connections == fetch_module.FETCH_ATTEMPTS
 
     def test_a_server_error_on_every_attempt_does_not_give_the_host_up(
         self, tmp_path, monkeypatch, connections
@@ -808,27 +812,27 @@ class TestTerrariumTiles:
             return FakeResponse(200, _tile_png(10.0))
 
         connections.answer = staticmethod(answer)
-        monkeypatch.setattr(terrain_module, "FETCH_WORKERS", 1)
+        monkeypatch.setattr(fetch_module, "FETCH_WORKERS", 1)
         wanted = {TileKey(10, x, 1): [0] for x in range(3)}
 
         answered = TerrariumTiles(tmp_path).pixels(wanted)
 
         assert set(answered) == {TileKey(10, 1, 1), TileKey(10, 2, 1)}
-        assert len(seen) == terrain_module.FETCH_ATTEMPTS + 2
+        assert len(seen) == fetch_module.FETCH_ATTEMPTS + 2
 
     def test_a_host_that_answers_every_tile_with_a_server_error_is_given_up(
         self, tmp_path, monkeypatch, connections
     ):
         """Every tile's attempts and pauses would take minutes for a run."""
         connections.answer = staticmethod(lambda path: FakeResponse(503, b"later"))
-        monkeypatch.setattr(terrain_module, "FETCH_WORKERS", 1)
+        monkeypatch.setattr(fetch_module, "FETCH_WORKERS", 1)
         wanted = {TileKey(10, x, 1): [0] for x in range(10)}
         tiles = TerrariumTiles(tmp_path)
 
         assert tiles.pixels(wanted) == {}
-        given_up_after = terrain_module.SERVER_ERROR_TILES_TO_GIVE_UP
+        given_up_after = fetch_module.SERVER_ERROR_TILES_TO_GIVE_UP
         assert len(connections.requests) == (
-            given_up_after * terrain_module.FETCH_ATTEMPTS
+            given_up_after * fetch_module.FETCH_ATTEMPTS
         )
         assert tiles._offline.is_set()
 
@@ -845,7 +849,7 @@ class TestTerrariumTiles:
             return FakeResponse(200, _tile_png(10.0))
 
         connections.answer = staticmethod(answer)
-        monkeypatch.setattr(terrain_module, "FETCH_WORKERS", 1)
+        monkeypatch.setattr(fetch_module, "FETCH_WORKERS", 1)
         wanted = {TileKey(10, x, 1): [0] for x in range(10)}
         tiles = TerrariumTiles(tmp_path)
 
@@ -876,14 +880,14 @@ class TestTerrariumTiles:
             return FakeResponse(200, _tile_png(10.0))
 
         pauses: list[float] = []
-        monkeypatch.setattr(terrain_module, "HTTPSConnection", _answers(answer))
-        monkeypatch.setattr("kml_heatmap.terrain.time.sleep", pauses.append)
+        monkeypatch.setattr(fetch_module, "HTTPSConnection", _answers(answer))
+        monkeypatch.setattr("kml_heatmap.terrain_fetch.time.sleep", pauses.append)
         wanted = {TileKey(10, x, 1): [0] for x in range(3)}
 
         answered = TerrariumTiles(tmp_path).pixels(wanted)
 
         assert answered == {tile: array("d", [10.0]) for tile in wanted}
-        assert pauses == [terrain_module.FETCH_RETRY_SECONDS] * 3
+        assert pauses == [fetch_module.FETCH_RETRY_SECONDS] * 3
 
     def test_the_pause_grows_with_every_attempt(self, tmp_path, monkeypatch):
         pauses: list[float] = []
@@ -891,13 +895,13 @@ class TestTerrariumTiles:
         def answer(path):
             raise TimeoutError("slow")
 
-        monkeypatch.setattr(terrain_module, "HTTPSConnection", _answers(answer))
-        monkeypatch.setattr("kml_heatmap.terrain.time.sleep", pauses.append)
+        monkeypatch.setattr(fetch_module, "HTTPSConnection", _answers(answer))
+        monkeypatch.setattr("kml_heatmap.terrain_fetch.time.sleep", pauses.append)
 
         assert TerrariumTiles(tmp_path).pixels({TileKey(10, 1, 1): [0]}) == {}
         assert pauses == [
-            terrain_module.FETCH_RETRY_SECONDS * 2**attempt
-            for attempt in range(terrain_module.FETCH_ATTEMPTS - 1)
+            fetch_module.FETCH_RETRY_SECONDS * 2**attempt
+            for attempt in range(fetch_module.FETCH_ATTEMPTS - 1)
         ]
 
     def test_a_tile_the_host_refuses_is_not_asked_again(self, tmp_path, connections):
@@ -961,7 +965,7 @@ class TestTerrariumTiles:
             return FakeResponse(200, _tile_png(10.0))
 
         connections.answer = staticmethod(answer)
-        monkeypatch.setattr(terrain_module, "FETCH_WORKERS", 1)
+        monkeypatch.setattr(fetch_module, "FETCH_WORKERS", 1)
         wanted = {TileKey(10, x, 1): [0] for x in range(3)}
         tiles = TerrariumTiles(tmp_path)
 
@@ -983,7 +987,7 @@ class TestTerrariumTiles:
     def test_refuses_a_tile_url_that_is_not_https(
         self, tmp_path, monkeypatch, connections
     ):
-        monkeypatch.setattr(terrain_module, "TILE_URL", "http://host/{z}/{x}/{y}.png")
+        monkeypatch.setattr(fetch_module, "TILE_URL", "http://host/{z}/{x}/{y}.png")
 
         assert TerrariumTiles(tmp_path).pixels({TileKey(10, 1, 1): [0]}) == {}
         assert connections.requests == []
@@ -1010,7 +1014,7 @@ class TestTerrariumTiles:
         assert list(tmp_path.iterdir()) == []
 
     def test_refuses_an_oversized_body(self, tmp_path, monkeypatch, connections):
-        monkeypatch.setattr(terrain_module, "MAX_TILE_BYTES", 10)
+        monkeypatch.setattr(fetch_module, "MAX_TILE_BYTES", 10)
 
         assert TerrariumTiles(tmp_path).pixels({TileKey(10, 1, 1): [0]}) == {}
 
@@ -1019,8 +1023,8 @@ class TestTerrariumTiles:
     ):
         """The rest of a body cut short would answer the next request."""
         normal = _tile_png(10.0)
-        monkeypatch.setattr(terrain_module, "MAX_TILE_BYTES", len(normal) + 10)
-        monkeypatch.setattr(terrain_module, "FETCH_WORKERS", 1)
+        monkeypatch.setattr(fetch_module, "MAX_TILE_BYTES", len(normal) + 10)
+        monkeypatch.setattr(fetch_module, "FETCH_WORKERS", 1)
 
         class Pipelined(FakeConnection):
             # Like http.client: an answer not read to the end blocks the next
@@ -1038,7 +1042,7 @@ class TestTerrariumTiles:
                     return FakeResponse(200, b"x" * (len(normal) + 100))
                 return FakeResponse(200, normal)
 
-        monkeypatch.setattr(terrain_module, "HTTPSConnection", Pipelined)
+        monkeypatch.setattr(fetch_module, "HTTPSConnection", Pipelined)
         tiles = TerrariumTiles(tmp_path)
 
         answered = tiles.pixels({TileKey(10, 1, 1): [0], TileKey(10, 2, 1): [0]})
@@ -1075,15 +1079,15 @@ class TestTerrariumTiles:
         png = _tile_png(123.0)
         tiles.path(tile).write_bytes(png)
         kept = tmp_path / "10-1-1.pixels"
-        planes = terrain_module._decode_planes(png)
+        planes = pixels_module._decode_planes(png)
         kept.write_bytes(
-            terrain_module._PIXELS_HEADER.pack(b"KHTP", 1, zlib.crc32(png))
+            pixels_module._PIXELS_HEADER.pack(b"KHTP", 1, zlib.crc32(png))
             + zlib.compress(planes, 6)
         )
 
         assert tiles.pixels({tile: [0]}) == {tile: array("d", [123.0])}
-        header = terrain_module._PIXELS_HEADER.unpack_from(kept.read_bytes())
-        assert header == (b"KHTP", terrain_module._PIXELS_VERSION, zlib.crc32(png))
+        header = pixels_module._PIXELS_HEADER.unpack_from(kept.read_bytes())
+        assert header == (b"KHTP", pixels_module._PIXELS_VERSION, zlib.crc32(png))
 
     def test_the_pixels_of_a_decoded_tile_are_kept(self, tmp_path, monkeypatch):
         """The next build reads them instead of decoding the PNG again."""
@@ -1094,7 +1098,7 @@ class TestTerrariumTiles:
         assert (tmp_path / "10-1-1.pixels").is_file()
 
         decode = MagicMock(side_effect=AssertionError("decoded again"))
-        monkeypatch.setattr(terrain_module, "decode_png", decode)
+        monkeypatch.setattr(pixels_module, "decode_png", decode)
         second = TerrariumTiles(tmp_path).pixels({tile: [0, 5, 65535]})
 
         assert second == first == {tile: array("d", [0.0, 17.5, 892.5 - 255])}
@@ -1141,7 +1145,7 @@ class TestTerrariumTiles:
         fresh = tmp_path / ".10-2-1.png.a8b7.tmp"
         for path in (stale, stale_pixels, fresh):
             path.write_bytes(b"half")
-        day_ago = time.time() - terrain_module.STALE_TEMP_SECONDS - 60
+        day_ago = time.time() - fetch_module.STALE_TEMP_SECONDS - 60
         for path in (stale, stale_pixels):
             os.utime(path, (day_ago, day_ago))
 
@@ -1157,7 +1161,7 @@ class TestTerrariumTiles:
     def test_decodes_many_tiles_in_a_pool(self, tmp_path):
         tiles = TerrariumTiles(tmp_path)
         wanted = {}
-        for x in range(terrain_module.DECODE_POOL_MIN_TILES):
+        for x in range(fetch_module.DECODE_POOL_MIN_TILES):
             tile = TileKey(10, x, 1)
             tiles.path(tile).write_bytes(_tile_png(float(x)))
             wanted[tile] = [0, 1]
@@ -1173,19 +1177,17 @@ class TestTerrariumTiles:
         """After an upgrade every tile is decoded again: not one by one."""
         tiles = TerrariumTiles(tmp_path)
         wanted = {}
-        for x in range(terrain_module.DECODE_POOL_MIN_TILES):
+        for x in range(fetch_module.DECODE_POOL_MIN_TILES):
             tile = TileKey(10, x, 1)
             png = _tile_png(float(x))
             tiles.path(tile).write_bytes(png)
             wanted[tile] = [0]
-            planes = terrain_module._decode_planes(png)
+            planes = pixels_module._decode_planes(png)
             if version is None:
-                terrain_module._keep_pixel_planes(tiles.path(tile), png, planes)
+                pixels_module._keep_pixel_planes(tiles.path(tile), png, planes)
             else:
                 (tmp_path / f"10-{x}-1.pixels").write_bytes(
-                    terrain_module._PIXELS_HEADER.pack(
-                        b"KHTP", version, zlib.crc32(png)
-                    )
+                    pixels_module._PIXELS_HEADER.pack(b"KHTP", version, zlib.crc32(png))
                     + zlib.compress(planes, 6)
                 )
 
@@ -1198,13 +1200,13 @@ class TestTerrariumTiles:
             def __enter__(self):
                 return self
 
-            def __exit__(self, *exc):
-                return False
-
-            def map(self, fn, *iterables, chunksize=1):
+            def map(self, fn, *iterables, chunksize=1, **_kwargs):
                 return map(fn, *iterables, strict=True)
 
-        monkeypatch.setattr(terrain_module, "ProcessPoolExecutor", InlinePool)
+            def shutdown(self, *_args, **_kwargs):
+                pass
+
+        monkeypatch.setattr(workers_module, "ProcessPoolExecutor", InlinePool)
 
         answered = tiles.pixels(wanted)
 
@@ -1216,7 +1218,7 @@ class TestTerrariumTiles:
         """A point in each of as many cached tiles as start the pool."""
         points = [
             TrackPoint(50.0, 8.0 + x * 0.5, 0.0)
-            for x in range(terrain_module.DECODE_POOL_MIN_TILES)
+            for x in range(fetch_module.DECODE_POOL_MIN_TILES)
         ]
         for point in points:
             gx, gy = _global_pixel(point.lat, point.lon)
@@ -1230,7 +1232,7 @@ class TestTerrariumTiles:
         tiles = TerrariumTiles(tmp_path)
         points = self._pooled_points(tiles)
         pool = MagicMock(side_effect=OSError("no semaphores"))
-        monkeypatch.setattr(terrain_module, "ProcessPoolExecutor", pool)
+        monkeypatch.setattr(workers_module, "ProcessPoolExecutor", pool)
 
         monkeypatch.setattr(logger, "getEffectiveLevel", lambda: logging.DEBUG)
 
@@ -1240,17 +1242,31 @@ class TestTerrariumTiles:
         assert kwargs["initializer"] is init_worker
         assert kwargs["initargs"] == (logging.DEBUG,)
 
+    @staticmethod
+    def _failing_pool(at_start=None, in_map=None):
+        """A process pool that cannot start, or whose workers fail."""
+        if at_start is not None:
+            return MagicMock(side_effect=at_start)
+        pool = MagicMock()
+        pool.return_value.map.side_effect = in_map
+        return pool
+
     @pytest.mark.parametrize(
-        "failure",
-        [BrokenProcessPool("a worker died"), OSError("no semaphores")],
+        ("at_start", "in_map"),
+        [
+            (None, BrokenProcessPool("a worker died")),
+            # A worker out of memory raises it to the parent as it is
+            (None, MemoryError()),
+            (OSError("no semaphores"), None),
+        ],
     )
     def test_a_decoding_pool_that_dies_decodes_the_tiles_here(
-        self, tmp_path, monkeypatch, caplog, failure
+        self, tmp_path, monkeypatch, caplog, at_start, in_map
     ):
         tiles = TerrariumTiles(tmp_path)
         points = self._pooled_points(tiles)
-        pool = MagicMock(side_effect=failure)
-        monkeypatch.setattr(terrain_module, "ProcessPoolExecutor", pool)
+        pool = self._failing_pool(at_start, in_map)
+        monkeypatch.setattr(workers_module, "ProcessPoolExecutor", pool)
 
         with caplog.at_level(logging.WARNING, logger="kml_heatmap"):
             by_path = sample_path_elevations({1: points}, tiles)
@@ -1259,7 +1275,9 @@ class TestTerrariumTiles:
         pool.assert_called_once()
         warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
         assert len(warnings) == 1
-        assert "decoding the tiles in this process" in warnings[0].getMessage()
+        message = warnings[0].getMessage()
+        assert "decoding the elevation tiles" in message
+        assert "going on in this process" in message
 
     def test_tiles_that_cannot_be_decoded_here_either_leave_the_ground_out(
         self, tmp_path, monkeypatch, caplog
@@ -1267,12 +1285,12 @@ class TestTerrariumTiles:
         tiles = TerrariumTiles(tmp_path)
         points = self._pooled_points(tiles)
         monkeypatch.setattr(
-            terrain_module,
+            workers_module,
             "ProcessPoolExecutor",
-            MagicMock(side_effect=BrokenProcessPool("a worker died")),
+            self._failing_pool(in_map=BrokenProcessPool("a worker died")),
         )
         monkeypatch.setattr(
-            terrain_module, "_decode_cached_tile", MagicMock(side_effect=MemoryError)
+            fetch_module, "_decode_cached_tile", MagicMock(side_effect=MemoryError)
         )
 
         with caplog.at_level(logging.WARNING, logger="kml_heatmap"):
@@ -1576,4 +1594,4 @@ def test_the_frontend_draws_the_relief_from_the_same_tiles():
     source = (FRONTEND / "ui" / "terrain.ts").read_text(encoding="utf-8")
     match = re.search(r'\bconst TERRAIN_TILE_URL =\s*"([^"]+)";', source)
     assert match, "TERRAIN_TILE_URL not found in ui/terrain.ts"
-    assert match.group(1) == terrain_module.TILE_URL
+    assert match.group(1) == fetch_module.TILE_URL

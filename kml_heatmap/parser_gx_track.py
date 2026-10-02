@@ -285,8 +285,10 @@ def process_gx_track(
             placemark_meta = metadata_cache[key]
 
         path, whens = parse_gx_tracks(flight, kml_file, coordinates)
-        if not path:
-            logger.debug("gx:Track without usable coordinates in %s", filename)
+        # One point is no path, as for a LineString (see parser_standard);
+        # it still counts for the heat
+        if len(path) < 2:
+            logger.debug("gx:Track without a usable path in %s", filename)
             continue
 
         track_meta = placemark_meta.copy()
