@@ -1938,6 +1938,30 @@ describe("ReplayRenderer", () => {
         expect(map.easeTo).not.toHaveBeenCalled();
       });
 
+      it("puts the airplane where it is once a frame, though the camera moves the map", () => {
+        flyEast();
+        // MapLibre fires a `move` from within every jump
+        const jump = map.jumpTo.getMockImplementation()!;
+        map.jumpTo.mockImplementation((options, eventData) => {
+          const moved = jump(options, eventData);
+          map.emit("move");
+          return moved;
+        });
+        play(100, 100);
+        const marker = mockReplayManager.state.airplaneMarker!;
+        const placed = vi.spyOn(marker, "setLatLng");
+        const lifted = vi.spyOn(marker, "setLift");
+        const jumps = map.jumpTo.mock.calls.length;
+
+        play(5, 100);
+
+        expect(map.jumpTo.mock.calls.length).toBeGreaterThan(jumps);
+        // Once by the frame, never back where the frame before left it,
+        // and lifted and turned once, after the camera
+        expect(placed).toHaveBeenCalledTimes(5);
+        expect(lifted).toHaveBeenCalledTimes(5);
+      });
+
       it("speeds up and slows down without jumps", () => {
         flyEast();
         const seen = play(90, 100);

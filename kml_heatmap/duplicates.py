@@ -125,10 +125,13 @@ class _Timed:
     box: tuple[float, float, float, float] = field(init=False)
     # Made when first needed: two recordings on real clocks are compared
     # without them. The lines between the fixes that pass through each cell
-    # (see _index_lines), and the part of the recording ``moving`` returns.
+    # (see _index_lines), the cells of ``reach``, the part of the
+    # recording ``moving`` returns, and the moments of ``samples``.
     _cells: dict[tuple[int, int], list[_Line]] | None = None
+    _reach: set[tuple[int, int]] | None = None
     _moving: _Timed | None = None
     _moving_found: bool = False
+    _samples: list[tuple[float, float, float]] | None = None
 
     def __post_init__(self) -> None:
         south, north = min(self.lats), max(self.lats)
@@ -165,6 +168,19 @@ class _Timed:
             self.lats[before] + (self.lats[after] - self.lats[before]) * share,
             self.lons[before] + (self.lons[after] - self.lons[before]) * share,
         )
+
+    def samples(self) -> list[tuple[float, float, float]]:
+        """The moments ``_clock_shifts`` compares at, and where it was then.
+
+        ``_MOMENTS`` of them, spread evenly over the recording. It is
+        compared with every other recording of its year at the same ones.
+        """
+        if self._samples is None:
+            self._samples = []
+            for step in range(_MOMENTS):
+                moment = self.times[0] + self.duration * (step + 0.5) / _MOMENTS
+                self._samples.append((moment, *self.at(moment)))
+        return self._samples
 
     def moving(self) -> _Timed | None:
         """The recording from its takeoff run to its last landing.
@@ -210,9 +226,7 @@ class _Timed:
         Between two fixes, the time is that of the closest point of the
         line between them. Of lines as close, the earliest counts.
         """
-        if self._cells is None:
-            self._cells = _index_lines(self.times, self.lats, self.lons, self.lon_scale)
-        cells = self._cells
+        cells = self._index()
         east_of = lon * self.lon_scale
         row, column = floor(lat / _CELL_DEGREES), floor(east_of / _CELL_DEGREES)
         nearest_time = None
@@ -237,6 +251,27 @@ class _Timed:
                         nearest_distance, nearest_start = distance, start
                         nearest_time = time + share * span
         return nearest_time
+
+    def reach(self) -> set[tuple[int, int]]:
+        """The cells of the places ``time_near`` may find the recording near.
+
+        Those a line of the recording passes through, and their eight
+        neighbours: of a place in any other cell, ``time_near`` surely
+        returns None. A set lookup, where it looks at every line nearby.
+        """
+        if self._reach is None:
+            self._reach = {
+                (row + rows, column + columns)
+                for row, column in self._index()
+                for rows in (-1, 0, 1)
+                for columns in (-1, 0, 1)
+            }
+        return self._reach
+
+    def _index(self) -> dict[tuple[int, int], list[_Line]]:
+        if self._cells is None:
+            self._cells = _index_lines(self.times, self.lats, self.lons, self.lon_scale)
+        return self._cells
 
 
 def _index_lines(
@@ -338,11 +373,23 @@ def _clock_shifts(first: _Timed, second: _Timed) -> list[float]:
     A shift that at least ``_MIN_AGREEING`` of them agree on is returned as
     the middle one of them, the one agreed on most first. Two recordings of
     one flight agree on their shift wherever the aircraft moved.
+
+    Most two flights of a year are not near each other at enough of those
+    moments for a shift to be agreed on, which the cells the second one
+    may be found near (``reach``) tell before any of its lines is looked
+    at. The cell of a place is the one ``time_near`` looks in.
     """
+    reach, lon_scale = second.reach(), second.lon_scale
+    near_places = [
+        (moment, lat, lon)
+        for moment, lat, lon in first.samples()
+        if (floor(lat / _CELL_DEGREES), floor(lon * lon_scale / _CELL_DEGREES)) in reach
+    ]
+    if len(near_places) < _MIN_AGREEING:
+        return []
     shifts: list[float] = []
-    for step in range(_MOMENTS):
-        moment = first.times[0] + first.duration * (step + 0.5) / _MOMENTS
-        near = second.time_near(*first.at(moment))
+    for moment, lat, lon in near_places:
+        near = second.time_near(lat, lon)
         if near is not None:
             shifts.append(near - moment)
     shifts.sort()

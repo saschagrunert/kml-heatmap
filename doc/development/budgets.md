@@ -62,8 +62,12 @@ The policy is written above the budgets in `build.js`:
 The comment above each budget lists every raise and lowering with the sizes
 before and after (the analysis of 2026-09-30 raised the feature and Wrapped
 budgets for the exports of the first visit that moved into them, and lowered
-MapLibre's for the styles of controls the app never adds), and `git log -L` on a
-budget line lists the commits that changed it and why. Where a change was sized
-against the budgets, its page says so as well, for example
+MapLibre's for the styles of controls the app never adds; the one of 2026-10-02
+moved the ribbons of the 3D view to the feature bundle: the app's budget was
+lowered by 6.75 KB raw and 2.5 KB gzipped, and the feature bundle's raised by
+6.75 KB raw and 3.25 KB gzipped, part of it for the speed fixes of that
+analysis), and `git log -L` on a budget line lists the commits that changed it
+and why. Where a change was sized against the budgets, its page says so as well,
+for example
 [the heat sources in the year worker](heat.md#the-heat-sources-and-the-year-worker)
 and [the readout of the heat cloud](heat.md#no-readout-on-the-flat-map).

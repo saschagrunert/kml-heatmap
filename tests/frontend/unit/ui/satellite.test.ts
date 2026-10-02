@@ -38,6 +38,7 @@ const featureBundle = vi.hoisted(() => ({
   followSatellite: vi.fn(),
 }));
 vi.mock("../../../../kml_heatmap/frontend/services/featureLoader", () => ({
+  loadedFeatures: () => null,
   loadFeatures: vi.fn(() =>
     Promise.resolve(
       featureBundle.available

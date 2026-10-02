@@ -96,6 +96,8 @@ const importWrapped: Importer<WrappedModule> = (failedImports) =>
 /** One lazy bundle: its loader and what tests use to start it over */
 interface LazyBundle<T> {
   load(): Promise<T | null>;
+  /** The bundle, if it has arrived, without asking for it */
+  loaded(): T | null;
   reset(importer: Importer<T>): void;
 }
 
@@ -149,6 +151,7 @@ function lazyBundle<T extends { BUILD?: string | undefined }>(
         });
       return pending;
     },
+    loaded: () => loaded,
     reset(next) {
       pending = null;
       loaded = null;
@@ -165,6 +168,14 @@ const wrapped = lazyBundle("Wrapped", WRAPPED_CSS_URL, importWrapped);
 /** The feature bundle's exports, or null when it could not be loaded */
 export function loadFeatures(): Promise<FeatureModule | null> {
   return features.load();
+}
+
+/**
+ * The feature bundle's exports if it has arrived, for whatever wanted it,
+ * or null: what lets go of what the bundle holds need not fetch it
+ */
+export function loadedFeatures(): FeatureModule | null {
+  return features.loaded();
 }
 
 /** The Wrapped bundle's exports, or null when it could not be loaded */

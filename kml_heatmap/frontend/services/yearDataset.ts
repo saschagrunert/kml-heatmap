@@ -202,36 +202,18 @@ export async function buildDatasetInSlices(
 export function combineYearData(
   yearDatasets: (KMLDataset | null | undefined)[],
 ): KMLDataset {
-  let segmentCount = 0;
-  let pathInfoCount = 0;
-  let originalPoints = 0;
-
-  for (const data of yearDatasets) {
-    if (!data) continue;
-    segmentCount += data.path_segments.length;
-    pathInfoCount += data.path_info.length;
-    originalPoints += data.original_points || 0;
-  }
-
-  const combined: KMLDataset = {
-    path_segments: new Array<PathSegment>(segmentCount),
-    path_info: new Array<KMLDataset["path_info"][number]>(pathInfoCount),
-    original_points: originalPoints,
+  const years = yearDatasets.filter((data): data is KMLDataset => !!data);
+  // Concatenated, not filled into new Array(n): see addRows
+  return {
+    path_segments: ([] as PathSegment[]).concat(
+      ...years.map((data) => data.path_segments),
+    ),
+    path_info: ([] as KMLDataset["path_info"]).concat(
+      ...years.map((data) => data.path_info),
+    ),
+    original_points: years.reduce(
+      (sum, data) => sum + (data.original_points || 0),
+      0,
+    ),
   };
-
-  let si = 0;
-  let pi = 0;
-  for (const data of yearDatasets) {
-    if (!data) continue;
-    const segments = data.path_segments;
-    for (let i = 0; i < segments.length; i++) {
-      combined.path_segments[si++] = segments[i]!;
-    }
-    const infos = data.path_info;
-    for (let i = 0; i < infos.length; i++) {
-      combined.path_info[pi++] = infos[i]!;
-    }
-  }
-
-  return combined;
 }

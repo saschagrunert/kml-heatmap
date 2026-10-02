@@ -6,11 +6,12 @@
  * used (see services/featureLoader.ts). Everything it shares with the app
  * lives in shared.bundle.js, so this bundle adds only replay itself (of one
  * flight and of all of them at once), the relief, the heat cloud and the
- * ribbons of a selection of the 3D view, which the layer manager fetches as
- * they are first wanted, the satellite imagery, which its switch fetches,
- * the profile of a single selected flight, which the app fetches as one
- * is first selected, the cross-section, which its control fetches, and the
- * hotspot tour with the camera moves it shares with Wrapped's intro.
+ * ribbons of the 3D view, of every flight and of a selection, which the
+ * layer manager fetches as they are first wanted, the satellite imagery,
+ * which its switch fetches, the profile of a single selected flight, which
+ * the app fetches as one is first selected, the cross-section, which its
+ * control fetches, and the hotspot tour with the camera moves it shares
+ * with Wrapped's intro.
  * Wrapped has a bundle of its own (wrapped.ts) and fetches this one only
  * for its intro's camera moves and heat cloud; it counts the airspace new
  * in a year with the app's code (DataManager.newAreaKm2).
@@ -30,6 +31,12 @@ export { followTerrain } from "./ui/terrain";
 export { followSatellite } from "./ui/satellite";
 export { followHeatCloud, prepareHeatCloud } from "./ui/heatCloud";
 export { followSelectionRibbons } from "./ui/selectionRibbons";
+export { ribbonFeatures } from "./ui/pathRibbons";
+export {
+  heldGroundedFlights,
+  releaseGroundedFlights,
+  releaseGroundProfiles,
+} from "./calculations/groundProfile";
 export { ReplayAllPlayer } from "./ui/replayAllPlayer";
 export { toggleReplayAll } from "./ui/replayAll";
 export { followFlightProfile } from "./ui/flightProfile";

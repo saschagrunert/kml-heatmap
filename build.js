@@ -420,9 +420,15 @@ function compareBundles(before, after, names) {
 // map, left: room for the toast of a base map that cannot be loaded and the
 // lazy bundles fetched by the build they belong to. 158.21 KB raw and 54.43
 // KB gzipped before, 157.02 KB raw and 54 KB gzipped after, in a local build.
-const BUDGET_APP = { raw: 160 * 1024, gzip: 55 * 1024 };
-// The feature bundle is fetched only when replay is opened, the relief, the
-// heat cloud and the ribbons of a selection of the 3D view are first drawn,
+// Lowered from 160 KB and 55 KB when the ribbons of the 3D view moved to the
+// feature bundle, which the 3D view fetches for its relief anyway (their cut
+// in ui/pathRibbons.ts, calculations/ribbons.ts and the flights set on their
+// ground, calculations/groundProfile.ts): 157.35 KB raw and 54.15 KB gzipped
+// before, 151.08 KB raw and 51.26 KB gzipped after, in a local build, about
+// 51.47 KB in CI going by the 0.4 % above.
+const BUDGET_APP = { raw: 153.25 * 1024, gzip: 52.5 * 1024 };
+// The feature bundle is fetched only when replay is opened, the 3D view (its
+// relief, its ribbons and the heat cloud) is first drawn,
 // the Satellite switch is first on, a single flight is first
 // selected or the cross-section is first opened, so it is not part of what a
 // first visit downloads; it still gets a budget so it cannot grow without
@@ -512,8 +518,14 @@ const BUDGET_APP = { raw: 160 * 1024, gzip: 55 * 1024 };
 // the tour paused while the tab is hidden: 138.31 KB raw and 50.95 KB
 // gzipped before, 138.42 KB raw and 51.03 KB gzipped after, in a local
 // build, which under the old budget of 51.25 KB gzipped would have left
-// about 10 B of room with the zlib of CI.
-const BUDGET_FEATURES = { raw: 140.5 * 1024, gzip: 52 * 1024 };
+// about 10 B of room with the zlib of CI. Raised from 140.5 KB and 52 KB for
+// the ribbons of the 3D view, which came here from the first visit (see
+// BUDGET_APP), and the performance fixes of the analysis of 2026-10-02
+// (Replay all's points written in place, the airplane of a replay turned
+// once a frame, the cross-section's white end selected rather than sorted):
+// 138.45 KB raw and 51.06 KB gzipped before, 145.17 KB raw and 53.96 KB
+// gzipped after, in a local build, about 54.18 KB in CI.
+const BUDGET_FEATURES = { raw: 147.25 * 1024, gzip: 55.25 * 1024 };
 
 // The Wrapped bundle is fetched only when the Wrapped dialog or the
 // statistics panel is first opened, and not with replay's code or replay

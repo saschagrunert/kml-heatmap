@@ -104,6 +104,7 @@ vi.mock("../../../../kml_heatmap/frontend/ui/wrappedManager", () => ({
   }),
 }));
 vi.mock("../../../../kml_heatmap/frontend/services/featureLoader", () => ({
+  loadedFeatures: () => null,
   // Replay and Wrapped come from lazily loaded bundles of their own; here
   // they are the doubles the module mocks above return
   loadFeatures: vi.fn(() =>

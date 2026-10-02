@@ -59,7 +59,14 @@ field stand and taxi in the same places. At 20 moments of the shorter one,
 between fixes far apart) when the other passed closest to where it was, and a
 shift of the clock that at least three of them agree on to within 5 s is checked
 as above, but within 150 m: with the time free, circuits flown at one field on
-different days come within 300 m often enough.
+different days come within 300 m often enough. Every two recordings of a year
+are compared, which most flights from one field pass the first look at (their
+areas overlap), so the 20 moments of each recording are worked out once, and a
+set of the cells the other comes near (`_Timed.reach`) leaves out the moments it
+cannot be found near before a line of it is looked at: two flights that are near
+each other at fewer than three of them are none. That halved the time of a year
+of 1,000 flights made of the flights of `data/`, each copied a few hundred
+metres off, from 23 s to 11 s.
 
 The flights of `data/` all start at the same moment, and the two of them that
 come closest to one flight (two flights of D-EAGJ at EDAQ) are still apart at 11

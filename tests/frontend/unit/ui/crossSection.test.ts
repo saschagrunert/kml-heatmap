@@ -1118,6 +1118,25 @@ describe("the figures", () => {
     const values = Float64Array.from({ length: 100 }, (_, i) => i + 1);
     expect(densityReference(values)).toBe(96);
   });
+
+  it("picks the cell a full sort would", () => {
+    let seed = 7;
+    const random = (): number =>
+      (seed = (seed * 16807) % 2147483647) / 2147483647;
+    for (let round = 0; round < 50; round++) {
+      const values = Float64Array.from({ length: 1 + round * 37 }, () =>
+        random() < 0.3 ? 0 : Math.round(random() * 50),
+      );
+      const filled = values.filter((value) => value > 0).sort();
+      const expected = filled.length
+        ? filled[Math.min(filled.length - 1, Math.floor(filled.length * 0.95))]
+        : 0;
+      const before = values.slice();
+      expect(densityReference(values)).toBe(expected);
+      // The cells it was given stay as they were
+      expect(values).toEqual(before);
+    }
+  });
 });
 
 describe("the chart's colours", () => {
@@ -1171,6 +1190,51 @@ describe("the chart's colours", () => {
     }
     expect(alphas.size).toBeGreaterThan(1);
     expect(Math.max(...alphas)).toBe(255);
+    lifetimeHere.abort();
+  });
+
+  it("draws every section into one image, cleared first", async () => {
+    const lifetimeHere = new AbortController();
+    const ownFrames = stubAnimationFrames();
+    markers.length = 0;
+    document.body.innerHTML = `<div id="map"></div>`;
+    const images: { data: Uint8ClampedArray }[] = [];
+    const put = vi.fn();
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({
+      createImageData: (width: number, height: number) => {
+        const image = { data: new Uint8ClampedArray(width * height * 4) };
+        images.push(image);
+        return image;
+      },
+      putImageData: put,
+    } as unknown as CanvasRenderingContext2D);
+    const app = createMockApp({
+      currentData: createDataset([{ id: 1 }], crossing(1)),
+      signal: lifetimeHere.signal,
+    });
+    const map = app.map as unknown as MockMap;
+    map.jumpTo({ center: [LON, LAT], zoom: 12 });
+    await app.mapReady;
+    await Promise.resolve();
+    await open(app);
+    const canvas = map.getCanvas() as HTMLElement;
+    drawLine(canvas);
+    expect(images).toHaveLength(1);
+    const filled = (): number =>
+      images[0]!.data.filter((_, i) => i % 4 === 3 && images[0]!.data[i]! > 0)
+        .length;
+    expect(filled()).toBeGreaterThan(0);
+
+    // A line far from the flight leaves the image empty, not as it was
+    const calls = put.mock.calls.length;
+    const [a, b] = handles();
+    a!.setLngLat([LON - 0.035, LAT + 0.5]);
+    b!.setLngLat([LON + 0.035, LAT + 0.5]);
+    a!.emit("drag");
+    ownFrames.run();
+    expect(put.mock.calls.length).toBeGreaterThan(calls);
+    expect(images).toHaveLength(1);
+    expect(filled()).toBe(0);
     lifetimeHere.abort();
   });
 });

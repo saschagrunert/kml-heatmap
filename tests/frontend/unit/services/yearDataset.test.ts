@@ -148,6 +148,16 @@ describe("combineYearData", () => {
     expect(result.path_info[2]).toBe(b.path_info[0]);
   });
 
+  it("gives arrays of its own, for one year as well", () => {
+    const a = dataset(2, 1, 100);
+
+    const result = combineYearData([a]);
+
+    expect(result.path_segments).not.toBe(a.path_segments);
+    expect(result.path_segments).toEqual(a.path_segments);
+    expect(result.path_info).not.toBe(a.path_info);
+  });
+
   it("skips null or undefined datasets", () => {
     const result = combineYearData([dataset(1), null, undefined]);
     expect(result.path_segments).toHaveLength(1);
