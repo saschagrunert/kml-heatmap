@@ -223,6 +223,34 @@ export function inputDeltas(before, after, fileName) {
 }
 
 /**
+ * A budget a bundle does not fit
+ * @typedef {object} Overrun
+ * @property {string} what The files, joined
+ * @property {"raw" | "gzip"} kind
+ * @property {number} size In bytes, NaN where the files could not be measured
+ * @property {number} budget In bytes
+ */
+
+/**
+ * The closing lines of a build over budget: each budget it exceeds, with
+ * the bytes over, so a failed job ends with them rather than with the
+ * breakdowns printed after the table
+ * @param {Overrun[]} overruns
+ * @returns {string[]}
+ */
+export function overrunSummary(overruns) {
+  return [
+    "❌ Bundle size budget exceeded:",
+    ...overruns.map(({ what, kind, size, budget }) =>
+      Number.isNaN(size)
+        ? `  ${what}: could not be measured`
+        : `  ${what}: ${size} B ${kind === "gzip" ? "gzipped" : "raw"}, ` +
+          `budget ${budget} B, ${size - budget} B over`,
+    ),
+  ];
+}
+
+/**
  * The flags of `node build.js`: `--watch`, `--metafile [path]`, which
  * writes esbuild's metafile (to `defaultMetafile` without a path), and
  * `--compare <path>`, which prints what changed from the build of an

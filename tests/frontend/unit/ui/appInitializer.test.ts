@@ -440,8 +440,21 @@ describe("appInitializer", () => {
       expect(app.airportMarkers).toEqual({});
     });
 
-    it("rejects invalid coordinates (mock validation)", () => {
-      expect(() => create([{ name: "X", lat: 91, lon: 0 }])).toThrow(/lat/i);
+    it("places airports either side of the antimeridian where they are", () => {
+      create([
+        { name: "Nadi NFFN", lat: -17.76, lon: 177.44 },
+        { name: "Funafuti NGFU", lat: -8.52, lon: -179.2 },
+      ]);
+
+      // Not wrapped into one world: each marker stands on its own side
+      expect(app.airportMarkers["Nadi NFFN"]!.getLatLng()).toEqual({
+        lat: -17.76,
+        lng: 177.44,
+      });
+      expect(app.airportMarkers["Funafuti NGFU"]!.getLatLng()).toEqual({
+        lat: -8.52,
+        lng: -179.2,
+      });
     });
   });
 

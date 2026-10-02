@@ -3,8 +3,43 @@
 Where to put the generated site and what the server has to do: nothing beyond
 serving files, with a few headers worth setting. The site of this repository
 goes to GitHub Pages from CI (see
-[Commit and publish](adding-flights.md#7-commit-and-publish)); this page is for
+[Commit and publish](adding-flights.md#7-commit-and-publish)); the next section
+sets up the same for a copy of the repository, and the rest of this page is for
 any other host.
+
+## Your own site on GitHub Pages
+
+The `test` workflow builds the site from `data/` and publishes it to GitHub
+Pages on every push to `main`, once every test has passed. To get the same for
+your own flights:
+
+1. Fork the repository on GitHub (or create a repository from a clone of it).
+2. Enable the workflows: GitHub turns them off in a fork until you confirm them
+   on its Actions tab.
+3. Set Settings > Pages > Source to "GitHub Actions". The workflow cannot set it
+   itself: its token is not allowed to change the Pages settings.
+4. Replace the flights: delete the KML files in `data/` and
+   `data/aircraft.json`, then add your own as
+   [Adding flights](adding-flights.md) describes, obfuscated before they are
+   committed (`make obfuscate`, and `make hooks` so a push with a real date is
+   refused). Your files may sit in subdirectories of `data/`.
+5. Optionally add a CARTO tile API key as the repository secret `CARTO_API_KEY`
+   (Settings > Secrets and variables > Actions). The base map loads without one
+   (see [With an API key](usage.md#with-an-api-key-optional)).
+6. Push to `main`. Once the run is green the site is at
+   `https://<owner>.github.io/<repository>/`; the deploy job's summary names the
+   address.
+
+The tests are written against the flights of this repository: the golden
+pipeline test (`GOLDEN_FILES` in `tests/test_pipeline_golden.py`), the landing
+and segment tests that read named files of `data/`, and the e2e specs, which
+drive a site built from `data/` and expect a few flights in its latest year. A
+fork that replaces the flights fails them, and then nothing is published. Keep
+the files they name, under `tests/fixtures/` with the tests pointed at them, or
+publish a local build to any other host as described below.
+
+The other repository settings are optional for a site of your own; the ones this
+repository uses are in [Repository rules](../CONTRIBUTING.md#repository-rules).
 
 ## Any static host
 

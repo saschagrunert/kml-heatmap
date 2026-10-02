@@ -9,13 +9,12 @@ is kept. The numbers themselves live next to the budgets, in those two files.
 ## Bundles
 
 A production build (`npm run build`) prints the size of every bundle next to its
-budget and fails when `mapApp.bundle.js` and `shared.bundle.js` together,
-`features.bundle.js`, `wrapped.bundle.js`, `yearWorker.bundle.js` or the
-vendored MapLibre and html-to-image files exceed their size budget in
-`build.js`. Each has a budget for its bytes as written and one for them gzipped
-(level 9); the comment above the budgets says how much room they leave and why.
-CI's zlib compresses up to about 0.5 % differently from a local build, so go by
-the gzipped sizes CI prints when a budget is close.
+budget, with the room it leaves in bytes, and fails when one of the bundles in
+the table below exceeds its size budget in `build.js`; the last lines of a
+failed build name each budget exceeded and by how many bytes. Each has a budget
+for its bytes as written and one for them gzipped (level 9). CI's zlib
+compresses up to about 0.5 % differently from a local build, so go by the
+gzipped sizes CI prints when a budget is close.
 
 | Budget in `build.js`   | What it covers                                                                                   |
 | ---------------------- | ------------------------------------------------------------------------------------------------ |
@@ -42,7 +41,8 @@ its own, for its bytes as the site serves it and one for them gzipped at level
 The policy is written above the budgets in `build.js`:
 
 - Raise a budget on purpose, in the change that needs the room, and say what it
-  paid for in the commit message and in the comment above the budget
+  paid for in the commit message; the comment above the budget only says what it
+  covers and how large that was when it was set
 - An app bundle gets about 2 KB of raw and 1 KB of gzipped room over its size
   when the budget is set, a vendored file about 1 %
 - The gzipped budget catches what the raw one rewards the wrong way: a change
@@ -59,15 +59,15 @@ The policy is written above the budgets in `build.js`:
 
 ## History
 
-The comment above each budget lists every raise and lowering with the sizes
-before and after (the analysis of 2026-09-30 raised the feature and Wrapped
-budgets for the exports of the first visit that moved into them, and lowered
-MapLibre's for the styles of controls the app never adds; the one of 2026-10-02
-moved the ribbons of the 3D view to the feature bundle: the app's budget was
-lowered by 6.75 KB raw and 2.5 KB gzipped, and the feature bundle's raised by
-6.75 KB raw and 3.25 KB gzipped, part of it for the speed fixes of that
-analysis), and `git log -L` on a budget line lists the commits that changed it
-and why. Where a change was sized against the budgets, its page says so as well,
-for example
+Every raise and lowering is in the history of its budget's line, with the sizes
+before and after and what it paid for in the commit message:
+
+```sh
+git log -L '/^const BUDGET_FEATURES/,+1:build.js'
+```
+
+The stylesheets' budgets are kept the same way, in `tests/test_asset_budget.py`.
+Where a change was sized against the budgets, its page says so as well, for
+example
 [the heat sources in the year worker](heat.md#the-heat-sources-and-the-year-worker)
 and [the readout of the heat cloud](heat.md#no-readout-on-the-flat-map).

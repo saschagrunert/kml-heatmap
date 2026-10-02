@@ -24,8 +24,10 @@ Other apps work as long as the file holds the track as a `LineString` or a
 Rename a SkyDemon export to `N_REGISTRATION_TYPE.kml` and copy it into `data/`:
 
 - `N` is the next free flight number: one more than the highest number already
-  in `data/` (`ls data | sort -n | tail -n 1`). The numbers keep the flights in
-  chronological order, and the files are processed in that order.
+  in `data/` and its subdirectories
+  (`ls -R data | grep -E '^[0-9]+_' | sort -n | tail -n 1`; the `grep` leaves
+  out Charterware files, whose names start with a year). The numbers keep the
+  flights in chronological order, and the files are processed in that order.
 - `REGISTRATION` is the registration without its hyphen (`DEHYL` for `D-EHYL`).
 - `TYPE` is the aircraft type designator (`DA40`, `C172`). It must hold a digit
   (`GLID` and the other ICAO designators without one aside); any other text
@@ -131,8 +133,8 @@ git commit -s -m "chore: add flight 104"
 Install the hooks once: with the pre-commit hooks (see
 [CONTRIBUTING.md](../CONTRIBUTING.md)) the commit fails while a file in `data/`
 is not obfuscated, and the pre-push hook (`make hooks`, which needs only Python)
-refuses to push a commit that carries one. The `obfuscation` CI job catches the
-same mistake only after the push, when the real dates are already public.
+refuses to push a commit that carries one. The CI lint job catches the same
+mistake only after the push, when the real dates are already public.
 
 Open a pull request or push to `main`. On `main`, the `test` workflow runs every
 test job against the new data, including the obfuscation check; once they pass,

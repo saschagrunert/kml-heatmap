@@ -14,6 +14,21 @@ run in the Playwright image only, in
 - E2E tests: `tests/e2e/` (Playwright)
 - Python tests: `tests/` (pytest)
 
+## Contract tests
+
+`tests/frontend/contract/exportContract.test.ts` checks the data files the
+generator writes against the types the frontend reads them with: its own
+fixtures, and the `data/` of a site built from this checkout in `docs/`. A local
+`npm test` or `make test` skips that second half when `docs/` is missing or was
+built from other sources (Vitest counts its tests as skipped, and gives the
+reason for a stale site). Build the site first to run it:
+
+```bash
+npm run build && python -m kml_heatmap data --output-dir docs
+```
+
+In CI the unit job builds it first, and a missing build fails there.
+
 ## Python tests
 
 pytest no longer forces coverage or parallel execution, so a plain `pytest` run
@@ -83,20 +98,21 @@ works) and skip otherwise; CI tests a site with a dummy key and, for the specs
 about the base map requests (`base-style`, `error-free`, `layers`) on the
 desktop, one without. It builds both once, in the `e2e-sites` job, and runs
 every e2e job in the Playwright image the visual job uses, with a browser per
-core of the runner. The `desktop` project is split into three shards
-(`--shard`), and the `mobile` project into two; the specs without a key run in a
-`desktop` job of their own. The tests tagged `@heavy` (`HEAVY` in
-`tests/e2e/fixtures.ts`: the 3D view with its relief, heat cloud or chase view,
-and the globe turned with the flights loaded) of the `desktop` and
-`webkit-desktop` projects run in a job of their own per engine with two browsers
-(`--grep @heavy --workers=2`), since software WebGL takes seconds per frame of
-them; the other jobs of those projects leave them out (`--grep-invert @heavy`).
-Tag a new spec that waits on frames of either, a describe with `HEAVY` and a
-single test with `@heavy` at the end of its title. In CI a failed test of the
-`desktop` project is retried once, which only tells a flaky failure from a
-steady one: `failOnFlakyTests` fails the run either way. The `mobile`, `visual`,
-`webkit` and `webkit-desktop` projects do not retry, and neither do the heavy
-tests, where one attempt takes minutes.
+core of the runner. The `desktop` and `mobile` projects are split into three
+shards each (`--shard`) and the `webkit` project into two; Playwright splits by
+the number of tests, not their time, so more shards even out the slow ones. The
+specs without a key run in a `desktop` job of their own. The tests tagged
+`@heavy` (`HEAVY` in `tests/e2e/fixtures.ts`: the 3D view with its relief, heat
+cloud or chase view, and the globe turned with the flights loaded) of the
+`desktop` and `webkit-desktop` projects run in a job of their own per engine
+with two browsers (`--grep @heavy --workers=2`), since software WebGL takes
+seconds per frame of them; the other jobs of those projects leave them out
+(`--grep-invert @heavy`). Tag a new spec that waits on frames of either, a
+describe with `HEAVY` and a single test with `@heavy` at the end of its title.
+In CI a failed test of the `desktop` project is retried once, which only tells a
+flaky failure from a steady one: `failOnFlakyTests` fails the run either way.
+The `mobile`, `visual`, `webkit` and `webkit-desktop` projects do not retry, and
+neither do the heavy tests, where one attempt takes minutes.
 
 ### The site under test
 
@@ -162,9 +178,9 @@ jobs of the `test` workflow, which wait for every test job but `security` to
 pass (a new advisory for a test dependency must not hold back new flights, and
 the weekly run reports it anyway) and skip a commit that is no longer the head
 of `main`: they run the same steps as `make build` (frontend bundle, then
-`python -m kml_heatmap data`) and upload the result to GitHub Pages. Nothing
-generated is committed; `docs/` is only the default output directory of a local
-`make build`. The `checks` job is the one status a merge needs (the ruleset on
+`python -m kml_heatmap data`) and upload the result to GitHub Pages (see
+[Repository rules](../../CONTRIBUTING.md#repository-rules) for what is not
+committed). The `checks` job is the one status a merge needs (the ruleset on
 `main` requires it, see
 [Repository rules](../../CONTRIBUTING.md#repository-rules)), because it needs
 every job a pull request runs and fails when any of them failed, was cancelled

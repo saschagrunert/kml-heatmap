@@ -126,18 +126,18 @@ here, not an oversight: adding the parentheses back is undone on the next
 - **Never commit un-obfuscated KML files.** Generating a site no longer rewrites
   them: run `make obfuscate` after adding flights to `data/` (or pass
   `--obfuscate-inputs`). The pre-commit hook, `make check-obfuscation` and the
-  `obfuscation` CI job verify that every committed file is obfuscated, but only
-  the hooks run before the dates would be public. The pre-push hook (install it
-  with `make hooks`) checks every commit being pushed, needs nothing beyond
-  Python 3.14 and refuses the push when it cannot check. The published site
-  carries no flight date finer than the year either way; this is about the KML
-  files this repository commits.
-- The frontend build output in `kml_heatmap/static/` is gitignored: the five
-  bundles (`mapApp.bundle.js`, `features.bundle.js`, `wrapped.bundle.js`,
-  `shared.bundle.js`, `yearWorker.bundle.js`) with their `.map` files, `vendor/`
-  (the third-party code copied out of `node_modules`) and `flags/` (the country
-  flags of `flag-icons`). It is built by `npm run build` and, for the image,
-  inside the Dockerfile; `make clean` removes it.
+  CI lint job verify that every committed file is obfuscated, but only the hooks
+  run before the dates would be public. The pre-push hook (install it with
+  `make hooks`) checks every commit being pushed, needs nothing beyond Python
+  3.14 and refuses the push when it cannot check. The published site carries no
+  flight date finer than the year either way; this is about the KML files this
+  repository commits.
+- The frontend build output in `kml_heatmap/static/` is gitignored: the bundles
+  with their `.map` files (listed in
+  [Frontend](doc/development/frontend.md#architecture)), `vendor/` (the
+  third-party code copied out of `node_modules`) and `flags/` (the country flags
+  of `flag-icons`). It is built by `npm run build` and, for the image, inside
+  the Dockerfile; `make clean` removes it.
 - The Python dependencies are declared once, in `pyproject.toml` (runtime
   dependencies plus the `test` and `dev` extras). `requirements.lock`,
   `requirements-test.lock` and `requirements-build.lock` are compiled from it
@@ -194,7 +194,7 @@ The snapshots are not taken of `docs/`. The statistics rail and the Wrapped
 dialog print figures computed from the flights, and `data/` grows all the time,
 so the project has a site of its own: `visual-site/`, built from the few flights
 in `tests/fixtures/visual/` (obfuscated like the ones in `data/`, which the
-hooks, `make check-obfuscation` and the `obfuscation` job check too), with
+hooks, `make check-obfuscation` and the CI lint job check too), with
 `tests/fixtures/airports.csv` and `runways.csv` in place of the OurAirports
 downloads and a fixed build time and commit. Build it before running the command
 above, outside the container, since the image has no Python the package runs on:

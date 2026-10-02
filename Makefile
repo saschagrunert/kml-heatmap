@@ -116,8 +116,8 @@ serve-build: build ## Run build, then serve
 # The generated site never carries a flight date finer than the year, so this
 # is about the KML files themselves: this repository commits the ones in
 # data/, and they must not carry real dates. Run it after adding new flights;
-# the pre-commit hook, `make check-obfuscation` and the `obfuscation` CI job
-# fail if you forget.
+# the pre-commit hook, `make check-obfuscation` and the CI lint job fail if
+# you forget.
 obfuscate: ## Rewrite the KML files in INPUT_DIR in place so they carry no real dates (IRREVERSIBLE)
 	python -m kml_heatmap.obfuscate "$(INPUT_DIR)"
 
@@ -128,7 +128,7 @@ check-obfuscation: ## Check that the KML files in INPUT_DIR and the fixture flig
 	python -m kml_heatmap.obfuscate "$(INPUT_DIR)" --check
 	python -m kml_heatmap.obfuscate tests/fixtures/visual --check
 
-# The obfuscation CI job only sees a real date once it is public; the hook
+# The obfuscation check of CI only sees a real date once it is public; the hook
 # refuses the push before. Linked rather than copied, so it stays current.
 # The pre-commit hooks of .pre-commit-config.yaml go in along with it where
 # pre-commit is installed; like typos in `lint`, a missing one is said, not
@@ -144,7 +144,7 @@ hooks: ## Install the pre-push hook that refuses to push KML files with real dat
 	@if command -v pre-commit >/dev/null 2>&1; then pre-commit install; else \
 	  echo "warning: pre-commit is not installed, skipping its hooks (see CONTRIBUTING.md)" >&2; fi
 
-lint: ## Run the linters, formatters (check only) and type checkers of the CI lint job, plus bandit and typos, which CI runs in the security and typos jobs
+lint: ## Run the linters, formatters (check only), type checkers and typos of the CI lint job, plus bandit, which CI runs in the security job
 	python scripts/check_locks.py
 	ruff check .
 	ruff format --check .

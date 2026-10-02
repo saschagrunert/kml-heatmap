@@ -1,0 +1,35 @@
+---
+# Python and Node.js at the versions of .python-version and .nvmrc, with
+# their caches, for the jobs of test.yml after their checkout, so each action
+# is pinned in one place. Installing is left to the jobs: each installs
+# something else.
+name: Set up the toolchain
+description: Set up Python and Node.js with their caches
+inputs:
+  python-lock:
+    description: >-
+      The lock files the job installs with pip, one per line, which key the
+      pip cache; empty for a job without Python
+    required: false
+    default: ""
+  npm-cache:
+    description: Whether to restore and save the npm cache, for a job that runs `npm ci`
+    required: false
+    default: "true"
+runs:
+  using: composite
+  steps:
+    # The pip cache is keyed by the lock files the job installs: a key shared
+    # by every job held only what the first job to save it had downloaded
+    - name: Set up Python
+      if: inputs.python-lock != ''
+      uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      with:
+        python-version-file: .python-version
+        cache: pip
+        cache-dependency-path: ${{ inputs.python-lock }}
+    - name: Set up Node.js
+      uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      with:
+        node-version-file: .nvmrc
+        cache: ${{ inputs.npm-cache == 'true' && 'npm' || '' }}

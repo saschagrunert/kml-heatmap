@@ -202,8 +202,8 @@ Targets (`make help` prints this list with the current variable values):
 - `serve-build` - Run `build`, then `serve`
 - `test` - Build the frontend bundles, then run the JavaScript and Python test
   suites with coverage
-- `lint` - Run the linters, formatters (check only) and type checkers of the CI
-  lint job, plus bandit and typos, which CI runs in the security and typos jobs
+- `lint` - Run the linters, formatters (check only), type checkers and typos of
+  the CI lint job, plus bandit, which CI runs in the security job
 - `format` - Run formatters
 - `lock` - Regenerate the lock files (`requirements.lock`,
   `requirements-test.lock`, `requirements-build.lock` and

@@ -24,7 +24,10 @@ export default defineConfig({
     coverage: {
       provider: "v8",
       reporter: ["text", "json", "html"],
-      include: ["kml_heatmap/frontend/**/*.{js,ts}"],
+      // The build scripts as well, as pytest measures scripts/*.py: a script
+      // only CI runs still shows when its tests stop reaching it. build.js
+      // itself builds as it is imported, so its helpers live in scripts/.
+      include: ["kml_heatmap/frontend/**/*.{js,ts}", "scripts/*.js"],
       exclude: ["**/node_modules/**", "**/tests/**"],
       clean: true,
       // One to three points below what the suite reaches, so a real
