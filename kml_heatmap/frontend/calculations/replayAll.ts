@@ -11,18 +11,19 @@
 import type { PathSegment } from "../types";
 import {
   DEGREES_TO_RADIANS,
+  focalLengthPx,
   metresPerPixel,
   planarMetres,
   TILE_SIZE_PX,
 } from "../utils/geometry";
-import { FEET_TO_METERS } from "../utils/constants";
-import { chainPieces, type FlightClock } from "./flightClock";
 import {
   lngLatOfMercator,
   mercatorOf,
   mercatorX,
   mercatorY,
-} from "./heatCloud";
+} from "../utils/mercator";
+import { FEET_TO_METERS } from "../utils/constants";
+import { chainPieces, type FlightClock } from "./flightClock";
 import { heatWeight } from "./heatLines";
 import { liftExaggeration } from "./lift";
 import type { SmoothedFlights, SmoothedLine } from "./smoothing";
@@ -63,12 +64,40 @@ export interface ReplayAllPoints {
   count: number;
   /** The Mercator point the points are given from */
   origin: readonly [number, number];
+  /** The Mercator x of the westernmost and easternmost point, unwrapped */
+  xs: readonly [number, number];
   /** The seconds of the longest flight: when the last one has landed */
   duration: number;
   /** The flights among the points */
   flights: number;
   /** West, south, east and north of the points in degrees, null for none */
   bounds: [number, number, number, number] | null;
+}
+
+/**
+ * The whole worlds (in degrees) to move each curve by that starts at the
+ * longitude of `starts`, so they lie together: each start into the 360
+ * degrees from the one after the widest gap between them round the world.
+ * Flights either side of the antimeridian lay a world apart, unwrapped
+ * each on its own, and their bounds were the whole world; moved to start
+ * near the first flight they stayed apart where it was far from them.
+ */
+export function worldShifts(starts: readonly number[]): number[] {
+  if (starts.length === 0) return [];
+  const wrapped = starts.map(
+    (lng) => lng - 360 * Math.floor((lng + 180) / 360),
+  );
+  const sorted = [...wrapped].sort((a, b) => a - b);
+  // From the last round to the first, then between each and the next
+  let gap = sorted[0]! + 360 - sorted[sorted.length - 1]!;
+  let from = sorted[0]!;
+  for (let k = 1; k < sorted.length; k++) {
+    if (sorted[k]! - sorted[k - 1]! > gap) {
+      gap = sorted[k]! - sorted[k - 1]!;
+      from = sorted[k]!;
+    }
+  }
+  return starts.map((lng) => -360 * Math.floor((lng - from) / 360) || 0);
 }
 
 /**
@@ -94,13 +123,17 @@ export function replayAllPoints(
   // the layer is given. The index into its curve of every point kept,
   // curve after curve, and each curve with the end of its points in it.
   const kept: number[] = [];
-  const curves: { line: SmoothedLine; times: Float64Array; end: number }[] = [];
+  // Each curve with its box, as it is unwrapped on its own (see
+  // smoothFlights): moved by whole worlds below (see worldShifts)
+  const curves: {
+    line: SmoothedLine;
+    times: Float64Array;
+    end: number;
+    box: [west: number, south: number, east: number, north: number];
+    shift: number;
+  }[] = [];
   const played = new Set<number>();
   let duration = 0;
-  let west = Infinity;
-  let east = -Infinity;
-  let south = Infinity;
-  let north = -Infinity;
   const { chains, chainOf } = flights;
   const count = segments.length;
   let i = 0;
@@ -138,16 +171,22 @@ export function replayAllPoints(
       const heightAt = (j: number): number => (ground?.[j] ?? 0) + heights[j]!;
       let keptFt = heightAt(0);
       let along = 0;
-      const keep = (j: number): void => {
+      const box: [number, number, number, number] = [
+        Infinity,
+        Infinity,
+        -Infinity,
+        -Infinity,
+      ];
+      const pick = (j: number): void => {
         const [lat, lng] = points[j]!;
-        west = Math.min(west, lng);
-        east = Math.max(east, lng);
-        south = Math.min(south, lat);
-        north = Math.max(north, lat);
+        box[0] = Math.min(box[0], lng);
+        box[1] = Math.min(box[1], lat);
+        box[2] = Math.max(box[2], lng);
+        box[3] = Math.max(box[3], lat);
         kept.push(j);
         keptFt = heightAt(j);
       };
-      keep(0);
+      pick(0);
       const last = points.length - 1;
       for (let j = 1; j <= last; j++) {
         along += planarMetres(points[j - 1]!, points[j]!);
@@ -156,14 +195,26 @@ export function replayAllPoints(
           along >= stepM ||
           Math.abs(heightAt(j) - keptFt) >= heightStepFt
         ) {
-          keep(j);
+          pick(j);
           along = 0;
         }
       }
-      curves.push({ line: chain, times, end: kept.length });
+      curves.push({ line: chain, times, end: kept.length, box, shift: 0 });
     }
     i = end;
   }
+  const shifts = worldShifts(curves.map(({ line }) => line.points[0]![1]));
+  let west = Infinity;
+  let east = -Infinity;
+  let south = Infinity;
+  let north = -Infinity;
+  curves.forEach((curve, c) => {
+    const shift = (curve.shift = shifts[c]!);
+    west = Math.min(west, curve.box[0] + shift);
+    south = Math.min(south, curve.box[1]);
+    east = Math.max(east, curve.box[2] + shift);
+    north = Math.max(north, curve.box[3]);
+  });
   const size = REPLAY_ALL_POINT_FLOATS;
   const total = kept.length;
   let origin: [number, number] = [0.5, 0.5];
@@ -174,14 +225,14 @@ export function replayAllPoints(
   }
   const points = new Float32Array(total * size);
   let n = 0;
-  for (const { line, times, end } of curves) {
+  for (const { line, times, end, shift } of curves) {
     const { ground, heights } = line;
     // Every point joins the next but the last of its curve
     for (; n < end; n++) {
       const j = kept[n]!;
       const [lat, lng] = line.points[j]!;
       const k = n * size;
-      points[k] = mercatorX(lng) - origin[0];
+      points[k] = mercatorX(lng + shift) - origin[0];
       points[k + 1] = mercatorY(lat) - origin[1];
       points[k + 2] = ground?.[j] ?? 0;
       points[k + 3] = heights[j]!;
@@ -193,6 +244,7 @@ export function replayAllPoints(
     points,
     count: total,
     origin,
+    xs: total > 0 ? [mercatorX(west), mercatorX(east)] : [0.5, 0.5],
     duration,
     flights: played.size,
     bounds: total > 0 ? [west, south, east, north] : null,
@@ -252,7 +304,7 @@ export function fitTilted(
   const across = width - padding.left - padding.right;
   const down = height - padding.top - padding.bottom;
   if (count === 0 || across <= 0 || down <= 0) return camera;
-  const distance = height / 2 / Math.tan((map.fov * DEGREES_TO_RADIANS) / 2);
+  const distance = focalLengthPx(height, map.fov * DEGREES_TO_RADIANS);
   const sin = Math.sin(map.pitch * DEGREES_TO_RADIANS);
   const cos = Math.cos(map.pitch * DEGREES_TO_RADIANS);
   // The centre in Mercator units from the origin of the points

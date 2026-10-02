@@ -33,9 +33,9 @@ import { ReplayAllPlayer } from "../../../../kml_heatmap/frontend/ui/replayAllPl
 import { REPLAY_ALL_LAYER } from "../../../../kml_heatmap/frontend/ui/replayAllLayer";
 import {
   CLOUD_POINT_FLOATS,
-  mercatorOf,
   type CloudPoints,
 } from "../../../../kml_heatmap/frontend/calculations/heatCloud";
+import { mercatorOf } from "../../../../kml_heatmap/frontend/utils/mercator";
 import {
   LIFT_MAX_ZOOM,
   liftExaggeration,

@@ -40,6 +40,7 @@ import {
   viewBox,
   type Box,
 } from "../utils/viewBox";
+import { boxOf } from "../utils/curveBox";
 import { highlightsSelection } from "./layerVisibility";
 
 /**
@@ -79,15 +80,7 @@ function stretchesIn(
   const stretches: (readonly [number, number])[] = [];
   let open = -1;
   for (let i = start; i < end; i++) {
-    let [west, south, east, north] = [540, 90, -540, -90];
-    for (let j = flights.from[i]!; j <= flights.to[i]!; j++) {
-      const [lat, lng] = points[j]!;
-      west = Math.min(west, lng);
-      east = Math.max(east, lng);
-      south = Math.min(south, lat);
-      north = Math.max(north, lat);
-    }
-    const inside = overlaps(box, [west, south, east, north]);
+    const inside = overlaps(box, boxOf(points, flights.from[i], flights.to[i]));
     if (inside && open < 0) open = i;
     if (!inside && open >= 0) {
       stretches.push([open, i]);
@@ -108,13 +101,13 @@ function stretchesIn(
  * stretches in it (see viewBox), as the layer manager does from
  * CULL_FROM_ZOOM on: at map zoom 16 the 31 flights of a year, all
  * selected, came to 83,000 pieces and 125 ms of every zoom's end, and
- * around the view to 7,000 pieces and 20 ms. The curves are the ones every flight is smoothed into for the colour layers
- * and the heat cloud (see groundedFlights) where those are held for the
- * level, or where the selection is most of the dataset, as the flights of
- * the home field are. Otherwise they are those of the selected flights
- * alone, smoothed alike: every flight of a year smoothed for another level
- * took 35 ms of a zoom's end on a desktop, where the cloud had kept its
- * points of that level.
+ * around the view to 7,000 pieces and 20 ms. The curves are the ones every
+ * flight is smoothed into for the colour layers and the heat cloud (see
+ * groundedFlights) where those are held for the level, or where the
+ * selection is most of the dataset, as the flights of the home field are.
+ * Otherwise they are those of the selected flights alone, smoothed alike:
+ * every flight of a year smoothed for another level took 35 ms of a zoom's
+ * end on a desktop, where the cloud had kept its points of that level.
  */
 export function selectionRibbons(
   app: MapApp,

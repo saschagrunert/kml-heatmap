@@ -15,11 +15,12 @@ import { LngLat, type Map as MapLibreMap } from "maplibre-gl";
 import {
   DEGREES_TO_RADIANS as RAD,
   EARTH_CIRCUMFERENCE_M,
+  focalLengthPx,
   TILE_SIZE_PX,
   turnOf,
 } from "../utils/geometry";
+import { lngLatOfMercator, mercatorOf } from "../utils/mercator";
 import { mapSize, REPLAY_CAMERA_MOVE } from "../utils/mapHelpers";
-import { lngLatOfMercator, mercatorOf } from "../calculations/heatCloud";
 import {
   heightAtZoomFt,
   type GroundedHeight,
@@ -223,6 +224,15 @@ interface Spring {
 const spring = (value: number): Spring => ({ value, velocity: 0 });
 
 /**
+ * A difference of Mercator x the short way round the world: a replay goes
+ * on past 180 where a flight crosses it, and the map wraps its centre back
+ * as it is dragged, which put the airplane a world away from the centre
+ */
+function worldOffset(dx: number): number {
+  return dx - Math.round(dx);
+}
+
+/**
  * The camera of one chase, from the moment it takes the map until it gives
  * it back (see ReplayCamera). Its springs start from the map as it is, so
  * the chase flies into its view, and do so again after the user has moved
@@ -309,8 +319,7 @@ export class ChaseCamera {
     const { height } = mapSize(this.map);
     return {
       world: TILE_SIZE_PX * 2 ** zoom,
-      distance:
-        height / 2 / Math.tan((this.map.getVerticalFieldOfView() * RAD) / 2),
+      distance: focalLengthPx(height, this.map.getVerticalFieldOfView() * RAD),
     };
   }
 
@@ -412,7 +421,7 @@ export class ChaseCamera {
       // From where the map looks now
       const center = map.getCenter();
       const [mx, my] = mercatorOf([center.lat, center.lng]);
-      this.x = spring(mx - cx);
+      this.x = spring(worldOffset(mx - cx));
       this.y = spring(my - cy);
       this.z = spring(map.getCenterElevation() - altitude);
     }
@@ -515,7 +524,7 @@ export class ChaseCamera {
       (this.altitude(target) - map.getCenterElevation()) /
       ChaseCamera.metresPerPx(center.lat, world);
     const drawn = projectRelative(
-      (ax - cx) * world,
+      worldOffset(ax - cx) * world,
       (cy - ay) * world,
       up,
       map.getBearing(),
@@ -523,7 +532,8 @@ export class ChaseCamera {
       distance,
     );
     const { width, height } = mapSize(map);
-    const ground = map.project([lon, lat]);
+    // Where the marker is drawn: on the world copy nearest the centre
+    const ground = map.project([center.lng + turnOf(center.lng, lon), lat]);
     return [width / 2 + drawn.x - ground.x, height / 2 + drawn.y - ground.y];
   }
 

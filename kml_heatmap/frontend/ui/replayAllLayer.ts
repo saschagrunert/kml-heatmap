@@ -24,7 +24,13 @@ import {
   REPLAY_ALL_POINT_FLOATS,
   type ReplayAllPoints,
 } from "../calculations/replayAll";
-import { drawing, LayerGl, setDepth, setProjection } from "./glLayer";
+import {
+  drawing,
+  LayerGl,
+  setDepth,
+  setProjection,
+  worldCopies,
+} from "./glLayer";
 
 /** The id of the layer on the map */
 export const REPLAY_ALL_LAYER = "replay-all";
@@ -257,7 +263,6 @@ export class ReplayAllLayer implements CustomLayerInterface {
     if (!ready) return;
 
     const u = ready.program.uniforms;
-    setProjection(gl, u, options, flights.origin, map.getCenter().lat);
     const height = gl.drawingBufferHeight;
     const ratio = map.getPixelRatio();
     gl.uniform2f(u.u_heights, style.groundM, style.liftM);
@@ -275,10 +280,17 @@ export class ReplayAllLayer implements CustomLayerInterface {
       gl.ONE,
       gl.ONE_MINUS_SRC_ALPHA,
     );
-    // The trails, then the heads over them
+    // The trails, then the heads over them, each in every world copy the
+    // view shows (see worldCopies): no copy's trails over another's heads
+    const lat = map.getCenter().lat;
+    const copies = worldCopies(map, options, flights.xs);
     for (const head of [0, 1]) {
       gl.uniform3f(u.u_clock, style.time, Math.max(style.fade, 1), head);
-      gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, flights.count - 1);
+      for (const copy of copies) {
+        const origin = [flights.origin[0] + copy, flights.origin[1]] as const;
+        setProjection(gl, u, options, origin, lat);
+        gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, flights.count - 1);
+      }
     }
     gl.bindVertexArray(null);
     gl.depthMask(true);

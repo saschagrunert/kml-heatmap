@@ -5,7 +5,7 @@
  */
 import type { MapApp } from "../mapApp";
 import type { KMLDataset } from "../types";
-import { datasetIndex } from "../calculations/datasetIndex";
+import { keptFlights } from "./keptFlights";
 import { flightClockOf } from "../calculations/flightClock";
 import {
   groundedFlights,
@@ -113,6 +113,11 @@ export class ReplayAllPlayer {
   orbit = false;
   /** Told on every frame the clock moved, and as it starts, stops or pauses */
   onChange: (() => void) | null = null;
+  /**
+   * Told each time the last flight lands, in the first play of a run and
+   * in every one after it from the start again
+   */
+  onLanded: (() => void) | null = null;
   private readonly app: MapApp;
   private readonly layer: ReplayAllLayer;
   private points: ReplayAllPoints | null = null;
@@ -366,10 +371,12 @@ export class ReplayAllPlayer {
         ? 0
         : Math.min(Math.max(now - this.lastFrame, 0) / 1000, MAX_FRAME_S);
     this.lastFrame = now;
+    const before = this.time;
     this.time += step * this.speed;
     if (this.time >= this.duration) {
       this.settle?.(true);
       this.settle = null;
+      if (before < this.duration) this.onLanded?.();
     }
     // Played to the end once the last trail has faded
     const end = this.duration + this.fade();
@@ -539,12 +546,10 @@ function keepOf(
     const chosen = new Set(pathIds);
     return (pathId) => chosen.has(pathId);
   }
-  const kept = datasetIndex(data).filter(
-    app.selectedYear,
-    app.selectedAircraft,
-  ).pathIds;
   const selected = app.selectedPathIds;
-  return app.isolateSelection && selected.size > 0
-    ? (pathId) => kept.has(pathId) && selected.has(pathId)
-    : (pathId) => kept.has(pathId);
+  return keptFlights(
+    app,
+    data,
+    app.isolateSelection && selected.size > 0 ? selected : null,
+  );
 }

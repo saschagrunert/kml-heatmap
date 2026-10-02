@@ -8,7 +8,9 @@
  * was lost. The programs that compiled outlast the layer's time off the
  * map, as long as their context does.
  */
-import type { CustomRenderMethodInput } from "maplibre-gl";
+import type { CustomRenderMethodInput, Map as MapLibreMap } from "maplibre-gl";
+import { focalLengthPx } from "../utils/geometry";
+import { mercatorX } from "../utils/mercator";
 
 /**
  * MapLibre's sphere, whose circumference its Mercator heights are in
@@ -314,6 +316,47 @@ export function setProjection(
 }
 
 /**
+ * The world copies to draw the points of a layer in, from `xs[0]` to
+ * `xs[1]` in Mercator x, each as the whole worlds they are moved east by.
+ * MapLibre hands a custom layer the matrix of world 0 alone, and wraps the
+ * map's centre back into it as it is dragged, so on the flat map points
+ * drawn there only went missing beside the antimeridian: flights at -179
+ * seen from 179, and the far side of a flight across it. So they are drawn
+ * in every copy the view shows some of, as MapLibre draws its own layers,
+ * the view widened by a quarter each way for the glow of a point beyond
+ * its edge, and only in the worlds MapLibre draws (drawnWorlds); the globe
+ * has the one.
+ */
+export function worldCopies(
+  map: MapLibreMap,
+  options: CustomRenderMethodInput,
+  [west, east]: readonly [number, number],
+): number[] {
+  if (options.shaderData.define.includes("GLOBE")) return [0];
+  const [first, last] = drawnWorlds(map);
+  const bounds = map.getBounds();
+  const left = mercatorX(bounds.getWest());
+  const right = mercatorX(bounds.getEast());
+  const pad = (right - left) / 4;
+  const copies: number[] = [];
+  const from = Math.max(Math.ceil(left - pad - east), first);
+  const to = Math.min(Math.floor(right + pad - west), last);
+  // || 0: not -0, for a first copy rounded up from below 0
+  for (let copy = from || 0; copy <= to; copy++) copies.push(copy);
+  return copies;
+}
+
+/**
+ * The first and the last world copy MapLibre draws on the flat map: three
+ * either side of world 0 (coveringTiles), and world 0 alone without
+ * renderWorldCopies. Unbounded, a pitch of 85 at the least zoom gave 36
+ * copies on a wide screen, each a draw of every stretch.
+ */
+export function drawnWorlds(map: MapLibreMap): [number, number] {
+  return map.getRenderWorldCopies() ? [-3, 3] : [0, 0];
+}
+
+/**
  * Set the u_depth both layers' shaders read: what the projection makes of
  * a distance from the camera (w) for the depth, the nearest a point may
  * be, and the focal length in pixels of a drawing buffer `height` high
@@ -330,7 +373,7 @@ export function setDepth(
     projection[10],
     projection[14],
     options.nearZ,
-    height / 2 / Math.tan(options.fov / 2),
+    focalLengthPx(height, options.fov),
   );
 }
 

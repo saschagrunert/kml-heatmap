@@ -32,12 +32,12 @@ export const CLOUD_STOPS: readonly (readonly [
 /** The blur and the gain of CLOUD_STOPS at the map zoom `zoom` */
 export function cloudLook(zoom: number): { sigmaPx: number; gain: number } {
   const next = CLOUD_STOPS.findIndex(([stop]) => stop > zoom);
-  const [z0, s0, g0] = CLOUD_STOPS[next <= 0 ? 0 : next - 1]!;
   if (next <= 0) {
     const [, s, g] =
       next === 0 ? CLOUD_STOPS[0]! : CLOUD_STOPS[CLOUD_STOPS.length - 1]!;
     return { sigmaPx: s, gain: g };
   }
+  const [z0, s0, g0] = CLOUD_STOPS[next - 1]!;
   const [z1, s1, g1] = CLOUD_STOPS[next]!;
   const t = (zoom - z0) / (z1 - z0);
   return { sigmaPx: s0 + (s1 - s0) * t, gain: g0 + (g1 - g0) * t };

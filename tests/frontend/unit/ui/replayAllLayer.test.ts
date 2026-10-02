@@ -114,6 +114,13 @@ function mockMap(): MapLibreMap {
     on: vi.fn(),
     off: vi.fn(),
     getCenter: vi.fn(() => ({ lng: 11, lat: 47 })),
+    // A view a degree either side of the centre, the flat map's (see
+    // worldCopies)
+    getRenderWorldCopies: vi.fn(() => true),
+    getBounds: vi.fn(function (this: MapLibreMap) {
+      const { lng } = this.getCenter();
+      return { getWest: () => lng - 1, getEast: () => lng + 1 };
+    }),
     getPixelRatio: vi.fn(() => 2),
     triggerRepaint: vi.fn(),
   } as unknown as MapLibreMap;
@@ -187,6 +194,32 @@ describe("the replay of all flights' layer", () => {
 
     expect(gl.drawArraysInstanced).not.toHaveBeenCalled();
     expect(layer.frames).toBe(0);
+  });
+
+  it("draws the trails of every world copy before any of their heads", () => {
+    layer.setPoints(flights());
+    // A view from 10 W to 12 E a world further east: world 0 and the copy
+    // east of it
+    vi.mocked(map.getBounds).mockReturnValueOnce({
+      getWest: () => -10,
+      getEast: () => 372,
+    } as unknown as ReturnType<MapLibreMap["getBounds"]>);
+
+    draw();
+
+    expect(gl.drawArraysInstanced).toHaveBeenCalledTimes(4);
+    // The head flag of u_clock last set before each draw
+    const clocks = gl.uniform3f.mock.calls
+      .map((call, k) => ({
+        name: (call[0] as { name: string }).name,
+        at: gl.uniform3f.mock.invocationCallOrder[k]!,
+        head: call[3] as number,
+      }))
+      .filter(({ name }) => name === "u_clock");
+    const heads = gl.drawArraysInstanced.mock.invocationCallOrder.map(
+      (draw) => clocks.filter(({ at }) => at < draw).at(-1)?.head,
+    );
+    expect(heads).toEqual([0, 0, 1, 1]);
   });
 
   it("draws the trails and then the heads from the same stretches", () => {

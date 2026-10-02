@@ -12,7 +12,7 @@ import type {
   Popup,
 } from "maplibre-gl";
 import { ZOOM_OFFSET } from "./constants";
-import { DEGREES_TO_RADIANS } from "./geometry";
+import { DEGREES_TO_RADIANS, focalLengthPx } from "./geometry";
 import { withTimeout } from "./withTimeout";
 
 /** A position the way the data files carry it: latitude first */
@@ -495,7 +495,7 @@ export function cameraDistanceRatio(
   if (pitch === 0) return 1;
   const fov = map.getVerticalFieldOfView() * DEGREES_TO_RADIANS;
   // The distance from the camera to the screen, in pixels
-  const focal = mapSize(map).height / 2 / Math.tan(fov / 2);
+  const focal = focalLengthPx(mapSize(map).height, fov);
   const centre = map.project(map.getCenter());
   const at = map.project([place.lng, place.lat]);
   // The ray's angle from the ground straight below the camera

@@ -315,6 +315,19 @@ describe("ReplayManager chase view", () => {
     expect(replayManager.state.chase).toBe(true);
   });
 
+  it("does not move the camera towards the start as a paused chase closes", () => {
+    openReplay(60);
+    replayManager.toggleChase();
+    settle();
+    vi.mocked(mockApp.map!.jumpTo).mockClear();
+    replayManager.toggleReplay();
+    // The chase only eases back from where it looked
+    expect(mockApp.map!.jumpTo).not.toHaveBeenCalled();
+    expect(mockApp.map!.easeTo).toHaveBeenCalled();
+    expect(replayManager.state.currentTime).toBe(0);
+    expect(el("replay-slider")).toHaveProperty("value", "0");
+  });
+
   it("ends as the flight does, fitting it the way the map was before", () => {
     openReplay(119);
     replayManager.toggleChase();

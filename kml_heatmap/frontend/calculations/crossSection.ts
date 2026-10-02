@@ -166,25 +166,33 @@ export function clipToCorridor(
   let t1 = 1;
   const dx = b[0] - a[0];
   const dy = b[1] - a[1];
-  // Each edge as p * t <= q
-  const edge = (p: number, q: number): boolean => {
-    if (p === 0) return q >= 0;
+  // Each edge as p * t <= q, in a plain loop rather than a closure that
+  // writes t0 and t1: it runs for every segment near the line, every frame
+  // of a drag
+  for (let edge = 0; edge < 4; edge++) {
+    const p = edge === 0 ? -dx : edge === 1 ? dx : edge === 2 ? -dy : dy;
+    const q =
+      edge === 0
+        ? a[0]
+        : edge === 1
+          ? lengthM - a[0]
+          : edge === 2
+            ? a[1] + halfWidthM
+            : halfWidthM - a[1];
+    if (p === 0) {
+      if (!(q >= 0)) return null;
+      continue;
+    }
     const t = q / p;
     if (p < 0) {
-      if (t > t1) return false;
+      if (t > t1) return null;
       if (t > t0) t0 = t;
     } else {
-      if (t < t0) return false;
+      if (t < t0) return null;
       if (t < t1) t1 = t;
     }
-    return true;
-  };
-  const inside =
-    edge(-dx, a[0]) &&
-    edge(dx, lengthM - a[0]) &&
-    edge(-dy, a[1] + halfWidthM) &&
-    edge(dy, halfWidthM - a[1]);
-  return inside && t1 > t0 ? [t0, t1] : null;
+  }
+  return t1 > t0 ? [t0, t1] : null;
 }
 
 /** What to cut the section of, see crossSection */

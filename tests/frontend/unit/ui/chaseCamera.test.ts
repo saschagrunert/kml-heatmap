@@ -258,6 +258,32 @@ describe("ChaseCamera", () => {
     expect(ground.y + y).toBeCloseTo(0.6 * 600, 0);
   });
 
+  it("keeps the airplane by the camera past 180, the map's centre wrapped back", () => {
+    /**
+     * Where the airplane is drawn after a chase step from `center` towards
+     * a flight at `lng` heading east, a new chase from the map there
+     */
+    const drawnAt = (lng: number, center: number): [number, number] => {
+      map.jumpTo({ center: [center, 10], zoom: 12, bearing: 0, pitch: 0 });
+      const chase = camera();
+      const target = heading(90, 2000, [10, lng]);
+      chase.step(target, 10, (now += 16), false);
+      // Wrapped back into -180 to 180, as MapLibre does as the map moves
+      const { lng: moved, lat } = map.getCenter();
+      map.jumpTo({ center: [moved - 360 * Math.round(moved / 360), lat] });
+      const [x, y] = chase.offsetOf(target);
+      const centre = map.getCenter().lng;
+      const ground = map.project([centre + turnOf(centre, lng), 10]);
+      return [ground.x + x, ground.y + y];
+    };
+    // A replay going on past 180, the map's centre a drag later wrapped
+    // back west of it, against the same chase by a flight far from 180
+    const [x, y] = drawnAt(180.01, -179.99);
+    const [farX, farY] = drawnAt(20.01, 20.01);
+    expect(x).toBeCloseTo(farX, 0);
+    expect(y).toBeCloseTo(farY, 0);
+  });
+
   /** A replay panel whose top is `top` pixels down the page */
   function panelAt(top: number): { moveTo: (top: number) => void } {
     const panel = document.createElement("div");

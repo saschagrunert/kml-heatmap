@@ -55,7 +55,7 @@ import { cloudPoints, type CloudPoints } from "../calculations/heatCloud";
 import { groundedFlights, heldFlights } from "../calculations/groundProfile";
 import { smoothGrounded } from "../calculations/smoothGrounded";
 import type { SmoothedFlights } from "../calculations/smoothing";
-import { datasetIndex } from "../calculations/datasetIndex";
+import { idsKey, keptFlights } from "./keptFlights";
 import { heatWeight } from "../calculations/heatLines";
 import {
   FULL_BAND,
@@ -166,9 +166,7 @@ function onReliefIn(app: MapApp, forced: boolean): boolean {
  * as well.
  */
 function pointsKey(app: MapApp, forced: boolean): unknown[] {
-  const isolated = isolatesIn(app, forced)
-    ? [...app.selectedPathIds].sort((a, b) => a - b).join()
-    : "";
+  const isolated = isolatesIn(app, forced) ? idsKey(app.selectedPathIds) : "";
   return [
     app.currentData,
     app.selectedYear,
@@ -582,15 +580,11 @@ export function followHeatCloud(app: MapApp): void {
     forced: boolean,
     exposure: number | undefined,
   ): CloudPoints => {
-    const kept = datasetIndex(data).filter(
-      app.selectedYear,
-      app.selectedAircraft,
-    ).pathIds;
-    const isolated = isolatesIn(app, forced);
-    const selected = app.selectedPathIds;
-    const keep = isolated
-      ? (pathId: number) => kept.has(pathId) && selected.has(pathId)
-      : (pathId: number) => kept.has(pathId);
+    const keep = keptFlights(
+      app,
+      data,
+      isolatesIn(app, forced) ? app.selectedPathIds : null,
+    );
     const segments = data.path_segments;
     const flights = flightsFor(segments, level, forced);
     // Rolled off for the scale of the middle of the level cut for

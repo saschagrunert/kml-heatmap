@@ -48,7 +48,7 @@ import {
   type HeightReference,
   type LineFrame,
 } from "../calculations/crossSection";
-import { datasetIndex } from "../calculations/datasetIndex";
+import { keptFlights } from "./keptFlights";
 import { applyToggleButtonState } from "../utils/buttonState";
 import { frameCoalescer } from "../utils/frameCoalescer";
 import {
@@ -315,14 +315,8 @@ function createTool(app: MapApp): Tool {
   const keeper = (): ((pathId: number) => boolean) | null => {
     const data = app.currentData;
     if (!data) return null;
-    const kept = datasetIndex(data).filter(
-      app.selectedYear,
-      app.selectedAircraft,
-    ).pathIds;
     const selected = app.selectedPathIds;
-    return selected.size
-      ? (pathId) => kept.has(pathId) && selected.has(pathId)
-      : (pathId) => kept.has(pathId);
+    return keptFlights(app, data, selected.size ? selected : null);
   };
 
   /** Work the section out again and draw it */

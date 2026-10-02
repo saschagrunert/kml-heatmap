@@ -32,8 +32,10 @@ import {
   TILE_SIZE_PX,
   type Coordinate,
 } from "../utils/geometry";
+import { mercatorOf } from "../utils/mercator";
 import { FEET_TO_METERS } from "../utils/constants";
 import { overlaps, type Box } from "../utils/viewBox";
+import { boxOf } from "../utils/curveBox";
 import { heatWeight, CRUISE_SPEED_MS, type SegmentWeight } from "./heatLines";
 import { liftExaggeration } from "./lift";
 import { chainPieces, flightClockOf } from "./flightClock";
@@ -154,6 +156,8 @@ export interface CloudPoints {
   count: number;
   /** The Mercator point the points are given from */
   origin: readonly [number, number];
+  /** The Mercator x of the westernmost and easternmost point, unwrapped */
+  xs: readonly [number, number];
   /**
    * The heat per metre where the cloud is busiest: of the cells of
    * CLOUD_CELL_PX the heat of the steps of the relief level in them is
@@ -163,30 +167,6 @@ export interface CloudPoints {
    * ui/heatCloudShaders.ts).
    */
   busiest: number;
-}
-
-/** The Mercator x and y (0 to 1) of a `[lat, lng]` point */
-export function mercatorOf([lat, lng]: Readonly<Coordinate>): [number, number] {
-  return [mercatorX(lng), mercatorY(lat)];
-}
-
-/** The Mercator x (0 to 1) of a longitude, as mercatorOf's */
-export function mercatorX(lng: number): number {
-  return (lng + 180) / 360;
-}
-
-/** The Mercator y (0 to 1) of a latitude, as mercatorOf's */
-export function mercatorY(lat: number): number {
-  const sin = Math.sin(lat * DEGREES_TO_RADIANS);
-  return 0.5 - Math.log((1 + sin) / (1 - sin)) / (4 * Math.PI);
-}
-
-/** The `[lng, lat]` of the Mercator x and y (0 to 1), as mercatorOf's */
-export function lngLatOfMercator(x: number, y: number): [number, number] {
-  return [
-    x * 360 - 180,
-    (360 / Math.PI) * Math.atan(Math.exp((1 - 2 * y) * Math.PI)) - 90,
-  ];
 }
 
 /** A point to a Chord: where it is, its height and the ground, and its time */
@@ -329,20 +309,7 @@ function crosses(
 
 /** Whether any of the curve `points` may reach into `box` */
 function reaches(box: Box, points: readonly Readonly<Coordinate>[]): boolean {
-  let west = Infinity;
-  let east = -Infinity;
-  let south = Infinity;
-  let north = -Infinity;
-  for (let k = 0; k < points.length; k++) {
-    const point = points[k]!;
-    const lat = point[0];
-    const lng = point[1];
-    if (lng < west) west = lng;
-    if (lng > east) east = lng;
-    if (lat < south) south = lat;
-    if (lat > north) north = lat;
-  }
-  return overlaps(box, [west, south, east, north]);
+  return overlaps(box, boxOf(points));
 }
 
 /**
@@ -639,6 +606,7 @@ export function cloudPoints(
     points,
     count: values.length / CLOUD_POINT_FLOATS,
     origin,
+    xs: values.length > 0 ? [west, east] : [0.5, 0.5],
     busiest: most,
   };
 }

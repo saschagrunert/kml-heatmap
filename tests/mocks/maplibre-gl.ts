@@ -329,6 +329,7 @@ export class Map
       | "getCenter"
       | "setCenter"
       | "getBounds"
+      | "getRenderWorldCopies"
       | "getBearing"
       | "getPitch"
       | "getVerticalFieldOfView"
@@ -663,6 +664,8 @@ export class Map
     this.center = assertLngLat(center, "setCenter");
     return this;
   });
+
+  getRenderWorldCopies = vi.fn(() => true);
 
   getBounds = vi.fn(
     () =>

@@ -5,8 +5,8 @@
  * cruise, and 80 in a turn, where the heading changes by ten degrees from
  * one to the next. Drawn straight from fix to fix, a turn is a polygon
  * once zoomed in. The colour lines, the heat lines, the selection's lines
- * and the replay all draw the curve of calculations/lift.ts through the
- * same fixes instead, cut into more points where the flight turns, so they
+ * and the replay all draw the curve of calculations/smoothing.ts through
+ * the same fixes instead, cut into more points where the flight turns, so they
  * lie on top of each other. The fixes stay where they are: a colour still
  * changes at a fix, and every point of the curve belongs to the segment it
  * lies on.
@@ -17,7 +17,7 @@ import { smoothFlights, type SmoothedFlights } from "./smoothing";
 
 /**
  * Degrees of turn per point of the curve. The ribbons of the 3D view take
- * eight (see lift.ts), which left the corners of a gentle turn to be seen
+ * eight (see ribbons.ts), which left the corners of a gentle turn to be seen
  * on a flat line at zoom 16.
  */
 export const FLAT_TURN_STEP_DEG = 4;

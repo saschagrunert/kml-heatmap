@@ -10,14 +10,8 @@
  * source travels as one flat column of `[lat, lng, heat]` per point (see
  * heatColumns), which is handed to the worker as it is.
  */
-import type { Coordinate } from "../utils/geometry";
+import { DEGREES_TO_RADIANS, type Coordinate } from "../utils/geometry";
 import { heatTone } from "./heatTone";
-
-/**
- * The one of utils/geometry.ts, spelled out: an import of it would bring
- * utils/constants.ts into the worker's bundle
- */
-const DEGREES_TO_RADIANS = Math.PI / 180;
 
 /**
  * The reach HEATMAP_REFERENCE_INTENSITY is chosen for. The ridge of a

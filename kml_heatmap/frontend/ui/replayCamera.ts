@@ -23,7 +23,12 @@ import {
 } from "../calculations/airplaneLift";
 import { liftExaggeration, ribbonWidthZoom } from "../calculations/lift";
 import { prefersReducedMotion } from "../utils/motion";
-import { DEGREES_TO_RADIANS, TILE_SIZE_PX, turnOf } from "../utils/geometry";
+import {
+  DEGREES_TO_RADIANS,
+  focalLengthPx,
+  TILE_SIZE_PX,
+  turnOf,
+} from "../utils/geometry";
 import { ChaseCamera, dampStep, type SavedCamera } from "./chaseCamera";
 
 /** Minimum interval between map pans triggered by slider drags */
@@ -102,7 +107,7 @@ const NADIR_MARGIN_DEG = 5;
  */
 export function liftRoomPx(pitch: number, fov: number, height: number): number {
   // The camera's distance from the screen, in pixels
-  const focal = height / 2 / Math.tan((fov * DEGREES_TO_RADIANS) / 2);
+  const focal = focalLengthPx(height, fov * DEGREES_TO_RADIANS);
   // How far below the line of sight to the middle the ground may be seen
   const down = pitch - NADIR_MARGIN_DEG;
   return down > 0 ? focal * Math.tan(down * DEGREES_TO_RADIANS) : 0;

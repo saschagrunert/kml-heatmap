@@ -77,8 +77,8 @@ const REPLAY_ALL_BUTTON_ID = "replay-all-btn";
  * The tilt a flatter map is turned to while the flights play at their
  * height, and what is flat enough to need it: those of the 3D view
  * (THREE_D_PITCH and THREE_D_MIN_PITCH in ui/mapOrientation.ts). Written
- * out rather than shared: two more exports of the shared chunk renamed
- * those Wrapped's bundle imports, 6 of the 7 bytes it had left.
+ * out rather than shared: two more exports of the shared chunk cost every
+ * bundle that imports from it some bytes for nothing to share.
  */
 const TILT_PITCH = 50;
 const TILT_MIN_PITCH = 20;
@@ -139,6 +139,10 @@ export class ReplayAllControls {
     this.app = app;
     this.player = new ReplayAllPlayer(app);
     this.player.onChange = () => this.sync();
+    // Each play-through, also from the start again after the end
+    this.player.onLanded = () => {
+      if (this.open) this.announce("Every flight has landed");
+    };
     // Escape leaves it, as it leaves the replay of one flight; not from the
     // speed picker, whose own list it closes, nor from a popup or a marker
     document.addEventListener(
@@ -181,7 +185,7 @@ export class ReplayAllControls {
     const speed = Number(
       panel.querySelector<HTMLSelectElement>("select")?.value,
     );
-    const ended = this.player.start({ speed });
+    void this.player.start({ speed });
     if (this.player.flights === 0) {
       if (this.player.unavailable) {
         showToast(REPLAY_ALL_UNAVAILABLE_MESSAGE, "error");
@@ -193,9 +197,6 @@ export class ReplayAllControls {
     slider.max = String(
       Math.ceil(this.player.duration / SLIDER_STEP_S) * SLIDER_STEP_S,
     );
-    void ended.then((landed) => {
-      if (landed && this.open) this.announce("Every flight has landed");
-    });
     this.setOrbit(false);
     app.replayState.all = true;
     app.replayActive = true;
