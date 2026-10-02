@@ -82,8 +82,8 @@ about the base map requests (`base-style`, `error-free`, `layers`) on the
 desktop, one without. It builds both once, in the `e2e-sites` job, and runs
 every e2e job in the Playwright image the visual job uses, with a browser per
 core of the runner. The `desktop` project is split into three shards
-(`--shard`), the first of which then runs the specs without a key, and the
-`mobile` project into two. The tests tagged `@heavy` (`HEAVY` in
+(`--shard`), and the `mobile` project into two; the specs without a key run in a
+`desktop` job of their own. The tests tagged `@heavy` (`HEAVY` in
 `tests/e2e/fixtures.ts`: the 3D view with its relief, heat cloud or chase view,
 and the globe turned with the flights loaded) of the `desktop` and
 `webkit-desktop` projects run in a job of their own per engine with two browsers

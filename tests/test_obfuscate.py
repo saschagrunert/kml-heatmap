@@ -1209,7 +1209,7 @@ class TestCheckObfuscated:
         kml_file.write_text("<kml/>", encoding="utf-8")
         assert check_kml_obfuscated(kml_file) == []
 
-    @settings(max_examples=100, deadline=None)
+    @settings(max_examples=100)
     @given(slot=st.integers(min_value=0, max_value=24 * 60 - 1))
     def test_only_the_charterware_slot_may_look_like_a_time(
         self, tmp_path_factory, slot
@@ -1410,7 +1410,7 @@ class TestExtractFrac:
 
 
 class TestProperties:
-    @settings(max_examples=100, deadline=None)
+    @settings(max_examples=100)
     @given(
         st.datetimes(
             # Hypothesis takes naive bounds and adds the time zone itself

@@ -246,3 +246,63 @@ class TestPrePushWithoutGit:
 
         with pytest.raises(OSError, match="git is not on PATH"):
             pre_push.commits_to_check(tmp_path, "origin", ["a" * 40])
+
+
+check_site_files = _load("check_site_files")
+
+
+def _write_files(root: Path, names: tuple[str, ...]) -> None:
+    for name in names:
+        (root / name).parent.mkdir(parents=True, exist_ok=True)
+        (root / name).write_text("x")
+
+
+class TestCheckSiteFiles:
+    def test_a_complete_site_passes(self, tmp_path, capsys):
+        _write_files(tmp_path, check_site_files.SITE_FILES)
+
+        assert check_site_files.main([str(tmp_path)]) == 0
+        assert f"All {len(check_site_files.SITE_FILES)} files are there" in (
+            capsys.readouterr().out
+        )
+
+    def test_names_every_file_that_is_missing_or_empty(self, tmp_path, capsys):
+        _write_files(tmp_path, check_site_files.SITE_FILES)
+        (tmp_path / "data" / "metadata.json").unlink()
+        (tmp_path / "vendor" / "maplibre-gl.mjs").write_text("")
+
+        assert check_site_files.main([str(tmp_path)]) == 1
+
+        errors = capsys.readouterr().out.splitlines()[1:]
+        assert errors == [
+            f"::error::{tmp_path / 'vendor/maplibre-gl.mjs'} was not generated",
+            f"::error::{tmp_path / 'data/metadata.json'} was not generated",
+        ]
+
+    def test_the_package_ships_every_asset_and_no_source_map(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        _write_files(tmp_path, check_site_files.PACKAGE_FILES)
+        monkeypatch.setattr(
+            check_site_files.importlib.resources, "files", lambda _: tmp_path
+        )
+
+        assert check_site_files.main(["--package"]) == 0
+        assert f"All {len(check_site_files.PACKAGE_FILES)} files are there" in (
+            capsys.readouterr().out
+        )
+
+        (tmp_path / "static" / "wrapped.css").unlink()
+        (tmp_path / "static" / "mapApp.bundle.js.map").write_text("{}")
+
+        assert check_site_files.main(["--package"]) == 1
+        assert capsys.readouterr().out.splitlines()[1:] == [
+            "::error::static/wrapped.css is not shipped",
+            "::error::static/mapApp.bundle.js.map is shipped",
+        ]
+
+    def test_wants_a_site_or_the_package(self, capsys):
+        with pytest.raises(SystemExit):
+            check_site_files.main([])
+        with pytest.raises(SystemExit):
+            check_site_files.main(["site", "--package"])

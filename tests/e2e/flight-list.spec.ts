@@ -4,7 +4,12 @@
  * covered in mobile.spec.ts.
  */
 import { test, expect, type Locator, type Page } from "./fixtures";
-import { expectNoA11yViolations, gotoApp, toggleStatsPanel } from "./helpers";
+import {
+  expectNoA11yViolations,
+  gotoApp,
+  knownYears,
+  toggleStatsPanel,
+} from "./helpers";
 
 /** Every flight of every year, so the list has plenty to sort */
 const ALL_YEARS = "/?y=all";
@@ -165,6 +170,26 @@ test.describe("Flight list", () => {
 
     await panel.locator(".kh-flights-search").fill("no such flight");
     await expect(panel.locator("tbody")).toHaveText("No flight matches");
+  });
+});
+
+/**
+ * One year of flights, for the specs that need only a few rows: every
+ * flight of every year left the shared runner so busy that a single click
+ * took seconds, and the selection spec came close to its timeout. The page
+ * opens on the latest year, the only one it can tell without loading the
+ * others; the metadata has no count of flights per year.
+ */
+test.describe("Flight list selection", () => {
+  test.beforeEach(async ({ page }) => {
+    await gotoApp(page);
+    const latest = Math.max(...(await knownYears(page)).map(Number));
+    const { year, flights } = await page.evaluate(() => ({
+      year: window.mapApp!.selectedYear,
+      flights: window.mapApp!.currentData!.path_info.length,
+    }));
+    expect(year, "the page opens on the latest year").toBe(String(latest));
+    expect(flights, "three flights to select").toBeGreaterThanOrEqual(3);
   });
 
   test("selects a flight alone, and adds one with Shift", async ({ page }) => {

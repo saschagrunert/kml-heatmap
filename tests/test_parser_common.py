@@ -168,7 +168,7 @@ class TestParseCoordinatePoint:
     def test_invalid_values(self, value):
         assert parse_coordinate_point(value, "test.kml") is None
 
-    @settings(max_examples=300, deadline=None)
+    @settings(max_examples=300)
     @given(
         st.one_of(
             st.text(),
@@ -271,7 +271,7 @@ class TestExtractCharterwareTimestamp:
     def test_invalid(self, desc):
         assert extract_charterware_timestamp(desc) is None
 
-    @settings(max_examples=100, deadline=None)
+    @settings(max_examples=100)
     @given(
         # A local date and time of a description, which has no time zone
         st.datetimes(

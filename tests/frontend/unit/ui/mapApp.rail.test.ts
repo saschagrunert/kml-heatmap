@@ -170,6 +170,24 @@ const BASE_STYLE = {
   ],
 };
 
+/**
+ * Holds the next call of a lazy bundle's loader until the test delivers it:
+ * the bundle the loader answers with, and the function that hands it over
+ */
+async function holdNextLoad<T>(
+  load: () => Promise<T>,
+): Promise<{ bundle: T; deliver: () => void }> {
+  const bundle = await load();
+  let deliver: () => void = () => {};
+  vi.mocked(load).mockImplementationOnce(
+    () =>
+      new Promise<T>((resolve) => {
+        deliver = () => resolve(bundle);
+      }),
+  );
+  return { bundle, deliver: () => deliver() };
+}
+
 describe("MapApp controls and map", () => {
   let app: MapApp;
 
@@ -466,16 +484,9 @@ describe("MapApp controls and map", () => {
 
     /** A Wrapped bundle that arrives when the test says so */
     async function heldBundle(): Promise<() => void> {
-      const bundle = await loadWrapped();
-      let deliver: () => void = () => {};
-      vi.mocked(loadWrapped).mockImplementationOnce(
-        () =>
-          new Promise((resolve) => {
-            deliver = () => resolve(bundle);
-          }),
-      );
+      const { deliver } = await holdNextLoad(loadWrapped);
       vi.mocked(loadWrapped).mockClear();
-      return () => deliver();
+      return deliver;
     }
 
     it("fetches nothing until the panel opens", async () => {
@@ -673,14 +684,7 @@ describe("MapApp controls and map", () => {
 
     it("opens replay once for quick clicks while the bundle loads", async () => {
       await initializeApp(app);
-      let deliver: () => void = () => {};
-      const bundle = await loadFeatures();
-      vi.mocked(loadFeatures).mockImplementationOnce(
-        () =>
-          new Promise((resolve) => {
-            deliver = () => resolve(bundle);
-          }),
-      );
+      const { deliver } = await holdNextLoad(loadFeatures);
       m.mockReplayManagerInstance.toggleReplay.mockClear();
 
       // Each click used to queue a toggle; two of them opened replay and
@@ -854,12 +858,8 @@ describe("MapApp controls and map", () => {
 
     it("asks once while the bundle is on its way", async () => {
       await initializeApp(app);
-      let deliver: () => void = () => {};
-      const bundle = await loadFeatures();
+      const { bundle, deliver } = await holdNextLoad(loadFeatures);
       vi.mocked(loadFeatures).mockClear();
-      vi.mocked(loadFeatures).mockImplementationOnce(
-        () => new Promise((resolve) => (deliver = () => resolve(bundle))),
-      );
 
       app.selectedPathIds.add(1);
       app.store.notifyMutation("selectedPathIds");
@@ -931,14 +931,7 @@ describe("MapApp controls and map", () => {
 
     it("builds no Wrapped manager once destroyed while its bundle loaded", async () => {
       await initializeApp(app);
-      let deliver: () => void = () => {};
-      const bundle = await loadWrapped();
-      vi.mocked(loadWrapped).mockImplementationOnce(
-        () =>
-          new Promise((resolve) => {
-            deliver = () => resolve(bundle);
-          }),
-      );
+      const { deliver } = await holdNextLoad(loadWrapped);
 
       const loading = app.loadWrapped();
       app.destroy();
@@ -950,14 +943,7 @@ describe("MapApp controls and map", () => {
 
     it("drops a Replay click still waiting for the bundle", async () => {
       await initializeApp(app);
-      let deliver: () => void = () => {};
-      const bundle = await loadFeatures();
-      vi.mocked(loadFeatures).mockImplementationOnce(
-        () =>
-          new Promise((resolve) => {
-            deliver = () => resolve(bundle);
-          }),
-      );
+      const { deliver } = await holdNextLoad(loadFeatures);
       m.mockReplayManagerInstance.toggleReplay.mockClear();
 
       app.toggleReplay();
@@ -971,14 +957,7 @@ describe("MapApp controls and map", () => {
 
     it("opens Replay all once for quick clicks while the bundle loads", async () => {
       await initializeApp(app);
-      let deliver: () => void = () => {};
-      const bundle = await loadFeatures();
-      vi.mocked(loadFeatures).mockImplementationOnce(
-        () =>
-          new Promise((resolve) => {
-            deliver = () => resolve(bundle);
-          }),
-      );
+      const { deliver } = await holdNextLoad(loadFeatures);
       m.toggleReplayAll.mockClear();
 
       app.toggleReplayAll();
@@ -994,14 +973,7 @@ describe("MapApp controls and map", () => {
 
     it("opens the cross-section once for quick clicks while the bundle loads", async () => {
       await initializeApp(app);
-      let deliver: () => void = () => {};
-      const bundle = await loadFeatures();
-      vi.mocked(loadFeatures).mockImplementationOnce(
-        () =>
-          new Promise((resolve) => {
-            deliver = () => resolve(bundle);
-          }),
-      );
+      const { deliver } = await holdNextLoad(loadFeatures);
       m.toggleCrossSection.mockClear();
 
       app.toggleCrossSection();
@@ -1066,14 +1038,7 @@ describe("MapApp controls and map", () => {
 
     it("drops a Replay all click still waiting for the bundle", async () => {
       await initializeApp(app);
-      let deliver: () => void = () => {};
-      const bundle = await loadFeatures();
-      vi.mocked(loadFeatures).mockImplementationOnce(
-        () =>
-          new Promise((resolve) => {
-            deliver = () => resolve(bundle);
-          }),
-      );
+      const { deliver } = await holdNextLoad(loadFeatures);
       m.toggleReplayAll.mockClear();
 
       app.toggleReplayAll();
@@ -1101,14 +1066,7 @@ describe("MapApp controls and map", () => {
 
     it("starts the hotspot tour once for quick clicks, apart from Replay all", async () => {
       await initializeApp(app);
-      let deliver: () => void = () => {};
-      const bundle = await loadFeatures();
-      vi.mocked(loadFeatures).mockImplementationOnce(
-        () =>
-          new Promise((resolve) => {
-            deliver = () => resolve(bundle);
-          }),
-      );
+      const { deliver } = await holdNextLoad(loadFeatures);
       m.toggleHotspotTour.mockClear();
       m.toggleReplayAll.mockClear();
 

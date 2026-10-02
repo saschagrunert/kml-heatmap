@@ -56,7 +56,7 @@ concurrency:
 jobs:
   lint:
     if: github.event_name != 'schedule'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -67,7 +67,7 @@ jobs:
         with:
           python-version-file: .python-version
           cache: pip
-          cache-dependency-path: requirements*.lock
+          cache-dependency-path: requirements-test.lock
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -113,13 +113,14 @@ jobs:
       - name: Check for unused files, exports and dependencies
         if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
         run: npm run lint:unused
-      # The workflows themselves: template injection, credentials left in
-      # the checkout, unpinned actions and the like. zizmor comes with the
-      # dev extra in requirements-test.lock; without a token it runs its
-      # offline audits only, the same as `make lint`.
+      # The workflows, the composite action and dependabot.yml: template
+      # injection, credentials left in the checkout, unpinned actions and
+      # the like. zizmor comes with the dev extra in requirements-test.lock;
+      # without a token it runs its offline audits only, the same as
+      # `make lint`.
       - name: Audit the workflows
         if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
-        run: zizmor --min-severity medium .github/workflows
+        run: zizmor --min-severity medium .github
 
   unit:
     # Not for Dependabot's Python bumps, see the top (also for the zizmor
@@ -129,59 +130,18 @@ jobs:
       !(github.event.pull_request.user.login == 'dependabot[bot]' &&
       github.actor == 'dependabot[bot]' &&
       startsWith(github.head_ref, 'dependabot/pip/'))
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Set up Python
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      # Python, Node.js, the dependencies, the bundles and the caches of the
+      # OurAirports database and the elevation tiles
+      - name: Set up the site build
+        uses: ./.github/actions/site-build-setup
         with:
-          python-version-file: .python-version
-          cache: pip
-          cache-dependency-path: requirements*.lock
-      - name: Set up Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version-file: .nvmrc
-          cache: npm
-      - name: Install Python dependencies
-        run: pip install --require-hashes -r requirements-test.lock
-      - name: Install npm dependencies
-        run: npm ci
-      - name: Build the JavaScript bundle
-        run: npm run build
-      - name: Compute the weekly cache key
-        id: week
-        run: echo "week=$(date +%G-%V)" >> "$GITHUB_OUTPUT"
-      # Only the CSVs: a failed download leaves a marker file behind that
-      # suppresses retries for an hour, and a cache saved with it would hand
-      # that to every job restoring it. During an outage the build falls back
-      # to an earlier week's copy.
-      - name: Cache the OurAirports database
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: |
-            ~/.cache/kml-heatmap/airports.csv
-            ~/.cache/kml-heatmap/runways.csv
-          key: ourairports-${{ steps.week.outputs.week }}
-          restore-keys: ourairports-
-      # The elevation tiles the ground under the flights is sampled from
-      # (kml_heatmap/terrain.py), with the decoded pixels of each beside it
-      # (.pixels): about 90 MB for data/, half of it each. A tile never
-      # changes upstream, so the cache of the last set of flights is restored
-      # for the next and only the tiles of new flights are downloaded; it is
-      # saved again under the new set. A tile that failed to download is
-      # simply not in it, so no failure is carried over. The pixels carry the
-      # CRC of their tile and a version of their layout, and a file that does
-      # not match either is decoded again, so they need no key of their own.
-      - name: Cache the elevation tiles
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.cache/kml-heatmap/terrain
-          key: terrain-${{ hashFiles('data/*.kml') }}
-          restore-keys: terrain-
+          python-lock: requirements-test.lock
       # The export contract test reads the data files of a real build
       - name: Build the site from the current sources
         run: python -m kml_heatmap data --output-dir docs
@@ -211,18 +171,23 @@ jobs:
       !(github.event.pull_request.user.login == 'dependabot[bot]' &&
       github.actor == 'dependabot[bot]' &&
       startsWith(github.head_ref, 'dependabot/pip/'))
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # The pip cache is keyed by the lock files this job installs, as in
+      # every job: a key shared by all of them held only what the first job
+      # to save it had downloaded
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version-file: .python-version
           cache: pip
-          cache-dependency-path: requirements*.lock
+          cache-dependency-path: |
+            requirements-build.lock
+            requirements.lock
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -245,25 +210,12 @@ jobs:
           python -m venv "$RUNNER_TEMP/wheel-venv"
           "$RUNNER_TEMP/wheel-venv/bin/pip" install --disable-pip-version-check --require-hashes -r requirements.lock
           "$RUNNER_TEMP/wheel-venv/bin/pip" install --disable-pip-version-check --no-deps dist/*.whl
+      # Every asset the page loads, and none of the source maps. Run outside
+      # the checkout so the installed package is imported, not the source
+      # tree (see scripts/check_site_files.py).
       - name: Check the shipped assets
-        # Run outside the checkout so the installed package is imported, not the source tree
         working-directory: ${{ runner.temp }}
-        run: |
-          for asset in templates/map_template.html static/mapApp.bundle.js \
-            static/features.bundle.js static/wrapped.bundle.js \
-            static/shared.bundle.js static/yearWorker.bundle.js \
-            static/vendor/maplibre-gl.mjs static/vendor/maplibre-gl-worker.mjs \
-            static/styles.css static/features.css static/wrapped.css; do
-            result=$("$RUNNER_TEMP/wheel-venv/bin/python" -c "import importlib.resources as r, kml_heatmap; print(r.files(kml_heatmap).joinpath('$asset').is_file())")
-            echo "$asset shipped: $result"
-            test "$result" = "True"
-          done
-          # The bundle is the shipped artifact; its source map (mappings and
-          # file names, build.js keeps the sources out) stays with the site
-          # and the container and out of the wheel
-          maps=$("$RUNNER_TEMP/wheel-venv/bin/python" -c "import importlib.resources as r, kml_heatmap; print(any(p.name.endswith('.map') for p in r.files(kml_heatmap).joinpath('static').iterdir()))")
-          echo "source maps shipped: $maps"
-          test "$maps" = "False"
+        run: '"$RUNNER_TEMP/wheel-venv/bin/python" "$GITHUB_WORKSPACE/scripts/check_site_files.py" --package'
       # Loads the parser, the minifiers, the renderer and the templates, which
       # `--version` alone never imports. The airport and runway fixtures
       # stand in for the OurAirports downloads, and `--no-terrain` keeps the
@@ -281,12 +233,7 @@ jobs:
           cp "${kml[@]:0:3}" smoke/input/
           "$RUNNER_TEMP/wheel-venv/bin/kml-heatmap" --version
           "$RUNNER_TEMP/wheel-venv/bin/kml-heatmap" --no-terrain smoke/input --output-dir smoke/site
-          for file in index.html map_config.js mapApp.bundle.js \
-            features.bundle.js wrapped.bundle.js shared.bundle.js \
-            yearWorker.bundle.js styles.css features.css wrapped.css \
-            vendor/maplibre-gl.mjs vendor/maplibre-gl-worker.mjs data/metadata.json; do
-            test -s "smoke/site/$file" || { echo "::error::smoke/site/$file was not generated"; exit 1; }
-          done
+          python "$GITHUB_WORKSPACE/scripts/check_site_files.py" smoke/site
           # Still the fixture, so nothing was downloaded
           cmp "$GITHUB_WORKSPACE/tests/fixtures/airports.csv" smoke/cache/airports.csv
           cmp "$GITHUB_WORKSPACE/tests/fixtures/runways.csv" smoke/cache/runways.csv
@@ -303,47 +250,17 @@ jobs:
       !(github.event.pull_request.user.login == 'dependabot[bot]' &&
       github.actor == 'dependabot[bot]' &&
       startsWith(github.head_ref, 'dependabot/pip/'))
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Set up Python
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      # As in the unit job, with the runtime dependencies only
+      - name: Set up the site build
+        uses: ./.github/actions/site-build-setup
         with:
-          python-version-file: .python-version
-          cache: pip
-          cache-dependency-path: requirements*.lock
-      - name: Set up Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version-file: .nvmrc
-          cache: npm
-      - name: Install Python dependencies
-        run: pip install --require-hashes -r requirements.lock
-      - name: Install npm dependencies
-        run: npm ci
-      - name: Build the JavaScript bundle
-        run: npm run build
-      - name: Compute the weekly cache key
-        id: week
-        run: echo "week=$(date +%G-%V)" >> "$GITHUB_OUTPUT"
-      - name: Cache the OurAirports database
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: |
-            ~/.cache/kml-heatmap/airports.csv
-            ~/.cache/kml-heatmap/runways.csv
-          key: ourairports-${{ steps.week.outputs.week }}
-          restore-keys: ourairports-
-      # The elevation tiles, see the unit job
-      - name: Cache the elevation tiles
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.cache/kml-heatmap/terrain
-          key: terrain-${{ hashFiles('data/*.kml') }}
-          restore-keys: terrain-
+          python-lock: requirements.lock
       # tests/e2e/fixtures.ts answers the tile servers locally, so the dummy
       # key never leaves the runner
       - name: Build the site with a dummy tile API key
@@ -375,7 +292,7 @@ jobs:
       # installs one there that cannot start: its scripts point at the tool
       # cache path of the runner, which the container mounts elsewhere). The
       # script keeps the build offline and its build stamp fixed, so it needs
-      # none of the caches above.
+      # none of the caches the setup restores.
       - name: Build the fixture site of the visual snapshots
         run: python scripts/build_visual_site.py
       - name: Upload the fixture site
@@ -400,7 +317,7 @@ jobs:
       !(github.event.pull_request.user.login == 'dependabot[bot]' &&
       github.actor == 'dependabot[bot]' &&
       startsWith(github.head_ref, 'dependabot/npm_and_yarn/playwright'))
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # The heavy tests allow up to five minutes each (the relief tests of
     # orientation.spec.ts three), so their jobs get longer
     timeout-minutes: ${{ matrix.timeout-minutes || 15 }}
@@ -412,10 +329,11 @@ jobs:
       fail-fast: false
       # Every project runs against the published setup, with the dummy key.
       # Without a key only the requests for the base map change, so that
-      # variant runs just the specs that make and check those requests
-      # (no-key-specs), on the desktop, instead of the whole suite a second
-      # time. It rides along in the first desktop shard, after its tests,
-      # rather than paying for a runner and its setup of its own.
+      # variant (site: none) runs just the specs that make and check those
+      # requests, on the desktop, instead of the whole suite a second time.
+      # It has a job of its own: after the tests of the first desktop shard
+      # it made that the slowest job of the run by about a minute, more than
+      # the setup of a runner costs.
       #
       # Software WebGL runs one browser per core of the 4-vCPU runner. The
       # desktop project is split into three shards and the mobile project
@@ -437,11 +355,10 @@ jobs:
       # nothing leaves the heavy jobs with no tests, which fails them.
       matrix:
         include:
-          - name: desktop-1+no-key
+          - name: desktop-1
             project: desktop
             shard: 1/3
             grep-invert: "@heavy"
-            no-key-specs: base-style.spec.ts error-free.spec.ts layers.spec.ts
           - name: desktop-2
             project: desktop
             shard: 2/3
@@ -456,6 +373,10 @@ jobs:
             workers: 2
             retries: 0
             timeout-minutes: 25
+          - name: desktop-no-key
+            project: desktop
+            site: none
+            specs: base-style.spec.ts error-free.spec.ts layers.spec.ts
           - name: mobile-1
             project: mobile
             shard: 1/2
@@ -494,16 +415,18 @@ jobs:
       # After the checkout, so tests/e2e/site-check.ts finds the site newer
       # than the sources; its bundles carry the hash of the sources they
       # were built from, which the check compares with this checkout
+      # The site with the dummy key, or the one without (site: none), into
+      # docs/, where the test server looks
       - name: Download the site
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: e2e-site-dummy
+          name: e2e-site-${{ matrix.site || 'dummy' }}
           path: docs
       - name: Run the E2E tests
         shell: bash
         env:
           # Checked against docs/map_config.js by tests/e2e/site-check.ts
-          E2E_API_KEYS: dummy
+          E2E_API_KEYS: ${{ matrix.site || 'dummy' }}
           PROJECT: ${{ matrix.project }}
           SHARD: ${{ matrix.shard }}
           GREP: ${{ matrix.grep }}
@@ -511,6 +434,7 @@ jobs:
           WORKERS: ${{ matrix.workers }}
           RETRIES: ${{ matrix.retries }}
           DEBUG: ${{ matrix.debug }}
+          SPECS: ${{ matrix.specs }}
         run: |
           args=(--project="$PROJECT")
           if [ -n "$SHARD" ]; then args+=(--shard="$SHARD"); fi
@@ -518,33 +442,10 @@ jobs:
           if [ -n "$GREP_INVERT" ]; then args+=(--grep-invert="$GREP_INVERT"); fi
           if [ -n "$WORKERS" ]; then args+=(--workers="$WORKERS"); fi
           if [ -n "$RETRIES" ]; then args+=(--retries="$RETRIES"); fi
-          npx playwright test "${args[@]}"
-      # Also when the run above failed, so one run reports both. The site
-      # replaces docs/, where the test server looks; the results and the
-      # report go next to the ones above, which a second run would delete.
-      - name: Download the site without a tile API key
-        if: ${{ !cancelled() && matrix.no-key-specs }}
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: e2e-site-none
-          path: e2e-site-none
-      - name: Run the E2E tests without a tile API key
-        if: ${{ !cancelled() && matrix.no-key-specs }}
-        shell: bash
-        env:
-          E2E_API_KEYS: none
-          PROJECT: ${{ matrix.project }}
-          SPECS: ${{ matrix.no-key-specs }}
-          PLAYWRIGHT_HTML_OUTPUT_DIR: playwright-report-no-key
-          # Beside the results of this run; the path in playwright.config.ts
-          # would overwrite the timings of the run above
-          PLAYWRIGHT_JSON_OUTPUT_FILE: test-results-no-key/e2e-timings.json
-        run: |
-          rm -rf docs
-          mv e2e-site-none docs
           # SPECS is a list of file names, split into words on purpose
-          # shellcheck disable=SC2086
-          npx playwright test --project="$PROJECT" --output=test-results-no-key $SPECS
+          # shellcheck disable=SC2206
+          if [ -n "$SPECS" ]; then args+=($SPECS); fi
+          npx playwright test "${args[@]}"
       # Also when the job timed out or was cancelled: the traces of the tests
       # that failed until then are what shows why
       - name: Upload Playwright results
@@ -555,8 +456,6 @@ jobs:
           path: |
             test-results/
             playwright-report/
-            test-results-no-key/
-            playwright-report-no-key/
           if-no-files-found: ignore
           retention-days: 7
       # The duration of every test (the JSON reporter of playwright.config.ts),
@@ -568,9 +467,7 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: e2e-timings-${{ matrix.name }}
-          path: |
-            test-results/e2e-timings.json
-            test-results-no-key/e2e-timings.json
+          path: test-results/e2e-timings.json
           if-no-files-found: ignore
           retention-days: 3
 
@@ -600,7 +497,7 @@ jobs:
       !(github.event.pull_request.user.login == 'dependabot[bot]' &&
       github.actor == 'dependabot[bot]' &&
       startsWith(github.head_ref, 'dependabot/npm_and_yarn/playwright'))
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     container:
       image: mcr.microsoft.com/playwright:v1.63.0-noble@sha256:eff16c30e6f3f4af0a03fa4b706120d5e9b0891c344a27d64559aff5900a4a27
@@ -637,7 +534,7 @@ jobs:
           retention-days: 7
 
   security:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -650,7 +547,7 @@ jobs:
         with:
           python-version-file: .python-version
           cache: pip
-          cache-dependency-path: requirements*.lock
+          cache-dependency-path: requirements-test.lock
       - name: Install Python dependencies
         run: pip install --require-hashes -r requirements-test.lock
       - name: Run bandit
@@ -659,12 +556,15 @@ jobs:
       # Every lock file, also the ones only the packaging job and `make lock`
       # install. pip-audit resolves the files of one call together, and only
       # the runtime and test locks are compiled to agree, so the build and
-      # tools locks get calls of their own.
+      # tools locks get calls of their own. Every lock pins every package
+      # with its hashes, so the audit reads the pins as they are, without pip
+      # resolving anything: --no-deps warned on every call, and left out a
+      # package (packaging) the locks pin.
       - name: Audit the Python lock files
         run: |
-          pip-audit --no-deps -r requirements.lock -r requirements-test.lock
-          pip-audit --no-deps -r requirements-build.lock
-          pip-audit --no-deps -r requirements-tools.lock
+          pip-audit --disable-pip --require-hashes -r requirements.lock -r requirements-test.lock
+          pip-audit --disable-pip --require-hashes -r requirements-build.lock
+          pip-audit --disable-pip --require-hashes -r requirements-tools.lock
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -700,7 +600,7 @@ jobs:
       !(github.event.pull_request.user.login == 'dependabot[bot]' &&
       github.actor == 'dependabot[bot]' &&
       startsWith(github.head_ref, 'dependabot/pip/'))
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -723,12 +623,7 @@ jobs:
           docker run --rm --network none --user "$(id -u):$(id -g)" -e HOME=/tmp \
             -v "$smoke/input:/data/input" -v "$smoke/site:/data/site" -v "$smoke/cache:/cache" \
             kml-heatmap input --output-dir site
-          for file in index.html map_config.js mapApp.bundle.js \
-            features.bundle.js wrapped.bundle.js shared.bundle.js \
-            yearWorker.bundle.js styles.css features.css wrapped.css \
-            vendor/maplibre-gl.mjs vendor/maplibre-gl-worker.mjs data/metadata.json; do
-            test -s "$smoke/site/$file" || { echo "::error::$file was not generated"; exit 1; }
-          done
+          python3 scripts/check_site_files.py "$smoke/site"
           # Still the fixture, and without a network nothing else was fetched
           cmp tests/fixtures/airports.csv "$smoke/cache/airports.csv"
           cmp tests/fixtures/runways.csv "$smoke/cache/runways.csv"
@@ -746,16 +641,11 @@ jobs:
           docker run --rm --network none \
             -v "$smoke/input:/data/input" -v "$smoke/site:/data/site" -v "$smoke/cache:/cache" \
             kml-heatmap input --output-dir site
-          for file in index.html map_config.js mapApp.bundle.js \
-            features.bundle.js wrapped.bundle.js shared.bundle.js \
-            yearWorker.bundle.js styles.css features.css wrapped.css \
-            vendor/maplibre-gl.mjs vendor/maplibre-gl-worker.mjs data/metadata.json; do
-            test -s "$smoke/site/$file" || { echo "::error::$file was not generated as the image user"; exit 1; }
-          done
+          python3 scripts/check_site_files.py "$smoke/site"
 
   obfuscation:
     if: github.event_name != 'schedule'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -766,7 +656,7 @@ jobs:
         with:
           python-version-file: .python-version
           cache: pip
-          cache-dependency-path: requirements*.lock
+          cache-dependency-path: requirements.lock
       - name: Install Python dependencies
         run: pip install --require-hashes -r requirements.lock
       - name: Check that the KML files are obfuscated
@@ -777,7 +667,7 @@ jobs:
 
   typos:
     if: github.event_name != 'schedule'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -806,7 +696,7 @@ jobs:
       - obfuscation
       - typos
     if: ${{ always() && github.event_name != 'schedule' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - name: Check that every test job passed
@@ -844,7 +734,7 @@ jobs:
       - obfuscation
       - typos
     if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
       publish: ${{ steps.head.outputs.publish }}
@@ -870,7 +760,7 @@ jobs:
   site:
     needs: publishable
     if: needs.publishable.outputs.publish == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     # pages: read for the address of the site, see "Look up the address"
     permissions:
@@ -880,41 +770,11 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Set up Python
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      # As in the unit job, with the runtime dependencies only
+      - name: Set up the site build
+        uses: ./.github/actions/site-build-setup
         with:
-          python-version-file: .python-version
-          cache: pip
-          cache-dependency-path: requirements*.lock
-      - name: Set up Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version-file: .nvmrc
-          cache: npm
-      - name: Install Python dependencies
-        run: pip install --require-hashes -r requirements.lock
-      - name: Install npm dependencies
-        run: npm ci
-      - name: Build the JavaScript bundle
-        run: npm run build
-      - name: Compute the weekly cache key
-        id: week
-        run: echo "week=$(date +%G-%V)" >> "$GITHUB_OUTPUT"
-      - name: Cache the OurAirports database
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: |
-            ~/.cache/kml-heatmap/airports.csv
-            ~/.cache/kml-heatmap/runways.csv
-          key: ourairports-${{ steps.week.outputs.week }}
-          restore-keys: ourairports-
-      # The elevation tiles, see the unit job
-      - name: Cache the elevation tiles
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.cache/kml-heatmap/terrain
-          key: terrain-${{ hashFiles('data/*.kml') }}
-          restore-keys: terrain-
+          python-lock: requirements.lock
       # The link preview images, cached under a hash of what each one draws
       # and of the module that draws them (kml_heatmap/previews.py), so the
       # latest cache has every image that did not change
@@ -950,7 +810,7 @@ jobs:
 
   deploy:
     needs: site
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     # Deployments never overlap and are never cancelled half way
     concurrency:

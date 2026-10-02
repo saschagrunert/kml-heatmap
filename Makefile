@@ -154,7 +154,7 @@ lint: ## Run the linters, formatters (check only) and type checkers of the CI li
 	npm run lint
 	npm run lint:unused
 	npm run format:check
-	zizmor --min-severity medium .github/workflows
+	zizmor --min-severity medium .github
 	@if command -v typos >/dev/null 2>&1; then typos; else \
 	  echo "warning: typos is not installed, skipping the spell check (CI runs it; see CONTRIBUTING.md)" >&2; fi
 
@@ -208,7 +208,7 @@ lock: ## Regenerate the lock files from pyproject.toml and requirements-tools.in
 clean: ## Remove the container image (when a runtime is available) and local build artifacts, including the frontend build output in kml_heatmap/static/ and the fixture site of the visual snapshots
 	-@test -z "$(CONTAINER_RUNTIME)" || $(CONTAINER_RUNTIME) rmi $(IMAGE_NAME) 2>/dev/null
 	rm -rf htmlcov coverage coverage.xml .coverage .coverage.* test-results playwright-report \
-	  visual-site \
+	  visual-site e2e-sites bundle-meta.json \
 	  dist build *.egg-info .mypy_cache .ruff_cache .pytest_cache .hypothesis \
 	  kml_heatmap/static/*.bundle.js kml_heatmap/static/*.map \
 	  kml_heatmap/static/vendor kml_heatmap/static/flags

@@ -162,9 +162,11 @@ updates:
       interval: "daily"
       time: "09:00"
     open-pull-requests-limit: 3
+    # Labels the repository has: Dependabot does not create a missing one,
+    # it only comments on the pull request that it could not be found
     labels:
       - "dependencies"
-      - "docker"
+      - "ci"
     commit-message:
       prefix: "docker"
     ignore:

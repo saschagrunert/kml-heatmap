@@ -566,7 +566,7 @@ class TestProcessPathSegments:
 
 
 class TestProcessPathSegmentsProperties:
-    @settings(max_examples=150, deadline=None)
+    @settings(max_examples=150)
     @given(
         st.lists(
             st.tuples(

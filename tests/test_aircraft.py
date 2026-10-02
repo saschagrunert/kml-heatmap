@@ -70,7 +70,7 @@ class TestNormalizeRegistration:
 
 
 class TestNormalizeRegistrationProperties:
-    @settings(max_examples=200, deadline=None)
+    @settings(max_examples=200)
     @given(
         st.text(alphabet=st.characters(whitelist_categories=("Lu", "Nd")), max_size=8)
     )
@@ -78,7 +78,7 @@ class TestNormalizeRegistrationProperties:
         once = normalize_registration(raw)
         assert normalize_registration(once) == once
 
-    @settings(max_examples=200, deadline=None)
+    @settings(max_examples=200)
     @given(
         st.text(alphabet=st.characters(whitelist_categories=("Lu", "Nd")), max_size=8)
     )
