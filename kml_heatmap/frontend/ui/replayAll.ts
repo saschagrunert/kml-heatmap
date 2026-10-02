@@ -200,7 +200,11 @@ export class ReplayAllControls {
     app.replayState.all = true;
     app.replayActive = true;
     this.release?.();
-    this.release = holdControls(HELD_CONTROL_IDS, "the replay of all flights");
+    this.release = holdControls(
+      HELD_CONTROL_IDS,
+      "the replay of all flights",
+      this.app.signal,
+    );
     document.body.classList.add("replay-all-active");
     panel.hidden = false;
     this.shown = "";

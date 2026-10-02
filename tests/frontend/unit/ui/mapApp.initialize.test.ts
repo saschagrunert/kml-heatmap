@@ -807,14 +807,14 @@ describe("MapApp.initialize", () => {
       expect(btn.getAttribute("aria-pressed")).toBe("false");
     });
 
-    it("disables the airspeed button without timing data", async () => {
+    it("marks the airspeed button unavailable without timing data", async () => {
       await initializeApp(app, defaultAirports, {
         ...defaultMetadata,
         max_groundspeed_knots: 0,
       });
 
       const btn = document.getElementById("airspeed-btn") as HTMLButtonElement;
-      expect(btn.disabled).toBe(true);
+      expect(btn.getAttribute("aria-disabled")).toBe("true");
       expect(
         mockLayerManagerInstance.updateAirspeedLegend,
       ).not.toHaveBeenCalled();
@@ -830,13 +830,13 @@ describe("MapApp.initialize", () => {
         max_groundspeed_knots: 0,
       });
 
-      // The button is disabled, so a pressed state could never have been
+      // The button is unavailable, so a pressed state could never have been
       // released, and the empty layer showed a legend with placeholders
       expect(app.airspeedVisible).toBe(false);
       expect(app.airspeedLayer.isVisible()).toBe(false);
       expect(visibility(app, "paths-airspeed")).toBe("none");
       const btn = document.getElementById("airspeed-btn") as HTMLButtonElement;
-      expect(btn.disabled).toBe(true);
+      expect(btn.getAttribute("aria-disabled")).toBe("true");
       expect(btn.getAttribute("aria-pressed")).toBe("false");
       expect(document.getElementById("airspeed-legend")!.hidden).toBe(true);
     });

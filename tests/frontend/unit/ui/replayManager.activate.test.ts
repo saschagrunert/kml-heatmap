@@ -34,6 +34,7 @@ import {
   asMapApp,
   createDataset,
   createMockApp,
+  isHeld,
   segmentOf,
 } from "../../testHelpers";
 import { setColorLayer } from "../../../../kml_heatmap/frontend/ui/layerVisibility";
@@ -413,7 +414,6 @@ describe("ReplayManager activation", () => {
       const autoZoomBtn = el("replay-autozoom-btn");
       expect(autoZoomBtn.classList.contains("active")).toBe(true);
       expect(autoZoomBtn.getAttribute("aria-pressed")).toBe("true");
-      expect(autoZoomBtn.title).toBe("Auto-zoom enabled");
     });
 
     it("shows the auto-zoom button off when auto-zoom is off", () => {
@@ -1391,9 +1391,9 @@ describe("ReplayManager activation", () => {
     it("disables layer buttons and filters", () => {
       activate();
 
-      expect((el("heatmap-btn") as HTMLButtonElement).disabled).toBe(true);
-      expect((el("airports-btn") as HTMLButtonElement).disabled).toBe(true);
-      expect((el("aviation-btn") as HTMLButtonElement).disabled).toBe(true);
+      expect(isHeld(el("heatmap-btn"))).toBe(true);
+      expect(isHeld(el("airports-btn"))).toBe(true);
+      expect(isHeld(el("aviation-btn"))).toBe(true);
       expect((el("year-select") as HTMLSelectElement).disabled).toBe(true);
       expect((el("aircraft-select") as HTMLSelectElement).disabled).toBe(true);
     });
@@ -1403,19 +1403,15 @@ describe("ReplayManager activation", () => {
       // the statistics to another view
       activate();
 
-      expect((el("isolate-btn") as HTMLButtonElement).disabled).toBe(true);
-      expect((el("selection-clear-btn") as HTMLButtonElement).disabled).toBe(
-        true,
-      );
-      expect((el("reset-view-btn") as HTMLButtonElement).disabled).toBe(true);
+      expect(isHeld(el("isolate-btn"))).toBe(true);
+      expect(isHeld(el("selection-clear-btn"))).toBe(true);
+      expect(isHeld(el("reset-view-btn"))).toBe(true);
 
       replayManager.toggleReplay();
 
-      expect((el("isolate-btn") as HTMLButtonElement).disabled).toBe(false);
-      expect((el("selection-clear-btn") as HTMLButtonElement).disabled).toBe(
-        false,
-      );
-      expect((el("reset-view-btn") as HTMLButtonElement).disabled).toBe(false);
+      expect(isHeld(el("isolate-btn"))).toBe(false);
+      expect(isHeld(el("selection-clear-btn"))).toBe(false);
+      expect(isHeld(el("reset-view-btn"))).toBe(false);
     });
 
     it("gives each control back as it was before the replay", () => {
@@ -1426,20 +1422,20 @@ describe("ReplayManager activation", () => {
       replayManager.toggleReplay();
 
       expect((el("year-select") as HTMLSelectElement).disabled).toBe(true);
-      expect((el("heatmap-btn") as HTMLButtonElement).disabled).toBe(false);
+      expect(isHeld(el("heatmap-btn"))).toBe(false);
     });
 
     it("disables Wrapped, which would take the map away from the replay", () => {
       activate();
 
-      expect((el("wrapped-btn") as HTMLButtonElement).disabled).toBe(true);
+      expect(isHeld(el("wrapped-btn"))).toBe(true);
     });
 
     it("lets the stylesheet dim the disabled toggles", () => {
       activate();
 
       // Nothing inline to beat the disabled look, so no toggle looks live
-      expect((el("airports-btn") as HTMLButtonElement).disabled).toBe(true);
+      expect(isHeld(el("airports-btn"))).toBe(true);
       expect(el("airports-btn").style.opacity).toBe("");
       expect(el("heatmap-btn").style.opacity).toBe("");
     });
@@ -1497,10 +1493,10 @@ describe("ReplayManager activation", () => {
     it("re-enables disabled buttons and filters", () => {
       openAndClose();
 
-      expect((el("heatmap-btn") as HTMLButtonElement).disabled).toBe(false);
+      expect(isHeld(el("heatmap-btn"))).toBe(false);
       expect((el("year-select") as HTMLSelectElement).disabled).toBe(false);
       expect((el("aircraft-select") as HTMLSelectElement).disabled).toBe(false);
-      expect((el("wrapped-btn") as HTMLButtonElement).disabled).toBe(false);
+      expect(isHeld(el("wrapped-btn"))).toBe(false);
     });
 
     it("hands the toggles their state back", () => {

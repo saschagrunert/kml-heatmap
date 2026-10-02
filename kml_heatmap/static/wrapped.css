@@ -416,8 +416,7 @@ body:has(#wrapped-modal:not([hidden]))
   animation: shimmer 4s ease-in-out infinite;
 }
 /* Section titles generated as headings keep the styling of their class */
-.wrapped-square-card h2,
-.wrapped-square-card h3 {
+.wrapped-square-card h2 {
   margin: 0;
 }
 .wrapped-square-card .year,
@@ -1029,7 +1028,7 @@ body:has(#wrapped-modal:not([hidden]))
 }
 .wrapped-square-card .fleet-aircraft-registration {
   font-size: var(--text-sm);
-  color: var(--color-text-muted);
+  color: var(--color-text-secondary);
 }
 .wrapped-square-card .fleet-aircraft-stats {
   display: flex;

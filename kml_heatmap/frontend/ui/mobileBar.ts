@@ -26,7 +26,7 @@ import {
   type ToggleKey,
   type ToggleSheetRow,
 } from "../state/toggles";
-import { runAction } from "./actions";
+import { NO_TIMING_MESSAGE, runAction } from "./actions";
 
 /** Control columns the bar replaces while it is mounted */
 const LEGACY_CONTROL_IDS = ["left-buttons", "right-buttons"];
@@ -59,7 +59,7 @@ function switchStates(
     // copy of the same flag
     airspeedVisible: {
       isDisabled: () => !app.hasTimingData,
-      hint: () => (app.hasTimingData ? null : "No timing data in the flights"),
+      hint: () => (app.hasTimingData ? null : NO_TIMING_MESSAGE),
     },
     isolateSelection: {
       isDisabled: () => app.selectedPathIds.size === 0,
@@ -517,12 +517,12 @@ function setLegacyControlsHidden(hidden: boolean): void {
 /**
  * Put the bar ahead of the map in the document, where the control columns
  * it stands in for are, so that it comes before the map's markers in the
- * tab order rather than after every one of them. Wrapped has the map in its
- * dialog; the bar goes to the end of the page then.
+ * tab order rather than after every one of them: ahead of the page's
+ * <main>, which holds the map, as the columns are. Wrapped has the map in
+ * its dialog; the bar goes to the end of the page then.
  */
 function insertBeforeMap(bar: HTMLElement): void {
-  const map = document.getElementById("map");
-  if (map?.parentElement === document.body)
-    document.body.insertBefore(bar, map);
+  const home = document.getElementById("map")?.closest("main");
+  if (home) home.before(bar);
   else document.body.append(bar);
 }

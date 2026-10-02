@@ -53,6 +53,7 @@ describe("UIToggles layers", () => {
     vi.clearAllMocks();
     unmount = mountElements(DOM);
     app = createMockApp({
+      hasTimingData: true,
       currentData: createDataset(
         [{ id: 1, year: 2025 }],
         [createSegment({ path_id: 1 })],
@@ -250,6 +251,26 @@ describe("UIToggles layers", () => {
       uiToggles.toggleAirspeed();
 
       expect(app.airspeedVisible).toBe(false);
+    });
+
+    it("says why it stays off without timing data, or while loading", () => {
+      // The button is aria-disabled then, and a click still reaches it
+      app.hasTimingData = false;
+
+      uiToggles.toggleAirspeed();
+
+      expect(app.airspeedVisible).toBe(false);
+      expect(toastMock.showToast).toHaveBeenCalledWith(
+        "No timing data in the flights",
+      );
+
+      app.isInitializing = true;
+      uiToggles.toggleAirspeed();
+
+      expect(app.airspeedVisible).toBe(false);
+      expect(toastMock.showToast).toHaveBeenLastCalledWith(
+        "Still loading the flights",
+      );
     });
   });
 

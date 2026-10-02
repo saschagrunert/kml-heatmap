@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import {
   applyToggleButtonState,
   setControlLabel,
+  setUnavailable,
   syncLegend,
   syncToggleButton,
 } from "../../../../kml_heatmap/frontend/utils/buttonState";
@@ -122,11 +123,10 @@ describe("buttonState", () => {
       expect(opacity(on)).toBe("1");
     });
 
-    it("dims a control that cannot act, either way it says so", () => {
-      // Replay, Isolate, North up and Reset view stay in the tab order;
-      // what a replay turns off is disabled outright
+    it("dims a control that cannot act", () => {
+      // Replay, Isolate, North up, Reset view and what a replay holds all
+      // stay in the tab order (ui/heldControls.ts)
       expect(opacity(control('aria-disabled="true"'))).toBe("0.5");
-      expect(opacity(control("disabled"))).toBe("0.5");
       expect(opacity(control('aria-disabled="false"'))).toBe("1");
     });
   });
@@ -177,6 +177,28 @@ describe("buttonState", () => {
         syncLegend(store, "airspeedVisible", "missing-legend"),
       ).not.toThrow();
       expect(() => store.set("airspeedVisible", true)).not.toThrow();
+    });
+  });
+
+  describe("setUnavailable", () => {
+    it("says through aria-disabled whether the control can act", () => {
+      setUnavailable(button, true);
+      expect(button.getAttribute("aria-disabled")).toBe("true");
+      // Still in the tab order, to explain itself
+      expect(button.disabled).toBe(false);
+
+      setUnavailable(button, false);
+      expect(button.getAttribute("aria-disabled")).toBe("false");
+    });
+
+    it("keeps a held control unavailable, with its word for the release", () => {
+      button.setAttribute("aria-disabled", "true");
+      button.dataset["held"] = "true";
+
+      setUnavailable(button, false);
+
+      expect(button.getAttribute("aria-disabled")).toBe("true");
+      expect(button.dataset["held"]).toBe("false");
     });
   });
 

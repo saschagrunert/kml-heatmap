@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  countryMark,
   generateStatsHtml,
   generateFunFactsHtml,
   calculateAircraftColorClass,
@@ -153,9 +154,11 @@ describe("wrappedHtml", () => {
 
       const html = generateFunFactsHtml(funFacts);
 
-      expect(html).toContain('<h3 class="fun-facts-title">');
       expect(html).toContain(
-        '<span class="section-title-text">Facts</span></h3>',
+        '<h2 id="wrapped-fun-facts-title" class="fun-facts-title">',
+      );
+      expect(html).toContain(
+        '<span class="section-title-text">Facts</span></h2>',
       );
       expect(html).toContain('<div class="fun-fact" data-category="distance">');
       // The category names the icon, drawn from the one icon family
@@ -177,9 +180,11 @@ describe("wrappedHtml", () => {
     it("handles empty fun facts array", () => {
       const html = generateFunFactsHtml([]);
 
-      expect(html).toContain('<h3 class="fun-facts-title">');
       expect(html).toContain(
-        '<span class="section-title-text">Facts</span></h3>',
+        '<h2 id="wrapped-fun-facts-title" class="fun-facts-title">',
+      );
+      expect(html).toContain(
+        '<span class="section-title-text">Facts</span></h2>',
       );
       expect(html).not.toContain("fun-fact-text");
     });
@@ -284,9 +289,11 @@ describe("wrappedHtml", () => {
 
       const html = generateAircraftFleetHtml(yearStats);
 
-      expect(html).toContain('<h3 class="aircraft-fleet-title">');
       expect(html).toContain(
-        '<span class="section-title-text">Fleet</span></h3>',
+        '<h2 id="wrapped-aircraft-fleet-title" class="aircraft-fleet-title">',
+      );
+      expect(html).toContain(
+        '<span class="section-title-text">Fleet</span></h2>',
       );
       expect(html).toContain('class="fleet-aircraft fleet-aircraft-high"');
       expect(html).toContain("D-EABC");
@@ -459,9 +466,11 @@ describe("wrappedHtml", () => {
 
       const html = generateHomeBaseHtml(homeBase);
 
-      expect(html).toContain('<h3 class="top-airports-title">');
       expect(html).toContain(
-        '<span class="section-title-text">Home Base</span></h3>',
+        '<h2 id="wrapped-top-airports-title" class="top-airports-title">',
+      );
+      expect(html).toContain(
+        '<span class="section-title-text">Home Base</span></h2>',
       );
       expect(html).toContain(
         '<div class="top-airport-name"><span class="top-airport-place">EDDF</span></div>',
@@ -533,9 +542,11 @@ describe("wrappedHtml", () => {
 
       const html = generateDestinationsHtml(grouped, plain);
 
-      expect(html).toContain('<h3 class="airports-grid-title">');
       expect(html).toContain(
-        '<span class="section-title-text">Destinations</span></h3>',
+        '<h2 id="wrapped-airports-grid-title" class="airports-grid-title">',
+      );
+      expect(html).toContain(
+        '<span class="section-title-text">Destinations</span></h2>',
       );
       expect(html).toContain('<div class="country-group"');
       expect(html).toContain('<span class="country-name">DE</span>');
@@ -674,8 +685,19 @@ describe("wrappedHtml", () => {
       });
 
       expect(html).toContain('<img class="country-flag" src="flags/de.svg"');
-      expect(html).toContain('alt="DE"');
+      // Decoration: the name beside it says the country
+      expect(html).toContain('alt=""');
       expect(html).not.toContain("country-code");
+    });
+
+    it("marks a country by a flag or a code that a screen reader skips", () => {
+      // The name beside it says the country: "DE Germany" said it twice
+      expect(countryMark("DE", "flags/de.svg", "country", 18, 14)).toBe(
+        '<img class="country-flag" src="flags/de.svg" alt="" width="18" height="14" loading="lazy">',
+      );
+      expect(countryMark("DE", null, "kh-stats-group", 16, 12)).toBe(
+        '<span class="kh-stats-group-code" aria-hidden="true">DE</span>',
+      );
     });
 
     it("labels a group with the ISO code and the country name", () => {

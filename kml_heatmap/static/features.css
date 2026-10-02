@@ -131,7 +131,8 @@
   flex: 1;
   height: 6px;
   border-radius: var(--radius-bar);
-  background: var(--color-bg-active);
+  /* A control's edge needs 3:1 on the panel; --color-bg-active was 1.2:1 */
+  background: var(--color-text-dim);
   outline: none;
   -webkit-appearance: none;
   appearance: none;
@@ -802,8 +803,8 @@ body.cross-section-open .toast-stack {
     height: 44px;
     background-color: transparent;
     background-image: linear-gradient(
-      var(--color-bg-active),
-      var(--color-bg-active)
+      var(--color-text-dim),
+      var(--color-text-dim)
     );
     background-size: 100% 6px;
     background-position: center;
@@ -928,6 +929,14 @@ body.cross-section-open .toast-stack {
   #replay-speed {
     padding-left: var(--space-xs);
     padding-right: var(--space-xs);
+  }
+}
+/* Under 16 px iOS zooms the page into a select that takes focus */
+@media (pointer: coarse) {
+  #replay-speed,
+  #replay-all-speed,
+  .section-select {
+    font-size: 16px;
   }
 }
 

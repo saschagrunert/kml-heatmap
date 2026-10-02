@@ -44,6 +44,7 @@ import { bindActions } from "./ui/actions";
 import { loadInitialData } from "./appInitializer";
 import { logError } from "./utils/logger";
 import { dismissToast, showToast } from "./utils/toast";
+import { setUnavailable } from "./utils/buttonState";
 import { domCache } from "./utils/domCache";
 import { applyGradientTokens } from "./utils/colors";
 import { renderControlIcons } from "./utils/icons";
@@ -1006,15 +1007,14 @@ export class MapApp {
    * the stylesheet dims, but still in the tab order. It runs for the keys
    * Reset view sets, the data (a first visit's year is only known with it),
    * the end of the first load and the end of every camera move, the fit's
-   * own included (see initializeManagers). A replay disables the button
-   * outright, and closing it runs this again. The phone's open sheet reads
-   * its Reset view row again at the same moments.
+   * own included (see initializeManagers). A replay holds the button (see
+   * holdControls), and closing it runs this again. The phone's open sheet
+   * reads its Reset view row again at the same moments.
    */
   private readonly syncResetButton = (): void => {
     if (this.replayActive) return;
-    domCache
-      .get("reset-view-btn")
-      ?.setAttribute("aria-disabled", String(!this.canResetView()));
+    const button = domCache.get("reset-view-btn");
+    if (button) setUnavailable(button, !this.canResetView());
     this.mobileBar?.refreshSheet();
   };
 

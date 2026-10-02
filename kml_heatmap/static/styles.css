@@ -258,6 +258,11 @@ body {
   background: var(--color-map-bg);
   overscroll-behavior: none;
 }
+/* The landmark around the map and what is said over it, without a box:
+   each of them is laid out against the page as before */
+main {
+  display: contents;
+}
 
 .noscript-message {
   color: var(--color-text);
@@ -376,26 +381,17 @@ body {
 .control-btn {
   cursor: pointer;
 }
-/* Unavailable: a control that cannot act right now, `disabled` or, for the
-   ones that stay in the tab order to explain themselves, aria-disabled.
-   This is the only dimmed state. A toggle that is merely off is drawn at
-   full strength and without the accent: off and unavailable used to share
-   the half opacity, and Aviation off looked as dead as Replay with nothing
+/* Unavailable: a control that cannot act right now. aria-disabled rather
+   than `disabled`, so it stays in the tab order to explain itself, the ones
+   a replay or the tour holds included (ui/heldControls.ts). This is the
+   only dimmed state. A toggle that is merely off is drawn at full strength
+   and without the accent: off and unavailable used to share the half
+   opacity, and Aviation off looked as dead as Replay with nothing
    selected. The state lives in the attributes, which the toggles and the
    actions write (utils/buttonState.ts), never in an inline style. */
-.control-btn:disabled,
 .control-btn[aria-disabled="true"] {
   opacity: 0.5;
   cursor: not-allowed;
-}
-.control-btn:disabled {
-  background-color: var(--color-bg-secondary);
-  color: var(--color-text-muted);
-  border-color: var(--color-divider);
-  box-shadow: none;
-}
-.control-btn:disabled:hover {
-  background-color: var(--color-bg-secondary);
 }
 
 /* The two fixed columns of grouped panels */
@@ -585,7 +581,7 @@ body {
 }
 /* The row, not the control, carries hover, selection and focus */
 @media (hover: hover) {
-  .control-row:hover:not(:has(> .control-btn:disabled)) {
+  .control-row:hover:not(:has(> .control-btn[aria-disabled="true"])) {
     background-color: var(--color-bg-hover);
   }
 }
@@ -641,8 +637,8 @@ body {
 }
 /* A disabled toggle still shows whether its layer is on, at half strength
    like the rest of a disabled control rather than as a live selection */
-.control-row:has(> .control-btn.active:disabled),
-.control-row:hover:has(> .control-btn.active:disabled) {
+.control-row:has(> .control-btn.active[aria-disabled="true"]),
+.control-row:hover:has(> .control-btn.active[aria-disabled="true"]) {
   background-color: rgba(var(--color-accent-blue-rgb), 0.07);
   box-shadow: inset 2px 0 0 0 rgba(var(--color-accent-blue-rgb), 0.5);
 }
@@ -744,7 +740,7 @@ body {
     color: var(--color-text);
   }
 }
-#selection-clear-btn:disabled {
+#selection-clear-btn[aria-disabled="true"] {
   opacity: 0.5;
   cursor: not-allowed;
 }
@@ -1933,8 +1929,10 @@ body.stats-open #left-buttons {
     line-height: 0;
   }
   /* Filter rows stretch the native picker over the whole row so the entire
-     row is the tap target. (position: relative is on the main .sheet-row rule) */
+     row is the tap target. (position: relative is on the main .sheet-row rule)
+     Unseen, it still needs 16 px: under that iOS zooms the page into it. */
   .sheet-row-select {
+    font-size: 16px;
     position: absolute;
     inset: 0;
     width: 100%;
@@ -2119,7 +2117,7 @@ body.stats-open #left-buttons {
   }
   /* Only while the map is on the page: in Wrapped's dialog it ends above
      the bar, and its credit floated a bar's height over its bottom edge */
-  body:has(.mobile-bar) > #map .maplibregl-ctrl-bottom-right {
+  body:has(.mobile-bar) main > #map .maplibregl-ctrl-bottom-right {
     bottom: calc(var(--mobile-bar-h) + var(--safe-bottom));
   }
   body:has(.mobile-bar) .color-legend,
@@ -2462,7 +2460,6 @@ body.stats-open #left-buttons {
     border-width: 2px;
   }
   /* Unavailable controls are still told apart, at more strength */
-  .control-btn:disabled,
   .control-btn[aria-disabled="true"],
   .filter-dropdown:has(select:disabled),
   .sheet-row[aria-disabled="true"] > .icon,
@@ -2513,8 +2510,8 @@ body.stats-open #left-buttons {
     outline-color: HighlightText;
   }
   /* A disabled toggle that is on is not a live selection */
-  .control-row:has(> .control-btn.active:disabled),
-  .control-row:hover:has(> .control-btn.active:disabled) {
+  .control-row:has(> .control-btn.active[aria-disabled="true"]),
+  .control-row:hover:has(> .control-btn.active[aria-disabled="true"]) {
     background-color: Canvas;
     color: GrayText;
     box-shadow: inset 2px 0 0 0 GrayText;

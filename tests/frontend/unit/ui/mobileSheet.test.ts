@@ -692,6 +692,29 @@ describe("MobileSheet", () => {
 
       expect(hint.hidden).toBe(true);
     });
+
+    it("names a row by its label, and describes it by its hint", () => {
+      sheet.openWith("Layers", [
+        {
+          kind: "switch",
+          id: "speed",
+          icon: "speed",
+          label: "Groundspeed",
+          isOn: () => false,
+          isDisabled: () => true,
+          hint: () => "No timing data in the flights",
+          onToggle: vi.fn(),
+        },
+      ]);
+
+      const element = row(sheet, "speed");
+      const label = element.querySelector(".sheet-row-label")!;
+      const hint = element.querySelector(".sheet-row-hint")!;
+      // From its contents its name ran the two together
+      expect(element.getAttribute("aria-labelledby")).toBe(label.id);
+      expect(element.getAttribute("aria-describedby")).toBe(hint.id);
+      expect(hint.textContent).toBe("No timing data in the flights");
+    });
   });
 
   describe("focus trap", () => {

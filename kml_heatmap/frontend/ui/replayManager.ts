@@ -329,7 +329,11 @@ export class ReplayManager {
 
     document.body.classList.add("replay-active");
     this.release?.();
-    this.release = holdControls(REPLAY_DISABLED_CONTROL_IDS, "the replay");
+    this.release = holdControls(
+      REPLAY_DISABLED_CONTROL_IDS,
+      "the replay",
+      this.app.signal,
+    );
     this.followLayers();
   }
 
@@ -515,20 +519,16 @@ export class ReplayManager {
     focusModeControl(this.app, "replay-btn");
   }
 
+  // Their titles say what they do, as every other toggle's does, and
+  // aria-pressed whether they are on
   private updateChaseButton(): void {
     const button = domCache.get("replay-chase-btn");
-    if (!button) return;
-    applyToggleButtonState(button, this.state.chase);
-    button.title = this.state.chase ? "Chase view on" : "Chase view off";
+    if (button) applyToggleButtonState(button, this.state.chase);
   }
 
   private updateAutoZoomButton(): void {
     const autoZoomBtn = domCache.get("replay-autozoom-btn");
-    if (!autoZoomBtn) return;
-    applyToggleButtonState(autoZoomBtn, this.state.autoZoom);
-    autoZoomBtn.title = this.state.autoZoom
-      ? "Auto-zoom enabled"
-      : "Auto-zoom disabled";
+    if (autoZoomBtn) applyToggleButtonState(autoZoomBtn, this.state.autoZoom);
   }
 
   /** Write to the polite live region (play/pause/seek end announcements) */

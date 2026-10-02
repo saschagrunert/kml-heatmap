@@ -5,12 +5,19 @@
  * same actions through `runAction`, so both ways in obey the same rules.
  */
 import type { MapApp } from "../mapApp";
-import type { ToggleAction, ToggleKey } from "../state/toggles";
+import type { ToggleAction } from "../state/toggles";
 import { logError } from "../utils/logger";
 import { showToast } from "../utils/toast";
+import { focusStatsRail } from "./appChrome";
 
 /** Said for a control that waits for the first load (runAction) */
 export const STILL_LOADING_MESSAGE = "Still loading the flights";
+
+/**
+ * Why the speed layer cannot be switched on: the flights have no times
+ * (#airspeed-reason in the template says the same)
+ */
+export const NO_TIMING_MESSAGE = "No timing data in the flights";
 
 /**
  * Actions that need loaded data. They are ignored while the app is still
@@ -38,13 +45,6 @@ export const DEFERRED_WHILE_INITIALIZING: ReadonlySet<ActionName> =
 
 type ActionHandler = (e?: Event) => void;
 
-/** The action of a toggle that is a store write and nothing else */
-function flip(app: MapApp, key: ToggleKey): ActionHandler {
-  return () => {
-    app[key] = !app[key];
-  };
-}
-
 /**
  * Every action by name. The toggles name theirs in state/toggles.ts, and
  * the compiler holds this to handling each of them.
@@ -53,8 +53,16 @@ function actionHandlers(app: MapApp) {
   return {
     toggleHeatmap: () => app.uiToggles.toggleHeatmap(),
     // A store write: the rail follows the key, and the panel's own code,
-    // which is lazily loaded, arrives on the first opening (ui/statsPanel.ts)
-    toggleStats: flip(app, "statsPanelVisible"),
+    // which is lazily loaded, arrives on the first opening (ui/statsPanel.ts).
+    // Opened from the keyboard (a click without a pointer, detail 0), the
+    // focus goes into the rail, as it goes into the sheets and Wrapped: on
+    // the button it left the panel 21 presses of Tab away, past every
+    // airport marker.
+    toggleStats: (e) => {
+      app.statsPanelVisible = !app.statsPanelVisible;
+      if (app.statsPanelVisible && (e as MouseEvent | undefined)?.detail === 0)
+        focusStatsRail();
+    },
     toggleAltitude: () => app.uiToggles.toggleAltitude(),
     toggleAirspeed: () => app.uiToggles.toggleAirspeed(),
     toggleAirports: () => app.uiToggles.toggleAirports(),

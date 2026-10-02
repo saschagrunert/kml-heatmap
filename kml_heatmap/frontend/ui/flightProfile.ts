@@ -51,8 +51,10 @@ import { formatSpeed, formatTime } from "../utils/replayFormatters";
 import type { Coordinate } from "../utils/geometry";
 import { setControlIcon } from "../utils/icons";
 import { toLngLat } from "../utils/mapHelpers";
+import { showToast } from "../utils/toast";
 import { REPLAY_PANEL_HEIGHT_VAR } from "./replayManager";
 import { crossSectionOpen, followCrossSection } from "./crossSection";
+import { heldReason } from "./heldControls";
 import { element, shape } from "./crossSectionElements";
 import { heightUnit } from "./crossSectionText";
 
@@ -406,6 +408,12 @@ export function followFlightProfile(app: MapApp): HTMLElement {
   const seekWith = (manager: ReplayManager, point: ProfilePoint): void => {
     if (!app.replayActive) {
       if (!app.canReplay()) return;
+      // Not while a mode holds the replay control, as its click says
+      const held = heldReason(domCache.get("replay-btn"));
+      if (held !== null) {
+        showToast(held);
+        return;
+      }
       // Where the map is: the seek below brings the airplane into view
       manager.toggleReplay(false);
       if (!app.replayActive) return;

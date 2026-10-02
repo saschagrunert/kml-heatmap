@@ -401,7 +401,11 @@ export class HotspotTour {
       app.heightBand = "";
     });
     this.release?.();
-    this.release = holdControls(HELD_CONTROL_IDS, "the hotspot tour");
+    this.release = holdControls(
+      HELD_CONTROL_IDS,
+      "the hotspot tour",
+      this.app.signal,
+    );
     this.showRunning(true);
 
     const listening = new AbortController();

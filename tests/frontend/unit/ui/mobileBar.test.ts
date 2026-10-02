@@ -587,8 +587,9 @@ describe("MobileBar", () => {
 
     it("marks the speed row unavailable without timing data in the store", () => {
       // The desktop button is not what it reads: that is a copy of the flag
-      (document.getElementById("airspeed-btn") as HTMLButtonElement).disabled =
-        false;
+      document
+        .getElementById("airspeed-btn")!
+        .setAttribute("aria-disabled", "false");
       app.store.set("hasTimingData", false);
       create();
       tab("layers").click();
@@ -823,10 +824,14 @@ describe("MobileBar", () => {
           Node.DOCUMENT_POSITION_FOLLOWING,
       ).toBeTruthy();
 
-      document.body.append(map);
+      // Back in the page's <main>, which the bar stands ahead of, as the
+      // control columns do
+      const home = document.createElement("main");
+      home.append(map);
+      document.body.append(home);
       app.store.set("wrappedVisible", false);
 
-      expect(created.root.nextElementSibling).toBe(map);
+      expect(created.root.nextElementSibling).toBe(home);
     });
   });
 

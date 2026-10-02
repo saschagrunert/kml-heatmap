@@ -139,6 +139,62 @@ describe("bindActions", () => {
     expect(app.store.get("statsPanelVisible")).toBe(false);
   });
 
+  describe("the focus of a statistics rail opened from the keyboard", () => {
+    let rail: HTMLElement;
+
+    beforeEach(() => {
+      document.body.insertAdjacentHTML(
+        "beforeend",
+        `<div id="stats-rail">
+          <div id="stats-rail-tabs" role="tablist" hidden>
+            <button id="stats-tab" role="tab" aria-selected="false"></button>
+            <button id="flights-tab" role="tab" aria-selected="true"></button>
+          </div>
+          <div id="stats-panel" tabindex="0"></div>
+        </div>`,
+      );
+      rail = document.getElementById("stats-rail")!;
+    });
+
+    afterEach(() => {
+      rail.remove();
+    });
+
+    // A click from the keyboard has detail 0, one of a pointer at least 1
+    const pointerClick = (el: HTMLElement): void => {
+      el.dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 1 }));
+    };
+
+    it("goes to the panel while the tabs wait for their code", () => {
+      elements["toggleStats"]!.focus();
+      elements["toggleStats"]!.click();
+
+      expect(document.activeElement).toBe(
+        document.getElementById("stats-panel"),
+      );
+    });
+
+    it("goes to the selected tab once the tabs show", () => {
+      document.getElementById("stats-rail-tabs")!.hidden = false;
+      elements["toggleStats"]!.click();
+
+      expect(document.activeElement).toBe(
+        document.getElementById("flights-tab"),
+      );
+    });
+
+    it("stays on the control for a pointer, and on closing", () => {
+      elements["toggleStats"]!.focus();
+      pointerClick(elements["toggleStats"]!);
+      expect(app.store.get("statsPanelVisible")).toBe(true);
+      expect(document.activeElement).toBe(elements["toggleStats"]);
+
+      elements["toggleStats"]!.click();
+      expect(app.store.get("statsPanelVisible")).toBe(false);
+      expect(document.activeElement).toBe(elements["toggleStats"]);
+    });
+  });
+
   it("binds the replay transport", async () => {
     elements["toggleReplay"]!.click();
     elements["playReplay"]!.click();

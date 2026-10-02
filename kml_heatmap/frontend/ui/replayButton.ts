@@ -6,6 +6,7 @@
  * to explain itself from the first paint, long before anyone opens replay
  * and the feature bundle is fetched.
  */
+import { setUnavailable } from "../utils/buttonState";
 import { domCache } from "../utils/domCache";
 
 export const REPLAY_BUTTON_LABEL = "Replay selected flight path";
@@ -23,6 +24,6 @@ export function updateReplayButtonState(ready: boolean): void {
   // The button stays enabled so it can explain why replay is unavailable:
   // aria-disabled says so without taking it out of the tab order, which
   // the disabled attribute would, and the stylesheet dims it
-  btn.setAttribute("aria-disabled", String(!ready));
+  setUnavailable(btn, !ready);
   btn.title = ready ? REPLAY_BUTTON_LABEL : REPLAY_PRECONDITION_MESSAGE;
 }

@@ -42,6 +42,7 @@ import {
   asMapApp,
   createDataset,
   createMockApp,
+  isHeld,
   mountElements,
   type MockApp,
 } from "../../testHelpers";
@@ -646,8 +647,7 @@ describe("the replay of all flights", () => {
       document.getElementById("replay-all-controls")!;
     const clock = (): string =>
       document.getElementById("replay-all-clock")!.textContent ?? "";
-    const held = (id: string): boolean =>
-      (document.getElementById(id) as HTMLButtonElement).disabled;
+    const held = (id: string): boolean => isHeld(document.getElementById(id));
 
     beforeEach(() => {
       controls = new ReplayAllControls(asMapApp(app));
