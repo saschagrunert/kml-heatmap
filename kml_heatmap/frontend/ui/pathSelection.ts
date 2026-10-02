@@ -10,11 +10,7 @@ import { AUTO_ZOOM_FOLLOW } from "../utils/constants";
 import { domCache } from "../utils/domCache";
 import { segmentBounds } from "../utils/geometry";
 import { pluralFlights } from "../utils/htmlGenerators";
-import {
-  resizeMapAfterTransition,
-  toBounds,
-  toLngLat,
-} from "../utils/mapHelpers";
+import { toBounds, unwrapLng } from "../utils/mapHelpers";
 import { prefersReducedMotion } from "../utils/motion";
 import { announceStatus } from "../utils/toast";
 
@@ -153,8 +149,6 @@ export class PathSelection {
         this.app.isolateSelection = false;
       }
     });
-
-    this.afterSelectionChange();
   }
 
   /**
@@ -239,8 +233,6 @@ export class PathSelection {
       });
       this.app.store.notifyMutation("selectedPathIds");
     }
-
-    this.afterSelectionChange();
   }
 
   /**
@@ -261,8 +253,6 @@ export class PathSelection {
         this.app.isolateSelection = false;
       }
     });
-
-    this.afterSelectionChange();
   }
 
   toggleIsolateSelection(): void {
@@ -298,9 +288,12 @@ export class PathSelection {
     const padding = mapChromePadding(map);
     if (unlessInView) {
       const { width, height } = map.getContainer().getBoundingClientRect();
+      // Each point on the world copy the map shows: across the
+      // antimeridian the other side of a flight is a world away otherwise
+      const centre = map.getCenter().lng;
       const clear = segments.every((segment) =>
-        segment.coords.every((coord) => {
-          const { x, y } = map.project(toLngLat(coord));
+        segment.coords.every(([lat, lng]) => {
+          const { x, y } = map.project([unwrapLng(lng, centre), lat]);
           return (
             x >= padding.left &&
             x <= width - padding.right &&
@@ -327,17 +320,6 @@ export class PathSelection {
       duration: FRAME_MS,
       animate: !prefersReducedMotion(),
     });
-  }
-
-  /**
-   * The drawn paths, the statistics, airport visibility and the replay
-   * button follow the store on their own (DataManager rebuilds or restyles
-   * the paths); what is left is the map's size.
-   */
-  private afterSelectionChange(): void {
-    if (this.app.altitudeVisible || this.app.airspeedVisible) {
-      resizeMapAfterTransition(this.app.map);
-    }
   }
 
   /**

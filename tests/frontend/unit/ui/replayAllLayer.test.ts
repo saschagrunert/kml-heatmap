@@ -276,6 +276,18 @@ describe("the replay of all flights' layer", () => {
     );
   });
 
+  it("pulls an end towards the camera no further than the near plane", () => {
+    layer.setPoints(flights());
+
+    draw();
+
+    // As the heat cloud does: an end just beyond it was clipped
+    const sources = gl.shaderSource.mock.calls.map((call) => String(call[1]));
+    expect(
+      sources.some((source) => source.includes("max(0.5 * w, near * 1.01))")),
+    ).toBe(true);
+  });
+
   it("says once that its shaders do not compile, and draws nothing", () => {
     gl = mockGl(false);
     layer.setPoints(flights());

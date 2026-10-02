@@ -16,20 +16,21 @@ __all__ = [
 # A date as flight logs write it into names: "16 Aug 2026" or "2026-08-16"
 DATE_PATTERN = re.compile(r"(\d{2}\s+\w{3}\s+\d{4}|\d{4}-\d{2}-\d{2})")
 # "2024-03-14 09:12:00": a space instead of the "T", which some tools write
-# and others read
-_LOOSE_TIMESTAMP_PATTERN = re.compile(r"^(\d{4}-\d{2}-\d{2}) (\d)")
+# and others read, or a lowercase "t", which RFC 3339 allows
+_LOOSE_TIMESTAMP_PATTERN = re.compile(r"^(\d{4}-\d{2}-\d{2})[ t](\d)")
 
 
 def normalize_timestamp_text(text: str) -> str:
     """The canonical form of a loosely written ISO timestamp.
 
-    A space between date and time becomes the "T" and a lowercase "z" the
-    "Z"; anything else is left as it is. The parser and the obfuscator both
-    read timestamps through this, so they accept the same ones.
+    A space or a lowercase "t" between date and time becomes the "T" and a
+    lowercase "z" the "Z"; anything else is left as it is. The parser and
+    the obfuscator both read timestamps through this, so they accept the
+    same ones.
     """
     text = text.strip()
     # Checked first: the parser runs this for every <when> of a track
-    if text[10:11] == " ":
+    if text[10:11] in (" ", "t"):
         text = _LOOSE_TIMESTAMP_PATTERN.sub(r"\1T\2", text, count=1)
     if text.endswith("z"):
         text = text[:-1] + "Z"

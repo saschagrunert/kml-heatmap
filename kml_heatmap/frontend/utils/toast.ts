@@ -145,13 +145,13 @@ export function showToast(
   toast.textContent = message;
   toast.dataset["message"] = message;
   announceInRegion(toastRegion(type), message);
+  dismissToast(message);
 
   if (type === "info" && !action) {
     // The live region speaks the message; this is only its picture
     toast.setAttribute("aria-hidden", "true");
     setTimeout(() => removeToast(toast), TOAST_DURATION_MS);
   } else {
-    dismissToast(message);
     if (action) {
       toast.append(toastButton(toast, action.run, action.label));
     }

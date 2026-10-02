@@ -4,6 +4,7 @@ import {
   createAirportMarkers,
   dropUnknownPathIds,
   loadInitialData,
+  publishDataset,
   resolveYearSelection,
 } from "../../../../kml_heatmap/frontend/appInitializer";
 import type {
@@ -696,6 +697,21 @@ describe("appInitializer", () => {
       expect(app.airspeedRange).toMatchObject({ min: 45, max: 135 });
     });
 
+    it("gives a year of one speed the metadata's scale, not the year before's", async () => {
+      await loadInitialData(asMapApp(app));
+      app.airspeedRange = { min: 45, max: 135 };
+
+      publishDataset(
+        asMapApp(app),
+        createDataset(
+          [{ id: 1, year: 2024 }],
+          [createSegment({ path_id: 1, groundspeed_knots: 90 })],
+        ),
+      );
+
+      expect(app.airspeedRange).toEqual({ min: 10, max: 150 });
+    });
+
     it("drops its dataset when the year was switched while it loaded", async () => {
       // A Reset view from the phone's bar went ahead during the first load,
       // and its year was then covered by this one's dataset
@@ -964,7 +980,8 @@ describe("appInitializer", () => {
       map.innerHTML = '<div class="maplibregl-popup"></div>';
       document.body.appendChild(map);
 
-      colorSegmentPopups();
+      const lifetime = new AbortController();
+      colorSegmentPopups(lifetime.signal);
       const content = document.createElement("div");
       content.innerHTML =
         '<div class="kh-popup-metric-colored" data-metric-color="rgb(1, 2, 3)"></div>';
@@ -975,11 +992,26 @@ describe("appInitializer", () => {
       expect(metric.style.getPropertyValue("--kh-metric-color")).toBe(
         "rgb(1, 2, 3)",
       );
+
+      // Not once the app is gone
+      lifetime.abort();
+      const later = document.createElement("div");
+      later.innerHTML =
+        '<div class="kh-popup-metric-colored" data-metric-color="rgb(4, 5, 6)"></div>';
+      map.firstElementChild!.appendChild(later);
+      await Promise.resolve();
+      expect(
+        (later.firstElementChild as HTMLElement).style.getPropertyValue(
+          "--kh-metric-color",
+        ),
+      ).toBe("");
       map.remove();
     });
 
     it("does nothing without a map", () => {
-      expect(() => colorSegmentPopups()).not.toThrow();
+      expect(() =>
+        colorSegmentPopups(new AbortController().signal),
+      ).not.toThrow();
     });
   });
 });

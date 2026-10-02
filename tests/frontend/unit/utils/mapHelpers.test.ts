@@ -17,7 +17,6 @@ import {
   mapSize,
   mapZoomToState,
   panPopupIntoView,
-  resizeMapAfterTransition,
   slideMapBesideRail,
   stateZoomToMap,
   toBounds,
@@ -1255,89 +1254,6 @@ describe("mapHelpers", () => {
 
       slideMapBesideRail(null, false, true);
       expect(classes()).toEqual([]);
-    });
-  });
-
-  describe("resizeMapAfterTransition", () => {
-    it("invalidates after fallback timeout when no element is given", () => {
-      const mockMap = mapStub();
-
-      resizeMapAfterTransition(mockMap);
-
-      expect(mockMap.resize).not.toHaveBeenCalled();
-
-      vi.advanceTimersByTime(350);
-
-      expect(mockMap.resize).toHaveBeenCalledOnce();
-    });
-
-    it("invalidates on transitionend when element is given", () => {
-      const mockMap = mapStub();
-      const el = document.createElement("div");
-
-      resizeMapAfterTransition(mockMap, el);
-
-      expect(mockMap.resize).not.toHaveBeenCalled();
-
-      el.dispatchEvent(
-        new TransitionEvent("transitionend", { bubbles: false }),
-      );
-
-      expect(mockMap.resize).toHaveBeenCalledOnce();
-    });
-
-    it("falls back to timeout when transitionend does not fire", () => {
-      const mockMap = mapStub();
-      const el = document.createElement("div");
-
-      resizeMapAfterTransition(mockMap, el);
-
-      vi.advanceTimersByTime(350);
-
-      expect(mockMap.resize).toHaveBeenCalledOnce();
-    });
-
-    it("does not double-call when both transitionend and timeout fire", () => {
-      const mockMap = mapStub();
-      const el = document.createElement("div");
-
-      resizeMapAfterTransition(mockMap, el);
-
-      el.dispatchEvent(
-        new TransitionEvent("transitionend", { bubbles: false }),
-      );
-      vi.advanceTimersByTime(350);
-
-      expect(mockMap.resize).toHaveBeenCalledOnce();
-    });
-
-    it("schedules nothing and listens to nothing without a map", () => {
-      const el = document.createElement("div");
-      const listen = vi.spyOn(el, "addEventListener");
-
-      resizeMapAfterTransition(null, el);
-      resizeMapAfterTransition(null);
-
-      expect(vi.getTimerCount()).toBe(0);
-      expect(listen).not.toHaveBeenCalled();
-    });
-
-    it("ignores transitionend from child elements", () => {
-      const mockMap = mapStub();
-      const el = document.createElement("div");
-      const child = document.createElement("span");
-      el.append(child);
-
-      resizeMapAfterTransition(mockMap, el);
-
-      const event = new TransitionEvent("transitionend", { bubbles: true });
-      Object.defineProperty(event, "target", { value: child });
-      el.dispatchEvent(event);
-
-      expect(mockMap.resize).not.toHaveBeenCalled();
-
-      vi.advanceTimersByTime(350);
-      expect(mockMap.resize).toHaveBeenCalledOnce();
     });
   });
 });

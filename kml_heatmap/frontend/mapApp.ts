@@ -194,8 +194,10 @@ export class MapApp {
   aircraftModels: AircraftModels = {};
   /** Colour range of the altitude layer, replaced by every layer build */
   altitudeRange: Range = { ...DEFAULT_ALTITUDE_RANGE };
-  /** Colour range of the speed layer, from metadata.json */
+  /** Colour range of the speed layer, stretched over the dataset's speeds */
   airspeedRange: Range = { ...DEFAULT_AIRSPEED_RANGE };
+  /** The speeds of every flight, from metadata.json: the range to fall back to */
+  metadataAirspeedRange: Range = { ...DEFAULT_AIRSPEED_RANGE };
 
   // Every manager is handed the whole app, so whatever stays writable below
   // is writable from all of them. The fields that nothing reassigns after
@@ -621,7 +623,7 @@ export class MapApp {
       fadeDuration: animate ? 300 : 0,
     });
     map.addControl(new AttributionControl({ compact: false }), "bottom-right");
-    followAttributionHeight(map);
+    followAttributionHeight(map, this.signal);
     this.map = map;
     // A first visit has just been fitted to it, and a saved view or a link
     // may show the very same (see isReset)
@@ -1005,12 +1007,15 @@ export class MapApp {
    * Reset view sets, the data (a first visit's year is only known with it),
    * the end of the first load and the end of every camera move, the fit's
    * own included (see initializeManagers). A replay disables the button
-   * outright, and closing it runs this again.
+   * outright, and closing it runs this again. The phone's open sheet reads
+   * its Reset view row again at the same moments.
    */
   private readonly syncResetButton = (): void => {
-    const button = domCache.get("reset-view-btn");
-    if (!button || this.replayActive) return;
-    button.setAttribute("aria-disabled", String(!this.canResetView()));
+    if (this.replayActive) return;
+    domCache
+      .get("reset-view-btn")
+      ?.setAttribute("aria-disabled", String(!this.canResetView()));
+    this.mobileBar?.refreshSheet();
   };
 
   /**
@@ -1039,6 +1044,8 @@ export class MapApp {
         loadFeatures,
         REPLAY_UNAVAILABLE_MESSAGE,
       );
+      // Torn down while it loaded: nothing is left to replay on
+      if (this.destroyed) return undefined;
       // Another caller may have finished the same load in the meantime
       this.replayManager ??= features
         ? new features.ReplayManager(this)

@@ -119,20 +119,28 @@ function restoreFocusFromRail(
  * Keep --attribution-h at the height of the map's credit. The credit wraps
  * once a layer adds one of its own (see styles.css), and the legends, the
  * toasts and the phone's replay panel stand on top of it. A phone shows two
- * of its lines, and a tap on it beside its links all of them.
+ * of its lines, and a tap on it beside its links all of them. It stops
+ * with `signal`.
  */
-export function followAttributionHeight(map: MapLibreMap): void {
+export function followAttributionHeight(
+  map: MapLibreMap,
+  signal: AbortSignal,
+): void {
   const credit = map
     .getContainer()
     .querySelector<HTMLElement>(".maplibregl-ctrl-attrib");
   if (!credit) return;
-  credit.addEventListener("click", (event) => {
-    if (!(event.target as Element).closest("a")) {
-      credit.classList.toggle("is-expanded");
-    }
-  });
+  credit.addEventListener(
+    "click",
+    (event) => {
+      if (!(event.target as Element).closest("a")) {
+        credit.classList.toggle("is-expanded");
+      }
+    },
+    { signal },
+  );
   if (typeof ResizeObserver === "undefined") return;
-  new ResizeObserver(() => {
+  const observer = new ResizeObserver(() => {
     const height = credit.getBoundingClientRect().height;
     // Hidden while a sheet covers its corner: the chrome keeps its place
     if (height > 0) {
@@ -141,5 +149,7 @@ export function followAttributionHeight(map: MapLibreMap): void {
         `${height}px`,
       );
     }
-  }).observe(credit);
+  });
+  observer.observe(credit);
+  signal.addEventListener("abort", () => observer.disconnect());
 }

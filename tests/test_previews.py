@@ -156,6 +156,14 @@ class TestTrackOf:
         assert track_of(path)[5] == pytest.approx(untimed)
         assert untimed == pytest.approx(13.6, abs=0.3)
 
+    def test_a_flight_across_the_antimeridian_runs_on(self):
+        path = [TrackPoint(-17.5, 179.95, 300.0), TrackPoint(-17.5, -179.95, 300.0)]
+        track = track_of(path)
+
+        assert track[3] == pytest.approx(track[0] + 0.1 / 360)
+        # 0.1 degrees of longitude at 17.5 S are about 10.6 km, not the world
+        assert track[5] == pytest.approx(10_600 / previews.REFERENCE_SPEED_MS, rel=0.01)
+
     def test_the_poles_stay_on_the_map(self):
         track = track_of(_path((89.9, 0.0), (-89.9, 0.0)))
         assert track[1] == pytest.approx(0, abs=1e-6)
@@ -243,6 +251,42 @@ class TestRenderPreview:
         ]
         # 7 m are a pixel at the closest zoom, and the glow reaches ~50 px
         assert lit_columns[-1] - lit_columns[0] < 200
+
+    @staticmethod
+    def _lit_columns(png):
+        _, rows = _pixels(png)
+        return [
+            column
+            for column in range(PREVIEW_WIDTH)
+            if any(row[column] for row in rows)
+        ]
+
+    def test_a_flight_across_the_antimeridian_is_drawn_as_anywhere_else(self):
+        def flight(east):
+            return _path(
+                (-17.8, east - 2.6), (-17.5, east - 0.1), (-16.7, east + 0.1), step=600
+            )
+
+        # Over Fiji, and the same flight shifted half the world to Greenwich
+        fiji = flight(180.0)
+        fiji = [point._replace(lon=(point.lon + 180) % 360 - 180) for point in fiji]
+        assert any(point.lon < 0 for point in fiji)
+        greenwich = flight(0.0)
+
+        assert self._lit_columns(render_preview([track_of(fiji)])) == (
+            self._lit_columns(render_preview([track_of(greenwich)]))
+        )
+
+    def test_flights_either_side_of_the_antimeridian_are_fitted_together(self):
+        west = track_of(_path((-17.0, 179.5), (-17.2, 179.8)))
+        east = track_of(_path((-16.9, -179.6), (-17.1, -179.3)))
+        apart = track_of(_path((-17.0, -0.5), (-17.2, -0.2)))
+        together = track_of(_path((-16.9, 0.4), (-17.1, 0.7)))
+
+        for tracks in ([west, east], [east, west]):
+            assert self._lit_columns(render_preview(tracks)) == (
+                self._lit_columns(render_preview([apart, together]))
+            )
 
 
 class TestRenderImages:

@@ -65,6 +65,17 @@ describe("showToast", () => {
     expect(document.querySelectorAll(`#${TOAST_STACK_ID}`)).toHaveLength(1);
   });
 
+  it("replaces the same info message rather than stacking a copy", () => {
+    showToast("Still loading the flights");
+    showToast("Still loading the flights");
+    vi.advanceTimersByTime(1000);
+
+    const stack = document.getElementById(TOAST_STACK_ID)!;
+    expect(
+      Array.from(stack.children).map((toast) => toast.textContent),
+    ).toEqual(["Still loading the flights"]);
+  });
+
   it("speaks info toasts through the persistent status region", () => {
     showToast("Link copied");
 

@@ -724,6 +724,22 @@ describe("MobileBar", () => {
       expect(row.getAttribute("aria-disabled")).toBe("false");
     });
 
+    it("reads the reset row again when the app says the first load is over", () => {
+      app.isInitializing = true;
+      dismissSheet();
+      tab("more").click();
+      const row = document.querySelector<HTMLElement>(
+        '[data-row="reset-view"]',
+      )!;
+      expect(row.getAttribute("aria-disabled")).toBe("true");
+
+      // No store key the sheet follows changes with it
+      app.isInitializing = false;
+      bar!.refreshSheet();
+
+      expect(row.getAttribute("aria-disabled")).toBe("false");
+    });
+
     it("leaves the actions that need data alone during the first load", () => {
       // Reset view here used to switch the year under the load that was
       // still running, and the map ended on another year than the dropdown

@@ -29,9 +29,11 @@ import {
   DEGREES_TO_RADIANS,
   EARTH_CIRCUMFERENCE_M,
   planarMetres,
+  turnOf,
   type Coordinate,
 } from "../utils/geometry";
 import { formatDuration } from "../utils/duration";
+import { unwrapLng } from "../utils/mapHelpers";
 import { formatNumber } from "../utils/formatters";
 import { pluralFlights } from "../utils/htmlGenerators";
 import { heatWeight, type SegmentWeight } from "./heatLines";
@@ -101,22 +103,29 @@ export type SegmentGrid = (
 
 /**
  * The segments of a dataset by the cells of a grid they pass through, the
- * cells `cellM` high and as wide at the first segment. A segment goes into
- * the cells of points along it no more than half a cell apart, so every
- * point of it is in the cell of one of them or in a cell next to it; one
- * across the antimeridian into the cells of its ends.
+ * cells `cellM` high and about as wide at the first segment. A segment goes
+ * into the cells of points along it no more than half a cell apart, so
+ * every point of it is in the cell of one of them or in a cell next to it;
+ * one across the antimeridian into the cells of its ends. The columns go
+ * round the world a whole number of times and wrap, so a place on one
+ * side of the antimeridian finds the segments on the other.
  */
 export function makeSegmentGrid(
   segments: readonly PathSegment[],
   cellM: number,
 ): SegmentGrid {
   const rowDeg = cellM / DEGREE_M;
-  const columnDeg =
-    rowDeg /
-    Math.max(
-      Math.cos((segments[0]?.coords[0][0] ?? 0) * DEGREES_TO_RADIANS),
-      0.1,
-    );
+  const columns = Math.ceil(
+    (360 / rowDeg) *
+      Math.max(
+        Math.cos((segments[0]?.coords[0][0] ?? 0) * DEGREES_TO_RADIANS),
+        0.1,
+      ),
+  );
+  const columnDeg = 360 / columns;
+  /** The key of a cell, its column wrapped round the world */
+  const keyOf = (row: number, column: number): number =>
+    row * ROW_STRIDE + (((column % columns) + columns) % columns);
   const cells = new Map<number, number[]>();
   segments.forEach(({ coords: [[lat0, lng0], [lat1, lng1]] }, index) => {
     const steps =
@@ -132,9 +141,10 @@ export function makeSegmentGrid(
           );
     for (let k = 0; k <= steps; k++) {
       const t = k / steps;
-      const key =
-        Math.floor((lat0 + (lat1 - lat0) * t) / rowDeg) * ROW_STRIDE +
-        Math.floor((lng0 + (lng1 - lng0) * t) / columnDeg);
+      const key = keyOf(
+        Math.floor((lat0 + (lat1 - lat0) * t) / rowDeg),
+        Math.floor((lng0 + (lng1 - lng0) * t) / columnDeg),
+      );
       const list = cells.get(key);
       if (!list) cells.set(key, [index]);
       else if (list[list.length - 1] !== index) list.push(index);
@@ -158,7 +168,7 @@ export function makeSegmentGrid(
         row++
       ) {
         for (let column = columnFrom; column <= columnTo; column++) {
-          for (const index of cells.get(row * ROW_STRIDE + column) ?? []) {
+          for (const index of cells.get(keyOf(row, column)) ?? []) {
             if (met[index] === call) continue;
             met[index] = call;
             visit(index);
@@ -188,7 +198,12 @@ interface Kept {
   heights: Map<number, { heightsFt: Float32Array; topFt: number }>;
   /** By the radius they are for, the one asked for last at the end */
   grids: Map<number, SegmentGrid>;
+  /** The boxes drawn past the antimeridian, see drawnPastAntimeridian */
+  past?: readonly Box[];
 }
+
+/** `[south, north, west, east]` in degrees, east and west unwrapped */
+type Box = readonly [number, number, number, number];
 
 let kept = new WeakMap<readonly PathSegment[], Kept>();
 
@@ -199,6 +214,68 @@ function keptFor(segments: readonly PathSegment[]): Kept {
     kept.set(segments, entry);
   }
   return entry;
+}
+
+/**
+ * The boxes around the flights of a dataset that are drawn past the
+ * antimeridian. The cloud draws a chain of segments (see smoothFlights)
+ * from its first point on, each point on the world copy of the one before,
+ * so a flight across the antimeridian goes on past 180 (or below -180)
+ * where nothing else is drawn. Worked out the first time and kept.
+ */
+function drawnPastAntimeridian(
+  segments: readonly PathSegment[],
+): readonly Box[] {
+  const entry = keptFor(segments);
+  if (entry.past) return entry.past;
+  const boxes: Box[] = [];
+  let i = 0;
+  while (i < segments.length) {
+    const pathId = segments[i]!.path_id;
+    let [south, west] = segments[i]!.coords[0];
+    let [north, east] = [south, west];
+    let lng = west;
+    // The chain smoothFlights makes: one flight, each segment starting
+    // where the one before ended
+    do {
+      const end = segments[i]!.coords[1];
+      lng = unwrapLng(end[1], lng);
+      south = Math.min(south, end[0]);
+      north = Math.max(north, end[0]);
+      west = Math.min(west, lng);
+      east = Math.max(east, lng);
+      i++;
+    } while (
+      i < segments.length &&
+      segments[i]!.path_id === pathId &&
+      segments[i]!.coords[0][0] === segments[i - 1]!.coords[1][0] &&
+      segments[i]!.coords[0][1] === segments[i - 1]!.coords[1][1]
+    );
+    if (west < -180 || east > 180) boxes.push([south, north, west, east]);
+  }
+  entry.past = boxes;
+  return boxes;
+}
+
+/**
+ * Whether the cloud of `segments` is drawn at `[lat, lng]`, as far as its
+ * world copy goes: everywhere within -180 to 180, and past it only around
+ * the flights that cross the antimeridian (within `reachDeg` of them).
+ * The world copies beside them have no cloud.
+ */
+export function isCloudWorld(
+  segments: readonly PathSegment[],
+  [lat, lng]: Readonly<Coordinate>,
+  reachDeg: number,
+): boolean {
+  if (Math.abs(lng) <= 180) return true;
+  return drawnPastAntimeridian(segments).some(
+    ([south, north, west, east]) =>
+      lat >= south - reachDeg &&
+      lat <= north + reachDeg &&
+      lng >= west - reachDeg &&
+      lng <= east + reachDeg,
+  );
 }
 
 /**
@@ -356,7 +433,10 @@ export function sightLine(
   return steps > 0 && places.length < 2 ? null : { places, stepFt };
 }
 
-/** The place of `sight` at `heightFt`, between the two samples around it */
+/**
+ * The place of `sight` at `heightFt`, between the two samples around it,
+ * the short way round where they lie either side of the antimeridian
+ */
 function placeOf({ places, stepFt }: SightLine, heightFt: number): Coordinate {
   const last = places.length - 1;
   const at = last > 0 ? Math.min(heightFt / stepFt, last) : 0;
@@ -364,7 +444,7 @@ function placeOf({ places, stepFt }: SightLine, heightFt: number): Coordinate {
   const t = at - k;
   const [lat0, lng0] = places[k]!;
   const [lat1, lng1] = places[Math.min(k + 1, last)]!;
-  return [lat0 + (lat1 - lat0) * t, lng0 + (lng1 - lng0) * t];
+  return [lat0 + (lat1 - lat0) * t, lng0 + turnOf(lng0, lng1) * t];
 }
 
 /**
@@ -455,10 +535,13 @@ export function readoutAt(
     const [lat, lng] = placeOf(sight, heightFt);
     const across = DEGREE_M * Math.cos(lat * DEGREES_TO_RADIANS);
     const [[lat0, lng0], [lat1, lng1]] = segment.coords;
+    // East of the place the short way round, and the far end from the
+    // near one: a segment across the antimeridian is not a world away
+    const x0 = turnOf(lng, lng0) * across;
     const part = insideFraction(
-      (lng0 - lng) * across,
+      x0,
       (lat0 - lat) * DEGREE_M,
-      (lng1 - lng) * across,
+      x0 + turnOf(lng0, lng1) * across,
       (lat1 - lat) * DEGREE_M,
       radiusM,
     );

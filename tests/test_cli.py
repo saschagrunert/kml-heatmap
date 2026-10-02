@@ -21,7 +21,7 @@ from kml_heatmap.exceptions import (
     KMLHeatmapError,
     OutputRefusedError,
 )
-from kml_heatmap.logger import logger, set_log_level
+from kml_heatmap.logger import logger, set_info_stream, set_log_level
 from kml_heatmap.renderer import FlightListing
 from kml_heatmap.terrain import TerrariumTiles
 
@@ -736,6 +736,7 @@ Airport names without a known ICAO code that would be published, as the route na
 """  # noqa: E501
 
 
+@pytest.mark.usefixtures("restore_log_level")
 class TestList:
     def test_prints_every_flight_and_why_one_is_left_out(self, tmp_path, capsys):
         flights = tmp_path / "flights"
@@ -772,6 +773,29 @@ class TestList:
         )
         assert [line[:1] for line in text.splitlines()[1:3]] == ["✓", "⚠"]
 
+    def test_the_log_goes_to_stderr_and_the_table_alone_to_stdout(
+        self, tmp_path, capsys
+    ):
+        flights = tmp_path / "flights"
+        shutil.copytree(FIXTURE_FLIGHTS, flights)
+
+        with (
+            patch("sys.argv", ["kml-heatmap", "--list", str(flights)]),
+            patch("kml_heatmap.terrain.TerrariumTiles"),
+        ):
+            main()
+
+        captured = capsys.readouterr()
+        assert captured.out.splitlines()[0].split() == LISTING.splitlines()[0].split()
+        assert captured.out.splitlines()[-1] == LISTING.splitlines()[-1]
+        assert "5 of 5 flight(s) would be published\n" in captured.out
+        assert "INFO" not in captured.out
+        assert "INFO: Found 5 KML file(s)" in captured.err
+
+        # A run without --list in the same process logs to stdout again
+        _run([str(flights), "--output-dir", str(tmp_path / "out")])
+        assert "INFO: Found 5 KML file(s)" in capsys.readouterr().out
+
     def test_nothing_to_list_is_a_usage_error(self, tmp_path, capsys):
         with (
             patch("sys.argv", ["kml-heatmap", "--list", str(tmp_path)]),
@@ -784,9 +808,10 @@ class TestList:
 
 @pytest.fixture
 def restore_log_level():
-    """Put the logger back at INFO after a test that changes it."""
+    """Put the logger back at INFO, on stdout, after a test that changes it."""
     yield
     set_log_level(logging.INFO)
+    set_info_stream("stdout")
 
 
 @pytest.mark.usefixtures("restore_log_level")

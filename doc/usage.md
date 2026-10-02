@@ -273,9 +273,11 @@ password database; the commands above go without it, because the cache is
 directory when it has no home (see
 [Cache directory](output.md#cache-directory)). `serve.py` serves `DATA_DIR`
 (default `/data`) and reads `BIND_HOST` (default `127.0.0.1`, hence `0.0.0.0`
-inside the container), `PORT` (default `8000`) and `CORS_ORIGIN` (unset by
-default). It sends `Cache-Control: no-store`, for development; the headers of a
-published site are in [Hosting](hosting.md#headers-and-compression).
+inside the container), `PORT` (default `8000`), `CORS_ORIGIN` (unset by default)
+and `OPEN_URL`, the address it prints (default `http://localhost:PORT/`;
+`make serve` passes the host's). It sends `Cache-Control: no-store`, for
+development; the headers of a published site are in
+[Hosting](hosting.md#headers-and-compression).
 
 ## Python usage
 

@@ -14,6 +14,7 @@ from typing import Any
 __all__ = [
     "logger",
     "set_debug_mode",
+    "set_info_stream",
     "set_log_level",
     "setup_logger",
 ]
@@ -37,12 +38,12 @@ class _SysStreamHandler(logging.StreamHandler):  # type: ignore[type-arg]
     """StreamHandler bound to the *current* sys.stdout or sys.stderr."""
 
     def __init__(self, stream_name: str) -> None:
-        self._stream_name = stream_name
+        self.stream_name = stream_name
         super().__init__()
 
     @property
     def stream(self) -> Any:
-        return getattr(sys, self._stream_name)
+        return getattr(sys, self.stream_name)
 
     @stream.setter
     def stream(self, _value: Any) -> None:
@@ -96,6 +97,17 @@ def set_log_level(level: int) -> None:
     for handler in logger.handlers:
         if handler.level < logging.WARNING:
             handler.setLevel(min(level, logging.INFO))
+
+
+def set_info_stream(stream_name: str) -> None:
+    """Write DEBUG and INFO records to ``stream_name``, stdout or stderr.
+
+    ``--list`` prints its table to stdout and moves them to stderr, so a
+    pipe or a file gets the table alone.
+    """
+    for handler in logger.handlers:
+        if isinstance(handler, _SysStreamHandler) and handler.level < logging.WARNING:
+            handler.stream_name = stream_name
 
 
 def set_debug_mode(enabled: bool) -> None:

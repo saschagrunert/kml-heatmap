@@ -27,18 +27,10 @@ vi.mock("../../../../kml_heatmap/frontend/services/featureLoader", () => ({
   loadFeatures: vi.fn(() => Promise.resolve(null)),
 }));
 
-const mapHelpers = vi.hoisted(() => ({
-  resizeMapAfterTransition: vi.fn(),
-}));
 const toastMock = vi.hoisted(() => ({ announceStatus: vi.fn() }));
 vi.mock(
   import("../../../../kml_heatmap/frontend/utils/toast"),
   async (importOriginal) => ({ ...(await importOriginal()), ...toastMock }),
-);
-// Partial: the mock app builds its map with the real helpers
-vi.mock(
-  import("../../../../kml_heatmap/frontend/utils/mapHelpers"),
-  async (importOriginal) => ({ ...(await importOriginal()), ...mapHelpers }),
 );
 
 describe("PathSelection", () => {
@@ -120,9 +112,6 @@ describe("PathSelection", () => {
 
       expect(restyles()).toBe(1);
       expect(rebuilds()).toBe(0);
-      expect(mapHelpers.resizeMapAfterTransition).toHaveBeenCalledWith(
-        mockApp.map,
-      );
       // Statistics, airports and the replay button subscribe to this
       expect(listener).toHaveBeenCalledTimes(1);
       expect(
@@ -134,12 +123,6 @@ describe("PathSelection", () => {
       expect(
         mockApp.replayManager.updateReplayButtonState,
       ).not.toHaveBeenCalled();
-    });
-
-    it("does not resize the map when no colour layer is visible", () => {
-      pathSelection.togglePathSelection(1);
-
-      expect(mapHelpers.resizeMapAfterTransition).not.toHaveBeenCalled();
     });
 
     it("restyles the paths in isolate mode, which keep their runs", () => {
@@ -595,6 +578,34 @@ describe("PathSelection", () => {
         await settled();
 
         expect(mockApp.map!.fitBounds).not.toHaveBeenCalled();
+      });
+
+      it("leaves a flight across the antimeridian alone when all of it is in view", async () => {
+        // From 179.9 E to 179.9 W, drawn on the copy of the world east of
+        // 180 that the map shows
+        mockApp.currentData = createDataset(
+          [{ id: 2 }],
+          [
+            createSegment({
+              path_id: 2,
+              coords: [
+                [52, 179.9],
+                [53, -179.9],
+              ],
+            }),
+          ],
+        );
+        const map = mockApp.map!;
+        map.jumpTo({ center: [180, 52.5] });
+        map.project.mockImplementation((lngLat) => ({
+          x: 600 + ((lngLat as [number, number])[0] - 180) * 2000,
+          y: 300,
+        }));
+
+        pathSelection.selectFlight(2);
+        await settled();
+
+        expect(map.fitBounds).not.toHaveBeenCalled();
       });
 
       it("frames one in view that is too small to be seen there", async () => {

@@ -50,6 +50,7 @@ import { heatWeight } from "../calculations/heatLines";
 import { airplaneLiftPx } from "../calculations/airplaneLift";
 import { liftExaggeration } from "../calculations/lift";
 import {
+  isCloudWorld,
   readoutAt,
   readoutData,
   readoutKept,
@@ -62,7 +63,11 @@ import {
   type ReadoutData,
 } from "../calculations/cloudReadout";
 import { frameCoalescer } from "../utils/frameCoalescer";
-import { DEGREES_TO_RADIANS, metresPerPixel } from "../utils/geometry";
+import {
+  DEGREES_TO_RADIANS,
+  METRES_PER_DEGREE,
+  metresPerPixel,
+} from "../utils/geometry";
 import { announceStatus } from "../utils/toast";
 import { whenIdle } from "../utils/whenIdle";
 import { cloudReachPx } from "./heatCloudLayer";
@@ -373,6 +378,10 @@ export function followCloudReadout(app: MapApp): void {
       return undefined;
     }
     const prepared = dataOf(segments);
+    // Degrees of longitude the cloud of a flight reaches beside it
+    const reachDeg =
+      radiusM /
+      (METRES_PER_DEGREE * Math.max(Math.cos(lat * DEGREES_TO_RADIANS), 0.1));
     // Lifted as the cloud is (ui/heatCloud.ts), and taken down the screen
     // by as much as a ribbon under the pointer is (PathHover.nearest)
     const exaggeration =
@@ -389,12 +398,13 @@ export function followCloudReadout(app: MapApp): void {
         // camera, and the space beside the globe with its rim: ground that
         // is not drawn at the point, and does not come back to it. The
         // cloud is drawn in the world copy of the flights only, whose
-        // longitudes are those of the flights.
+        // longitudes are those of the flights, and past 180 around the
+        // flights that cross the antimeridian.
         const at = map.unproject([x, y]);
         const back = map.project(at);
-        return Math.abs(at.lng) <= 180 &&
+        return isCloudWorld(segments, [at.lat, at.lng], reachDeg) &&
           Math.hypot(back.x - x, back.y - y) <= radiusPx / 2
-          ? [at.lat, at.lng]
+          ? [at.lat, at.wrap().lng]
           : null;
       },
     );

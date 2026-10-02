@@ -135,8 +135,9 @@ EARTH_CIRCUMFERENCE_M = 40_075_016.686
 #: Heat is added up in whole milliseconds per pixel, which keeps the blur
 #: exact
 HEAT_UNIT = 1000
-#: The floats of a point in a track: x and y in Web Mercator (0 to 1) and
-#: the seconds spent on the stretch that ends at it
+#: The floats of a point in a track: x and y in Web Mercator (0 to 1, x
+#: beyond that where the track crosses the antimeridian) and the seconds
+#: spent on the stretch that ends at it
 TRACK_STRIDE = 3
 
 #: Preview images that were not used for this long are removed
@@ -187,7 +188,10 @@ def track_of(path: FlightPath) -> array[float]:
     """A path as the images draw it (see ``TRACK_STRIDE``).
 
     The seconds of a stretch come from the timestamps of its ends; without
-    them, or across a gap, from its length at a cruise's pace.
+    them, or across a gap, from its length at a cruise's pace. A point is
+    kept on the world copy of the one before, so a flight across the
+    antimeridian runs on past 1 (or below 0) rather than back across the
+    whole map.
     """
     track: array[float] = array("d")
     previous: tuple[float, float, float | None] | None = None
@@ -196,6 +200,7 @@ def track_of(path: FlightPath) -> array[float]:
         seconds = 0.0
         if previous is not None:
             x0, y0, ts0 = previous
+            x += round(x0 - x)
             gap = None if ts0 is None or point.ts is None else point.ts - ts0
             if gap is not None and 0 < gap <= MAX_FIX_GAP_S:
                 seconds = gap
@@ -211,9 +216,40 @@ def track_of(path: FlightPath) -> array[float]:
     return track
 
 
-def _view(tracks: Sequence[array[float]]) -> tuple[float, float, float]:
+def _world_shifts(tracks: Sequence[array[float]]) -> list[int]:
+    """The whole worlds to move each track by, so they span the least.
+
+    Each track starts out on the first world copy. Flights either side of
+    the antimeridian are nearer to each other with the western ones moved
+    a world east; that is taken when it spans less.
+    """
+    spans = [
+        (min(track[0::TRACK_STRIDE]), max(track[0::TRACK_STRIDE])) for track in tracks
+    ]
+    near = [-math.floor(low) for low, _ in spans]
+    east = [
+        shift + int((low + high) / 2 + shift < 0.5)
+        for shift, (low, high) in zip(near, spans, strict=True)
+    ]
+
+    def width(shifts: list[int]) -> float:
+        placed = [
+            (low + shift, high + shift)
+            for shift, (low, high) in zip(shifts, spans, strict=True)
+        ]
+        return max(high for _, high in placed) - min(low for low, _ in placed)
+
+    return east if width(east) < width(near) else near
+
+
+def _view(
+    tracks: Sequence[array[float]], shifts: Sequence[int]
+) -> tuple[float, float, float]:
     """Scale and offset from Web Mercator to the pixels of the image."""
-    xs = [track[0::TRACK_STRIDE] for track in tracks]
+    xs = [
+        [x + shift for x in track[0::TRACK_STRIDE]]
+        for track, shift in zip(tracks, shifts, strict=True)
+    ]
     ys = [track[1::TRACK_STRIDE] for track in tracks]
     x0, x1 = min(map(min, xs)), max(map(max, xs))
     y0, y1 = min(map(min, ys)), max(map(max, ys))
@@ -241,11 +277,12 @@ def _rasterize(tracks: Sequence[array[float]]) -> list[int]:
     heat = [0] * (width * height)
     if not tracks:
         return heat
-    scale, offset_x, offset_y = _view(tracks)
-    for track in tracks:
+    shifts = _world_shifts(tracks)
+    scale, offset_x, offset_y = _view(tracks, shifts)
+    for track, shift in zip(tracks, shifts, strict=True):
         x0 = y0 = 0.0
         for index in range(0, len(track), TRACK_STRIDE):
-            x = track[index] * scale + offset_x
+            x = (track[index] + shift) * scale + offset_x
             y = track[index + 1] * scale + offset_y
             if index:
                 dx, dy = x - x0, y - y0

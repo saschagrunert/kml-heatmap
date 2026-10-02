@@ -243,12 +243,17 @@ export class MobileBar {
       }),
     );
     for (const key of SHEET_KEYS) {
-      this.unsubscribes.push(
-        store.subscribe(key, () => {
-          if (this.sheet.isOpen()) this.sheet.refresh();
-        }),
-      );
+      this.unsubscribes.push(store.subscribe(key, () => this.refreshSheet()));
     }
+  }
+
+  /**
+   * Read the rows of an open sheet again. The store's keys do it on their
+   * own; Reset view also turns on the end of the first load and of every
+   * camera move, which the app passes on (see MapApp.syncResetButton).
+   */
+  refreshSheet(): void {
+    if (this.sheet.isOpen()) this.sheet.refresh();
   }
 
   private createTab(spec: TabSpec): HTMLButtonElement {
