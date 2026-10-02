@@ -21,13 +21,18 @@ import {
   type LngLat,
   type LngLatBoundsLike,
   type MapMouseEvent,
+  type PaddingOptions,
   type StyleSpecification,
 } from "maplibre-gl";
 import { DataManager } from "./ui/dataManager";
 import type { StateManager } from "./ui/stateManager";
 import { LayerManager } from "./ui/layerManager";
 import { FilterManager } from "./ui/filterManager";
-import { PathSelection } from "./ui/pathSelection";
+import {
+  CONTROL_COLUMNS,
+  mapChromePadding,
+  PathSelection,
+} from "./ui/pathSelection";
 import { AirportManager } from "./ui/airportManager";
 import { MapOrientation } from "./ui/mapOrientation";
 
@@ -155,11 +160,27 @@ export interface MapConfig {
 const VIEW_KEYS = [...TOGGLE_KEYS, "heightBand"] as const;
 
 /**
- * Padding around the flights when the view is fitted to all of them. The heat's
- * glow reaches about 18 pixels (HEATMAP_RADIUS_PX) past the outermost fix, and
- * at 30 the edge of the map cut it off at the farthest airport.
+ * Room around the flights, beyond the panels over the map, when the view is
+ * fitted to all of them (startViewPadding). The heat's glow reaches about
+ * 18 pixels (HEATMAP_RADIUS_PX) past the outermost fix, and at 30 the edge
+ * of the map cut it off at the farthest airport.
  */
 const START_VIEW_PADDING = 48;
+
+/**
+ * The padding of a fit to the start view: clear of the control columns, as
+ * a selection's fit is. A flat 48 pixels left the tracks at the left edge
+ * under the left column on a narrow window. The columns alone: the legend
+ * and the chip come and go with the data and the selection, and counted,
+ * Reset view landed on another camera than the first visit had.
+ */
+function startViewPadding(container: HTMLElement): Required<PaddingOptions> {
+  return mapChromePadding(
+    { getContainer: () => container },
+    START_VIEW_PADDING,
+    CONTROL_COLUMNS,
+  );
+}
 
 /** Delay before a Wrapped panel restored from state opens again */
 const WRAPPED_RESTORE_DELAY_MS = 500;
@@ -478,12 +499,15 @@ export class MapApp {
     this.syncResetButton();
 
     // The line of a cross-section the link or the last visit had, which
-    // the tool opens on (ui/crossSection.ts)
-    if (this.crossSectionLine) this.toggleCrossSection();
+    // the tool opens on (ui/crossSection.ts). Neither it nor Wrapped opens
+    // over a load that failed, where they would show nothing but zeros.
+    const loaded = this.currentData !== null;
+    if (this.crossSectionLine && loaded) this.toggleCrossSection();
 
     // Restore wrapped panel state if it was open
     const state = this.savedState;
-    if (state && state.wrappedVisible) {
+    if (state?.wrappedVisible && !loaded) delete state.wrappedVisible;
+    if (state?.wrappedVisible) {
       this.wrappedRestoreTimer = setTimeout(() => {
         this.wrappedRestoreTimer = null;
         void this.loadWrapped()
@@ -598,7 +622,10 @@ export class MapApp {
       : {
           bounds: toBounds(this.config.bounds),
           // A fit turns the map north up unless it is told the bearing
-          fitBoundsOptions: { padding: START_VIEW_PADDING, bearing },
+          fitBoundsOptions: {
+            padding: startViewPadding(domCache.get("map")!),
+            bearing,
+          },
         };
 
     // A style given as an object is taken in on the next animation frame,
@@ -837,7 +864,7 @@ export class MapApp {
     // the moves of its animation end in the camera it aims at.
     const map = this.map;
     map?.fitBounds(this.measureStartView(map), {
-      padding: START_VIEW_PADDING,
+      padding: startViewPadding(map.getContainer()),
       pitch: 0,
     });
   }
@@ -846,7 +873,7 @@ export class MapApp {
   private measureStartView(map: MapLibreMap): LngLatBoundsLike {
     const bounds = toBounds(this.config.bounds);
     this.startCamera = map.cameraForBounds(bounds, {
-      padding: START_VIEW_PADDING,
+      padding: startViewPadding(map.getContainer()),
     });
     return bounds;
   }
@@ -886,15 +913,6 @@ export class MapApp {
       Math.abs(map.getZoom() - start.zoom!) < 0.01 &&
       Math.abs(map.getBearing()) + Math.abs(map.getPitch()) < 0.2
     );
-  }
-
-  togglePathSelection(pathId: string): void {
-    this.pathSelection.togglePathSelection(Number(pathId));
-  }
-
-  seekReplay(value: string): void {
-    // Only reachable from the replay panel, which exists once replay is on
-    this.replayManager?.seekReplay(value);
   }
 
   /**

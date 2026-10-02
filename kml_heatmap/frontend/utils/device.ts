@@ -3,14 +3,15 @@
  * asks about the device goes through here, so the phone layout means the
  * same to the mobile bar, the labels and the export.
  */
-import { MOBILE_BREAKPOINT_PX } from "./constants";
+import { MOBILE_BREAKPOINT_PX, PHONE_MAX_HEIGHT_PX } from "./constants";
 
 /**
- * The phone layout: the mobile bar in place of the control columns. Just
- * under the breakpoint, like the stylesheet, so the two agree on a
- * fractional width such as 767.5px.
+ * The phone layout: the mobile bar in place of the control columns, below
+ * the breakpoint's width or at a phone's height held sideways. Just under
+ * the breakpoint, like the stylesheet, so the two agree on a fractional
+ * width such as 767.5px.
  */
-export const PHONE_LAYOUT_QUERY = `(max-width: ${MOBILE_BREAKPOINT_PX - 0.02}px)`;
+export const PHONE_LAYOUT_QUERY = `(max-width: ${MOBILE_BREAKPOINT_PX - 0.02}px), (max-height: ${PHONE_MAX_HEIGHT_PX}px)`;
 
 /** Whether the page matches a media query; false where there are none */
 export function matchesMedia(query: string): boolean {
@@ -21,12 +22,13 @@ export function matchesMedia(query: string): boolean {
 
 /**
  * Whether the page has the phone layout. Without media queries (jsdom), by
- * the width of the window.
+ * the size of the window.
  */
 export function isPhoneLayout(): boolean {
   return typeof window.matchMedia === "function"
     ? window.matchMedia(PHONE_LAYOUT_QUERY).matches
-    : window.innerWidth < MOBILE_BREAKPOINT_PX;
+    : window.innerWidth < MOBILE_BREAKPOINT_PX ||
+        window.innerHeight <= PHONE_MAX_HEIGHT_PX;
 }
 
 /**

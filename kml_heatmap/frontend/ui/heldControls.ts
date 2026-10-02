@@ -72,9 +72,13 @@ function describe(control: HTMLElement, entry: Held): void {
   }
 }
 
-/** Give a control back what it had before the first hold */
+/**
+ * Give a control back what it had before the first hold, or the title
+ * setUnavailable gave it since
+ */
 function restore(control: HTMLElement, entry: Held): void {
-  control.title = entry.title;
+  control.title = control.dataset["heldTitle"] ?? entry.title;
+  delete control.dataset["heldTitle"];
   if (control instanceof HTMLSelectElement) {
     control.disabled = entry.disabled;
     return;

@@ -11,6 +11,8 @@ import {
   matchesMedia,
 } from "../../../../kml_heatmap/frontend/utils/device";
 import { MOBILE_BREAKPOINT_PX } from "../../../../kml_heatmap/frontend/utils/constants";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 
 /** Answer the media queries of `matching` as matched, every other not */
 function stubMedia(...matching: string[]): ReturnType<typeof vi.fn> {
@@ -45,9 +47,45 @@ describe("device", () => {
   describe("the phone layout", () => {
     it("is the stylesheet's breakpoint, just under it", () => {
       expect(PHONE_LAYOUT_QUERY).toBe(
-        `(max-width: ${MOBILE_BREAKPOINT_PX - 0.02}px)`,
+        "(max-width: 767.98px), (max-height: 480px)",
       );
-      expect(PHONE_LAYOUT_QUERY).toBe("(max-width: 767.98px)");
+    });
+
+    it("is the one the stylesheets give the phone, and leave the columns", () => {
+      // A phone held sideways (844 by 390) is wide enough for the columns
+      // but too short for them: every width rule says so too
+      for (const name of ["styles", "features", "wrapped"]) {
+        const css = readFileSync(
+          resolve(__dirname, `../../../../kml_heatmap/static/${name}.css`),
+          "utf8",
+        );
+        for (const [, query] of css.matchAll(/@media ([^{]*width[^{]*)\{/g)) {
+          const min = /\(min-width: (\d+)px\)/.exec(query!);
+          const max = /^\(max-width: (\d+)\.98px\)/.exec(query!.trim());
+          if (min && Number(min[1]) >= MOBILE_BREAKPOINT_PX) {
+            expect(query, name).toContain("and (min-height: 480.02px)");
+          } else if (max && Number(max[1]) >= MOBILE_BREAKPOINT_PX - 1) {
+            expect(query, name).toContain(", (max-height: 480px)");
+          }
+        }
+      }
+    });
+
+    it("is a short window's too, without media queries", () => {
+      Reflect.deleteProperty(window, "matchMedia");
+      setInnerWidth(844);
+      const height = window.innerHeight;
+      Object.defineProperty(window, "innerHeight", {
+        value: 390,
+        configurable: true,
+      });
+
+      expect(isPhoneLayout()).toBe(true);
+      Object.defineProperty(window, "innerHeight", {
+        value: height,
+        configurable: true,
+      });
+      expect(isPhoneLayout()).toBe(false);
     });
 
     it("follows the media query where there is one", () => {

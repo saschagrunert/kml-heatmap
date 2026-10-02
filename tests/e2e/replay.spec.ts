@@ -153,7 +153,7 @@ test.describe("Replay", () => {
     const midpoint = Math.floor(maxTime / 2);
 
     await page.evaluate(
-      (val) => window.mapApp!.seekReplay(String(val)),
+      (val) => window.mapApp!.replayManager!.seekReplay(String(val)),
       midpoint,
     );
 
@@ -262,7 +262,9 @@ test.describe("Replay", () => {
         });
       await page.evaluate(() => {
         const state = window.mapApp!.replayState;
-        window.mapApp!.seekReplay(String(Math.floor(state.maxTime / 2)));
+        window.mapApp!.replayManager!.seekReplay(
+          String(Math.floor(state.maxTime / 2)),
+        );
       });
       // Settled where the replay opened, so the view to come back is known
       await expect

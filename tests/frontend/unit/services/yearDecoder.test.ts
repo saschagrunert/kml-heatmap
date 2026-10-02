@@ -186,6 +186,41 @@ describe("createYearDecoder", () => {
       expect(vi.getTimerCount()).toBe(0);
     });
 
+    it("waits for a queue the worker works through, one answer at a time", async () => {
+      vi.useFakeTimers();
+      worker.answers = false;
+      const decoder = createYearDecoder({ createWorker, timeoutMs: 1000 });
+      const first = decoder.decode(yearBytes(year));
+      const second = decoder.decode(yearBytes(year));
+
+      await vi.advanceTimersByTimeAsync(900);
+      worker.answer(worker.requests[0]!);
+      await vi.advanceTimersByTimeAsync(900);
+      expect(worker.terminate).not.toHaveBeenCalled();
+      worker.answer(worker.requests[1]!);
+
+      await expect(first).resolves.toEqual(expanded);
+      await expect(second).resolves.toEqual(expanded);
+      expect(worker.terminate).not.toHaveBeenCalled();
+      expect(vi.getTimerCount()).toBe(0);
+    });
+
+    it("gives up on a queue when no answer comes for the whole wait", async () => {
+      vi.useFakeTimers();
+      worker.answers = false;
+      const decoder = createYearDecoder({ createWorker, timeoutMs: 1000 });
+      const first = decoder.decode(yearBytes(year));
+      await vi.advanceTimersByTimeAsync(500);
+      const second = decoder.decode(yearBytes(year));
+
+      // A later request does not put the deadline off
+      await vi.advanceTimersByTimeAsync(500);
+
+      expect(worker.terminate).toHaveBeenCalledTimes(1);
+      await expect(first).resolves.toEqual(expanded);
+      await expect(second).resolves.toEqual(expanded);
+    });
+
     it("waits half a minute for an answer by default", async () => {
       vi.useFakeTimers();
       worker.answers = false;

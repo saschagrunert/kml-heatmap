@@ -19,15 +19,19 @@ const BREAKPOINT_PX = MOBILE_BAR_BREAKPOINT_PX;
 
 const PHONE = { width: 390, height: 844 };
 const DESKTOP = { width: 1280, height: 720 };
+/** A phone held sideways: wide enough for the columns, too short for them */
+const SIDEWAYS = { width: 844, height: 390 };
+/** The tallest viewport the phone layout takes, whatever its width */
+const PHONE_MAX_HEIGHT_PX = 480;
 
-/** Resize and wait until the bar has caught up with the new width */
+/** Resize and wait until the bar has caught up with the new size */
 async function resizeTo(
   page: Page,
   size: { width: number; height: number },
 ): Promise<void> {
   await page.setViewportSize(size);
   await expect(page.locator("#mobile-bar")).toHaveCount(
-    size.width < BREAKPOINT_PX ? 1 : 0,
+    size.width < BREAKPOINT_PX || size.height <= PHONE_MAX_HEIGHT_PX ? 1 : 0,
   );
 }
 
@@ -176,10 +180,20 @@ test.describe("Mobile breakpoint", () => {
     await expect(page.locator("#mobile-sheet")).toBeVisible();
   });
 
+  test("a phone held sideways gets the phone layout", async ({ page }) => {
+    await waitForAppReady(page);
+    await resizeTo(page, SIDEWAYS);
+    await expectColumnsReplaced(page);
+
+    await resizeTo(page, DESKTOP);
+    await expectColumnsUsable(page);
+  });
+
   /**
-   * Above the breakpoint but shorter than the control columns: a landscape
-   * phone, a short laptop window, a split screen, or 400% browser zoom, which
-   * WCAG 1.4.10 puts at 320x256 CSS pixels.
+   * Above the breakpoint but shorter than the control columns: a short
+   * laptop window or a split screen. A phone held sideways, or 400% browser
+   * zoom, which WCAG 1.4.10 puts at 320x256 CSS pixels, gets the phone
+   * layout instead (see the test above).
    *
    * The columns are fixed, so the page cannot scroll them into view and they
    * have to scroll themselves. They carry `max-height` and `overflow-y: auto`
@@ -200,10 +214,13 @@ test.describe("Mobile breakpoint", () => {
     // Measured rather than assumed: a hard-coded height would stop
     // overflowing as soon as the column gains or loses a row
     const natural = await column.evaluate((el) => el.scrollHeight);
-    await page.setViewportSize({
-      width: 1280,
-      height: Math.round(natural / 2),
-    });
+    // Just above the phone layout's height, which a taller column overflows
+    const height = PHONE_MAX_HEIGHT_PX + 1;
+    expect(
+      natural,
+      "a column taller than the shortest desktop",
+    ).toBeGreaterThan(height);
+    await page.setViewportSize({ width: 1280, height });
 
     await expect
       .poll(() => column.evaluate((el) => el.scrollHeight > el.clientHeight), {

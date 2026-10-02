@@ -15,7 +15,11 @@
  */
 import type { MapApp } from "../mapApp";
 import type { FeatureModule } from "../features";
-import { loadWrapped, wasSiteUpdated } from "../services/featureLoader";
+import {
+  loadWrapped,
+  noticeSiteUpdate,
+  wasSiteUpdated,
+} from "../services/featureLoader";
 import { logError } from "../utils/logger";
 import { prefersReducedMotion } from "../utils/motion";
 import { dismissToast, showToast } from "../utils/toast";
@@ -70,9 +74,12 @@ export async function loadLazyBundle<T>(
     if (bundle || message !== unavailable) dismissToast(message);
   }
   // A bundle of a newer deploy has said so (services/featureLoader.ts).
-  // Any other failure after it is most likely the deploy's as well, and
-  // the reload it offers puts both right.
-  if (!bundle && !wasSiteUpdated()) showToast(unavailable, "error");
+  // Any other failure after it is most likely the deploy's as well: the
+  // reload it offers, said again rather than nothing, puts both right.
+  if (!bundle) {
+    if (wasSiteUpdated()) noticeSiteUpdate();
+    else showToast(unavailable, "error");
+  }
   return bundle;
 }
 

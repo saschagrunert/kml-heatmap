@@ -180,6 +180,7 @@ export function setupDOM(): void {
     </div>
     <button id="heatmap-btn"></button>
     <button id="replay-btn"></button>
+    <button id="selection-replay-btn" hidden></button>
     <button id="altitude-btn"></button>
     <button id="airspeed-btn"></button>
     <button id="airports-btn"></button>

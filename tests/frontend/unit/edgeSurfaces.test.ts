@@ -15,7 +15,7 @@ import { resolve } from "node:path";
  */
 
 /** The phone layout's breakpoint in styles.css */
-const PHONE = "(max-width: 767.98px)";
+const PHONE = "(max-width: 767.98px), (max-height: 480px)";
 
 /** The surfaces that span the whole width of the map on a phone */
 const EDGE_SURFACES = [".mobile-bar", ".mobile-sheet"];

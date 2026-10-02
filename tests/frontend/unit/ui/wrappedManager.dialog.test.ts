@@ -400,6 +400,16 @@ describe("WrappedManager dialog", () => {
       expect(el("wrapped-year").textContent).toBe("2024");
     });
 
+    it("refreshes the cards when the aircraft changes without new data", () => {
+      openWrapped();
+      el("wrapped-year").textContent = "stale";
+
+      // An aircraft held while a year loaded, applied as that load failed
+      mockApp.selectedAircraft = "D-EFGH";
+
+      expect(el("wrapped-year").textContent).toBe("2024");
+    });
+
     it("leaves the cards alone when data loads while it is closed", () => {
       openWrapped();
       wrappedManager.closeWrapped();
@@ -422,12 +432,15 @@ describe("WrappedManager dialog", () => {
       }
     });
 
-    it("keeps the map interactive because it moves into the dialog", () => {
-      document.body.appendChild(el("map"));
+    it("keeps the map interactive: it leaves the inert page for the dialog", () => {
+      const main = document.createElement("main");
+      main.appendChild(el("map"));
+      document.body.appendChild(main);
 
       openWrapped();
 
-      expect(el("map").hasAttribute("inert")).toBe(false);
+      expect(main.hasAttribute("inert")).toBe(true);
+      expect(el("map").closest("[inert]")).toBeNull();
     });
 
     it("moves the map into the dialog after the layout has settled", () => {

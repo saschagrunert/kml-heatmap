@@ -6,6 +6,8 @@ import type { MapApp } from "../mapApp";
 import { segmentsForPathIds } from "../calculations/statistics";
 import { loadFeatures } from "../services/featureLoader";
 import { applyToggleButtonState, setUnavailable } from "../utils/buttonState";
+import { isPhoneLayout } from "../utils/device";
+import { NO_SELECTION_MESSAGE } from "./actions";
 import { AUTO_ZOOM_FOLLOW } from "../utils/constants";
 import { domCache } from "../utils/domCache";
 import { segmentBounds } from "../utils/geometry";
@@ -14,10 +16,15 @@ import { toBounds, unwrapLng } from "../utils/mapHelpers";
 import { prefersReducedMotion } from "../utils/motion";
 import { announceStatus } from "../utils/toast";
 
+/** What Isolate does, its title in the template */
+const ISOLATE_LABEL = "Isolate selected paths";
+
+/** The control columns, which the phone's bar replaces */
+export const CONTROL_COLUMNS = "#left-buttons, #right-buttons";
+
 /** What floats over the map along its edges and would cover a framed flight */
 const MAP_CHROME_SELECTOR = [
-  "#left-buttons",
-  "#right-buttons",
+  CONTROL_COLUMNS,
   "#selection-chip",
   "#flight-profile",
   "#cross-section",
@@ -63,9 +70,14 @@ function afterLayout(): Promise<void> {
  * panels over it: the control columns at the sides, the selection chip at
  * the top, the legend and the phone's bar at the bottom. Each panel counts
  * at the edge it stands at from which it reaches in least, and no edge
- * takes more than a third of the map.
+ * takes more than a third of the map. `margin` is the room left beyond,
+ * and `chrome` the panels that count.
  */
-export function mapChromePadding(map: MapLibreMap): Required<PaddingOptions> {
+export function mapChromePadding(
+  map: Pick<MapLibreMap, "getContainer">,
+  margin = FRAME_MARGIN_PX,
+  chrome = MAP_CHROME_SELECTOR,
+): Required<PaddingOptions> {
   const box = map.getContainer().getBoundingClientRect();
   const padding: Record<Edge, number> = {
     top: 0,
@@ -73,10 +85,13 @@ export function mapChromePadding(map: MapLibreMap): Required<PaddingOptions> {
     bottom: 0,
     left: 0,
   };
-  for (const element of document.querySelectorAll<HTMLElement>(
-    MAP_CHROME_SELECTOR,
-  )) {
-    if (element.hidden) continue;
+  // On a phone the bar stands in for the columns, which the start view
+  // is measured ahead of (the bar mounts after the map)
+  const phone = isPhoneLayout();
+  for (const element of document.querySelectorAll<HTMLElement>(chrome)) {
+    if (element.hidden || (phone && element.matches(CONTROL_COLUMNS))) {
+      continue;
+    }
     const r = element.getBoundingClientRect();
     if (r.width === 0 || r.height === 0) continue;
     // [how far it is from the edge, how far it reaches in from it]
@@ -97,7 +112,7 @@ export function mapChromePadding(map: MapLibreMap): Required<PaddingOptions> {
     if (edge) padding[edge] = Math.max(padding[edge], depth);
   }
   const limit = (edge: Edge, size: number): number =>
-    Math.min(padding[edge], size / 3) + FRAME_MARGIN_PX;
+    Math.min(padding[edge], size / 3) + margin;
   return {
     top: limit("top", box.height),
     bottom: limit("bottom", box.height),
@@ -358,7 +373,9 @@ export class PathSelection {
     if (!btn) return;
 
     applyToggleButtonState(btn, this.app.isolateSelection);
-    // Still focusable, like the replay button, but announced as unavailable
-    setUnavailable(btn, this.app.selectedPathIds.size === 0);
+    // Still focusable, like the replay button, but announced as unavailable,
+    // and saying why where the phone's sheet already did
+    const none = this.app.selectedPathIds.size === 0;
+    setUnavailable(btn, none, none ? NO_SELECTION_MESSAGE : ISOLATE_LABEL);
   }
 }

@@ -52,11 +52,10 @@ import { restingPitch } from "./replayState";
 
 /**
  * Elements that stay out of the inert set while the dialog is open: the
- * map, which the dialog takes over, and the toasts, whose live regions
- * would otherwise fall silent for as long as Wrapped is open.
+ * toasts, whose live regions would otherwise fall silent for as long as
+ * Wrapped is open.
  */
 const NON_INERT_IDS = new Set([
-  "map",
   TOAST_STACK_ID,
   TOAST_STATUS_ID,
   TOAST_ALERT_ID,
@@ -173,10 +172,15 @@ export class WrappedManager {
     this.originalMapNext = null;
 
     // A year that finishes loading while the dialog is open replaces the
-    // cards, which were computed from the data that was there before
-    this.unsubscribeData = app.store.subscribe("currentData", () => {
-      if (app.wrappedVisible) this.fillCards();
-    });
+    // cards, which were computed from the data that was there before, and
+    // so does a filter that changes without new data (an aircraft held
+    // while a year loaded, applied as that load failed)
+    this.unsubscribeData = app.store.subscribeKeys(
+      ["currentData", "selectedYear", "selectedAircraft"],
+      () => {
+        if (app.wrappedVisible) this.fillCards();
+      },
+    );
 
     const signal = this.listening.signal;
     domCache
@@ -681,6 +685,15 @@ export class WrappedManager {
       }
     }
 
+    // A card left empty is hidden: it would be a blank tile, named by a
+    // heading that is not there
+    const fleetCard = domCache.get("wrapped-card-fleet");
+    if (fleetCard) fleetCard.hidden = !fleetEl?.innerHTML;
+    const airportsCard = domCache.get("wrapped-card-airports");
+    if (airportsCard) {
+      airportsCard.hidden = !topAirportsEl?.innerHTML && !gridEl?.innerHTML;
+    }
+
     // The cards were just rewritten, which is neither a scroll nor a
     // resize: without this the fade at the bottom of the column keeps
     // whatever verdict the previous set of cards left behind
@@ -690,7 +703,8 @@ export class WrappedManager {
   /**
    * Keep keyboard and screen reader focus inside the dialog: remember the
    * opener, make everything outside the dialog inert and focus the close
-   * button. The map is excluded because it is moved into the dialog.
+   * button. The map's <main> goes inert with the rest of the page, which
+   * leaves the map alone: it is moved out of it into the dialog.
    *
    * A snapshot of the children is not enough. Crossing the breakpoint while
    * the dialog is open mounts the mobile bar onto the body, and without the

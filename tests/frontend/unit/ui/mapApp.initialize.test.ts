@@ -114,10 +114,15 @@ vi.mock("../../../../kml_heatmap/frontend/ui/uiToggles", () => ({
     return m.mockUITogglesInstance;
   }),
 }));
+/** What the start view keeps off the edges with no panels over them */
+const START_PADDING = { top: 48, right: 48, bottom: 48, left: 48 };
 vi.mock("../../../../kml_heatmap/frontend/ui/pathSelection", () => ({
   PathSelection: vi.fn(function () {
     return m.mockPathSelectionInstance;
   }),
+  // The start view keeps 48 pixels off every edge where no panel is
+  mapChromePadding: vi.fn(() => ({ top: 48, right: 48, bottom: 48, left: 48 })),
+  CONTROL_COLUMNS: "#left-buttons, #right-buttons",
 }));
 
 const {
@@ -559,7 +564,7 @@ describe("MapApp.initialize", () => {
           [8, 50],
           [10, 52],
         ],
-        { padding: 48, pitch: 0 },
+        { padding: START_PADDING, pitch: 0 },
       );
       expect(app.map!.getBearing()).toBe(0);
       expect(app.map!.getPitch()).toBe(0);
@@ -1078,6 +1083,19 @@ describe("MapApp.initialize", () => {
       expect(app.savedState).not.toHaveProperty("wrappedVisible");
     });
 
+    it("does not reopen the wrapped modal over a load that failed", async () => {
+      vi.useFakeTimers();
+      mockStateManagerInstance.loadState.mockReturnValue({
+        wrappedVisible: true,
+      });
+
+      await initializeApp(app, defaultAirports, defaultMetadata, null);
+      await vi.advanceTimersByTimeAsync(500);
+
+      expect(mockWrappedManagerInstance.showWrapped).not.toHaveBeenCalled();
+      expect(app.savedState).not.toHaveProperty("wrappedVisible");
+    });
+
     it("is done with the restore of the wrapped modal when it fails to open", async () => {
       vi.useFakeTimers();
       mockStateManagerInstance.loadState.mockReturnValue({
@@ -1197,7 +1215,7 @@ describe("MapApp.initialize", () => {
           [8, 50],
           [10, 52],
         ],
-        fitBoundsOptions: { padding: 48 },
+        fitBoundsOptions: { padding: START_PADDING },
       });
       expect(mockMap(app).options).not.toHaveProperty("center");
       expect(mockMap(app).options).not.toHaveProperty("zoom");

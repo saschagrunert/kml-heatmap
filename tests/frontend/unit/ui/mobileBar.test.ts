@@ -10,6 +10,8 @@ import {
   type StoreAccessors,
 } from "../../../../kml_heatmap/frontend/state/store";
 import { MobileBar } from "../../../../kml_heatmap/frontend/ui/mobileBar";
+import { REPLAY_PRECONDITION_MESSAGE } from "../../../../kml_heatmap/frontend/ui/replayButton";
+import { NO_DATA_MESSAGE } from "../../../../kml_heatmap/frontend/ui/actions";
 import { MOBILE_BREAKPOINT_PX } from "../../../../kml_heatmap/frontend/utils/constants";
 import { PHONE_LAYOUT_QUERY } from "../../../../kml_heatmap/frontend/utils/device";
 
@@ -199,7 +201,9 @@ describe("MobileBar", () => {
 
       // Just under it, like the stylesheet's max-width queries
       expect(window.matchMedia).toHaveBeenCalledWith(PHONE_LAYOUT_QUERY);
-      expect(PHONE_LAYOUT_QUERY).toBe("(max-width: 767.98px)");
+      expect(PHONE_LAYOUT_QUERY).toBe(
+        "(max-width: 767.98px), (max-height: 480px)",
+      );
     });
 
     it("stays out of the document above the breakpoint", () => {
@@ -365,6 +369,21 @@ describe("MobileBar", () => {
       expect(document.querySelector<HTMLElement>(".mobile-sheet")!.hidden).toBe(
         true,
       );
+    });
+
+    it("takes the focus into the statistics as they open, as the sheets do", () => {
+      const panel = document.createElement("div");
+      panel.id = "stats-panel";
+      panel.tabIndex = 0;
+      document.body.append(panel);
+
+      tab("stats").click();
+      expect(document.activeElement).toBe(panel);
+
+      // Closed, the tab keeps it
+      tab("stats").click();
+      expect(document.activeElement).toBe(tab("stats"));
+      panel.remove();
     });
 
     it("follows the stats panel state", () => {
@@ -610,6 +629,53 @@ describe("MobileBar", () => {
     });
   });
 
+  describe("after a load that failed", () => {
+    afterEach(() => {
+      document.body.classList.remove("flights-failed");
+    });
+
+    it("marks the tabs and rows made of the flights unavailable, and why", () => {
+      document.body.classList.add("flights-failed");
+      create();
+
+      for (const id of ["stats", "wrapped"]) {
+        expect(tab(id).getAttribute("aria-disabled"), id).toBe("true");
+        expect(tab(id).title).toBe(NO_DATA_MESSAGE);
+      }
+      expect(tab("layers").hasAttribute("aria-disabled")).toBe(false);
+      tab("more").click();
+      for (const id of [
+        "replay-all",
+        "hotspot-tour",
+        "cross-section",
+        "export",
+      ]) {
+        const row = document.querySelector(`[data-row="${id}"]`)!;
+        expect(row.getAttribute("aria-disabled"), id).toBe("true");
+        expect(row.querySelector(".sheet-row-hint")!.textContent).toBe(
+          NO_DATA_MESSAGE,
+        );
+      }
+      expect(
+        document
+          .querySelector('[data-row="share"]')!
+          .getAttribute("aria-disabled"),
+      ).toBe("false");
+
+      // With the flights in, the app says so again
+      document.body.classList.remove("flights-failed");
+      bar!.syncTabs();
+      bar!.refreshSheet();
+      expect(tab("stats").getAttribute("aria-disabled")).toBe("false");
+      expect(tab("stats").hasAttribute("title")).toBe(false);
+      expect(
+        document
+          .querySelector('[data-row="export"]')!
+          .getAttribute("aria-disabled"),
+      ).toBe("false");
+    });
+  });
+
   describe("more rows", () => {
     beforeEach(() => {
       create();
@@ -625,7 +691,8 @@ describe("MobileBar", () => {
         '[data-row="replay"] .sheet-row-hint',
       )!;
       expect(hint.hidden).toBe(false);
-      expect(hint.textContent).toBe("Pick one flight under Stats, Flights");
+      // The words of the button in the columns, which name timing data
+      expect(hint.textContent).toBe(REPLAY_PRECONDITION_MESSAGE);
     });
 
     it("does not repeat the tile credit, which the map itself carries", () => {

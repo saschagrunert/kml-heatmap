@@ -26,7 +26,15 @@ import {
   type ToggleKey,
   type ToggleSheetRow,
 } from "../state/toggles";
-import { NO_TIMING_MESSAGE, runAction } from "./actions";
+import {
+  flightsFailed,
+  NO_DATA_MESSAGE,
+  NO_SELECTION_MESSAGE,
+  NO_TIMING_MESSAGE,
+  runAction,
+} from "./actions";
+import { REPLAY_PRECONDITION_MESSAGE } from "./replayButton";
+import { focusStatsRail } from "./appChrome";
 
 /** Control columns the bar replaces while it is mounted */
 const LEGACY_CONTROL_IDS = ["left-buttons", "right-buttons"];
@@ -64,12 +72,18 @@ function switchStates(
     isolateSelection: {
       isDisabled: () => app.selectedPathIds.size === 0,
       hint: () =>
-        app.selectedPathIds.size === 0 ? "Select flights to isolate" : null,
+        app.selectedPathIds.size === 0 ? NO_SELECTION_MESSAGE : null,
     },
   };
 }
 
 type TabId = "layers" | "filter" | "stats" | "wrapped" | "more";
+
+/** A More row of what is made of the flights, unavailable without them */
+const needsFlights = {
+  isDisabled: flightsFailed,
+  hint: () => (flightsFailed() ? NO_DATA_MESSAGE : null),
+};
 
 /**
  * What a tab opens: a sheet, the statistics (a disclosure, as the desktop
@@ -317,7 +331,12 @@ export class MobileBar {
       case "stats":
         this.closeSheet();
         this.tabs.get(id)?.focus();
-        runAction(this.app, "toggleStats");
+        // Into the sheet as it opens, as the other sheets take it: the
+        // sheet comes before the bar in the page, so Tab from the tab
+        // went on to Wrapped, More and the map
+        if (runAction(this.app, "toggleStats") && this.app.statsPanelVisible) {
+          focusStatsRail();
+        }
         break;
       case "wrapped":
         this.closeSheet();
@@ -347,7 +366,7 @@ export class MobileBar {
    * Reflect panel and sheet state on the tabs. The bar only reads app state
    * while it is mounted, so a wide viewport never touches the store.
    */
-  private syncTabs(): void {
+  syncTabs(): void {
     if (!this.mounted) return;
     for (const spec of TABS) {
       const tab = this.tabs.get(spec.id);
@@ -356,6 +375,14 @@ export class MobileBar {
       tab.classList.toggle("active", active);
       if (spec.kind === "disclosure") {
         tab.setAttribute("aria-expanded", String(active));
+      }
+      // Statistics and Wrapped are made of the flights; an open rail can
+      // still be closed (runAction)
+      if (spec.kind !== "sheet") {
+        const failed = flightsFailed() && !active;
+        tab.setAttribute("aria-disabled", String(failed));
+        if (failed) tab.title = NO_DATA_MESSAGE;
+        else tab.removeAttribute("title");
       }
     }
   }
@@ -416,8 +443,7 @@ export class MobileBar {
         icon: "play",
         // The name the control has in the columns
         label: "Replay",
-        hint: () =>
-          app.canReplay() ? null : "Pick one flight under Stats, Flights",
+        hint: () => (app.canReplay() ? null : REPLAY_PRECONDITION_MESSAGE),
         isDisabled: () => !app.canReplay(),
         onSelect: () => {
           runAction(app, "toggleReplay");
@@ -428,6 +454,7 @@ export class MobileBar {
         id: "replay-all",
         icon: "play",
         label: "Replay all",
+        ...needsFlights,
         onSelect: () => runAction(app, "toggleReplayAll"),
       },
       {
@@ -435,6 +462,7 @@ export class MobileBar {
         id: "hotspot-tour",
         icon: "trophy",
         label: "Hotspot tour",
+        ...needsFlights,
         onSelect: () => runAction(app, "toggleHotspotTour"),
       },
       {
@@ -442,6 +470,7 @@ export class MobileBar {
         id: "cross-section",
         icon: "ruler",
         label: "Cross-section",
+        ...needsFlights,
         onSelect: () => runAction(app, "toggleCrossSection"),
       },
       ...this.toggleRows("more"),
@@ -464,6 +493,7 @@ export class MobileBar {
         id: "export",
         icon: "export",
         label: "Export image",
+        ...needsFlights,
         onSelect: () => runAction(app, "exportMap"),
       },
       {

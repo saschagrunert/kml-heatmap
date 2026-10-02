@@ -292,6 +292,30 @@ export function countryMark(
     : `<span class="${prefix}-code" aria-hidden="true">${escapeHtml(code)}</span>`;
 }
 
+/**
+ * The heading of one country's airports in a list grouped by country (the
+ * statistics rail and Wrapped's destinations): its mark (see countryMark),
+ * its name and how many airports, classed `<prefix>-name` and
+ * `<prefix>-count`. The "Other" group has no mark.
+ */
+export function countryHeading(
+  className: string,
+  prefix: string,
+  code: string,
+  label: string,
+  count: number,
+  src: string | null,
+  width: number,
+  height: number,
+): string {
+  return (
+    `<div class="${className}">` +
+    (code === "Other" ? "" : countryMark(code, src, prefix, width, height)) +
+    `<span class="${prefix}-name">${escapeHtml(label)}</span>` +
+    `<span class="${prefix}-count">${count}</span></div>`
+  );
+}
+
 export function generateDestinationsHtml(
   grouped: Map<string, string[]>,
   options: DestinationsOptions,
@@ -306,22 +330,18 @@ export function generateDestinationsHtml(
   );
 
   for (const [code, airports] of grouped) {
-    const isCountry = code !== "Other";
-    const label = isCountry ? countryName(code) : "Other";
-    const codeHtml = isCountry
-      ? countryMark(code, flagSrc(code), "country", 18, 14)
-      : "";
     html +=
       '<div class="country-group">' +
-      '<div class="country-group-title">' +
-      codeHtml +
-      '<span class="country-name">' +
-      escapeHtml(label) +
-      "</span>" +
-      '<span class="country-count">' +
-      airports.length +
-      "</span>" +
-      "</div>" +
+      countryHeading(
+        "country-group-title",
+        "country",
+        code,
+        code === "Other" ? code : countryName(code),
+        airports.length,
+        flagSrc(code),
+        18,
+        14,
+      ) +
       '<ul class="country-airports">';
     for (const name of airports) {
       const isHome = !!homeBase && name === homeBase;

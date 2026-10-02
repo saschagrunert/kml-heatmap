@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
+  CONTROL_COLUMNS,
   mapChromePadding,
   PathSelection,
 } from "../../../../kml_heatmap/frontend/ui/pathSelection";
@@ -364,7 +365,7 @@ describe("PathSelection", () => {
         return element;
       });
 
-      const padding = mapChromePadding(map as never);
+      const padding = mapChromePadding(map);
 
       expect(padding.right).toBe(182 + 24);
       expect(padding.top).toBe(46 + 24);
@@ -386,12 +387,78 @@ describe("PathSelection", () => {
       );
       document.body.append(profile);
 
-      const padding = mapChromePadding(map as never);
+      const padding = mapChromePadding(map);
 
       expect(padding.bottom).toBe(209 + 24);
       expect(padding.left).toBe(24);
       expect(padding.right).toBe(24);
       profile.remove();
+    });
+
+    it("leaves out the columns on a phone, where the bar replaces them", () => {
+      // Measured for the start view before the bar mounts and hides them
+      const width = window.innerWidth;
+      Object.defineProperty(window, "innerWidth", {
+        value: 390,
+        configurable: true,
+      });
+      const map = mockApp.map!;
+      vi.spyOn(map.getContainer(), "getBoundingClientRect").mockReturnValue(
+        rect(0, 0, 390, 844),
+      );
+      const column = document.createElement("div");
+      column.id = "left-buttons";
+      vi.spyOn(column, "getBoundingClientRect").mockReturnValue(
+        rect(8, 100, 170, 600),
+      );
+      document.body.append(column);
+
+      expect(mapChromePadding(map, 48).left).toBe(48);
+
+      Object.defineProperty(window, "innerWidth", {
+        value: width,
+        configurable: true,
+      });
+      column.remove();
+    });
+
+    it("counts only the panels it is given", () => {
+      // The start view's columns: a legend that shows with the data would
+      // move a Reset view off the first visit's camera
+      const map = mockApp.map!;
+      vi.spyOn(map.getContainer(), "getBoundingClientRect").mockReturnValue(
+        rect(0, 0, 1280, 720),
+      );
+      const legend = document.createElement("div");
+      legend.className = "color-legend";
+      vi.spyOn(legend, "getBoundingClientRect").mockReturnValue(
+        rect(8, 660, 260, 52),
+      );
+      document.body.append(legend);
+
+      expect(mapChromePadding(map, 48).bottom).toBe(60 + 48);
+      expect(mapChromePadding(map, 48, CONTROL_COLUMNS).bottom).toBe(48);
+      legend.remove();
+    });
+
+    it("leaves the margin it is given beyond the panels", () => {
+      // The start view's, which keeps the heat's glow in view
+      const map = mockApp.map!;
+      vi.spyOn(map.getContainer(), "getBoundingClientRect").mockReturnValue(
+        rect(0, 0, 768, 1024),
+      );
+      const column = document.createElement("div");
+      column.id = "left-buttons";
+      vi.spyOn(column, "getBoundingClientRect").mockReturnValue(
+        rect(8, 100, 140, 600),
+      );
+      document.body.append(column);
+
+      const padding = mapChromePadding(map, 48);
+
+      expect(padding.left).toBe(148 + 48);
+      expect(padding.top).toBe(48);
+      column.remove();
     });
   });
 
@@ -796,10 +863,12 @@ describe("PathSelection", () => {
     it("is announced as unavailable without a selection, and stays focusable", () => {
       expect(btn.getAttribute("aria-disabled")).toBe("true");
       expect(btn.disabled).toBe(false);
+      expect(btn.title).toBe("Select flights to isolate");
 
       mockApp.selectedPathIds.add(1);
       mockApp.store.notifyMutation("selectedPathIds");
       expect(btn.getAttribute("aria-disabled")).toBe("false");
+      expect(btn.title).toBe("Isolate selected paths");
 
       mockApp.isolateSelection = true;
       expect(btn.getAttribute("aria-disabled")).toBe("false");

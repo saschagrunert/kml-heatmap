@@ -732,11 +732,10 @@ describe("wrapped feature", () => {
       );
 
       expect(texts).toContain(
-        "You covered <strong>2,000.0 nautical miles</strong> in 2023!",
-      );
-      expect(texts).toContain(
         "You flew <strong>2 different aircraft</strong> in 2023.",
       );
+      // The distance is on the card above; a fact repeated it
+      expect(texts.join(" ")).not.toContain("nautical miles");
       expect(texts.join(" ")).not.toContain("this year");
     });
 
@@ -751,9 +750,6 @@ describe("wrapped feature", () => {
         (f) => f.text.html,
       );
 
-      expect(texts).toContain(
-        "You covered <strong>2,000.0 nautical miles</strong> in total!",
-      );
       expect(texts).toContain(
         "You flew <strong>2 different aircraft</strong> in total.",
       );

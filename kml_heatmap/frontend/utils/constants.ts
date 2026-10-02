@@ -12,6 +12,13 @@ export const CRUISE_ALTITUDE_THRESHOLD_FT = 1000;
 export const MOBILE_BREAKPOINT_PX = 768;
 
 /**
+ * Heights up to this get the phone layout too, whatever the width: a phone
+ * held sideways, or a window as short, has no room for the control
+ * columns (matches styles.css)
+ */
+export const PHONE_MAX_HEIGHT_PX = 480;
+
+/**
  * Zoom comes in two units. MapLibre counts in 512 pixel tiles where Leaflet
  * counted in 256 pixel ones, so the same view is one level lower: state zoom
  * = map zoom + ZOOM_OFFSET. The code and the map speak the map's own unit.

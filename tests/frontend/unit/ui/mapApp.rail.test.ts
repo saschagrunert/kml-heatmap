@@ -31,6 +31,7 @@ import {
 import {
   loadFeatures,
   loadWrapped,
+  noticeSiteUpdate,
   wasSiteUpdated,
 } from "../../../../kml_heatmap/frontend/services/featureLoader";
 import {
@@ -133,6 +134,7 @@ vi.mock("../../../../kml_heatmap/frontend/services/featureLoader", () => ({
     }),
   ),
   wasSiteUpdated: vi.fn(() => false),
+  noticeSiteUpdate: vi.fn(() => null),
 }));
 vi.mock("../../../../kml_heatmap/frontend/ui/uiToggles", () => ({
   UIToggles: vi.fn(function () {
@@ -143,6 +145,9 @@ vi.mock("../../../../kml_heatmap/frontend/ui/pathSelection", () => ({
   PathSelection: vi.fn(function () {
     return m.mockPathSelectionInstance;
   }),
+  // The start view keeps 48 pixels off every edge where no panel is
+  mapChromePadding: vi.fn(() => ({ top: 48, right: 48, bottom: 48, left: 48 })),
+  CONTROL_COLUMNS: "#left-buttons, #right-buttons",
 }));
 
 const {
@@ -225,6 +230,29 @@ describe("MapApp controls and map", () => {
       expect(btn.title).toBe("Replay selected flight path");
       // The stylesheet dims it from the attribute
       expect(btn.style.opacity).toBe("");
+    });
+
+    it("offers Replay beside the selection while it can replay it", async () => {
+      await initializeApp(app);
+      const chip = document.getElementById("selection-replay-btn")!;
+      expect(chip.hidden).toBe(true);
+
+      app.selectedPathIds.add(1);
+      app.store.notifyMutation("selectedPathIds");
+      expect(chip.hidden).toBe(false);
+
+      // It presses the Replay control, which a mode may hold
+      const pressed = vi.fn();
+      document.getElementById("replay-btn")!.addEventListener("click", pressed);
+      chip.click();
+      expect(pressed).toHaveBeenCalledTimes(1);
+
+      // Not over a running replay, nor for a flight without times
+      app.replayActive = true;
+      expect(chip.hidden).toBe(true);
+      app.replayActive = false;
+      app.hasTimingData = false;
+      expect(chip.hidden).toBe(true);
     });
 
     it("follows the timing data of the loaded metadata", async () => {
@@ -583,11 +611,13 @@ describe("MapApp controls and map", () => {
 
       expect(await app.loadWrapped()).toBeUndefined();
 
-      // featureLoader said the site was updated; its code did load
+      // featureLoader said the site was updated; its code did load, and
+      // the reload it offered is offered again rather than nothing
       expect(showToast).not.toHaveBeenCalledWith(
         WRAPPED_UNAVAILABLE_MESSAGE,
         "error",
       );
+      expect(noticeSiteUpdate).toHaveBeenCalledTimes(1);
     });
 
     it("takes Wrapped's failure away once the statistics bring the file (regression)", async () => {
@@ -1021,6 +1051,18 @@ describe("MapApp controls and map", () => {
       await vi.waitFor(() =>
         expect(m.toggleCrossSection).toHaveBeenCalledWith(app),
       );
+    });
+
+    it("leaves the cross-section of a link closed over a load that failed", async () => {
+      mockStateManagerInstance.loadState.mockReturnValue({
+        crossSectionLine: "51.5,12.1,51.6,12.3",
+      });
+      m.toggleCrossSection.mockClear();
+
+      await initializeApp(app, m.defaultAirports, m.defaultMetadata, null);
+      await Promise.resolve();
+
+      expect(m.toggleCrossSection).not.toHaveBeenCalled();
     });
 
     it("leaves the cross-section closed without a line", async () => {
@@ -1468,7 +1510,7 @@ describe("MapApp controls and map", () => {
       await initializeApp(app);
 
       expect(mockMap(app).options["fitBoundsOptions"]).toEqual({
-        padding: 48,
+        padding: { top: 48, right: 48, bottom: 48, left: 48 },
         bearing: 90,
       });
     });

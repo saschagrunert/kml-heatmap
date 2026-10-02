@@ -262,6 +262,8 @@ describe("WrappedManager content", () => {
     expect(el("wrapped-aircraft-fleet").innerHTML).not.toBe("");
     expect(el("wrapped-top-airports").innerHTML).not.toBe("");
     expect(el("wrapped-airports-grid").innerHTML).not.toBe("");
+    expect(el("wrapped-card-fleet").hidden).toBe(false);
+    expect(el("wrapped-card-airports").hidden).toBe(false);
     wrappedManager.closeWrapped();
 
     // A year without flights must not keep showing the previous one
@@ -272,6 +274,16 @@ describe("WrappedManager content", () => {
     expect(el("wrapped-aircraft-fleet").innerHTML).toBe("");
     expect(el("wrapped-top-airports").innerHTML).toBe("");
     expect(el("wrapped-airports-grid").innerHTML).toBe("");
+    // An empty card is hidden rather than a blank tile without its heading
+    expect(el("wrapped-card-fleet").hidden).toBe(true);
+    expect(el("wrapped-card-airports").hidden).toBe(true);
+    wrappedManager.closeWrapped();
+
+    // and comes back with a year that fills it
+    mockApp.selectedYear = "all";
+    wrappedManager.showWrapped();
+    expect(el("wrapped-card-fleet").hidden).toBe(false);
+    expect(el("wrapped-card-airports").hidden).toBe(false);
   });
 
   it("skips the airport sections when no flight has an airport", () => {

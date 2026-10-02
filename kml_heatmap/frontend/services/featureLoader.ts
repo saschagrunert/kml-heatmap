@@ -59,10 +59,11 @@ export function wasSiteUpdated(): boolean {
 
 /**
  * Say the site was updated, with the reload that puts it right. Shown
- * again for every use that finds it: the same message replaces the one on
+ * again for every use that finds it, a failure of the other bundle after
+ * it included (loadLazyBundle): the same message replaces the one on
  * screen, so there is only ever one.
  */
-function noticeSiteUpdate(): null {
+export function noticeSiteUpdate(): null {
   siteUpdated = true;
   showToast(SITE_UPDATED_MESSAGE, "info", {
     label: "Reload",
@@ -112,7 +113,8 @@ function lazyBundle<T extends { BUILD?: string | undefined }>(
   importer: Importer<T>,
 ): LazyBundle<T> {
   // An import cannot be aborted, so a stalled one is only given up on:
-  // the caller gets its answer and the next attempt starts over
+  // the caller gets its answer, and the next attempt waits on the same
+  // import (timedImports counts a failure, not a timeout)
   const timed = (load: Importer<T>) =>
     timedImports(
       load,

@@ -476,25 +476,28 @@ the filters.
   ignores. When the first year cannot be loaded the map says what failed and
   offers Retry there, with no toast beside it; the year dropdown keeps showing
   that year (or another one picked meanwhile that failed as well), which Retry
-  loads again, the colour legends are hidden while there are no flights, and
-  Reset view is available. The loading indicator shows from the start, while the
-  list of years loads, and the year dropdown names the year the page opens on
-  from the first paint
+  loads again, the colour legends are hidden while there are no flights,
+  Statistics, Wrapped, Replay all, the hotspot tour, the cross-section and the
+  export are unavailable and say so (on a phone the tabs and the More rows too),
+  and Reset view is available. The loading indicator shows from the start, while
+  the list of years loads, and the year dropdown names the year the page opens
+  on from the first paint
 - The toasts stand where the colour legend is on a phone, and over it beside the
   statistics or in a window narrower than 940 px: the legend steps aside there
   while one shows
 - The controls come before the map in the tab order, and the "Skip to map" link
   at the start of the page goes past them to the map and its airport markers
-- Below 768 px the two control columns are replaced by a bottom bar with five
-  tabs. Layers, Filter and More open a sheet; Stats and Wrapped open their panel
-  directly. A sheet closes with its close button, a tap beside it, or a drag
-  down on its top edge (the grabber and the title) past a third of its height or
-  a quick flick; a shorter drag lets it spring back, and under reduced motion it
-  closes or returns at once. Escape closes an open sheet, and Tab stays inside
-  it. The Layers sheet takes half the height, so the map above it shows what a
-  switch did, and scrolls. Replay, Replay all and the hotspot tour take over the
-  bottom edge and the bar steps aside until they end. The colour legend steps
-  aside while a popup is open on the map, which it would cover
+- Below 768 px, or at 480 px of height and less (a phone held sideways), the two
+  control columns are replaced by a bottom bar with five tabs. Layers, Filter
+  and More open a sheet; Stats and Wrapped open their panel directly. A sheet
+  closes with its close button, a tap beside it, or a drag down on its top edge
+  (the grabber and the title) past a third of its height or a quick flick; a
+  shorter drag lets it spring back, and under reduced motion it closes or
+  returns at once. Escape closes an open sheet, and Tab stays inside it. The
+  Layers sheet takes half the height, so the map above it shows what a switch
+  did, and scrolls. Replay, Replay all and the hotspot tour take over the bottom
+  edge and the bar steps aside until they end. The colour legend steps aside
+  while a popup is open on the map, which it would cover
 
 ### Units
 
@@ -551,10 +554,11 @@ button or a click on the map closes it.
   aircraft
 - **Path selection** - Click paths to highlight and view detailed statistics. A
   chip at the top of the map says how many flights are selected and clears them
-  again; on a phone, while the statistics sheet is open, it moves into the
-  sheet's header without its count. With neither colour layer on, the selected
-  flights are drawn as thin light lines over the heatmap, which steps back while
-  they show, at every zoom level, and the lines are fainter the more flights are
+  again; on a phone it also replays the flight when it is the only one and has
+  timing data, and while the statistics sheet is open it moves into the sheet's
+  header without its count. With neither colour layer on, the selected flights
+  are drawn as thin light lines over the heatmap, which steps back while they
+  show, at every zoom level, and the lines are fainter the more flights are
   selected; in the 3D view they are lifted to their height with the heat cloud
 - **Airport selection** - Click an airport marker to select all flights that
   visited it; click the map beside every flight to clear the selection, with

@@ -45,10 +45,14 @@ export function mountWrappedDom(): void {
         <div id="wrapped-stats"></div>
         <button id="wrapped-more-btn">More below</button>
         <div id="wrapped-fun-facts"></div>
-        <div id="wrapped-aircraft-fleet"></div>
-        <div id="wrapped-top-airports"></div>
+        <section id="wrapped-card-fleet">
+          <div id="wrapped-aircraft-fleet"></div>
+        </section>
+        <section id="wrapped-card-airports">
+          <div id="wrapped-top-airports"></div>
+          <div id="wrapped-airports-grid"></div>
+        </section>
         <div id="wrapped-cards-column"></div>
-        <div id="wrapped-airports-grid"></div>
         <div id="wrapped-map-container">
           <div id="wrapped-intro-title">
             <span id="wrapped-intro-heading"></span>

@@ -232,7 +232,7 @@
 }
 /* Replay above the breakpoint. The panel is centred on the map, not on the
    viewport, where it ran over the rail. */
-@media (min-width: 768px) {
+@media (min-width: 768px) and (min-height: 480.02px) {
   body.stats-open #replay-controls {
     left: calc(50% + var(--stats-rail-w) / 2);
     /* Just above the breakpoint the map beside the rail (452 px at 768 px)
@@ -247,7 +247,7 @@
    below about 960 px, and below about 1340 px beside the rail, where the
    panel is centred on the narrower map. ReplayManager measures
    --replay-panel-h. */
-@media (min-width: 768px) and (max-width: 959.98px) {
+@media (min-width: 768px) and (max-width: 959.98px) and (min-height: 480.02px) {
   body.replay-active .color-legend {
     bottom: calc(
       var(--space-lg) + var(--safe-bottom) + var(--replay-panel-h, 0px) +
@@ -255,7 +255,7 @@
     );
   }
 }
-@media (min-width: 960px) and (max-width: 1339.98px) {
+@media (min-width: 960px) and (max-width: 1339.98px) and (min-height: 480.02px) {
   body.stats-open.replay-active .color-legend {
     bottom: calc(
       var(--space-lg) + var(--safe-bottom) + var(--replay-panel-h, 0px) +
@@ -277,7 +277,7 @@ body.replay-all-active .toast-stack {
 /* Where the legend stands on top of the panel (the two ranges above), the
    toasts that stack above the panel stood on the legend's scale: they go
    above both then. ReplayManager measures --replay-legend-h. */
-@media (min-width: 768px) and (max-width: 959.98px) {
+@media (min-width: 768px) and (max-width: 959.98px) and (min-height: 480.02px) {
   body.replay-active:has(.color-legend:not([hidden])) .toast-stack {
     bottom: calc(
       var(--space-lg) + var(--safe-bottom) + var(--replay-panel-h, 0px) +
@@ -285,7 +285,7 @@ body.replay-all-active .toast-stack {
     );
   }
 }
-@media (min-width: 960px) and (max-width: 1339.98px) {
+@media (min-width: 960px) and (max-width: 1339.98px) and (min-height: 480.02px) {
   body.stats-open.replay-active:has(.color-legend:not([hidden])) .toast-stack {
     bottom: calc(
       var(--space-lg) + var(--safe-bottom) + var(--replay-panel-h, 0px) +
@@ -297,7 +297,7 @@ body.replay-all-active .toast-stack {
 /* Centred beside the rail, the panel covers the GitHub link in the bottom
    right corner until the window is about 900 px wide. The link steps aside
    for the replay there, as it does on a phone. */
-@media (min-width: 768px) and (max-width: 899.98px) {
+@media (min-width: 768px) and (max-width: 899.98px) and (min-height: 480.02px) {
   body.stats-open.replay-active #github-footer {
     visibility: hidden;
   }
@@ -354,7 +354,7 @@ body.replay-all-active .toast-stack {
 body.replay-all-active .color-legend {
   visibility: hidden;
 }
-@media (min-width: 768px) {
+@media (min-width: 768px) and (min-height: 480.02px) {
   body.stats-open #replay-all-controls {
     left: calc(50% + var(--stats-rail-w) / 2);
     /* Beside the rail the map can be narrower than the row of the slider */
@@ -533,7 +533,7 @@ body.profile-open .toast-stack {
     color: var(--color-text);
   }
 }
-@media (min-width: 768px) {
+@media (min-width: 768px) and (min-height: 480.02px) {
   body.stats-open #flight-profile {
     left: calc(50% + var(--stats-rail-w) / 2);
     width: clamp(240px, calc(100vw - var(--stats-rail-w) - 600px), 560px);
@@ -541,7 +541,7 @@ body.profile-open .toast-stack {
 }
 /* Narrower than that, the legend stands on top of the strip, as it does on
    the replay panel */
-@media (min-width: 768px) and (max-width: 839.98px) {
+@media (min-width: 768px) and (max-width: 839.98px) and (min-height: 480.02px) {
   body.profile-open .color-legend {
     bottom: calc(
       var(--attribution-h) + var(--space-sm) + var(--safe-bottom) +
@@ -549,7 +549,7 @@ body.profile-open .toast-stack {
     );
   }
 }
-@media (min-width: 840px) and (max-width: 1155.98px) {
+@media (min-width: 840px) and (max-width: 1155.98px) and (min-height: 480.02px) {
   body.stats-open.profile-open .color-legend {
     bottom: calc(
       var(--attribution-h) + var(--space-sm) + var(--safe-bottom) +
@@ -712,14 +712,14 @@ body.cross-section-open .toast-stack {
       var(--cross-section-h, 0px) + var(--space-sm)
   );
 }
-@media (min-width: 768px) {
+@media (min-width: 768px) and (min-height: 480.02px) {
   body.stats-open #cross-section {
     left: calc(50% + var(--stats-rail-w) / 2);
     width: clamp(280px, calc(100vw - var(--stats-rail-w) - 600px), 640px);
   }
 }
 /* Narrower than that, the legend stands on top of the panel */
-@media (min-width: 768px) and (max-width: 859.98px) {
+@media (min-width: 768px) and (max-width: 859.98px) and (min-height: 480.02px) {
   body.cross-section-open .color-legend {
     bottom: calc(
       var(--attribution-h) + var(--space-sm) + var(--safe-bottom) +
@@ -727,7 +727,7 @@ body.cross-section-open .toast-stack {
     );
   }
 }
-@media (min-width: 860px) and (max-width: 1175.98px) {
+@media (min-width: 860px) and (max-width: 1175.98px) and (min-height: 480.02px) {
   body.stats-open.cross-section-open .color-legend {
     bottom: calc(
       var(--attribution-h) + var(--space-sm) + var(--safe-bottom) +
@@ -737,7 +737,7 @@ body.cross-section-open .toast-stack {
 }
 /* On a phone it spans the width above the bar and the credit, as the
    profile does, and the legend it would cover steps aside */
-@media (max-width: 767.98px) {
+@media (max-width: 767.98px), (max-height: 480px) {
   #cross-section {
     left: calc(var(--edge-gap) + var(--safe-left));
     right: calc(var(--edge-gap) + var(--safe-right));
@@ -772,7 +772,7 @@ body.cross-section-open .toast-stack {
 /* ==========================================================================
    Mobile layout (narrow viewports)
    ========================================================================== */
-@media (max-width: 767.98px) {
+@media (max-width: 767.98px), (max-height: 480px) {
   .replay-btn {
     min-height: var(--btn-min-height);
   }
@@ -1040,12 +1040,12 @@ body.cross-section-open .toast-stack {
    a slider, and on a phone the statistics sheet runs up under it, where it
    covered the sheet's tabs: the band stays as it is, and shows again with
    the labels or the map */
-@media (max-width: 1279.98px) {
+@media (max-width: 1279.98px), (max-height: 480px) {
   body.stats-open #height-band {
     display: none;
   }
 }
-@media (max-width: 767.98px) {
+@media (max-width: 767.98px), (max-height: 480px) {
   body > #height-band {
     position: fixed;
     top: calc(
@@ -1233,14 +1233,14 @@ body.hotspot-tour-active .toast-stack {
       var(--space-sm)
   );
 }
-@media (min-width: 768px) {
+@media (min-width: 768px) and (min-height: 480.02px) {
   body.stats-open #hotspot-tour {
     left: calc(50% + var(--stats-rail-w) / 2);
   }
 }
 /* On a phone the panel spans the width above the credit, where the bar
    was: the bar steps aside while the tour runs, as for a replay */
-@media (max-width: 767.98px) {
+@media (max-width: 767.98px), (max-height: 480px) {
   #hotspot-tour {
     left: calc(var(--edge-gap) + var(--safe-left));
     right: calc(var(--edge-gap) + var(--safe-right));

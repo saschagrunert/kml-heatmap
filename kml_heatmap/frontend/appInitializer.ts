@@ -10,10 +10,11 @@ import {
 } from "./features/airports";
 import { setUnavailable } from "./utils/buttonState";
 import { domCache } from "./utils/domCache";
-import { applyMetricColors } from "./utils/htmlGenerators";
+import { applyMetricColors, pluralFlights } from "./utils/htmlGenerators";
 import { createActivationFilter, toLngLat } from "./utils/mapHelpers";
 import { announceStatus, showToast } from "./utils/toast";
 import { setAirportLabelHover } from "./ui/airportLabels";
+import { NO_DATA_MESSAGE } from "./ui/actions";
 import { datasetIndex } from "./calculations/datasetIndex";
 import { calculateAirspeedRange } from "./features/layers";
 import type { MapApp } from "./mapApp";
@@ -158,7 +159,7 @@ export async function loadInitialData(app: MapApp): Promise<void> {
   if (app.selectedYear === year) {
     app.store.batch(() => {
       if (data) {
-        dropUnknownPathIds(app, data);
+        dropUnknownPathIds(app, data, true);
         publishDataset(app, data);
       }
       app.filterManager.updateAircraftDropdown();
@@ -174,8 +175,9 @@ export async function loadInitialData(app: MapApp): Promise<void> {
   // Set initial airport marker sizes
   app.airportManager.updateAirportMarkerSizes();
 
-  // Restore stats panel visibility
-  if (app.savedState && app.savedState.statsPanelVisible) {
+  // Restore stats panel visibility, over flights only: without them the
+  // rail opened on zeros (see followLoadFailure)
+  if (app.savedState?.statsPanelVisible && app.currentData) {
     app.statsPanelVisible = true;
   }
 }
@@ -216,6 +218,19 @@ export function announceDataset(year: string): void {
 }
 
 /**
+ * The controls of what is made of the flights (NEED_DATA in ui/actions.ts),
+ * shown unavailable while a load left the map without any
+ */
+const NEED_DATA_CONTROL_IDS = [
+  "stats-btn",
+  "wrapped-btn",
+  "replay-all-btn",
+  "hotspot-tour-btn",
+  "cross-section-btn",
+  "export-btn",
+];
+
+/**
  * Say on the map itself that the first load left it without flights, and
  * offer to load them again. Otherwise the page was an empty map whose
  * dropdown named the year, with a toast that went after four seconds. What
@@ -242,9 +257,30 @@ function followLoadFailure(app: MapApp): { settle: () => void } {
   };
   let settled = false;
   let retrying = false;
+  /** Set while the controls of NEED_DATA_CONTROL_IDS say there is no data */
+  let blocked = false;
+  /** Their titles from before, given back with the data */
+  const titles = new Map<HTMLElement, string>();
   const sync = (): void => {
     // The colour legends stand for nothing while there is none (styles.css)
     document.body.classList.toggle("no-data", !app.currentData);
+    // A click on one says so (runAction); a Retry under way still has none
+    if (blocked !== (settled && !app.currentData)) {
+      blocked = !blocked;
+      document.body.classList.toggle("flights-failed", blocked);
+      for (const id of NEED_DATA_CONTROL_IDS) {
+        const control = domCache.get(id);
+        if (!control) continue;
+        if (blocked) titles.set(control, control.title);
+        setUnavailable(
+          control,
+          blocked,
+          blocked ? NO_DATA_MESSAGE : (titles.get(control) ?? control.title),
+        );
+      }
+      app.mobileBar?.syncTabs();
+      app.mobileBar?.refreshSheet();
+    }
     if (!panel) return;
     const hide = !settled || retrying || app.currentData !== null;
     // Its own Retry is what hides it, and would take the focus with it
@@ -311,14 +347,20 @@ export function colorSegmentPopups(signal: AbortSignal): void {
  *
  * Ids are derived from the flights, so a shared link or a saved state keeps
  * pointing at the same flight after a re-export; one whose flight is gone
- * is dropped quietly. Isolation goes with the last id: the controls cannot
- * leave isolate mode on over an empty selection. A dataset missing a year
- * that failed to load cannot tell a deleted flight from an unloaded one, so
- * it drops nothing.
+ * is dropped, which `say` tells the visitor (the first load, of the link
+ * they opened). Isolation goes with the last id: the controls cannot leave
+ * isolate mode on over an empty selection. A dataset missing a year that
+ * failed to load cannot tell a deleted flight from an unloaded one, so it
+ * drops nothing.
  * @param app - The MapApp instance to operate on
  * @param data - The dataset the selection has to refer to
+ * @param say - Whether a toast says how many were left out
  */
-export function dropUnknownPathIds(app: MapApp, data: KMLDataset): void {
+export function dropUnknownPathIds(
+  app: MapApp,
+  data: KMLDataset,
+  say = false,
+): void {
   const selected = app.selectedPathIds;
   if (selected.size === 0 || data.incomplete) return;
 
@@ -331,6 +373,9 @@ export function dropUnknownPathIds(app: MapApp, data: KMLDataset): void {
     app.store.notifyMutation("selectedPathIds");
     if (selected.size === 0) app.isolateSelection = false;
   });
+  if (say) {
+    showToast(`Left out ${pluralFlights(unknown.length)} not on this site`);
+  }
 }
 
 /**

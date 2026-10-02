@@ -32,8 +32,9 @@ import type { Coordinate } from "../utils/geometry";
 import type { YearRequest, YearResponse } from "./yearWorker";
 
 /**
- * How long the worker may take over one year or one heat. Either takes it
- * some milliseconds, so this only ever ends a wait for a worker that hangs.
+ * How long the worker may go without answering while requests wait. It
+ * answers one at a time, and each takes it some milliseconds, so this only
+ * ever ends a wait for a worker that hangs.
  */
 const DECODE_TIMEOUT_MS = 30_000;
 
@@ -112,6 +113,19 @@ export function createYearDecoder(
   let destroyed = false;
   let nextId = 0;
   const pending = new Map<number, Settle>();
+  /**
+   * Gives up on a worker that has not answered for `timeoutMs` while some
+   * request waits. Started by a request, again by every answer: a queue of
+   * them behind a long one is the worker at work, not one that hangs.
+   */
+  let watchdog: ReturnType<typeof setTimeout> | undefined;
+  const watch = (): void => {
+    clearTimeout(watchdog);
+    watchdog =
+      pending.size > 0 && !workerDone
+        ? setTimeout(() => giveUpOnWorker("no answer"), timeoutMs)
+        : undefined;
+  };
 
   /** Settle every request without an answer; none is waited for after */
   const settleAll = (answer: Error | null): void => {
@@ -137,12 +151,12 @@ export function createYearDecoder(
       const id = nextId++;
       const settle: Settle = (answer) => {
         pending.delete(id);
-        clearTimeout(timer);
+        if (pending.size === 0) watch();
         if (answer instanceof Error) reject(answer);
         else resolve(answer);
       };
-      const timer = setTimeout(() => giveUpOnWorker("no answer"), timeoutMs);
       pending.set(id, settle);
+      if (watchdog === undefined) watch();
       // Copied, not transferred: the copy is a fraction of a millisecond,
       // and the bytes are still here if the worker fails over them
       const request: YearRequest = { id, ...body };
@@ -158,6 +172,7 @@ export function createYearDecoder(
     worker.addEventListener("message", (event) => {
       const answer = (event as MessageEvent<YearResponse>).data;
       pending.get(answer.id)?.(answer);
+      watch();
     });
     // A script that did not load, or an error nobody caught in it
     worker.addEventListener("error", (event) => giveUpOnWorker(event.message));

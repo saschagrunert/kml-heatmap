@@ -83,13 +83,24 @@ export function followReplayAvailability(app: MapApp): void {
   // A running replay owns the button (it is pressed); it is back in step
   // with the selection as the replay closes
   const refresh = (): void => {
-    if (!app.replayActive) updateReplayButtonState(app.canReplay());
+    const ready = app.canReplay();
+    if (!app.replayActive) updateReplayButtonState(ready);
+    // The phone's Replay beside the selection (styles.css)
+    const chipReplay = domCache.get("selection-replay-btn");
+    if (chipReplay) chipReplay.hidden = !ready || app.replayActive;
   };
   app.store.subscribeKeys(
     ["selectedPathIds", "hasTimingData", "currentData", "replayActive"],
     refresh,
   );
   refresh();
+  // A press of the Replay control itself, so that a mode which holds it
+  // (heldControls.ts) says why rather than a replay starting under it
+  domCache
+    .get("selection-replay-btn")
+    ?.addEventListener("click", () => domCache.get("replay-btn")?.click(), {
+      signal: app.signal,
+    });
 }
 
 /**

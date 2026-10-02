@@ -229,7 +229,8 @@ export class FilterManager {
       if (aircraft !== null) this.app.selectedAircraft = aircraft;
       this.updateAircraftDropdown();
       if (keepSelection && aircraft === null) {
-        dropUnknownPathIds(this.app, data);
+        // A Retry of the first year: what its link named is said there
+        dropUnknownPathIds(this.app, data, true);
       } else {
         this.clearSelectionUnlessInitializing();
       }
