@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, NamedTuple
 
 from .cache import atomic_bytes_write
 from .logger import logger
-from .png import PNG_SIGNATURE, PngError, _header, chunks, decode_png
+from .png import PNG_SIGNATURE, PngError, chunks, decode_png, ihdr_fields
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -56,7 +56,7 @@ def is_tile_png(data: bytes) -> bool:
         return False
     try:
         for kind, body in chunks(data):
-            if kind == b"IHDR" and _header(body)[:2] != (TILE_SIZE, TILE_SIZE):
+            if kind == b"IHDR" and ihdr_fields(body)[:2] != (TILE_SIZE, TILE_SIZE):
                 return False
             if kind == b"IEND":
                 return True

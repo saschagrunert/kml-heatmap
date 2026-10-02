@@ -40,9 +40,7 @@ if TYPE_CHECKING:
 __all__ = [
     "ParseResult",
     "load_cached_entry",
-    "load_cached_kml",
     "parse_and_cache",
-    "parse_kml_file",
     "parse_size",
 ]
 
@@ -432,17 +430,6 @@ def load_cached_entry(kml_file: str) -> tuple[CachedParse | None, Path | None]:
     return cached, cache_path
 
 
-def load_cached_kml(kml_file: str) -> tuple[ParseResult | None, Path | None]:
-    """The cached parse result of a KML file (None on a miss) and its entry.
-
-    See ``load_cached_entry``.
-    """
-    cached, cache_path = load_cached_entry(kml_file)
-    if cached is None:
-        return None, cache_path
-    return (cached.coordinates, cached.path_groups, cached.path_metadata), cache_path
-
-
 def parse_and_cache(
     kml_file: str,
     cache_path: Path | None = None,
@@ -465,14 +452,6 @@ def parse_and_cache(
     if cache_path:
         save_to_cache(cache_path, *result, recorder.warnings, landings)
     return result, landings
-
-
-def parse_kml_file(kml_file: str, cache_path: Path | None = None) -> ParseResult:
-    """Parse a KML file and store the result in the cache entry ``cache_path``.
-
-    See ``parse_and_cache``, which keeps the landings of the paths as well.
-    """
-    return parse_and_cache(kml_file, cache_path)[0]
 
 
 def _parse_kml(kml_file: str) -> ParseResult:

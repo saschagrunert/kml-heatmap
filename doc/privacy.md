@@ -118,13 +118,15 @@ of a date either, which the year of the flight completes (`16 Aug`, `16.08.`,
 `16/08`, `KW33`, `260816`, `03/2026`, and `Sat` next to a date). Nor may a
 weekday named in full (`Saturday`, `Samstag`, `sonntags`): the timestamps no
 longer fall on it. The name of a file carries no time of day either (`1513h`,
-`1513H`, `15h13`, `0930Z`, `0930z`, `0930UTC`, `15:13`, `3pm`, `1430 GMT`,
-`1430 Zulu`, `14:30 EST`, `1430 local`, `0930 hours`, `14.30Z`, `0930Z-1045Z`,
-`14:30 +02:00`, `1430+0200`), except for the sequence number in the time slot of
-an obfuscated Charterware name, and neither do its names and descriptions, nor a
-Unix time of a past day in the text of an element (see
-[Troubleshooting](usage.md#make-check-obfuscation-or-the-commit-hook-fails)). A
-comment or processing instruction inside a text hides nothing from the check
+`1513H`, `15h13`, `0930Z`, `0930z`, `0930UTC`, `15:13`, `3pm`, `10 AM`,
+`1430 GMT`, `1430 Zulu`, `14:30 EST`, `1430 local`, `0930 hours`, `14.30Z`,
+`0930Z-1045Z`, `14:30 +02:00`, `1430+0200`), except for the sequence number in
+the time slot of an obfuscated Charterware name, and neither do its names and
+descriptions, nor a Unix time of a past day in the text of an element (see
+[Troubleshooting](usage.md#make-check-obfuscation-or-the-commit-hook-fails)). An
+`AM` in capitals after a number is a time, even where it is German written in
+capitals (`2 AM RHEIN`), which cannot be told from one; `3 am` stays. A comment
+or processing instruction inside a text hides nothing from the check
 (`16<!-- -->.08.2026`). The timestamps of one track (a gx:Track, the tracks of a
 gx:MultiTrack, or a Placemark without either that is no point marker) count as
 one flight and are never split, and so do tracks no more than 12 hours apart in
@@ -140,7 +142,7 @@ When a date cannot be removed (in an element the tool does not rewrite, say, or
 a file name that is taken without it), the rewrite lists it and stops rather
 than leaving a file half scrubbed.
 
-The commit hook (`make hooks`) runs the check before every push, and refuses a
+The pre-push hook (`make hooks`) runs the check before every push, and refuses a
 commit message that names a date or a weekday when its commit adds or changes a
 flight in `data/` (`Add flight 16 Aug 2026`): the history of the repository is
 as public as the files.
@@ -192,15 +194,15 @@ Removed from the site:
   `16.8`, `16 08 2026`, `16AUG26`, `16-AUG-26`, `260816`, `03/2026`,
   `2026/8/16`, `KW33 2026`, `KW33`, `Week 33`, `2026W33`, `14:30`, `1430Z`,
   `0930z`, `1430 UTC`, `1430L`, `1513h`, `1513H`, `1430hrs`, `14h30`, `15.13h`,
-  `14.30 Uhr`, `3pm`, `0930Z-1045Z`, `2026-08-16_1430`, `2026-08-16-14-30`,
-  `202608161430`), with the zone, the fraction of a second or the offset that
-  follows a time (`1430 GMT`, `1430 Zulu`, `09:30 EDT`, `14:30 AEST`,
-  `1430 local`, `0930 hours`, `14:30:00.5Z`, `14:30 +02:00`, `1430+0200`; the
-  common zones, not every one there is), also with German month names written
-  day first (`16. Mai 2026`, `16. März`, `16MAI26`, `Mai 2026`); a month name
-  alone (`Flugplatz Juli`) stays, and so do runway designators in a name that
-  speaks of a runway (`RWY 08/26`, `07L/25R`) and a version after a word that
-  says so (`firmware 12.10`), while a bare `26/08` is August 26th and
+  `14.30 Uhr`, `3pm`, `10 AM`, `0930Z-1045Z`, `2026-08-16_1430`,
+  `2026-08-16-14-30`, `202608161430`), with the zone, the fraction of a second
+  or the offset that follows a time (`1430 GMT`, `1430 Zulu`, `09:30 EDT`,
+  `14:30 AEST`, `1430 local`, `0930 hours`, `14:30:00.5Z`, `14:30 +02:00`,
+  `1430+0200`; the common zones, not every one there is), also with German month
+  names written day first (`16. Mai 2026`, `16. März`, `16MAI26`, `Mai 2026`); a
+  month name alone (`Flugplatz Juli`) stays, and so do runway designators in a
+  name that speaks of a runway (`RWY 08/26`, `07L/25R`) and a version after a
+  word that says so (`firmware 12.10`), while a bare `26/08` is August 26th and
   `EDDS 07/25` July 25th (or July 2025): where a name could hold a date, the
   date goes. A registration that looks like a time keeps it (`N1513H`,
   `RA-1430L`), and `W33` alone is the code of an airport in the US as often. A

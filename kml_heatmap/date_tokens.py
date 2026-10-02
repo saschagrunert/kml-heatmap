@@ -416,16 +416,31 @@ _TIME_OF_DAY = re.compile(
 # "L" of the local time ("14.30h", "14.30 hrs", "14.30L"; two digits for
 # the hour, "1h30" and "1.30 hrs" are durations), either with a zone
 # ("14h30Z", "9h30 UTC", "14.30Z", "9.30 CET"), anything with "Uhr" ("14.30
-# Uhr", "1430 Uhr", "14 Uhr"), and the English "3pm", "3 p.m." and "11.30am"
-# ("3 am" is German for "3 at the", and after a hyphen it is a type or a
-# registration, "Mi-8AM"). An underscore may stand before them, as in a
-# file name ("1_DEHYL_14h30").
+# Uhr", "1430 Uhr", "14 Uhr"), and the English "3pm", "3 p.m.", "10 AM" and
+# "11.30am" ("3 am" is German for "3 at the", while "10 AM" in capitals is
+# the time, and so is a German "2 AM RHEIN" written in capitals, which
+# cannot be told from one). After a hyphen it is a type or a registration
+# ("Mi-8AM", "PA-1 PM"), unless a time stands before the hyphen: then it is
+# the end of a range ("10am-12pm", "10 AM-12 PM", "9 a.m.-5 p.m."), and a
+# lowercase "am" at either end of one is the time as well ("10 am-12 pm").
+# An underscore may stand before them, as in a file name ("1_DEHYL_14h30").
+# An hour of the clock with a half of the day ("3", "11.30")
+_HOUR_12 = r"(?:1[0-2]|0?[1-9])(?:\.[0-5]\d)?"
+# A hyphen with a time before it ("10am-", "9 a.m.-"), which makes the time
+# after it the end of a range rather than part of a name ("Mi-8AM")
+_AFTER_A_TIME = r"(?:(?<=[AaPp][Mm]-)|(?<=[AaPp]\.[Mm]\.-))"
+_NOT_AFTER_A_NAME = rf"(?:(?<!-)|{_AFTER_A_TIME})"
+# What ends a range after a time ("-12 pm", "-1:15pm")
+_RANGE_END = r"-(?:1[0-2]|0?[1-9])(?:[.:][0-5]\d)?\s?(?i:[ap]\.?m)"
 _TIME_OF_DAY_WORDS = re.compile(
     r"(?<![^\W_]|[.:])"
     rf"(?:(?:[01]?\d|2[0-3])[h.][0-5]\d\s*{_ZONE_NAME}(?![A-Za-z])|"
     rf"(?:[01]\d|2[0-3])(?:h[0-5]\d|\.[0-5]\d(?:L|{_HOURS})(?![A-Za-z]))|"
     r"(?:[01]?\d|2[0-3])(?:[.:]?[0-5]\d)?\s*Uhr|"
-    r"(?<!-)(?:1[0-2]|0?[1-9])(?:\.[0-5]\d)?(?:\s?(?i:p\.?m\.?|a\.m\.)|(?i:am)))"
+    rf"{_NOT_AFTER_A_NAME}{_HOUR_12}(?i:p\.?m\.?|a\.m\.|am)|"
+    rf"{_NOT_AFTER_A_NAME}{_HOUR_12}(?:\s(?i:p\.?m\.?|a\.m\.)|\sA\.?M\.?)|"
+    rf"{_AFTER_A_TIME}{_HOUR_12}\s(?i:am)|"
+    rf"{_NOT_AFTER_A_NAME}{_HOUR_12}\s(?i:am)(?={_RANGE_END}))"
     r"(?![^\W_])"
 )
 # A calendar week without the year, "KW33", "KW 33" and "Week 33", which the

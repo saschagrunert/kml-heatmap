@@ -32,14 +32,14 @@ a name such as `2025_summer_trip.kml` names no aircraft. It is published with
 every flight, so it also has to start with an ICAO nationality mark: the part
 before its hyphen, or any mark it starts with when written without one (`DEHYL`,
 `OEAKI`, `9HABC`, `VH-ABC`). A mark of one character takes as many after it as
-that state gives (four for `D`, `F`, `G`, `I`, `M`, `C` and `2`, three for `Z`),
-and a US registration is `N` with a digit other than zero and at most two
-letters at the end (`N12345`, `N123AB`). Anything else (`1_ANNA_DA40.kml`,
-`1_MIKE_DA40.kml`) is dropped with a warning and the type stays; a name that
-happens to have the shape of a registration (`DAVID`, D-AVID) still passes. A
-name with more than three parts (`7_DEAGJ_DA20_copy.kml`) keeps the first three
-and drops the rest with a warning. Flight dates are not included in filenames
-for privacy.
+that state gives (four for `D`, `F`, `G`, `I`, `M`, `C` and `2`, three for `Z`,
+three or four for `P`, three to five for `B`), and a US registration is `N` with
+a digit other than zero and at most two letters at the end (`N12345`, `N123AB`).
+Anything else (`1_ANNA_DA40.kml`, `1_MIKE_DA40.kml`) is dropped with a warning
+and the type stays; a name that happens to have the shape of a registration
+(`DAVID`, D-AVID) still passes. A name with more than three parts
+(`7_DEAGJ_DA20_copy.kml`) keeps the first three and drops the rest with a
+warning. Flight dates are not included in filenames for privacy.
 
 The hyphen is restored for these nationality prefixes: `2`, `4O`, `5B`, `9A`,
 `9H`, `CS`, `D`, `E7`, `EC`, `EI`, `ES`, `EW`, `F`, `G`, `HA`, `HB`, `I`, `LN`,
@@ -596,7 +596,7 @@ and stops rather than leaving it half scrubbed; remove the date by hand. The
 same goes for a weekday or a time of day anywhere else in a file besides its
 timestamps. A trip whose legs on several days are less than 12 hours apart is
 one flight that runs past the days after January 1st: split the file into one
-per day of flying, as the check says. The commit hook also refuses a commit
+per day of flying, as the check says. The pre-push hook also refuses a commit
 message that dates a flight it adds or changes (`Add flight 16 Aug 2026`):
 reword it with `git commit --amend` or a rebase. Four digits that are a year and
 a time at once, such as `2026 local` (20:26), count as a time. A duration

@@ -1063,6 +1063,8 @@ describe("MapApp controls and map", () => {
       await Promise.resolve();
 
       expect(m.toggleCrossSection).not.toHaveBeenCalled();
+      // Nor do the saves and Copy link hand the line on
+      expect(app.crossSectionLine).toBe("");
     });
 
     it("leaves the cross-section closed without a line", async () => {

@@ -18,8 +18,8 @@ from kml_heatmap import site_assets
 from kml_heatmap.constants import KM_TO_NAUTICAL_MILES
 from kml_heatmap.export_pipeline import path_duration
 from kml_heatmap.geometry import haversine_distance
-from kml_heatmap.parser import parse_kml_file
 from kml_heatmap.segment_calculator import calculate_fallback_groundspeed
+from tests.conftest import parse_kml_file
 
 if TYPE_CHECKING:
     from types import ModuleType
