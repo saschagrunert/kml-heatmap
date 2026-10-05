@@ -502,7 +502,6 @@ describe("MapApp.initialize", () => {
         app.threeDVisible = true;
         app.satelliteVisible = true;
         app.store.set("statsPanelVisible", true);
-        app.heightBand = "500-3000";
       });
       mockMap(app).jumpTo({ bearing: 40, pitch: 60 });
     }
@@ -524,7 +523,6 @@ describe("MapApp.initialize", () => {
         "threeDVisible",
         "satelliteVisible",
         "statsPanelVisible",
-        "heightBand",
       ] as const;
       const listener = vi.fn();
       app.store.subscribeKeys([...keys, "selectedYear"], listener);
@@ -664,7 +662,6 @@ describe("MapApp.initialize", () => {
       ["3D flights", () => (app.threeDVisible = true)],
       ["the globe", () => (app.globeVisible = true)],
       ["the satellite imagery", () => (app.satelliteVisible = true)],
-      ["a band of heights", () => (app.heightBand = "500-3000")],
       ["the statistics", () => app.store.set("statsPanelVisible", true)],
       [
         "a selection",
@@ -877,18 +874,6 @@ describe("MapApp.initialize", () => {
       expect(
         document.getElementById("airspeed-btn")!.getAttribute("aria-pressed"),
       ).toBe("false");
-    });
-
-    it("restores the heat cloud's band of heights with the 3D view", async () => {
-      mockStateManagerInstance.loadState.mockReturnValue({
-        threeDVisible: true,
-        heightBand: "500-3000",
-      });
-
-      await initializeApp(app);
-
-      expect(app.threeDVisible).toBe(true);
-      expect(app.heightBand).toBe("500-3000");
     });
 
     it("adds the altitude layer and shows its legend", async () => {

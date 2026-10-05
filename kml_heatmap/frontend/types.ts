@@ -372,8 +372,6 @@ export interface AppState extends Partial<ToggleFlags> {
   bearing?: number;
   /** Degrees the map is tilted, 0 to MAP_MAX_PITCH; absent means flat */
   pitch?: number;
-  /** The heat cloud's band of heights (StoreState.heightBand); absent: all */
-  heightBand?: string;
   /** The cross-section's line (StoreState.crossSectionLine); absent: none */
   crossSectionLine?: string;
 }

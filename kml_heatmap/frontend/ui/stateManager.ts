@@ -11,7 +11,6 @@ import {
 } from "../state/toggles";
 import type { MapCenter, SavedState } from "../types";
 import {
-  isHeightBand,
   isPathId,
   isSupportedSchemaVersion,
   STATE_SCHEMA_VERSION,
@@ -39,15 +38,14 @@ export function storageKey(
 }
 
 /**
- * What a session keeps of the store: the filters, every toggle, the heat
- * cloud's band of heights and the line of the cross-section
+ * What a session keeps of the store: the filters, every toggle and the
+ * line of the cross-section
  */
 const PERSISTED_KEYS: readonly (keyof StoreState)[] = [
   "selectedYear",
   "selectedAircraft",
   "selectedPathIds",
   ...TOGGLE_KEYS,
-  "heightBand",
   "crossSectionLine",
 ];
 
@@ -92,8 +90,6 @@ export function sanitizeSavedState(candidate: unknown): SavedState {
       result[key] = value;
     }
   }
-  const band = candidate["heightBand"];
-  if (isHeightBand(band)) result.heightBand = band;
   const line = candidate["crossSectionLine"];
   if (isSectionLine(line)) result.crossSectionLine = line;
   // Path ids are only meaningful when they were written with an id scheme
@@ -213,8 +209,6 @@ export class StateManager {
       selectedYear: this.app.selectedYear,
       selectedAircraft: this.app.selectedAircraft,
       selectedPathIds: Array.from(this.app.selectedPathIds),
-      // The tour shows every height while it runs (ui/hotspotTour.ts)
-      heightBand: this.app.tourView?.heightBand ?? this.app.heightBand,
       crossSectionLine: this.app.crossSectionLine,
       // Replay state is not persisted: too complex to restore reliably
     };

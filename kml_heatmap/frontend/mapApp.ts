@@ -157,12 +157,6 @@ export interface MapConfig {
 }
 
 /**
- * The keys of the view besides the filters that Reset view puts back: the
- * toggles and the heat cloud's band of heights
- */
-const VIEW_KEYS = [...TOGGLE_KEYS, "heightBand"] as const;
-
-/**
  * Room around the flights, beyond the panels over the map, when the view is
  * fitted to all of them (startViewPadding). The heat's glow reaches about
  * 18 pixels (HEATMAP_RADIUS_PX) past the outermost fix, and at 30 the edge
@@ -834,7 +828,7 @@ export class MapApp {
     this.followFlightProfile();
     this.store.subscribeKeys(
       [
-        ...VIEW_KEYS,
+        ...TOGGLE_KEYS,
         "selectedYear",
         "selectedAircraft",
         "selectedPathIds",
@@ -850,11 +844,10 @@ export class MapApp {
 
   /**
    * Go back to what a first visit shows: the newest year, every aircraft,
-   * the heatmap and the airports, nothing selected or isolated, the heat
-   * cloud at every height, flat and north up over all the flights. It goes
-   * through the year filter, so the dropdowns, the loaded data and the
-   * store change together in one batch; the saved state and the link
-   * follow the store and the camera as ever.
+   * the heatmap and the airports, nothing selected or isolated, flat and
+   * north up over all the flights. It goes through the year filter, so the
+   * dropdowns, the loaded data and the store change together in one batch;
+   * the saved state and the link follow the store and the camera as ever.
    * Out of reach during a replay, like the filters: the button is disabled
    * (REPLAY_DISABLED_CONTROL_IDS) and the phone's bar steps aside.
    */
@@ -867,7 +860,7 @@ export class MapApp {
       this.defaultYear,
       () => {
         // The selection goes with the year switch, as with every filter
-        for (const key of [...VIEW_KEYS, "selectedAircraft"] as const) {
+        for (const key of [...TOGGLE_KEYS, "selectedAircraft"] as const) {
           this.store.set(key, defaults[key]);
         }
       },
@@ -926,7 +919,7 @@ export class MapApp {
       this.selectedYear === this.defaultYear &&
       this.selectedAircraft === "all" &&
       this.selectedPathIds.size === 0 &&
-      VIEW_KEYS.every((key) => this[key] === defaults[key]) &&
+      TOGGLE_KEYS.every((key) => this[key] === defaults[key]) &&
       Math.abs(center.lng - target.lng) + Math.abs(center.lat - target.lat) <
         2e-6 &&
       Math.abs(map.getZoom() - start.zoom!) < 0.01 &&

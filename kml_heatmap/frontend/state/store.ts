@@ -71,11 +71,6 @@ export interface StoreState extends ToggleFlags {
    */
   forcedHeatCloud: boolean;
   /**
-   * The heights above ground whose heat the 3D view's cloud shows, as a
-   * link writes them (see calculations/heightBand.ts): "" for all of them
-   */
-  heightBand: string;
-  /**
    * The line of the cross-section as a link writes it, "lat,lng,lat,lng"
    * from its start to its end (see isSectionLine in state/urlState.ts),
    * "" while it shows none (see ui/crossSection.ts, its writer once the
@@ -136,7 +131,6 @@ export const STORE_ACCESSOR_KEYS = [
   "heatCloudScale",
   "heatmapExposure",
   "forcedHeatCloud",
-  "heightBand",
   "crossSectionLine",
   "selectionRibbons",
   "replayActive",
@@ -186,7 +180,6 @@ export function createDefaultState(): StoreState {
     heatCloudScale: 0,
     heatmapExposure: 1,
     forcedHeatCloud: false,
-    heightBand: "",
     crossSectionLine: "",
     selectionRibbons: false,
     replayActive: false,

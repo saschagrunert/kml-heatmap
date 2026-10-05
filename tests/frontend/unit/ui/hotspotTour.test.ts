@@ -660,29 +660,6 @@ describe("hotspot tour", () => {
     });
   });
 
-  it("shows every height while it runs, and gives the band back however it ends", () => {
-    app.store.set("heightBand", "1000-");
-
-    tour.start();
-    expect(app.store.get("heightBand")).toBe("");
-    // The user's, which the state manager saves meanwhile
-    expect(app.tourView).toMatchObject({ heightBand: "1000-" });
-    tour.stop();
-    expect(app.store.get("heightBand")).toBe("1000-");
-
-    // Taken over, the 3D view stays, with the user's band
-    tour.start();
-    map().getContainer().dispatchEvent(new Event("pointerdown"));
-    expect(tour.isOpen).toBe(false);
-    expect(app.store.get("threeDVisible")).toBe(true);
-    expect(app.store.get("heightBand")).toBe("1000-");
-
-    app.store.set("threeDVisible", false);
-    tour.start();
-    app.store.set("replayActive", true);
-    expect(app.store.get("heightBand")).toBe("1000-");
-  });
-
   it("gives the controls back as they were", () => {
     el("isolate-btn").setAttribute("aria-disabled", "true");
 

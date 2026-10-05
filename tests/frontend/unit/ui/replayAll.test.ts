@@ -1239,7 +1239,6 @@ describe("the replay of all flights", () => {
         globeVisible: false,
         threeDVisible: false,
         heatmapVisible: true,
-        heightBand: "",
       };
 
       controls.show();

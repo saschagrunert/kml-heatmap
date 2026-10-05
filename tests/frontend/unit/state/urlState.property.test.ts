@@ -1,17 +1,14 @@
 /**
  * Property tests of the links (state/urlState.ts): whatever state the app
- * can hold comes back from its link, and the parsers of the height band and
- * of the cross-section's line take exactly what the app writes. fast-check
- * prints the seed and the smallest failing state when a property fails;
- * pass it back with `{ seed, path }` in the options of fc.assert to replay
- * that run.
+ * can hold comes back from its link, and the parser of the cross-section's
+ * line takes exactly what the app writes. fast-check prints the seed and
+ * the smallest failing state when a property fails; pass it back with
+ * `{ seed, path }` in the options of fc.assert to replay that run.
  */
 import { describe, it, expect } from "vitest";
 import fc from "fast-check";
 import {
   encodeStateToUrl,
-  HEIGHT_BAND_STOPS_FT,
-  isHeightBand,
   isSectionLine,
   parseUrlParams,
 } from "../../../../kml_heatmap/frontend/state/urlState";
@@ -42,19 +39,6 @@ function stepped(min: number, max: number, step: number) {
 /** Degrees with six decimals, as the link writes the centre */
 const micro = (limit: number) =>
   fc.integer({ min: -limit * 1e6, max: limit * 1e6 }).map((n) => n / 1e6);
-
-/** A band the control writes: two of its stops, or one above 0 and no top */
-const heightBand = fc
-  .tuple(
-    fc.nat({ max: HEIGHT_BAND_STOPS_FT.length - 1 }),
-    fc.nat({ max: HEIGHT_BAND_STOPS_FT.length - 1 }),
-  )
-  .filter(([bottom, top]) => bottom !== top || bottom > 0)
-  .map(([a, b]) => {
-    const [bottom, top] = a <= b ? [a, b] : [b, a];
-    const from = HEIGHT_BAND_STOPS_FT[bottom]!;
-    return bottom === top ? `${from}-` : `${from}-${HEIGHT_BAND_STOPS_FT[top]}`;
-  });
 
 /** Two ends of the cross-section, latitude first, as ui/crossSection.ts writes them */
 const sectionLine = fc
@@ -100,7 +84,6 @@ const view = fc.record(
       fc.constant(0),
       stepped(0, MAP_MAX_PITCH, 0.1).map((p) => Math.round(p * 10) / 10),
     ),
-    heightBand,
     crossSectionLine: sectionLine,
   },
   { requiredKeys: [] },
@@ -154,40 +137,7 @@ describe("links, for any state (fast-check)", () => {
   });
 });
 
-describe("the parsers of the band and of the line (fast-check)", () => {
-  it("takes every band the control writes, and reads it back from a link", () => {
-    fc.assert(
-      fc.property(heightBand, (band) => {
-        expect(isHeightBand(band)).toBe(true);
-        expect(parseUrlParams(new URLSearchParams({ h: band }))).toEqual({
-          heightBand: band,
-        });
-      }),
-    );
-  });
-
-  it("keeps a band from a link exactly when isHeightBand takes it", () => {
-    fc.assert(
-      fc.property(
-        fc.oneof(
-          heightBand,
-          fc.string({ maxLength: 12 }),
-          fc
-            .tuple(fc.nat({ max: 20000 }), fc.option(fc.nat({ max: 20000 })))
-            .map(([from, to]) => `${from}-${to ?? ""}`),
-        ),
-        (text) => {
-          const parsed = parseUrlParams(
-            new URLSearchParams({ y: "2025", h: text }),
-          );
-          expect(parsed?.heightBand).toBe(
-            isHeightBand(text) ? text : undefined,
-          );
-        },
-      ),
-    );
-  });
-
+describe("the parser of the line (fast-check)", () => {
   it("takes every line within the map's range, and reads it back from a link", () => {
     fc.assert(
       fc.property(sectionLine, (line) => {

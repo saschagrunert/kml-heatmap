@@ -6,8 +6,7 @@
  * tap on it) shows a small box beside the pointer: "About 42 min within
  * 1 km" over "17 flights · mostly 800 to 1,200 ft AGL". It says what the
  * cloud there is made of: the flights the cloud draws (the filters,
- * Isolate) at the heights it draws them (the band of ui/heightBand.ts),
- * along the line of sight through the pointer (see
+ * Isolate), along the line of sight through the pointer (see
  * calculations/cloudReadout.ts). It speaks of time, never of the
  * brightness, which the exposure of the cloud scales, and of no date or
  * hour.
@@ -45,7 +44,6 @@ import type { MapApp } from "../mapApp";
 import type { StoreState } from "../state/store";
 import type { PathSegment } from "../types";
 import { idsKey, keptFlights } from "./keptFlights";
-import { heightBandEdgesFt, parseHeightBand } from "../calculations/heightBand";
 import { heatWeight } from "../calculations/heatLines";
 import { airplaneLiftPx } from "../calculations/airplaneLift";
 import { liftExaggeration } from "../calculations/lift";
@@ -83,8 +81,8 @@ const CLEAR_GAP_PX = 4;
 /**
  * The panels over the map the box keeps clear of where it can: the control
  * columns, the selection chip, the profile of a flight, the phone's bar,
- * the colour legends, and on a phone the band of heights and the compass
- * that float over the top of the map
+ * the colour legends, and on a phone the compass that floats over the top
+ * of the map
  */
 const MAP_PANELS_SELECTOR = [
   "#left-buttons",
@@ -93,7 +91,6 @@ const MAP_PANELS_SELECTOR = [
   "#flight-profile",
   "#mobile-bar",
   ".color-legend",
-  "#height-band",
   "#compass-float-btn",
 ].join(", ");
 
@@ -121,7 +118,6 @@ const READOUT_KEYS: readonly (keyof StoreState)[] = [
   "heatCloud",
   "heatmapVisible",
   "forcedHeatCloud",
-  "heightBand",
   "replayActive",
   "wrappedVisible",
   "currentData",
@@ -425,7 +421,6 @@ export function followCloudReadout(app: MapApp): void {
       sight,
       radiusM,
       keep,
-      heightBandEdgesFt(parseHeightBand(app.heightBand)),
     );
   };
 
@@ -621,7 +616,6 @@ export function followCloudReadout(app: MapApp): void {
       isolated && idsKey(isolated),
       app.terrainActive,
       app.reliefLevel,
-      app.heightBand,
     ];
     // A selection that is not isolated changes nothing the readout says:
     // the click that clears one keeps the readout it showed

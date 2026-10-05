@@ -57,26 +57,10 @@ describe("sanitizeSavedState", () => {
     }
   });
 
-  it("keeps the heat cloud's band of heights as a link writes it, and nothing else", () => {
-    expect(sanitizeSavedState({ heightBand: "500-3000" })).toEqual({
-      heightBand: "500-3000",
-    });
-    expect(sanitizeSavedState({ heightBand: "1000-" })).toEqual({
-      heightBand: "1000-",
-    });
-    for (const heightBand of [
-      "",
-      "500",
-      "-3000",
-      "a-b",
-      "5-7",
-      "3000-500",
-      "0-",
-      500,
-      null,
-    ]) {
-      expect(sanitizeSavedState({ heightBand })).toEqual({});
-    }
+  it("drops the band of heights an older session saved", () => {
+    expect(
+      sanitizeSavedState({ threeDVisible: true, heightBand: "500-3000" }),
+    ).toEqual({ threeDVisible: true });
   });
 
   it("drops path ids saved with an older id scheme", () => {
@@ -251,7 +235,6 @@ describe("StateManager", () => {
         "statsPanelVisible",
         "flightListVisible",
         "wrappedVisible",
-        "heightBand",
         "crossSectionLine",
       ]);
     });
@@ -501,23 +484,11 @@ describe("StateManager", () => {
       expect(new URLSearchParams(url).get("x")).toBe("51.5,12.1,51.6,12.3");
     });
 
-    it("saves the heat cloud's band of heights, and carries it in the link", () => {
-      mockApp.store.set("heightBand", "500-3000");
-
-      stateManager.saveMapState();
-
-      expect(savedState()).toMatchObject({ heightBand: "500-3000" });
-      const url = String(vi.mocked(history.replaceState).mock.calls[0]![2]);
-      expect(new URLSearchParams(url).get("h")).toBe("500-3000");
-    });
-
     it("saves the view and the switches the hotspot tour started from while it runs", () => {
-      // The tour turns the 3D view and the heatmap on, shows every height
-      // and flies the map from place to place; a reload or a link keeps
-      // the user's
+      // The tour turns the 3D view and the heatmap on and flies the map
+      // from place to place; a reload or a link keeps the user's
       mockApp.store.set("threeDVisible", true);
       mockApp.store.set("heatmapVisible", true);
-      mockApp.store.set("heightBand", "");
       mockApp.tourView = {
         center: { lat: 51.2, lng: 12.4 },
         zoom: 9,
@@ -526,7 +497,6 @@ describe("StateManager", () => {
         globeVisible: false,
         threeDVisible: false,
         heatmapVisible: false,
-        heightBand: "500-3000",
       };
 
       stateManager.saveMapState();
@@ -537,7 +507,6 @@ describe("StateManager", () => {
         bearing: 10,
         threeDVisible: false,
         heatmapVisible: false,
-        heightBand: "500-3000",
       });
       expect(mockApp.map!.getCenter).not.toHaveBeenCalled();
     });
@@ -661,7 +630,6 @@ describe("StateManager", () => {
         flightListVisible: false,
         wrappedVisible: false,
         isolateSelection: false,
-        heightBand: "",
         crossSectionLine: "",
       });
       // North up, flat and Mercator are the defaults and stay out of the link

@@ -43,10 +43,6 @@
  * the flight and resting when the map does: the replay of all flights that
  * plays under the intro is no replay of the app's (replayActive), which
  * would dim it.
- *
- * In the 3D view the band of heights of its control (ui/heightBand.ts)
- * leaves out the heat below and above it. Wrapped and the flat map, which
- * have no such control, show all of it.
  */
 import type { MapApp } from "../mapApp";
 import type { StoreState } from "../state/store";
@@ -57,11 +53,6 @@ import { smoothGrounded } from "../calculations/smoothGrounded";
 import type { SmoothedFlights } from "../calculations/smoothing";
 import { idsKey, keptFlights } from "./keptFlights";
 import { heatWeight } from "../calculations/heatLines";
-import {
-  FULL_BAND,
-  heightBandEdgesFt,
-  parseHeightBand,
-} from "../calculations/heightBand";
 import {
   isLiftedAt,
   LIFT_MAX_ZOOM,
@@ -92,7 +83,6 @@ import {
   type HeatCloudStyle,
 } from "./heatCloudLayer";
 import { cloudExposure, cloudLook } from "./heatCloudShaders";
-import { followHeightBand } from "./heightBand";
 import { followCloudReadout } from "./cloudReadout";
 import { replayAllTime } from "./replayAll";
 import { REPLAY_ALL_LAYER } from "./replayAllLayer";
@@ -124,7 +114,6 @@ const CLOUD_REPLAY_OPACITY = 0.25;
 const CLOUD_KEYS: readonly (keyof StoreState)[] = [
   "threeDVisible",
   "forcedHeatCloud",
-  "heightBand",
   "wrappedVisible",
   "heatmapVisible",
   "replayActive",
@@ -308,7 +297,6 @@ export function prepareHeatCloud(app: MapApp, zooms: readonly number[]): void {
 export function followHeatCloud(app: MapApp): void {
   const map = app.map;
   if (!map || followed.has(app)) return;
-  followHeightBand(app);
   // What the cloud under the pointer is made of (ui/cloudReadout.ts)
   followCloudReadout(app);
   /**
@@ -403,13 +391,6 @@ export function followHeatCloud(app: MapApp): void {
         : 1,
       flow: !app.replayActive,
       until: growing() ? (replayAllTime(app) ?? 0) : undefined,
-      // Wrapped shows the whole year, and the flat map (the replay of all
-      // flights) every height: neither shows the control of the band
-      band: heightBandEdgesFt(
-        app.wrappedVisible || !app.threeDVisible
-          ? FULL_BAND
-          : parseHeightBand(app.heightBand),
-      ),
     };
   };
 
