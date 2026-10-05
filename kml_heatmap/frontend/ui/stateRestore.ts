@@ -107,7 +107,6 @@ export function restoreState(app: MapApp): void {
       const value = state[key];
       if (value !== undefined) app.store.set(key, value);
     }
-    if (state.heightBand) app.heightBand = state.heightBand;
     // The tool opens on it once the flights are in (see initialize)
     if (state.crossSectionLine) app.crossSectionLine = state.crossSectionLine;
     // Altitude and speed colour the same paths, and the toggles never

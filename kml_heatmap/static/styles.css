@@ -823,9 +823,9 @@ main {
 .no-data .color-legend {
   display: none;
 }
-/* The toasts stand where the legend is on a phone, and beside the
-   statistics or in a narrow window over it, and a toast drawn over it cut
-   both short: the legend steps aside while one shows. The widest toast
+/* The toasts stand where the legend is beside the statistics or in a
+   narrow window over it, and a toast drawn over it cut both short: the
+   legend steps aside while one shows. The widest toast
    (400px, in the middle) meets the heat's legend below 940px, and beside
    the rail below 1600px. */
 .stats-open:has(.toast-visible) .color-legend {
@@ -2054,22 +2054,11 @@ main > #map .maplibregl-ctrl-bottom-right {
       calc(var(--space-md) + var(--safe-bottom));
   }
 
-  .color-legend {
-    /* The larger type's widest legend, as above */
-    min-width: 228px;
-    font-size: var(--text-sm);
-    left: calc(var(--edge-gap) + var(--safe-left));
-    bottom: calc(var(--edge-gap) + var(--safe-bottom));
-  }
-  .color-legend .labels {
-    font-size: var(--text-sm);
-  }
-  /* A popup on the map (an airport's, a path's) is drawn inside it, under
-     the legend, which covers the bottom left corner of the narrow map:
-     an airport's list of flights ran under it. The popup is what is read
-     while it is open, and the legend comes back as it closes. */
-  body:has(#map .maplibregl-popup) .color-legend {
-    visibility: hidden;
+  /* No colour legend over a phone's map, where the altitude's took a
+     sixth of its height and covered the popups in its corner: the Layers
+     sheet shows the ramp of each colour layer beside its switch */
+  .color-legend:not([hidden]) {
+    display: none;
   }
 
   /* The map's attribution is fine print (--text-fine above); the scale
@@ -2127,7 +2116,6 @@ main > #map .maplibregl-ctrl-bottom-right {
   body:has(.mobile-bar) main > #map .maplibregl-ctrl-bottom-right {
     bottom: calc(var(--mobile-bar-h) + var(--safe-bottom));
   }
-  body:has(.mobile-bar) .color-legend,
   body:has(.mobile-bar) .toast-stack {
     bottom: calc(
       var(--mobile-bar-h) + var(--attribution-h) + var(--space-sm) +

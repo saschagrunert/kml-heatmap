@@ -44,11 +44,7 @@
  * a map at rest, in an exported image and in the cloud of a replay, faint or
  * building up behind the replay of all flights. And the exposure follows the
  * heat: the busiest cells of the cloud glow no brighter than white, however
- * many flights the filters keep (see cloudExposure). A band of heights above
- * ground can leave out the heat below and above it, in the glow and its shadow
- * alike, fading out at its edges (calculations/heightBand.ts); the exposure
- * stays that of all of it, so a band draws its heat as bright as the whole
- * cloud does.
+ * many flights the filters keep (see cloudExposure).
  *
  * The constants named here and the shaders are in ui/heatCloudShaders.ts.
  */
@@ -115,12 +111,6 @@ export interface HeatCloudStyle {
   opacity: number;
   /** Whether its pulses may run (see CLOUD_FLOW_SPACING_PX) */
   flow: boolean;
-  /**
-   * The heights above ground its heat is drawn at, in feet: from the first
-   * it fades in up to the second, and from the third out up to the fourth
-   * (see heightBandEdgesFt)
-   */
-  band: readonly [number, number, number, number];
   /**
    * The seconds into every flight its heat is drawn up to, by the clock of
    * the replay of all flights (see flightClock); all of it without
@@ -302,7 +292,6 @@ export class HeatCloudLayer implements CustomLayerInterface {
       (this.flowS / period / 2) % 1,
     );
 
-    gl.uniform4f(u.u_band, ...style.band);
     gl.uniform1f(u.u_until, style.until ?? 1e30);
     const fade = style.fade ?? 1;
     gl.uniform1f(

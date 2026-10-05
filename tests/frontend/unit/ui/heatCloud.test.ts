@@ -42,11 +42,6 @@ import {
   RELIEF_MAX_LEVEL,
 } from "../../../../kml_heatmap/frontend/calculations/lift";
 import {
-  FULL_BAND,
-  heightBandEdgesFt,
-  parseHeightBand,
-} from "../../../../kml_heatmap/frontend/calculations/heightBand";
-import {
   groundedFlights,
   heldFlights,
   heldGroundedFlights,
@@ -304,34 +299,6 @@ describe("the heat cloud", () => {
     app.selectedPathIds = new Set([1]);
     expect(style()!.opacity).toBeGreaterThan(0);
     expect(style()!.opacity).toBeLessThan(1);
-  });
-
-  it("draws the band of heights of its control in the 3D view, and every height in Wrapped", async () => {
-    app.threeDVisible = true;
-    await follow();
-    expect(style()!.band).toEqual(heightBandEdgesFt(FULL_BAND));
-    const cut = cuts.count;
-    const handed = setPoints.mock.calls.length;
-    const repaints = map().triggerRepaint.mock.calls.length;
-
-    app.heightBand = "500-3000";
-    expect(style()!.band).toEqual(
-      heightBandEdgesFt(parseHeightBand("500-3000")),
-    );
-    expect(map().triggerRepaint.mock.calls.length).toBeGreaterThan(repaints);
-    // The band is drawn by the shaders, from the same points
-    expect(cuts.count).toBe(cut);
-    expect(setPoints.mock.calls.length).toBe(handed);
-    // Its control, under the 3D switch or over the map
-    expect(document.getElementById("height-band")?.hidden).toBe(false);
-
-    // Wrapped has no control for it, and shows the whole year
-    app.wrappedVisible = true;
-    expect(style()!.band).toEqual(heightBandEdgesFt(FULL_BAND));
-    app.wrappedVisible = false;
-    expect(style()!.band).toEqual(
-      heightBandEdgesFt(parseHeightBand("500-3000")),
-    );
   });
 
   it("follows the year and aircraft filters", async () => {
@@ -856,18 +823,6 @@ describe("the heat cloud", () => {
       toggleReplayAll(asMapApp(app));
       expect(style()).toMatchObject({ opacity: 1, flow: true });
       expect(style()!.until).toBeUndefined();
-    });
-
-    it("draws every height on the flat map, where the band's control is not shown, and the band in the 3D view", async () => {
-      app.heightBand = "500-3000";
-      await follow();
-      toggleReplayAll(asMapApp(app));
-
-      expect(style()!.band).toEqual(heightBandEdgesFt(FULL_BAND));
-      app.threeDVisible = true;
-      expect(style()!.band).toEqual(
-        heightBandEdgesFt(parseHeightBand("500-3000")),
-      );
     });
 
     it("draws no heat while the Heatmap switch is off", async () => {

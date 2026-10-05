@@ -329,16 +329,16 @@ jobs:
       # The tests tagged @heavy (HEAVY in tests/e2e/fixtures.ts) draw the 3D
       # view or turn the globe with the flights on it, which takes seconds per
       # frame there. Among three other browsers they ran out of time (Reset
-      # view and the band of heights in state.spec.ts, the globe of
-      # orientation.spec.ts, the hotspot tour, the chase view) and took the
-      # cores from the specs beside them, so in both engines they run in a job
-      # of their own with two browsers, and without a retry, which would not
-      # turn the run green (failOnFlakyTests) and doubles an attempt of
-      # minutes: with it, a run where they all time out would outlast the job
-      # and lose its report. The relief tests among them still run one after
-      # the other in one worker (orientation.spec.ts). The other jobs of the
-      # desktop and webkit-desktop projects leave them out. A tag that matches
-      # nothing leaves the heavy jobs with no tests, which fails them.
+      # view in state.spec.ts, the globe of orientation.spec.ts, the hotspot
+      # tour, the chase view) and took the cores from the specs beside them,
+      # so in both engines they run in a job of their own with two browsers,
+      # and without a retry, which would not turn the run green
+      # (failOnFlakyTests) and doubles an attempt of minutes: with it, a run
+      # where they all time out would outlast the job and lose its report.
+      # The relief tests among them still run one after the other in one
+      # worker (orientation.spec.ts). The other jobs of the desktop and
+      # webkit-desktop projects leave them out. A tag that matches nothing
+      # leaves the heavy jobs with no tests, which fails them.
       matrix:
         include:
           - name: desktop-1

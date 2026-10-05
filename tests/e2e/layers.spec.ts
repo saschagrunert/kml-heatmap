@@ -199,9 +199,9 @@ test.describe("Layers", () => {
 
   test("the heat legend shows with the heatmap and says what its colours stand for", async ({
     page,
+    isMobile,
   }) => {
-    // Through whichever control the viewport offers: on a phone the legend
-    // stands above the bar, as the colour legends do
+    test.skip(isMobile, "A phone's map has no legends; see mobile.spec.ts");
     const legend = page.locator("#heat-legend");
     await expect(legend).toBeVisible();
     // One row: which way the time grows, on either side of the bar

@@ -156,7 +156,7 @@ const NODES: Record<Exclude<IconName, keyof typeof OWN_PATHS>, IconNode> = {
   earth: Earth,
   milestone: Milestone,
   ruler: Ruler,
-  // A climb, and the height above the ground of the heat cloud's band
+  // A climb
   climb: ArrowUpFromLine,
   reset: RotateCcw,
 };

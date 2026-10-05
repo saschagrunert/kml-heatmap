@@ -25,9 +25,14 @@
  * worth their heat rolls off to, so its circuits keep their steps of
  * colour rather than glowing as one white blob.
  */
-import { smoothstep } from "./heightBand";
 import { cellTable } from "./cellTable";
 import { heatTone } from "./heatTone";
+
+/** 0 up to `from`, 1 from `to`, and smoothly between, as GLSL's smoothstep */
+function smoothstep(from: number, to: number, x: number): number {
+  const t = Math.min(Math.max((x - from) / (to - from), 0), 1);
+  return t * t * (3 - 2 * t);
+}
 
 /**
  * Of the flights along a stretch's axis in its cells, how far those going

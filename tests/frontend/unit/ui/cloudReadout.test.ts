@@ -187,7 +187,7 @@ describe("the readout of the heat cloud", () => {
     expect(status()).toBe("");
   });
 
-  it("follows the filters, Isolate and the band of heights", async () => {
+  it("follows the filters and Isolate", async () => {
     enter3D();
     app.selectedPathIds = new Set([2]);
     move(0, 0);
@@ -201,13 +201,6 @@ describe("the readout of the heat cloud", () => {
     expect(shown()).toContain("1 flight ·");
 
     app.isolateSelection = false;
-    // Only the heights the cloud is drawn at
-    app.heightBand = "2000-";
-    expect(shown()).toBeNull();
-    move(0, 0);
-    await nextFrame();
-    expect(shown()).toBeNull();
-    app.heightBand = "";
     move(20, 0);
     await nextFrame();
     expect(shown()).toContain("2 flights");
@@ -442,9 +435,9 @@ describe("the readout of the heat cloud", () => {
   it("keeps clear of the panels over the map where it can", () => {
     enter3D();
     map().jumpTo({ center: [7.6, 50.3] });
-    // The band of heights floats over the top of a phone's map
+    // The compass floats over the top of a phone's map
     const panel = document.createElement("div");
-    panel.id = "height-band";
+    panel.id = "compass-float-btn";
     panel.getBoundingClientRect = () =>
       ({ left: 0, top: 200, right: 800, bottom: 280 }) as DOMRect;
     document.body.append(panel);
@@ -543,7 +536,6 @@ describe("the readout of the heat cloud", () => {
       globeVisible: false,
       threeDVisible: true,
       heatmapVisible: true,
-      heightBand: "",
     };
     expect(map().listenerCount("mousemove")).toBe(0);
     expect(map().listenerCount("click")).toBe(0);

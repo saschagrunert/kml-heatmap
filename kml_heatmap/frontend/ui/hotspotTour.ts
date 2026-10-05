@@ -33,12 +33,6 @@
  * as it does for a replay, and the panel takes the bottom edge. The
  * readout of the cloud under the pointer hides meanwhile (features.css):
  * the camera moves under a pointer resting on the map.
- *
- * The cloud shows every height while it runs, as in Wrapped: the heat of
- * a caption is all of the heat there, and a band of heights that leaves
- * out the ground would leave the home field dark. The band's
- * control hides (features.css), and the user's band comes back as the
- * tour ends, however it ends; the state manager saves it meanwhile.
  */
 import type { Map as MapLibreMap } from "maplibre-gl";
 import type { MapApp } from "../mapApp";
@@ -149,12 +143,10 @@ const KEYS_NOT_TAKING_OVER = new Set([
 
 /**
  * The view the tour started from, which it goes back to and the state
- * manager saves while it runs: Wrapped's, the heatmap switch and the band
- * of heights of the cloud
+ * manager saves while it runs: Wrapped's and the heatmap switch
  */
 export interface TourView extends UserMapView {
   heatmapVisible: boolean;
-  heightBand: string;
 }
 
 /** Where the camera of a view is */
@@ -389,7 +381,6 @@ export class HotspotTour {
       globeVisible: app.globeVisible,
       threeDVisible: app.threeDVisible,
       heatmapVisible: app.heatmapVisible,
-      heightBand: app.heightBand,
     };
     this.returning = null;
     this.saved = saved;
@@ -398,7 +389,6 @@ export class HotspotTour {
     app.store.batch(() => {
       app.threeDVisible = true;
       app.heatmapVisible = true;
-      app.heightBand = "";
     });
     this.release?.();
     this.release = holdControls(
@@ -595,15 +585,15 @@ export class HotspotTour {
       map.stop();
     }
     this.moving = false;
-    // The band of heights is the user's whichever way it ends; the view
-    // and the switches the user took the map over with are theirs too
-    app.store.batch(() => {
-      app.heightBand = saved.heightBand;
-      if (how === "takeover") return;
-      app.threeDVisible = saved.threeDVisible;
-      app.heatmapVisible = saved.heatmapVisible;
-    });
-    if (how === "takeover") app.stateManager.scheduleSave();
+    // The view and the switches the user took the map over with are theirs
+    if (how === "takeover") {
+      app.stateManager.scheduleSave();
+    } else {
+      app.store.batch(() => {
+        app.threeDVisible = saved.threeDVisible;
+        app.heatmapVisible = saved.heatmapVisible;
+      });
+    }
     if (how === "return") {
       const { center, zoom, bearing, pitch } = saved;
       const returning: TourCamera = { center, zoom, bearing, pitch };

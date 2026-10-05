@@ -238,10 +238,8 @@ of a place taken together, at least 8 km apart). Each is named after its airport
 ("Home field EDAQ Halle-Oppin" for the home base), or by its distance and
 direction from the nearest one ("18 km south-east of EDAQ Halle-Oppin"), and
 captioned with the time spent there ("4 h 58 min") and its share of the view's
-time; never a date or an hour. The cloud shows every height while it runs, and
-the band of heights, which gives up its place in the Map group meanwhile, comes
-back as it ends. The camera flies to each place, tilted, and turns slowly over
-it for a few seconds before it moves on.
+time; never a date or an hour. The camera flies to each place, tilted, and turns
+slowly over it for a few seconds before it moves on.
 
 Pause, the previous and the next place and Stop are in its panel, and the
 caption is read out as it changes. Played to the end, stopped or ended with
@@ -380,27 +378,6 @@ the new ground, for 3 seconds at most (a playing replay's trail, drawn anew in
 every frame, is not waited for). Tilted past 45 degrees, the map leaves out the
 place names of its far distance, which stood along the horizon over the fog.
 
-### Height AGL
-
-In the 3D view, while it draws the heat as a cloud, a slider with two thumbs
-under the 3D switch shows only the heat between two heights above the ground, so
-the circuits and the climbs out of a field can be told from the cruise above
-them: from the ground, 100, 200, 300, 500, 700 and 1,000 ft up to 10,000 ft, the
-top past that for no limit. The heat just outside the band fades out rather than
-stopping at its edge, over 15% of the edge's height (at least 50 ft), in the
-glow and in its shadow on the ground alike; the exposure stays that of the whole
-cloud, so a band is as bright as it is in the whole of it. The heights are the
-ones the flights are lifted by: above the relief under them (as coarse as the
-zoom draws it), or above the line between their fields where the ground is not
-known, so every flight has them, and a circuit reads the same over a field at
-1,500 ft as over one at the sea. Each thumb is a slider of its own for the
-keyboard (the arrow keys, Page Up and Page Down, Home and End) and reads out its
-height. Every height on a first visit; kept in the link and the saved session,
-and put back to every height by Reset view. Wrapped, whose intro flies over the
-cloud, always shows every height. On a phone it floats over the top of the map,
-beside the compass; while the statistics are open it is hidden there, and in the
-icon column beside them on a tablet.
-
 ### Heat cloud readout
 
 In the 3D view, resting the pointer on the heat cloud, or tapping it on a phone,
@@ -411,8 +388,7 @@ the ground most of it was in, for example "About 42 min within 1 km" over "17
 flights · mostly 800 to 1,200 ft AGL". It is counted as the cloud counts it (the
 seconds between the logged positions, at most two minutes each; a track without
 times at a cruise), and never from the brightness, which the cloud scales to its
-busiest places; it follows the filters, Isolate and the Height AGL band (heat
-the band fades out counts as much as it is drawn), and says no date or time of
+busiest places; it follows the filters and Isolate, and says no date or time of
 day.
 
 There is none over the sky of a steeply tilted map, or beside the globe. In a
@@ -446,12 +422,11 @@ the Layers sheet.
 
 Go back to what a first visit shows: the newest year and all aircraft, the
 heatmap and airports on and the other layers, 3D, the globe and the satellite
-imagery off, the heat cloud at every height, nothing selected, the statistics
-closed, and the map flat and north up over all the flights. The saved session
-and the link follow. While there is nothing to reset, on a first visit and after
-a reset until the page or the map changes, it is dimmed and a press does
-nothing. On a phone it is in the More sheet; during a replay it is disabled like
-the filters.
+imagery off, nothing selected, the statistics closed, and the map flat and north
+up over all the flights. The saved session and the link follow. While there is
+nothing to reset, on a first visit and after a reset until the page or the map
+changes, it is dimmed and a press does nothing. On a phone it is in the More
+sheet; during a replay it is disabled like the filters.
 
 ### Across the controls
 
@@ -482,9 +457,8 @@ the filters.
   and Reset view is available. The loading indicator shows from the start, while
   the list of years loads, and the year dropdown names the year the page opens
   on from the first paint
-- The toasts stand where the colour legend is on a phone, and over it beside the
-  statistics or in a window narrower than 940 px: the legend steps aside there
-  while one shows
+- The toasts stand over the colour legend beside the statistics or in a window
+  narrower than 940 px: the legend steps aside there while one shows
 - The controls come before the map in the tab order, and the "Skip to map" link
   at the start of the page goes past them to the map and its airport markers
 - Below 768 px, or at 480 px of height and less (a phone held sideways), the two
@@ -496,8 +470,9 @@ the filters.
   returns at once. Escape closes an open sheet, and Tab stays inside it. The
   Layers sheet takes half the height, so the map above it shows what a switch
   did, and scrolls. Replay, Replay all and the hotspot tour take over the bottom
-  edge and the bar steps aside until they end. The colour legend steps aside
-  while a popup is open on the map, which it would cover
+  edge and the bar steps aside until they end. The map shows no colour legend
+  there, the heat's included; the Layers sheet shows the scales of altitude and
+  groundspeed beside their switches
 - Added to the home screen, the site opens as an app of its own (the manifest's
   `standalone` display), and on an iPhone the map fills the whole screen, under
   the status bar and around the Dynamic Island or the notch; the controls, the
@@ -527,24 +502,23 @@ the page groups the digits the same way.
 
 ### Keyboard
 
-| Where                                                             | Keys                                            | What they do                                                                                                                 |
-| ----------------------------------------------------------------- | ----------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| The map, once it has focus (Tab to it, or the "Skip to map" link) | Arrow keys                                      | Pan by 100 px (MapLibre's own keys)                                                                                          |
-|                                                                   | Shift + Left or Right                           | Turn the map by 15 degrees                                                                                                   |
-|                                                                   | Shift + Up or Down                              | Tilt it by 10 degrees                                                                                                        |
-|                                                                   | + and -                                         | Zoom in and out by a level, by two with Shift                                                                                |
-| Whatever is open                                                  | Escape                                          | Closes the innermost thing that is open (see below)                                                                          |
-| The Layers, Filter or More sheet on a phone                       | Tab and Shift + Tab                             | Move within the sheet and wrap round at its ends; focus stays inside until it closes (the statistics sheet does not hold it) |
-| The replay's slider                                               | Right or Up, Left or Down                       | A hundredth of the flight on or back, at least one second                                                                    |
-|                                                                   | Page Up and Page Down                           | A tenth of the flight                                                                                                        |
-| The Replay all slider                                             | Arrow keys                                      | A minute of the clock                                                                                                        |
-|                                                                   | Home and End                                    | The start and the end                                                                                                        |
-| An end of the cross-section (A or B), once focused                | Arrow keys                                      | Move the end by 10 px on the screen, by 50 px with Shift                                                                     |
-| The tabs of the statistics panel                                  | Left and Right                                  | The other tab (Statistics or Flights)                                                                                        |
-|                                                                   | Home and End                                    | The first and the last tab                                                                                                   |
-| A row of the flight list                                          | Click, or Enter on its button                   | Selects that flight alone; with Ctrl, Cmd or Shift held, a click adds it to the selection or takes it out                    |
-| The thumbs of the Height AGL slider                               | Arrow keys, Page Up and Page Down, Home and End | One stop, several stops, or either end, as in any slider                                                                     |
-| An airport marker                                                 | Enter                                           | Opens its popup and moves focus into it, where Escape closes it again                                                        |
+| Where                                                             | Keys                          | What they do                                                                                                                 |
+| ----------------------------------------------------------------- | ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| The map, once it has focus (Tab to it, or the "Skip to map" link) | Arrow keys                    | Pan by 100 px (MapLibre's own keys)                                                                                          |
+|                                                                   | Shift + Left or Right         | Turn the map by 15 degrees                                                                                                   |
+|                                                                   | Shift + Up or Down            | Tilt it by 10 degrees                                                                                                        |
+|                                                                   | + and -                       | Zoom in and out by a level, by two with Shift                                                                                |
+| Whatever is open                                                  | Escape                        | Closes the innermost thing that is open (see below)                                                                          |
+| The Layers, Filter or More sheet on a phone                       | Tab and Shift + Tab           | Move within the sheet and wrap round at its ends; focus stays inside until it closes (the statistics sheet does not hold it) |
+| The replay's slider                                               | Right or Up, Left or Down     | A hundredth of the flight on or back, at least one second                                                                    |
+|                                                                   | Page Up and Page Down         | A tenth of the flight                                                                                                        |
+| The Replay all slider                                             | Arrow keys                    | A minute of the clock                                                                                                        |
+|                                                                   | Home and End                  | The start and the end                                                                                                        |
+| An end of the cross-section (A or B), once focused                | Arrow keys                    | Move the end by 10 px on the screen, by 50 px with Shift                                                                     |
+| The tabs of the statistics panel                                  | Left and Right                | The other tab (Statistics or Flights)                                                                                        |
+|                                                                   | Home and End                  | The first and the last tab                                                                                                   |
+| A row of the flight list                                          | Click, or Enter on its button | Selects that flight alone; with Ctrl, Cmd or Shift held, a click adds it to the selection or takes it out                    |
+| An airport marker                                                 | Enter                         | Opens its popup and moves focus into it, where Escape closes it again                                                        |
 
 Escape closes the innermost thing first: the readout of the heat cloud, then an
 airport's popup while focus is on its marker or inside the popup (focus goes
@@ -617,10 +591,6 @@ browser's address bar or use the copy-link button:
   is every link from before the map could turn, opens north up, flat and in
   Mercator
 - 3D view (`?d=1`), left out while the flights are drawn flat
-- The heights above ground the heat cloud of the 3D view shows (`?h=500-3000`,
-  or `?h=1000-` without a top), in feet at the stops of the Height AGL slider;
-  left out for every height, and read as every height when it names other
-  heights
 - Satellite imagery (`?s=1`), left out while the ground is the dark map. It is a
   parameter of its own, like `g` and `d`, so the nine flags of `v` and every
   older link stay as they were
@@ -630,7 +600,8 @@ browser's address bar or use the copy-link button:
 - The line of the cross-section (`?x=51.55,11.9,51.6,12.3`), the latitude and
   longitude of its start and then of its end, left out while the tool is closed;
   a link with it opens the tool on that line
-- The heat counted by distance (`?r=1`) is gone; an old link's `r` is ignored
+- The heat counted by distance (`?r=1`) and the heat cloud's band of heights
+  (`?h=500-3000`) are gone; an old link's `r` and `h` are ignored
 
 Example URLs:
 
@@ -640,7 +611,6 @@ Example URLs:
 ?y=2025&a=D-EAGJ&lat=51.5&lng=13.4&z=10  # Complete state
 ?y=all&lat=48&lng=8&z=4&g=1&b=-30&t=50   # All years on a turned, tilted globe
 ?y=2025&z=9&t=60&d=1                     # 2025 in 3D
-?y=2025&z=9&t=60&d=1&h=0-1500            # 2025 in 3D, up to 1,500 ft AGL
 ```
 
 URL parameters take precedence over localStorage, allowing shared links to

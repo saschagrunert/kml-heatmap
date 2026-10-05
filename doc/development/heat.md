@@ -203,7 +203,7 @@ many flights' worth of heat the two ends stand for, the heat one flight leaves
 over a place as a lone cruise at 100 kt does, the time spent there, a flight's
 worth being one pass of any flight. It is a `.color-legend`, so it stands where
 the altitude and groundspeed legends do and follows their rules beside the rail,
-the replay panel, the profile strip, the phone's bar and Wrapped.
+the replay panel, the profile strip and Wrapped; the phone layout shows none.
 `followLayerVisibility` shows it while the heat is the colour the map shows (the
 Heatmap switch on, no colour layer, which brings its own legend, and no replay)
 and fades its bar with the heat when that steps back for the aviation chart or a
@@ -238,8 +238,7 @@ adds up, so n flights' worth is drawn at n times it.
   (`CLOUD_COLOUR`), and hands the store the factor it draws a flight's worth
   with where the map came to rest (`heatCloudScale`: the gain of `CLOUD_STOPS`
   at that zoom times `cloudExposure` of its busiest cells), which `heatScale`
-  reads in place of the flat exposure while `heatCloud` is set. The height band
-  leaves that exposure alone.
+  reads in place of the flat exposure while `heatCloud` is set.
 
 The heatmap and the cloud count the heat whatever the pace of the fixes. The
 lines add it up in 40 m cells, which a lone pass logged every few seconds leaves
@@ -571,10 +570,9 @@ a replay. The glow pass draws them with `u_marks.x` from `markStrength`, one
 less the strength the pulses are drawn with in the same frame, so the two
 cross-fade as the pulses fade in and out and the cloud always shows one of them;
 the shadow pass draws none. In the frame `withMapStill` takes the layer draws
-the marks and no pulse, without touching its fade. The band of heights fades the
-marks as it fades the glow under them. They fade in from map zoom 7.5 to 9
-(`CLOUD_MARK_ZOOMS`), further out the routes of a region run together: from 6.5
-to 8 they scattered over a region's routes as noise.
+the marks and no pulse, without touching its fade. They fade in from map zoom
+7.5 to 9 (`CLOUD_MARK_ZOOMS`), further out the routes of a region run together:
+from 6.5 to 8 they scattered over a region's routes as noise.
 
 A mark is a chevron pointing ahead along a track where it crosses a line of a
 lattice on the ground, in Mercator units from the origin of the points. The
@@ -612,8 +610,8 @@ glow without working a mark out.
 Only a stretch whose time runs forward draws them. A stretch that reaches behind
 the camera's near plane is cut there, and the ends of the part left have its
 time, height, marks, heat and place on the ground, the ground its glow is pulled
-to among them, so its pulses, its band of heights, its pull and its marks stay
-where it was flown and meet those of the next.
+to among them, so its pulses, its pull and its marks stay where it was flown and
+meet those of the next.
 
 Where flights overlap in both directions, a runway or a circuit used both ways,
 a route flown out and back, marks both ways at the same places would be noise,
@@ -705,40 +703,6 @@ a custom layer the matrix of world 0 alone and wraps the centre back into it as
 the map is dragged, so drawn there only, flights beside the antimeridian went
 missing from the other side of it. The replay of all flights is drawn the same
 way; the globe is one world.
-
-### The band of heights
-
-The band of heights (`heightBand` in the store, `h` in the link, the text
-`500-3000` or `1000-` of `calculations/heightBand.ts`, empty for every height)
-leaves out the heat below and above two heights above ground. It needs no other
-points: the fourth float of a point is its height above the ground in feet, the
-one the cloud is lifted by, and the shaders get the band as one uniform
-(`u_band`, from `heightBandEdgesFt`): where it fades in, where it is whole,
-where it starts to fade out and where it is gone, 15 % of each edge's height
-past it and at least 50 ft. A stretch with both ends outside the band on one
-side is dropped in the vertex shader, and the others are faded per pixel by the
-height along them (`smoothstep`), in the glow and in the shadow alike; the
-exposure is still that of all the points, so a band is as bright as in the whole
-cloud. The band is above ground rather than above the sea because the ground
-under every point is known, the relief sampled by the build or without it the
-line between the fields, and a circuit is then at the same height over any
-field.
-
-The control (`ui/heightBand.ts`, in the feature bundle and started with the
-cloud) is two range inputs over one track, each with a label and its height as
-`aria-valuetext`, at the stops of `HEIGHT_BAND_STOPS_FT` (the top past the last
-is no top); it is a row of the Map group under the 3D switch, a group of its own
-over the top of the map in the phone layout (`PHONE_LAYOUT_QUERY`, before the
-floating compass in the page, so the keyboard reaches the two in turn), and
-shown while the 3D view draws the cloud with the Heatmap switch on, but not over
-the statistics (`features.css`). The first visit carries only the check of the
-link (`isHeightBand` in `state/urlState.ts`, with the text's pattern and the
-stops, which the saved state checks as well), the store key and Reset view. A
-text that is not two stops, the lower first, as a link edited by hand may have,
-is every height: it is dropped as the link or the saved state is read, where the
-store held it before, wrote it back into the link and kept Reset view available
-until the control was first shown. Wrapped always draws every height
-(`wrappedVisible`), its intro included.
 
 ### Performance
 
@@ -876,12 +840,10 @@ is the maths:
   zoom 13 in), so the box can say "within 1 km".
 - The time is the cloud's: the heat of each segment in seconds as `heatWeight`
   weighs it (at most 120 s, a track without times at a cruise,
-  `CRUISE_SPEED_MS`), times the part of it within the circle (`insideFraction`),
-  times the part of it the band of heights draws (`heightBandEdgesFt`, the fade
-  of the cloud's shaders, at the height of the segment). A segment of no heat
-  counts for nothing, as the cloud draws nothing of it, and a place with none
-  has no readout. The flights are the path ids with any heat within, of those
-  the cloud draws (filters, Isolate, band of heights). The heights are above the
+  `CRUISE_SPEED_MS`), times the part of it within the circle (`insideFraction`).
+  A segment of no heat counts for nothing, as the cloud draws nothing of it, and
+  a place with none has no readout. The flights are the path ids with any heat
+  within, of those the cloud draws (filters, Isolate). The heights are above the
   ground the cloud stands on (`groundProfilesFt` at the relief level: the
   sampled ground on the relief, the line between the fields on the globe), added
   up in 100 ft bins; the box names the run of four with the most of it, "mostly"
@@ -932,12 +894,12 @@ corners, then beside the tooltip or the tapped popup (a `.segment-tooltip` or
 `.segment-popup` in the map's container; a `MutationObserver` places the box
 again as one opens or closes later, after a look on idle), and clear of the
 panels over the map (the control columns, the selection chip, the flight
-profile, the phone's bar and the floating band of heights) where it can, within
-the map. With it the readout showed at 44 of the 77 points, at each of the 39
-with the tooltip too, and never over it. It hides over a marker (the event's
-target is not the canvas), while a button is held or the map moves, and after
-Escape until the pointer moves 8 px; a change of what it is worked out from
-(filters, Isolate, the band, the relief) tells a resting pointer anew.
+profile, the phone's bar and the floating compass) where it can, within the map.
+With it the readout showed at 44 of the 77 points, at each of the 39 with the
+tooltip too, and never over it. It hides over a marker (the event's target is
+not the canvas), while a button is held or the map moves, and after Escape until
+the pointer moves 8 px; a change of what it is worked out from (filters,
+Isolate, the relief) tells a resting pointer anew.
 
 ### Clicks and taps
 

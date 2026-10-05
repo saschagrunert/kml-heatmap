@@ -27,10 +27,6 @@ import {
 } from "../../../../kml_heatmap/frontend/utils/geometry";
 import type { PathSegment } from "../../../../kml_heatmap/frontend/types";
 import {
-  heightBandEdgesFt,
-  parseHeightBand,
-} from "../../../../kml_heatmap/frontend/calculations/heightBand";
-import {
   CRUISE_SPEED_MS,
   heatWeight,
   type SegmentWeight,
@@ -463,42 +459,6 @@ describe("readoutAt", () => {
     )!;
     expect(readout.band).toMatchObject({ fromFt: 700, toFt: 1100 });
     expect(readout.band.share).toBeCloseTo(2 / 3, 1);
-  });
-
-  it("counts the heights of the band the cloud is drawn for, as much as it draws them", () => {
-    const segments = [
-      ...flight(1, { altitude: 900 }),
-      ...flight(2, { altitude: 3000, lat: LAT + 0.001 }),
-      ...flight(3, { altitude: 2150, lat: LAT - 0.001 }),
-    ];
-    const prepared = data(segments);
-    const grid = segmentGrid(segments, R);
-    const all = readoutAt(prepared, grid, down([LAT, LNG]), R, everyone)!;
-    // 500 to 2,000 ft, fading out up to 2,300
-    const band = heightBandEdgesFt(parseHeightBand("500-2000"));
-    const banded = readoutAt(
-      prepared,
-      grid,
-      down([LAT, LNG]),
-      R,
-      everyone,
-      band,
-    )!;
-    expect(all.flights).toBe(3);
-    expect(banded.flights).toBe(2);
-    // The one at 900 ft whole, the one halfway through the fade half
-    expect(banded.seconds).toBeCloseTo((all.seconds / 3) * 1.5, 0);
-    expect(banded.band).toMatchObject({ fromFt: 700, toFt: 1100 });
-    expect(
-      readoutAt(
-        prepared,
-        grid,
-        down([LAT, LNG]),
-        R,
-        everyone,
-        heightBandEdgesFt(parseHeightBand("4000-")),
-      ),
-    ).toBeNull();
   });
 
   it("counts no segment of no heat, which the cloud leaves out", () => {

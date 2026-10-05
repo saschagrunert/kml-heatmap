@@ -241,13 +241,15 @@ test.describe("Mobile bar", () => {
       await expect.poll(() => airportsOnMap(page)).toBe(true);
     });
 
-    test("the colour layers drive their legends and stay exclusive", async ({
+    test("the colour layers stay exclusive, with no legend over the map", async ({
       page,
     }) => {
-      const altitudeLegend = page.locator("#altitude-legend");
-      const airspeedLegend = page.locator("#airspeed-legend");
-      await expect(altitudeLegend).toBeHidden();
-      await expect(airspeedLegend).toBeHidden();
+      const legends = page.locator(".color-legend");
+      // The heat's included, which a desktop shows with the heatmap on
+      await expect(legends).toHaveCount(3);
+      for (const legend of await legends.all()) {
+        await expect(legend).toBeHidden();
+      }
 
       await openMobileSheet(page, "layers");
       const altitude = layerSwitch(page, "altitude");
@@ -259,9 +261,9 @@ test.describe("Mobile bar", () => {
         "aria-pressed",
         "true",
       );
-      await expect(altitudeLegend).toBeVisible();
-      await expect(page.locator("#legend-min")).toBeVisible();
-      await expect(page.locator("#legend-max")).toBeVisible();
+      // The ramp beside the switch stands in for the legend
+      await expect(altitude.locator(".gradient-chip")).toBeVisible();
+      await expect(page.locator("#altitude-legend")).toBeHidden();
 
       // Only one colour layer at a time
       await speed.click();
@@ -271,8 +273,7 @@ test.describe("Mobile bar", () => {
         "aria-pressed",
         "true",
       );
-      await expect(airspeedLegend).toBeVisible();
-      await expect(altitudeLegend).toBeHidden();
+      await expect(page.locator("#airspeed-legend")).toBeHidden();
     });
 
     test("the aviation switch toggles the open flightmaps layer", async ({
@@ -811,18 +812,6 @@ test.describe("Mobile bar", () => {
 
     await toggleStatsPanel(page);
     await expect(attribution).toBeVisible();
-  });
-
-  test("the legend clears the attribution and the bar", async ({ page }) => {
-    await toggleLayer(page, "altitude");
-    const legend = page.locator("#altitude-legend");
-    await expect(legend).toBeVisible();
-
-    const legendBox = (await legend.boundingBox())!;
-    const attributionBox = (await attributionControl(page).boundingBox())!;
-    expect(legendBox.y + legendBox.height).toBeLessThanOrEqual(
-      attributionBox.y,
-    );
   });
 
   test.describe("Compass and globe", () => {

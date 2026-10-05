@@ -191,7 +191,6 @@ describe("ReplayManager activation", () => {
         globeVisible: false,
         threeDVisible: false,
         heatmapVisible: true,
-        heightBand: "",
       };
 
       replayManager.toggleReplay();

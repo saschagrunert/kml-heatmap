@@ -56,10 +56,9 @@ parameters a link carries, and how older links are read, are listed under
 higher than MapLibre's own (see `ZOOM_OFFSET` in `utils/constants.ts`). What a
 link and the saved state carry is checked as it is read (`state/urlState.ts`,
 `sanitizeSavedState` in `ui/stateManager.ts`), in the first visit's code, so the
-store never holds what the page cannot show: a band of heights the slider cannot
-set (`isHeightBand`) or a line of the cross-section that is not two places
-(`isSectionLine`; the store's `crossSectionLine`, which the tool writes and
-opens on as the page does).
+store never holds what the page cannot show, such as a line of the cross-section
+that is not two places (`isSectionLine`; the store's `crossSectionLine`, which
+the tool writes and opens on as the page does).
 
 ## Bundles
 

@@ -393,8 +393,6 @@ float marked(float glow, vec2 p, vec2 dir, float across, float t, float sigma, f
  *   of them is kept.
  * - Its pulses come as far apart on the screen as its length over the
  *   periods of the flight's time along it (CLOUD_FLOW_CLOSEST).
- * - A stretch whose two ends are below the band of heights, or both above
- *   it, is left out whole: none of it is in the band.
  * - A stretch is cut where the clock of the replay of all flights has
  *   come to (`u_until`), and one that begins later is left out whole; the
  *   end cut has no join with the next.
@@ -420,7 +418,6 @@ uniform vec2 u_viewport;
 uniform vec3 u_sigma;
 uniform vec4 u_depth;
 uniform float u_gain;
-uniform vec4 u_band;
 uniform vec2 u_ground;
 uniform vec2 u_shadow;
 uniform vec4 u_flow;
@@ -431,7 +428,6 @@ flat out vec4 v_joins;
 flat out vec4 v_blur;
 flat out float v_heat;
 flat out vec2 v_time;
-flat out vec2 v_height;
 flat out float v_flow;
 ${MARKS_VERTEX}
 vec4 project(vec4 point) {
@@ -466,7 +462,6 @@ void main() {
   float near = u_depth.z;
   if (
     a_heat.x <= 0.0 || a_heat.y >= u_until || shade <= 0.0 || (a.w < near && b.w < near)
-    || max(a_start.w, a_end.w) <= u_band.x || min(a_start.w, a_end.w) >= u_band.w
   ) {
     gl_Position = vec4(0.0, 0.0, 2.0, 1.0);
     return;
@@ -547,7 +542,6 @@ void main() {
   }
   v_heat = shade * u_gain * a_heat.x * (kept.y - kept.x) / max(length_px, 1e-3);
   v_time = mix(vec2(a_heat.y), vec2(a_out.y), kept);
-  v_height = mix(vec2(a_start.w), vec2(a_end.w), kept);
   v_marks = mix(vec2(a_heat.z), vec2(a_out.z), kept);
   float axis = markAxis(a_start.xy, a_end.xy);
   if (a_in > 0.0 && mod(markAxis(a_before.xy, a_start.xy) - axis, 8.0) != 0.0) v_marks.x = 0.0;
@@ -574,9 +568,6 @@ void main() {
  * time the pixel was flown at, in two periods, one twice the other,
  * blended as the zoom goes from one to the next; a pulse is brightest at
  * its head and fades along where it has been, and is 1 on average.
- * Times the part of the band of heights at the height it was flown at,
- * which fades in and out at the band's edges, in the shadow as in the
- * glow.
  */
 export const FRAGMENT_SHADER = `#version 300 es
 precision highp float;
@@ -585,14 +576,12 @@ flat in vec4 v_joins;
 flat in vec4 v_blur;
 flat in float v_heat;
 flat in vec2 v_time;
-flat in vec2 v_height;
 flat in float v_flow;
 uniform vec3 u_colour;
 uniform float u_ceiling;
 uniform vec2 u_shadow;
 uniform vec4 u_flow;
 uniform vec2 u_flowMix;
-uniform vec4 u_band;
 out vec4 fragColor;
 
 float pulse(float phase) {
@@ -628,8 +617,6 @@ void main() {
       * 0.5 * (erf(dot(p - a, v_joins.xy) * spread) + erf(dot(b - p, v_joins.zw) * spread));
     if (u_marks.x > 0.0) glow = marked(glow, p, dir, across, t, sigma, scale, spread);
   }
-  float height = mix(v_height.x, v_height.y, t);
-  glow *= smoothstep(u_band.x, u_band.y, height) * (1.0 - smoothstep(u_band.z, u_band.w, height));
   if (u_flowMix.y * v_flow > 0.0) {
     float time = mix(v_time.x, v_time.y, t);
     float pulses = mix(
@@ -671,7 +658,6 @@ export const UNIFORMS = [
   "u_ceiling",
   "u_flow",
   "u_flowMix",
-  "u_band",
   "u_marks",
   "u_until",
 ] as const;

@@ -35,9 +35,9 @@ const MAP_CHROME_SELECTOR = [
 
 /**
  * How far from an edge something may sit and still count as standing at it.
- * On a phone the profile of a flight and the legend stand above the bar and
- * the map's credit, 81 px from the bottom and more with a home indicator:
- * at 48 px the profile, as wide as the map, counted at the left edge, and a
+ * On a phone the profile of a flight stands above the bar and the map's
+ * credit, 81 px from the bottom and more with a home indicator: at 48 px
+ * the profile, as wide as the map, counted at the left edge, and a
  * flight framed with it ended up beside it rather than above it.
  */
 const EDGE_REACH_PX = 128;

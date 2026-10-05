@@ -25,10 +25,6 @@ import {
   type CloudPoints,
 } from "../../../../kml_heatmap/frontend/calculations/heatCloud";
 import { smoothFlights } from "../../../../kml_heatmap/frontend/calculations/smoothing";
-import {
-  FULL_BAND,
-  heightBandEdgesFt,
-} from "../../../../kml_heatmap/frontend/calculations/heightBand";
 import type { PathSegment } from "../../../../kml_heatmap/frontend/types";
 
 const motion = vi.hoisted(() => ({ reduced: false }));
@@ -208,7 +204,6 @@ const STYLE: HeatCloudStyle = {
   liftM: 3,
   opacity: 1,
   flow: true,
-  band: heightBandEdgesFt(FULL_BAND),
 };
 
 /** The draws of a frame of STYLE: the shadow, then the glow */
@@ -723,38 +718,6 @@ describe("the heat cloud's layer", () => {
     expect(vertex).toContain("if (a_out.x > 0.0 && flown >= 1.0) {");
   });
 
-  it("draws the heat of the band of heights the app asks for, in the glow and its shadow alike", () => {
-    style = { ...STYLE, band: [425, 500, 3000, 3450] };
-    layer.onAdd(map);
-    layer.setPoints(points());
-    render();
-
-    expect(perDraw("u_band")).toEqual([
-      [425, 500, 3000, 3450],
-      [425, 500, 3000, 3450],
-    ]);
-    const vertex = vertexSource();
-    const fragment = fragmentSource();
-    // A stretch all below the band or all above it is left out whole, and
-    // the glow of the others fades by the height along them
-    expect(vertex).toContain(
-      "max(a_start.w, a_end.w) <= u_band.x || min(a_start.w, a_end.w) >= u_band.w",
-    );
-    expect(vertex).toContain(
-      "v_height = mix(vec2(a_start.w), vec2(a_end.w), kept);",
-    );
-    const fade =
-      "glow *= smoothstep(u_band.x, u_band.y, height) * (1.0 - smoothstep(u_band.z, u_band.w, height));";
-    expect(fragment).toContain(fade);
-    // after the shadow's Gaussian and the glow's alike, not in one of them
-    expect(fragment.indexOf(fade)).toBeGreaterThan(
-      fragment.indexOf("if (u_shadow.y > 0.0)"),
-    );
-    expect(fragment).toContain(
-      `  }\n  float height = mix(v_height.x, v_height.y, t);\n  ${fade}`,
-    );
-  });
-
   it("pulls a glow near the ground to the plane 30 ft over its ground, from points 100 px apart", () => {
     layer.onAdd(map);
     layer.setPoints(points());
@@ -1159,7 +1122,7 @@ describe("the heat cloud's layer", () => {
       expect(marks()).toBe(1);
     });
 
-    it("are faded by the band of heights as the glow is, from their own block of the shaders", () => {
+    it("come from their own block of the shaders, before the pulses", () => {
       render();
       const source = (of: string): string =>
         gl.shaderSource.mock.calls
@@ -1194,7 +1157,7 @@ describe("the heat cloud's layer", () => {
       const main = fragment.slice(fragment.indexOf("void main()"));
       expect(main.indexOf("marked(glow")).toBeGreaterThan(0);
       expect(main.indexOf("marked(glow")).toBeLessThan(
-        main.indexOf("u_band.y, height"),
+        main.indexOf("if (u_flowMix.y * v_flow > 0.0)"),
       );
     });
   });

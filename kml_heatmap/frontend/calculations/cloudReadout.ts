@@ -37,7 +37,6 @@ import { formatNumber } from "../utils/formatters";
 import { pluralFlights } from "../utils/htmlGenerators";
 import { heatWeight, type SegmentWeight } from "./heatLines";
 import { groundProfilesFt } from "./groundProfile";
-import { smoothstep } from "./heightBand";
 
 /**
  * The radii a readout says it is "within", in metres: round numbers, so it
@@ -423,9 +422,6 @@ export interface CloudReadout {
  * against the place of the line at its own height, and counts with the
  * part of its seconds that its part within the radius is of its length;
  * one of no heat counts for nothing, as the cloud draws nothing of it.
- * `band` is the band of heights the cloud is drawn for, as the edges of
- * its fade (see heightBandEdgesFt): a segment counts as much as the cloud
- * draws of it, and not at all outside it.
  */
 export function readoutAt(
   { segments, seconds, heightsFt }: ReadoutData,
@@ -433,9 +429,6 @@ export function readoutAt(
   sight: SightLine,
   radiusM: number,
   keep: (pathId: number) => boolean,
-  [fadeIn, inFrom, inTo, fadeOut]: readonly [number, number, number, number] = [
-    -2, -1, 1e9, 2e9,
-  ],
 ): CloudReadout | null {
   const flights = new Set<number>();
   const bins = new Float64Array(BAND_BINS);
@@ -452,10 +445,7 @@ export function readoutAt(
   grid(sight.places, radiusM + widest / 2, (index) => {
     const segment = segments[index]!;
     const heightFt = heightsFt[index]!;
-    const drawn =
-      smoothstep(fadeIn, inFrom, heightFt) *
-      (1 - smoothstep(inTo, fadeOut, heightFt));
-    if (!(drawn > 0) || !keep(segment.path_id)) return;
+    if (!keep(segment.path_id)) return;
     const [lat, lng] = placeOf(sight, heightFt);
     const across = METRES_PER_DEGREE * Math.cos(lat * DEGREES_TO_RADIANS);
     const [[lat0, lng0], [lat1, lng1]] = segment.coords;
@@ -469,7 +459,7 @@ export function readoutAt(
       (lat1 - lat) * METRES_PER_DEGREE,
       radiusM,
     );
-    const spent = seconds[index]! * part * drawn;
+    const spent = seconds[index]! * part;
     if (!(spent > 0)) return;
     flights.add(segment.path_id);
     total += spent;

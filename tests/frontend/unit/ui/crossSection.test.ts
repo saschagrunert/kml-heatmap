@@ -985,7 +985,6 @@ describe("cross-section", () => {
         globeVisible: false,
         threeDVisible: false,
         heatmapVisible: true,
-        heightBand: "",
       };
 
       await open(app);

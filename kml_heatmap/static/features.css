@@ -736,7 +736,7 @@ body.cross-section-open .toast-stack {
   }
 }
 /* On a phone it spans the width above the bar and the credit, as the
-   profile does, and the legend it would cover steps aside */
+   profile does */
 @media (max-width: 767.98px), (max-height: 480px) {
   #cross-section {
     left: calc(var(--edge-gap) + var(--safe-left));
@@ -749,9 +749,6 @@ body.cross-section-open .toast-stack {
       var(--mobile-bar-h) + var(--attribution-h) + var(--space-sm) +
         var(--safe-bottom)
     );
-  }
-  body.cross-section-open .color-legend {
-    visibility: hidden;
   }
   body:has(.mobile-bar).cross-section-open .toast-stack {
     bottom: calc(
@@ -859,14 +856,10 @@ body.cross-section-open .toast-stack {
   body.replay-all-active #stats-rail {
     visibility: hidden;
   }
-  /* Legends are covered by the replay panel on small screens */
-  body.replay-active #altitude-legend,
-  body.replay-active #airspeed-legend {
-    visibility: hidden;
-  }
-  /* So is the statistics sheet. Its offsets below are keyed on the bar, which
-     replay removes from the document, so without this the opaque replay panel
-     covers the lower third of the panel and the collapse control reappears. */
+  /* The statistics sheet is covered by the replay panel on small screens.
+     Its offsets below are keyed on the bar, which replay removes from the
+     document, so without this the opaque replay panel covers the lower
+     third of the panel and the collapse control reappears. */
   body.replay-active #stats-rail {
     visibility: hidden;
   }
@@ -878,15 +871,12 @@ body.cross-section-open .toast-stack {
     );
   }
   /* The strip spans the width above the bar and the credit, like the
-     replay panel, and the legend it would cover steps aside for it */
+     replay panel */
   #flight-profile {
     left: calc(var(--edge-gap) + var(--safe-left));
     right: calc(var(--edge-gap) + var(--safe-right));
     width: auto;
     transform: none;
-  }
-  body.profile-open .color-legend {
-    visibility: hidden;
   }
   body:has(.mobile-bar) #flight-profile {
     bottom: calc(
@@ -937,135 +927,6 @@ body.cross-section-open .toast-stack {
   #replay-all-speed,
   .section-select {
     font-size: 16px;
-  }
-}
-
-/* ==========================================================================
-   Height band of the heat cloud (ui/heightBand.ts)
-
-   A row of the Map group under the 3D switch; in the phone layout, where
-   the columns are hidden, a control group of its own over the top of the
-   map, beside the compass. Two range inputs lie over one track, and only
-   their thumbs take the pointer, so each thumb is dragged on its own.
-   ========================================================================== */
-#height-band {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-xs);
-  padding: var(--space-sm) var(--space-md);
-  font-size: var(--text-md);
-}
-#height-band[hidden] {
-  display: none;
-}
-/* The value beside the title, or under it at the right where the two do
-   not fit side by side, as in a column */
-.height-band-head {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  column-gap: var(--space-sm);
-}
-#height-band-title {
-  display: flex;
-  gap: 9px;
-  font-weight: 500;
-}
-.height-band-value {
-  margin-left: auto;
-  color: var(--color-text-secondary);
-  font-size: var(--text-sm);
-  white-space: nowrap;
-}
-/* The track, and the band on it from the middle of one thumb to the
-   middle of the other */
-.height-band-track {
-  --thumb: var(--icon-sm);
-  --at: calc(100% - var(--thumb));
-  position: relative;
-  height: 24px;
-  background:
-    linear-gradient(
-        90deg,
-        transparent calc(var(--thumb) / 2 + var(--at) * var(--band-low)),
-        var(--color-accent-blue) 0
-          calc(var(--thumb) / 2 + var(--at) * var(--band-high)),
-        transparent 0
-      )
-      center / 100% 4px no-repeat,
-    linear-gradient(var(--color-bg-active) 0 0) center / 100% 4px no-repeat;
-}
-#height-band input {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  margin: 0;
-  background: none;
-  appearance: none;
-  pointer-events: none;
-}
-#height-band .is-above {
-  z-index: 1;
-}
-#height-band input::-webkit-slider-thumb {
-  appearance: none;
-  width: var(--thumb);
-  height: var(--thumb);
-  border-radius: 50%;
-  background: var(--color-accent-blue);
-  pointer-events: auto;
-  cursor: pointer;
-}
-#height-band input::-moz-range-thumb {
-  width: var(--thumb);
-  height: var(--thumb);
-  border: 0;
-  border-radius: 50%;
-  background: var(--color-accent-blue);
-  pointer-events: auto;
-  cursor: pointer;
-}
-#height-band input:focus-visible {
-  outline: none;
-  --color-accent-blue: var(--color-text);
-}
-/* A finger needs a bigger thumb to hold */
-@media (pointer: coarse) {
-  .height-band-track {
-    --thumb: 24px;
-    height: 32px;
-  }
-}
-/* In the icon rail of a column beside the statistics there is no room for
-   a slider, and on a phone the statistics sheet runs up under it, where it
-   covered the sheet's tabs: the band stays as it is, and shows again with
-   the labels or the map */
-@media (max-width: 1279.98px), (max-height: 480px) {
-  body.stats-open #height-band {
-    display: none;
-  }
-}
-@media (max-width: 767.98px), (max-height: 480px) {
-  body > #height-band {
-    position: fixed;
-    top: calc(
-      var(--edge-gap) + var(--safe-top) + var(--btn-min-height) +
-        var(--space-sm)
-    );
-    left: calc(var(--edge-gap) + var(--safe-left));
-    right: calc(
-      var(--edge-gap) * 2 + var(--safe-right) + var(--btn-min-height)
-    );
-    z-index: var(--z-controls);
-  }
-}
-/* Forced colours drop the track's gradients and paint the thumbs over */
-@media (forced-colors: active) {
-  .height-band-track {
-    forced-color-adjust: none;
-    --color-accent-blue: Highlight;
-    --color-bg-active: GrayText;
-    --color-text: CanvasText;
   }
 }
 
@@ -1214,16 +1075,10 @@ body.cross-section-open .toast-stack {
   cursor: not-allowed;
 }
 /* The profile of a selected flight has the same place, and the tour's
-   caption is what is read there while it runs. The cloud shows every
-   height meanwhile, without the control of the band, as in Wrapped; its
-   readout under a pointer turns itself off (ui/cloudReadout.ts). The band
-   gives up its room as well: hidden in place it left a gap as tall as
-   itself inside the Map group. Nothing measures it while the tour runs. */
+   caption is what is read there while it runs. The cloud's readout under
+   a pointer turns itself off meanwhile (ui/cloudReadout.ts). */
 body.hotspot-tour-active #flight-profile {
   visibility: hidden;
-}
-body.hotspot-tour-active #height-band {
-  display: none;
 }
 /* The toasts stack above the panel, as above the replay's. The tour
    measures --tour-panel-h. */
@@ -1255,8 +1110,7 @@ body.hotspot-tour-active .toast-stack {
     );
   }
   body.hotspot-tour-active #github-footer,
-  body.hotspot-tour-active #stats-rail,
-  body.hotspot-tour-active .color-legend {
+  body.hotspot-tour-active #stats-rail {
     visibility: hidden;
   }
 }

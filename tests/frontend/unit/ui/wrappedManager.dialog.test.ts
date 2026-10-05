@@ -366,7 +366,6 @@ describe("WrappedManager dialog", () => {
         globeVisible: false,
         threeDVisible: false,
         heatmapVisible: true,
-        heightBand: "",
       };
 
       wrappedManager.showWrapped(true);
