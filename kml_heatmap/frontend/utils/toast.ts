@@ -10,7 +10,23 @@ export const TOAST_ALERT_ID = "toast-alert";
 /** Container the visible toasts stack in */
 export const TOAST_STACK_ID = "toast-stack";
 
-const pendingWrites = new WeakMap<HTMLElement, ReturnType<typeof setTimeout>>();
+/** A write to a live region that is still to come, see announceInRegion */
+interface PendingWrite {
+  timer: ReturnType<typeof setTimeout>;
+  /**
+   * The messages in the order they came. A toast stays; any other message
+   * replaces the one of its kind before it.
+   */
+  messages: { text: string; kept: boolean }[];
+}
+
+const pendingWrites = new WeakMap<HTMLElement, PendingWrite>();
+
+/** Messages read out as one, each a sentence of its own */
+function joined(messages: string[]): string {
+  if (messages.length < 2) return messages[0] ?? "";
+  return messages.map((m) => (/[.!?]$/.test(m) ? m : m + ".")).join(" ");
+}
 
 /**
  * Write a message to a live region that stays in the document.
@@ -19,19 +35,31 @@ const pendingWrites = new WeakMap<HTMLElement, ReturnType<typeof setTimeout>>();
  * region inserted with its text is often skipped, and so is a message
  * written in the same task the region was cleared in, so the region is
  * cleared now and filled a moment later. A newer message replaces one that
- * has not been written yet.
+ * has not been written yet, except one that is `kept` (a toast, which
+ * says what the page did on its own: an aircraft filter dropped by a
+ * load that then says which year it shows). Kept messages are read out
+ * with the rest in the order they came, and a text that comes twice is
+ * read once.
  */
-export function announceInRegion(region: HTMLElement, message: string): void {
+export function announceInRegion(
+  region: HTMLElement,
+  message: string,
+  kept = false,
+): void {
   const pending = pendingWrites.get(region);
-  if (pending !== undefined) clearTimeout(pending);
-  region.textContent = "";
-  pendingWrites.set(
-    region,
-    setTimeout(() => {
+  if (pending !== undefined) clearTimeout(pending.timer);
+  const messages = (pending?.messages ?? []).filter((m) => kept || m.kept);
+  messages.push({ text: message, kept });
+  const write: PendingWrite = {
+    messages,
+    timer: setTimeout(() => {
       pendingWrites.delete(region);
-      region.textContent = message;
+      const texts = [...new Set(write.messages.map((m) => m.text))];
+      region.textContent = joined(texts);
     }, LIVE_REGION_DELAY_MS),
-  );
+  };
+  region.textContent = "";
+  pendingWrites.set(region, write);
 }
 
 /** The element with this id, created on the body when the page lacks it */
@@ -144,7 +172,7 @@ export function showToast(
   toast.className = `toast-notification toast-${type}`;
   toast.textContent = message;
   toast.dataset["message"] = message;
-  announceInRegion(toastRegion(type), message);
+  announceInRegion(toastRegion(type), message, true);
   dismissToast(message);
 
   if (type === "info" && !action) {

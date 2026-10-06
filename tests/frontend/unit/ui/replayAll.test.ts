@@ -1100,6 +1100,19 @@ describe("the replay of all flights", () => {
       expect(onMap()).toBe(false);
     });
 
+    it("leaves focus the user took elsewhere where it is as it closes", () => {
+      controls.show();
+      const elsewhere = document.createElement("button");
+      document.body.append(elsewhere);
+      elsewhere.focus();
+
+      controls.close();
+
+      expect(controls.isOpen).toBe(false);
+      expect(document.activeElement).toBe(elsewhere);
+      elsewhere.remove();
+    });
+
     it("gives a control back disabled when it was before (regression)", () => {
       // The speed layer on a site without timing data: closing the replay
       // turned it on

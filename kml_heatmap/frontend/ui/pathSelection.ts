@@ -5,7 +5,10 @@ import type { Map as MapLibreMap, PaddingOptions, Point } from "maplibre-gl";
 import type { MapApp } from "../mapApp";
 import { segmentsForPathIds } from "../calculations/statistics";
 import { loadFeatures } from "../services/featureLoader";
-import { applyToggleButtonState, setUnavailable } from "../utils/buttonState";
+import {
+  applyToggleButtonState,
+  setUnavailableFor,
+} from "../utils/buttonState";
 import { isPhoneLayout } from "../utils/device";
 import { NO_SELECTION_MESSAGE } from "./actions";
 import { AUTO_ZOOM_FOLLOW } from "../utils/constants";
@@ -15,10 +18,12 @@ import { pluralFlights } from "../utils/htmlGenerators";
 import { toBounds, unwrapLng } from "../utils/mapHelpers";
 import { prefersReducedMotion } from "../utils/motion";
 import { safeAreaInsets } from "../utils/safeArea";
-import { announceStatus } from "../utils/toast";
+import { announceStatus, showToast } from "../utils/toast";
 
-/** What Isolate does, its title in the template */
-const ISOLATE_LABEL = "Isolate selected paths";
+/** Said for a press on Isolate with nothing selected */
+export const ISOLATE_HINT =
+  NO_SELECTION_MESSAGE +
+  ": click one on the map, or pick one under Statistics, Flights";
 
 /** The control columns, which the phone's bar replaces */
 export const CONTROL_COLUMNS = "#left-buttons, #right-buttons";
@@ -286,7 +291,10 @@ export class PathSelection {
   }
 
   toggleIsolateSelection(): void {
-    if (this.app.replayActive || this.app.selectedPathIds.size === 0) {
+    if (this.app.replayActive) return;
+    // Dimmed, and a press said nothing of how to get a selection
+    if (this.app.selectedPathIds.size === 0) {
+      showToast(ISOLATE_HINT);
       return;
     }
 
@@ -391,6 +399,6 @@ export class PathSelection {
     // Still focusable, like the replay button, but announced as unavailable,
     // and saying why where the phone's sheet already did
     const none = this.app.selectedPathIds.size === 0;
-    setUnavailable(btn, none, none ? NO_SELECTION_MESSAGE : ISOLATE_LABEL);
+    setUnavailableFor(btn, none ? NO_SELECTION_MESSAGE : null);
   }
 }

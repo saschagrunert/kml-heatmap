@@ -90,10 +90,7 @@ test.describe("Path Selection", () => {
     await selectPathForReplay(page);
 
     await expect(replayBtn).toBeEnabled();
-    await expect(replayBtn).toHaveAttribute(
-      "title",
-      "Replay selected flight path",
-    );
+    await expect(replayBtn).toHaveAttribute("title", "Replay selected flight");
     await expect(replayBtn).toHaveCSS("opacity", "1");
   });
 
@@ -124,7 +121,7 @@ test.describe("Path Selection", () => {
     const pathId = await selectPathForReplay(page);
     await expect(page.locator("#replay-btn")).toHaveAttribute(
       "title",
-      "Replay selected flight path",
+      "Replay selected flight",
     );
 
     await togglePathSelection(page, pathId, 0);

@@ -150,8 +150,8 @@
             class="btn-surface control-btn"
             data-action="showWrapped"
             data-icon="wrapped"
-            title="Wrapped: your year in review"
-            aria-label="Wrapped: your year in review"
+            title="Wrapped: your flying in review"
+            aria-label="Wrapped: your flying in review"
             aria-haspopup="dialog"
           >
             <span class="control-label">Wrapped</span>
@@ -180,7 +180,7 @@
             data-action="toggleReplay"
             data-icon="play"
             title="Pick one flight with timing data to replay, under Statistics, Flights"
-            aria-label="Replay selected flight path"
+            aria-label="Replay selected flight"
             aria-disabled="true"
             aria-pressed="false"
           >
@@ -221,8 +221,8 @@
             class="btn-surface control-btn"
             data-action="toggleIsolateSelection"
             data-icon="isolate"
-            title="Isolate selected paths"
-            aria-label="Isolate selected paths"
+            title="Isolate selected flights"
+            aria-label="Isolate selected flights"
             aria-disabled="true"
             aria-pressed="false"
           >
@@ -348,8 +348,8 @@
             class="btn-surface control-btn"
             data-action="toggleAltitude"
             data-icon="altitude"
-            title="Altitude: colour the paths by height"
-            aria-label="Altitude: colour the paths by height"
+            title="Altitude: colour the flights by height"
+            aria-label="Altitude: colour the flights by height"
             aria-pressed="false"
           >
             <span class="control-label">Altitude</span>
@@ -362,8 +362,8 @@
             class="btn-surface control-btn"
             data-action="toggleAirspeed"
             data-icon="speed"
-            title="Groundspeed: colour the paths by speed over the ground"
-            aria-label="Groundspeed: colour the paths by speed over the ground"
+            title="Groundspeed: colour the flights by speed over the ground"
+            aria-label="Groundspeed: colour the flights by speed over the ground"
             aria-pressed="false"
             aria-disabled="true"
           >
@@ -486,7 +486,7 @@
             data-icon="stats"
             data-icon-size="20"
           ></span>
-          <span class="kh-stats-title-text">Flight Statistics</span>
+          <span class="kh-stats-title-text">Statistics</span>
         </h2>
         <button
           id="stats-collapse-btn"
@@ -506,7 +506,7 @@
       <div
         id="stats-rail-tabs"
         role="tablist"
-        aria-label="Statistics rail"
+        aria-label="Statistics and flights"
         hidden
       >
         <button
@@ -692,12 +692,7 @@
         </button>
       </div>
 
-      <div
-        id="map"
-        role="application"
-        aria-label="Flight map visualization"
-        tabindex="-1"
-      ></div>
+      <div id="map" role="region" aria-label="Flight map" tabindex="-1"></div>
 
       <!-- Loading indicator (shown/hidden by the data manager, text is updatable) -->
       <div id="loading">
@@ -850,8 +845,8 @@
             data-action="closeWrapped"
             data-icon="close"
             data-icon-size="20"
-            title="Close year in review"
-            aria-label="Close year in review"
+            title="Close Wrapped"
+            aria-label="Close Wrapped"
           >
             <span class="control-label">Close</span>
           </button>
@@ -864,7 +859,7 @@
             id="wrapped-cards-column"
             tabindex="0"
             role="region"
-            aria-label="Year in review cards"
+            aria-label="Wrapped cards"
           >
             <!-- Card 1: Stats -->
             <section

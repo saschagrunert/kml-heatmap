@@ -200,6 +200,16 @@ export function holdControls(
 }
 
 /**
+ * Whether the focus is in `panel`, or nowhere: what a mode that ends asks
+ * before its panel hides, and hands it on only then (focusModeControl).
+ * Focus the user had taken elsewhere, the flight profile say, stays there.
+ */
+export function focusWasIn(panel: Element | null): boolean {
+  const active = document.activeElement;
+  return !active || active === document.body || !!panel?.contains(active);
+}
+
+/**
  * Hand the focus to the control `id` of a mode that ends, whose panel had
  * it and hides: a button that hides drops its focus to <body>. On a phone
  * the control columns are hidden, and the bar's More tab, whose sheet

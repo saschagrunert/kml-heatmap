@@ -64,7 +64,7 @@ test.describe("Replay", () => {
     // A toggle keeps its name; aria-pressed says it is on
     await expect(replayBtn).toHaveAttribute(
       "aria-label",
-      "Replay selected flight path",
+      "Replay selected flight",
     );
 
     await replayBtn.click();
@@ -74,7 +74,7 @@ test.describe("Replay", () => {
     await expect(replayBtn).toHaveAttribute("aria-pressed", "false");
     await expect(replayBtn).toHaveAttribute(
       "aria-label",
-      "Replay selected flight path",
+      "Replay selected flight",
     );
   });
 
@@ -569,7 +569,7 @@ test.describe("Replay", () => {
 
     const popup = mapPopupContent(page);
     await expect(popup).toBeVisible({ timeout: 3000 });
-    await expect(popup).toContainText("Current Position");
+    await expect(popup).toContainText("Current position");
 
     // Closed through the marker: the test is of what the popup shows
     await page.evaluate(() => {
@@ -606,7 +606,7 @@ test.describe("Replay", () => {
 
     const popup = mapPopupContent(page);
     await expect(popup).toBeVisible({ timeout: 3000 });
-    await expect(popup).toContainText("Current Position");
+    await expect(popup).toContainText("Current position");
   });
 
   test("the heat canvas stays under the paths after a replay", async ({

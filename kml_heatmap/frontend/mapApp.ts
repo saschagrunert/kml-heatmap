@@ -45,11 +45,16 @@ import { followSelectionHighlight } from "./ui/selectionHighlight";
 import { followHeatLegend } from "./ui/heatLegend";
 import { followStatsPanel } from "./ui/statsPanel";
 import { MobileBar } from "./ui/mobileBar";
-import { bindActions } from "./ui/actions";
+import {
+  STILL_LOADING_MESSAGE,
+  bindActions,
+  failStart,
+  startFailure,
+} from "./ui/actions";
 import { loadInitialData } from "./appInitializer";
 import { logError } from "./utils/logger";
 import { dismissToast, showToast } from "./utils/toast";
-import { setUnavailable } from "./utils/buttonState";
+import { setUnavailableFor } from "./utils/buttonState";
 import { domCache } from "./utils/domCache";
 import { applyGradientTokens } from "./utils/colors";
 import { renderControlIcons } from "./utils/icons";
@@ -601,7 +606,7 @@ export class MapApp {
     const gl = canvas.getContext("webgl2");
     if (!gl) {
       throw new UnsupportedBrowserError(
-        "WebGL 2 is not available. The map requires a browser with WebGL 2 support.",
+        "WebGL 2 is not available. Turn on hardware acceleration or try another browser.",
       );
     }
     // Free the test context immediately
@@ -852,9 +857,12 @@ export class MapApp {
    * (REPLAY_DISABLED_CONTROL_IDS) and the phone's bar steps aside.
    */
   async resetView(): Promise<void> {
-    // Like Isolate with nothing selected: unavailable, and a press does
-    // nothing (see syncResetButton)
-    if (!this.canResetView()) return;
+    // Like Isolate with nothing selected: unavailable, and a press says why
+    // (see syncResetButton)
+    if (!this.canResetView()) {
+      showToast(this.resetViewReason() ?? RESET_VIEW_DONE_MESSAGE);
+      return;
+    }
     const defaults = createDefaultState();
     const applied = await this.filterManager.filterByYear(
       this.defaultYear,
@@ -895,7 +903,15 @@ export class MapApp {
    * while it would change something
    */
   canResetView(): boolean {
-    return !this.isInitializing && !this.isReset();
+    return this.resetViewReason() === null;
+  }
+
+  /** Why Reset view cannot be pressed now; null when it can */
+  resetViewReason(): string | null {
+    const failure = startFailure();
+    if (failure) return failure;
+    if (this.isInitializing) return STILL_LOADING_MESSAGE;
+    return this.isReset() ? RESET_VIEW_DONE_MESSAGE : null;
   }
 
   /**
@@ -1044,7 +1060,10 @@ export class MapApp {
   private readonly syncResetButton = (): void => {
     if (this.replayActive) return;
     const button = domCache.get("reset-view-btn");
-    if (button) setUnavailable(button, !this.canResetView());
+    if (button) {
+      // Dimmed, its tooltip says why, as Isolate's does
+      setUnavailableFor(button, this.resetViewReason());
+    }
     this.mobileBar?.refreshSheet();
   };
 
@@ -1219,9 +1238,17 @@ export class MapApp {
 
 defineStoreAccessors(MapApp.prototype);
 
+/** Why Reset view is unavailable once the first load is over */
+export const RESET_VIEW_DONE_MESSAGE =
+  "Nothing to reset: the map shows the start view";
+
+/** Said in place of the map when initialization fails */
+export const INIT_ERROR_MESSAGE =
+  "The map could not start. Reload the page to try again.";
+
 /** Markup shown in place of the map when initialization fails */
 export const INIT_ERROR_HTML =
-  '<div class="kh-init-error" role="alert">Failed to initialize map. Please reload the page.</div>';
+  '<div class="kh-init-error" role="alert">' + INIT_ERROR_MESSAGE + "</div>";
 
 /**
  * Create the app, bind the controls and run the initial load. Exported so
@@ -1240,16 +1267,24 @@ export async function initMapApp(config: MapConfig): Promise<MapApp> {
   return app;
 }
 
-/** Log the failure and tell the user, in place of a map that never came */
+/**
+ * Log the failure and tell the user, in place of a map that never came.
+ * The controls say it too: bound before the start, they said the flights
+ * were still loading, which they never would.
+ */
 export function reportInitFailure(error: unknown): void {
   logError(error);
+  // Only a message of the app's own replaces the generic one
+  const message =
+    error instanceof UnsupportedBrowserError
+      ? error.message
+      : INIT_ERROR_MESSAGE;
+  failStart(message);
   const mapEl = document.getElementById("map");
   if (mapEl) {
     mapEl.innerHTML = INIT_ERROR_HTML;
-    // Set as text: only a message of the app's own replaces the generic one
-    if (error instanceof UnsupportedBrowserError) {
-      mapEl.firstElementChild!.textContent = error.message;
-    }
+    // Set as text
+    mapEl.firstElementChild!.textContent = message;
   }
 }
 

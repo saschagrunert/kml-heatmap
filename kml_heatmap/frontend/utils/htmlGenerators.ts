@@ -61,10 +61,15 @@ export interface AirportPopupParams {
   isHomeBase: boolean;
 }
 
+/** The airport popup, which its marker's aria-controls names while open */
+export const AIRPORT_POPUP_ID = "airport-popup";
+
 /**
  * Generate airport marker popup HTML. The container takes focus when a
- * keyboard opens the popup; the flight list is added when it is shown (see
- * ui/airportFlights.ts).
+ * keyboard opens the popup, and is named after the airport, so that the
+ * focus lands on something a screen reader can name; the flight list is
+ * added when it is shown (see ui/airportFlights.ts). Its count is of the
+ * flights the filter shows, not of every flight there.
  */
 export function generateAirportPopupHtml(params: AirportPopupParams): string {
   const googleMapsLink = `https://www.google.com/maps?q=${params.lat},${params.lon}`;
@@ -73,7 +78,7 @@ export function generateAirportPopupHtml(params: AirportPopupParams): string {
     : "";
 
   return `
-    <div class="popup-container kh-popup-airport" tabindex="-1">
+    <div id="${AIRPORT_POPUP_ID}" class="popup-container kh-popup-airport" tabindex="-1" role="group" aria-label="${escapeHtml(params.name || "Unknown")}">
         <div class="popup-header kh-popup-header-airport${params.isHomeBase ? " kh-popup-header-home" : ""}">
             <span class="popup-header-icon">${icon("airport", 20)}</span>
             <span>${escapeHtml(params.name || "Unknown")}</span>
@@ -90,7 +95,7 @@ export function generateAirportPopupHtml(params: AirportPopupParams): string {
             </a>
         </div>
         <div class="popup-metric kh-popup-metric-flights">
-            <span class="kh-popup-metric-label">Total Flights</span>
+            <span class="kh-popup-metric-label">Flights shown</span>
             <span class="popup-metric-value kh-popup-accent">${params.flightCount}</span>
         </div>
     </div>`;
@@ -116,8 +121,8 @@ export interface SegmentPopupParams {
  */
 export function generateSegmentPopupHtml(params: SegmentPopupParams): string {
   const { segment } = params;
-  const title = params.title || "Segment Data";
-  const headerIcon = params.icon ?? "airport";
+  const title = params.title || "On this flight";
+  const headerIcon = params.icon ?? "aircraft";
 
   const altFt = segment.altitude_ft;
   const altFtRounded = Math.round(altFt / 50) * 50;

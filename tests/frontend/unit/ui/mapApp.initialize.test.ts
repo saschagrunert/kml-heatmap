@@ -7,6 +7,7 @@ import {
   MAP_STALL_MESSAGE,
   MAP_STALL_MS,
   MapApp,
+  RESET_VIEW_DONE_MESSAGE,
   startViewPadding,
 } from "../../../../kml_heatmap/frontend/mapApp";
 import { resetSafeArea } from "../../../../kml_heatmap/frontend/utils/safeArea";
@@ -652,6 +653,10 @@ describe("MapApp.initialize", () => {
 
       expectAvailable(false);
       expect(app.isReset()).toBe(true);
+      // It says why, as Isolate does, and so does a press
+      expect(button().title).toBe(RESET_VIEW_DONE_MESSAGE);
+      await app.resetView();
+      expect(toastMock.showToast).toHaveBeenCalledWith(RESET_VIEW_DONE_MESSAGE);
     });
 
     it.each([

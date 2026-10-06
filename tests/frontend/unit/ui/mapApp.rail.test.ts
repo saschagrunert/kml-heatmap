@@ -227,7 +227,7 @@ describe("MapApp controls and map", () => {
       app.store.notifyMutation("selectedPathIds");
 
       expect(btn.getAttribute("aria-disabled")).toBe("false");
-      expect(btn.title).toBe("Replay selected flight path");
+      expect(btn.title).toBe("Replay selected flight");
       // The stylesheet dims it from the attribute
       expect(btn.style.opacity).toBe("");
     });
@@ -569,14 +569,13 @@ describe("MapApp controls and map", () => {
       await heldBundle();
       const title = document.createElement("h2");
       title.id = "stats-rail-title";
-      title.innerHTML =
-        '<span class="kh-stats-title-text">Flight Statistics</span>';
+      title.innerHTML = '<span class="kh-stats-title-text">Statistics</span>';
       document.body.appendChild(title);
       app.selectedPathIds.add(1);
 
       app.store.set("statsPanelVisible", true);
 
-      expect(title.textContent).toBe("Selected Paths Statistics");
+      expect(title.textContent).toBe("Statistics of the selection");
     });
 
     it("says so and closes the rail when the bundle cannot be fetched", async () => {

@@ -145,6 +145,38 @@ describe("replay feature", () => {
       });
     });
 
+    it("ends the last segment after the time its length takes, at its own speed or the one before", () => {
+      const segments = flight(turn, [2, 2, 2, 2, 2, 2]);
+      const last = segments.length - 1;
+      const start = (curve: { times: Float64Array }) => curve.times[last]!;
+      const length = metres(turn[last]!, turn[last + 1]!);
+      // On the whole second after it, a step of the timeline's slider
+      const endsAfter = (curve: ReturnType<typeof replayCurve>, s: number) => {
+        expect(Number.isInteger(curve.end)).toBe(true);
+        expect(curve.end - start(curve)).toBeGreaterThanOrEqual(s);
+        expect(curve.end - start(curve)).toBeLessThan(s + 1);
+      };
+
+      // No speed logged: as fast as the 0.0025 degrees before it in 2 s
+      endsAfter(
+        replayCurve(segments, () => 0),
+        2.4,
+      );
+
+      // At its logged speed, and flown, not jumped to its end
+      segments[last]!.groundspeed_knots = 20;
+      const logged = replayCurve(segments, () => 0);
+      endsAfter(logged, length / ((20 * 1852) / 3600));
+      const halfway = replayPoint(logged, last, 0.5)!.position[1];
+      expect(halfway).toBeGreaterThan(8.0085);
+      expect(halfway).toBeLessThan(8.0105);
+
+      // A crawl holds the replay for two minutes at most
+      segments[last]!.groundspeed_knots = 1;
+      const crawl = replayCurve(segments, () => 0);
+      expect(crawl.end - start(crawl)).toBe(120);
+    });
+
     it("changes speed smoothly across a fix, where each segment had its own", () => {
       // 10 m/s, then 30 m/s: moved evenly along each, the airplane tripled
       // its speed at the fix

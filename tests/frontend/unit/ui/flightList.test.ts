@@ -84,7 +84,7 @@ const segments = [
 ];
 
 const RAIL = `
-  <h2 id="stats-rail-title"><span class="kh-stats-title-text">Flight Statistics</span></h2>
+  <h2 id="stats-rail-title"><span class="kh-stats-title-text">Statistics</span></h2>
   <div id="stats-rail-tabs" role="tablist" hidden>
     <button id="stats-tab" role="tab" aria-selected="true">Statistics</button>
     <button id="flights-tab" role="tab" aria-selected="false" tabindex="-1">Flights</button>
@@ -143,7 +143,7 @@ describe("FlightList", () => {
 
   it("lists every flight of the filter in file order, year only", () => {
     expect(cells()).toEqual([
-      ["EDAQ → EDDP", "D-EAGJ", "2025", "0:20", "11", "3,500", "1"],
+      ["EDAQ → EDDP", "D-EAGJ", "2025", "0h 20m", "11", "3,500", "1"],
       // No times, so no landings either
       ["EDDP → EDAQ", "D-ESST", "2024", "—", "38", "5,200", "—"],
       // No code, no aircraft, no segments: the stand-ins, and escaped
@@ -339,7 +339,7 @@ describe("FlightList", () => {
       expect(tab("stats-tab").getAttribute("aria-selected")).toBe("true");
       expect(panel().hidden).toBe(true);
       expect(tab("stats-panel").hidden).toBe(false);
-      expect(title()).toBe("Selected Paths Statistics");
+      expect(title()).toBe("Statistics of the selection");
     });
 
     it("switches on a click", () => {

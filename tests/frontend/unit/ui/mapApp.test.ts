@@ -1,12 +1,14 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
   INIT_ERROR_HTML,
+  INIT_ERROR_MESSAGE,
   MapApp,
   UnsupportedBrowserError,
   initMapApp,
   reportInitFailure,
 } from "../../../../kml_heatmap/frontend/mapApp";
 import { safeAreaInsets } from "../../../../kml_heatmap/frontend/utils/safeArea";
+import { bindActions } from "../../../../kml_heatmap/frontend/ui/actions";
 import { STORE_ACCESSOR_KEYS } from "../../../../kml_heatmap/frontend/state/store";
 import type { KMLDataset } from "../../../../kml_heatmap/frontend/types";
 import { createSegment } from "../../testHelpers";
@@ -243,6 +245,8 @@ describe("MapApp", () => {
 
     afterEach(() => {
       mapEl.remove();
+      // Every report marks the start failed (see failStart)
+      delete document.body.dataset["startFailure"];
     });
 
     it("logs the error and replaces the map with a message", () => {
@@ -253,8 +257,49 @@ describe("MapApp", () => {
       expect(loggerMock.logError).toHaveBeenCalledWith(error);
       expect(mapEl.innerHTML).toBe(INIT_ERROR_HTML);
       expect(mapEl.querySelector(".kh-init-error")!.textContent).toBe(
-        "Failed to initialize map. Please reload the page.",
+        "The map could not start. Reload the page to try again.",
       );
+    });
+
+    it("has every control say why, instead of that the flights still load", () => {
+      const button = document.createElement("button");
+      button.dataset["action"] = "toggleStats";
+      button.title = "Statistics";
+      document.body.appendChild(button);
+      const app = new MapApp(config);
+      bindActions(app);
+
+      reportInitFailure(new Error("no map"));
+      button.click();
+
+      expect(button.getAttribute("aria-disabled")).toBe("true");
+      expect(button.title).toBe(INIT_ERROR_MESSAGE);
+      expect(app.store.get("statsPanelVisible")).toBe(false);
+      expect(document.querySelector(".toast-notification")!.textContent).toBe(
+        INIT_ERROR_MESSAGE,
+      );
+      app.destroy();
+      button.remove();
+    });
+
+    it("says why on a press after the app was torn down", () => {
+      const button = document.createElement("button");
+      button.dataset["action"] = "toggleStats";
+      document.body.appendChild(button);
+      const app = new MapApp(config);
+      bindActions(app);
+      // A map that never loaded takes the app's listeners with it
+      app.destroy();
+      document.getElementById("toast-stack")?.remove();
+
+      reportInitFailure(new Error("no map"));
+      button.click();
+
+      expect(document.querySelector(".toast-notification")!.textContent).toBe(
+        INIT_ERROR_MESSAGE,
+      );
+      expect(app.resetViewReason()).toBe(INIT_ERROR_MESSAGE);
+      button.remove();
     });
 
     it("says why for a browser without WebGL 2, as text", async () => {
@@ -264,7 +309,7 @@ describe("MapApp", () => {
 
       const notice = mapEl.querySelector(".kh-init-error")!;
       expect(notice.textContent).toBe(
-        "WebGL 2 is not available. The map requires a browser with WebGL 2 support.",
+        "WebGL 2 is not available. Turn on hardware acceleration or try another browser.",
       );
       expect(notice.getAttribute("role")).toBe("alert");
       expect(loggerMock.logError).toHaveBeenCalledWith(

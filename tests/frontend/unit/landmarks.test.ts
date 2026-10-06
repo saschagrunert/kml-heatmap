@@ -25,6 +25,14 @@ describe("the landmarks of the page", () => {
     }
   });
 
+  it("has the map as a region, so its popups read as a page does", () => {
+    // An application role takes the screen reader out of browse mode, and
+    // the popups of airports and segments are text with links
+    const map = page.getElementById("map")!;
+    expect(map.getAttribute("role")).toBe("region");
+    expect(map.getAttribute("aria-label")).toBe("Flight map");
+  });
+
   it("keeps the toasts out of main, which Wrapped makes inert, the stack ahead of it", () => {
     const main = page.querySelector("main")!;
     for (const id of ["toast-stack", "toast-status", "toast-alert"]) {

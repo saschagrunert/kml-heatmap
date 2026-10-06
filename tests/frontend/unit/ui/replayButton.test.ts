@@ -18,7 +18,8 @@ function button(): HTMLButtonElement {
 
 describe("updateReplayButtonState", () => {
   beforeEach(() => {
-    document.body.innerHTML = '<button id="replay-btn"></button>';
+    document.body.innerHTML =
+      '<button id="replay-btn" aria-label="Replay selected flight"></button>';
   });
 
   it("dims the button and says what is missing when replay is not possible", () => {

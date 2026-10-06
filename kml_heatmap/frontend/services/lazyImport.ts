@@ -1,6 +1,13 @@
 import { withTimeout } from "../utils/withTimeout";
 
 /**
+ * What to do about code that could not be fetched, after the sentence that
+ * says so: the next press asks the server again (see importWithRetry),
+ * under another URL
+ */
+export const TRY_AGAIN = ". Check the connection and try again.";
+
+/**
  * The import of a file the app fetches on first use, and of the same file
  * again after a failure.
  *

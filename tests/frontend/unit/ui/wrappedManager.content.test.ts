@@ -69,7 +69,7 @@ describe("WrappedManager content", () => {
     wrappedManager.showWrapped();
 
     expect(el("wrapped-title").textContent).toBe("Your Flight History");
-    expect(el("wrapped-year").textContent).toBe("All Years");
+    expect(el("wrapped-year").textContent).toBe("All years");
   });
 
   it("counts the flights and airports of the selected year", () => {
@@ -78,8 +78,8 @@ describe("WrappedManager content", () => {
     const cards = statCards();
     expect(cards["Flights"]).toBe("3");
     expect(cards["Airports"]).toBe("3");
-    expect(cards["Flight Time"]).toBe("3h 0m");
-    expect(cards["Max Groundspeed"]).toBe("120kt");
+    expect(cards["Flight time"]).toBe("3h 0m");
+    expect(cards["Max groundspeed"]).toBe("120kt");
     expect(cards["Distance"]).toMatch(/^\d[\d,]*\.\dnm$/);
   });
 
@@ -135,8 +135,8 @@ describe("WrappedManager content", () => {
 
     const cards = statCards();
     expect(cards["Flights"]).toBe("3");
-    expect(cards["Flight Time"]).toBeUndefined();
-    expect(cards["Max Groundspeed"]).toBeUndefined();
+    expect(cards["Flight time"]).toBeUndefined();
+    expect(cards["Max groundspeed"]).toBeUndefined();
   });
 
   it("renders the fun facts from the year's statistics", () => {

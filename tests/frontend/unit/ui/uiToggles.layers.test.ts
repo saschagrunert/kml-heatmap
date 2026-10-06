@@ -137,7 +137,7 @@ describe("UIToggles layers", () => {
       expect(el("airspeed-btn").getAttribute("aria-pressed")).toBe("false");
       expect(el("airspeed-legend").hidden).toBe(true);
       expect(toastMock.showToast).toHaveBeenCalledWith(
-        "Groundspeed layer disabled",
+        "Groundspeed off, colouring by altitude",
         "info",
       );
     });
@@ -229,7 +229,7 @@ describe("UIToggles layers", () => {
       expect(el("airspeed-btn").getAttribute("aria-pressed")).toBe("true");
       expect(el("airspeed-legend").hidden).toBe(false);
       expect(toastMock.showToast).toHaveBeenCalledWith(
-        "Altitude layer disabled",
+        "Altitude off, colouring by groundspeed",
         "info",
       );
     });

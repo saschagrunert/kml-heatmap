@@ -567,7 +567,7 @@ export async function activateReplay(page: Page): Promise<number> {
   const pathId = await selectPathForReplay(page);
   await expect(page.locator("#replay-btn")).toHaveAttribute(
     "title",
-    "Replay selected flight path",
+    "Replay selected flight",
   );
   await startReplay(page);
   await expect(page.locator("#replay-controls")).toBeVisible({

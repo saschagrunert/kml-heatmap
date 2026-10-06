@@ -10,7 +10,11 @@ import {
   CHASE_ZOOM,
 } from "../../../../kml_heatmap/frontend/ui/chaseCamera";
 import * as motion from "../../../../kml_heatmap/frontend/utils/motion";
-import { isReplayCameraMove } from "../../../../kml_heatmap/frontend/utils/mapHelpers";
+import type { Map as MapLibreMap } from "maplibre-gl";
+import {
+  followContextLoss,
+  isReplayCameraMove,
+} from "../../../../kml_heatmap/frontend/utils/mapHelpers";
 import {
   createReplayManager,
   createReplayMockApp,
@@ -194,6 +198,29 @@ describe("ReplayManager chase view", () => {
     expect(map.easeTo).toHaveBeenCalledTimes(1);
   });
 
+  it("leaves a map without its WebGL context alone as the replay closes, and tells it of the rest once it is back", () => {
+    openReplay();
+    const map = mockApp.map!;
+    followContextLoss(map as unknown as MapLibreMap);
+    const ends = restsOf(map);
+    replayManager.toggleChase();
+    replayManager.playReplay();
+    vi.advanceTimersByTime(160);
+    vi.mocked(map.jumpTo).mockClear();
+
+    map.emit("webglcontextlost");
+    replayManager.toggleReplay();
+    settle();
+    expect(ends).toEqual([]);
+    expect(map.easeTo).not.toHaveBeenCalled();
+    expect(map.jumpTo).not.toHaveBeenCalled();
+
+    map.emit("webglcontextrestored");
+    map.emit("style.load");
+    settle(1);
+    expect(ends).toEqual(["zoomend", "moveend"]);
+  });
+
   it("tells a map the app has let go of nothing", () => {
     const lifetime = new AbortController();
     Object.assign(mockApp, { signal: lifetime.signal });
@@ -329,7 +356,7 @@ describe("ReplayManager chase view", () => {
   });
 
   it("ends as the flight does, fitting it the way the map was before", () => {
-    openReplay(119);
+    openReplay(239);
     replayManager.toggleChase();
     settle();
     replayManager.playReplay();

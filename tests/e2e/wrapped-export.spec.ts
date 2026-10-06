@@ -247,10 +247,7 @@ test.describe("Wrapped and Export", () => {
 
     const closeBtn = modal.locator(".close-btn");
     await expect(closeBtn).toBeVisible();
-    await expect(closeBtn).toHaveAttribute(
-      "aria-label",
-      "Close year in review",
-    );
+    await expect(closeBtn).toHaveAttribute("aria-label", "Close Wrapped");
     await closeBtn.click();
     await expect(modal).toBeHidden();
 
@@ -360,7 +357,7 @@ test.describe("Wrapped and Export", () => {
 
     await openWrapped(page);
 
-    await expect(page.locator("#wrapped-year")).toHaveText("All Years");
+    await expect(page.locator("#wrapped-year")).toHaveText("All years");
     await expect(page.locator("#wrapped-title")).toHaveText(
       "Your Flight History",
     );
@@ -423,7 +420,7 @@ test.describe("Wrapped and Export", () => {
     await page.locator("#export-btn").click();
 
     await expect(page.locator(".toast-notification")).toHaveText(
-      "Export unavailable",
+      "Export is unavailable: its code could not be loaded. Check the connection and try again.",
     );
     await expect(page.locator("#export-btn")).toHaveText("Export image");
     await expect(page.locator("#export-btn")).toBeEnabled();

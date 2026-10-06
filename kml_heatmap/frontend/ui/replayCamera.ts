@@ -413,6 +413,8 @@ export class ReplayCamera {
   private jumped = false;
   /** The frame the rest is looked for in, while one is pending */
   private restFrame: number | null = null;
+  /** Whether the rest waits for the map to have its WebGL context back */
+  private restAwaited = false;
 
   /** Whether the camera is moving the map for a frame of `follow` */
   private framing = false;
@@ -521,10 +523,9 @@ export class ReplayCamera {
     const moving = this.jumped && performance.now() - since < CAMERA_REST_MS;
     this.jumped = false;
     // A gesture or an animation of the map ends in a `moveend` of its own;
-    // a map without its WebGL context has its listeners told once it is
-    // back, which throw asking it now
+    // a map without its WebGL context is waited for in rest
     const map = this.app.map;
-    if (moving || map?.isMoving() || (map && hasLostContext(map))) {
+    if (moving || (map && !hasLostContext(map) && map.isMoving())) {
       this.restFrame = requestAnimationFrame(this.lookForRest);
     } else this.rest();
   };
@@ -540,9 +541,26 @@ export class ReplayCamera {
     this.jumped = false;
     const unrested = this.unrested;
     const map = this.app.map;
-    this.unrested = null;
     // Nobody is told of a map the app has let go of
-    if (!unrested || !map || this.app.signal.aborted) return;
+    if (!unrested || !map || this.app.signal.aborted) {
+      this.unrested = null;
+      return;
+    }
+    // A map without its WebGL context has its listeners told once its
+    // style is back (see whenContextRestored), which throw asking it now.
+    // A replay that closes meanwhile leaves it so as well.
+    if (hasLostContext(map)) {
+      if (this.restAwaited) return;
+      this.restAwaited = true;
+      map.once("webglcontextrestored", () => {
+        map.once("style.load", () => {
+          this.restAwaited = false;
+          this.rest();
+        });
+      });
+      return;
+    }
+    this.unrested = null;
     if (unrested.zoomed) map.fire("zoomend");
     map.fire("moveend");
   }
@@ -681,7 +699,7 @@ export class ReplayCamera {
     chase.release();
     const saved = chase.saved;
     const position = this.heading?.position;
-    if (restore) {
+    if (restore && !hasLostContext(map)) {
       map.easeTo({
         ...saved,
         ...(restore === "view" && position
@@ -777,7 +795,13 @@ export class ReplayCamera {
     // Every frame, so not of the container, which lays the page out
     const { width, height } = mapSize(map);
     const size = { x: width, y: height };
-    const ground = map.project(toLngLat(currentPos));
+    // In the copy of the world the map looks at: the curve of a flight
+    // across the antimeridian goes on past 180, and the map's centre may
+    // have wrapped back since (see ChaseCamera.offsetOf)
+    const ground = map.project([
+      unwrapLng(currentPos[1], map.getCenter().lng),
+      currentPos[0],
+    ]);
     const point = { x: ground.x, y: ground.y - this.liftPx(map, state) };
     const marginX = size.x * EDGE_MARGIN_FRACTION;
     const marginY = size.y * EDGE_MARGIN_FRACTION;
@@ -888,7 +912,8 @@ export class ReplayCamera {
     // zooms (see keepAirplaneInView), and the old centre had lost the
     // airplane by then
     map.easeTo({
-      center: toLngLat(currentPos),
+      // The short way, in the world the map looks at (see airplaneOnScreen)
+      center: [unwrapLng(currentPos[1], map.getCenter().lng), currentPos[0]],
       zoom: Math.max(AUTO_ZOOM_MIN, zoom - steps),
       duration: AUTO_ZOOM_DURATION_MS,
       animate: !prefersReducedMotion(),

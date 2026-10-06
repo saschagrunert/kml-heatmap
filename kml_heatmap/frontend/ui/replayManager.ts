@@ -10,10 +10,12 @@ import { formatTime } from "../utils/replayFormatters";
 import { applyToggleButtonState } from "../utils/buttonState";
 import {
   focusModeControl,
+  focusWasIn,
   holdControls,
   REPLAY_HELD_CONTROL_IDS,
 } from "./heldControls";
 import { setControlIcon } from "../utils/icons";
+import { STILL_LOADING_MESSAGE } from "./actions";
 import { AUTO_ZOOM_FOLLOW, MAP_SOURCES } from "../utils/constants";
 import { airplaneLiftPx, heightAtZoomFt } from "../calculations/airplaneLift";
 import { liftExaggeration, reliefLevel } from "../calculations/lift";
@@ -78,8 +80,35 @@ const REPLAY_DISABLED_CONTROL_IDS = [
   "replay-all-btn",
 ];
 
-/** Custom property holding the replay panel's height, read by styles.css */
+/** Custom property holding the replay panel's height, read by features.css */
 export const REPLAY_PANEL_HEIGHT_VAR = "--replay-panel-h";
+
+/**
+ * Keep REPLAY_PANEL_HEIGHT_VAR at the height of a replay's `panel` while it
+ * shows: the toasts and the colour legend stand on top of it, and it wraps
+ * anew as a phone turns or the window resizes. Returns what stops that and
+ * takes the property off again, which `signal` does as well: the app's,
+ * for a panel whose owner has no destroy of its own.
+ */
+export function followPanelHeight(
+  panel: HTMLElement,
+  signal?: AbortSignal,
+): () => void {
+  const style = document.body.style;
+  const measure = (): void =>
+    style.setProperty(REPLAY_PANEL_HEIGHT_VAR, panel.offsetHeight + "px");
+  measure();
+  const watch =
+    typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
+  watch?.observe(panel);
+  const stop = (): void => {
+    watch?.disconnect();
+    style.removeProperty(REPLAY_PANEL_HEIGHT_VAR);
+    signal?.removeEventListener("abort", stop);
+  };
+  signal?.addEventListener("abort", stop, { once: true });
+  return stop;
+}
 
 /**
  * Custom property holding the height of the colour legend on screen during
@@ -153,6 +182,8 @@ export class ReplayManager {
   private speedBeforeChase: string | null = null;
   /** Measures the legends while a replay runs (REPLAY_LEGEND_HEIGHT_VAR) */
   private legendWatch: ResizeObserver | null = null;
+  /** Ends followPanelHeight of the open panel */
+  private unfollowPanel: (() => void) | null = null;
   /** Gives the held controls back as they were (see holdControls) */
   private release: (() => void) | null = null;
   private readonly onVisibilityChange = (): void => {
@@ -230,11 +261,17 @@ export class ReplayManager {
 
     // The trail written while the WebGL context was lost had no source to
     // go to, and a paused replay writes it again only once it moves on. It
-    // is written whole, and the route with it. Not on a map the app has
-    // let go of.
+    // is written whole, and the route with it. A replay closed meanwhile
+    // emptied sources that were not there: the style comes back with the
+    // route and trail of the loss, which go again. Not on a map the app
+    // has let go of.
     if (app.map) {
       whenContextRestored(app.map, () => {
-        if (!this.state.layerActive || app.signal.aborted) return;
+        if (app.signal.aborted) return;
+        if (!this.state.layerActive) {
+          this.emptyReplaySources();
+          return;
+        }
         this.writeRoute();
         this.state.trailDirty = true;
         this.renderer.scheduleTrailFlush(this.state);
@@ -246,6 +283,8 @@ export class ReplayManager {
   destroy(): void {
     document.removeEventListener("visibilitychange", this.onVisibilityChange);
     this.stopFollowingLayers();
+    this.unfollowPanel?.();
+    this.unfollowPanel = null;
     this.unwatchLegends();
     this.renderer.cancelTrailFlush();
     this.renderer.stopWatchingMap();
@@ -298,12 +337,11 @@ export class ReplayManager {
 
     panel.style.display = "block";
     // The colour legend stands on top of the panel during replay (see
-    // styles.css). The panel's height follows the pointer and the readout,
-    // so it is measured rather than repeated in the stylesheet.
-    document.body.style.setProperty(
-      REPLAY_PANEL_HEIGHT_VAR,
-      panel.offsetHeight + "px",
-    );
+    // features.css). The panel's height follows the pointer, the readout
+    // and the width of the window, so it is measured rather than repeated
+    // in the stylesheet.
+    this.unfollowPanel?.();
+    this.unfollowPanel = followPanelHeight(panel);
     this.watchLegends();
     // The heatmap and the colour layers hide for the replay, and the panel
     // takes the bottom edge: the mobile bar steps aside instead of stacking
@@ -446,12 +484,14 @@ export class ReplayManager {
   }
 
   private deactivateReplay(panel: HTMLElement): void {
+    const hadFocus = focusWasIn(panel);
     // The closing announcement below replaces the "stopped" one, and the
     // map stays where it is: the airplane leaves it, and a chase gives the
     // view back from where it looks
     this.stopReplay(false, false);
     panel.style.display = "none";
-    document.body.style.removeProperty(REPLAY_PANEL_HEIGHT_VAR);
+    this.unfollowPanel?.();
+    this.unfollowPanel = null;
     this.unwatchLegends();
     this.stopFollowingLayers();
 
@@ -482,7 +522,7 @@ export class ReplayManager {
     this.release = null;
     this.app.replayActive = false;
     // After the bar is back, which may be the control that takes focus
-    this.restoreFocusAfterReplay();
+    if (hadFocus) this.restoreFocusAfterReplay();
     // The panel's own live region is hidden with it by now, and a hidden
     // region is not read out
     announceStatus("Replay closed");
@@ -512,10 +552,10 @@ export class ReplayManager {
   }
 
   /**
-   * Hand focus back when the panel closes. The exit control usually holds it
-   * and is about to be hidden with the panel, which would drop focus to
-   * <body>. The bar owns the entry point while it is showing, otherwise the
-   * replay button does.
+   * Hand focus back when the panel that had it closes. The exit control
+   * usually holds it and is hidden with the panel, which would drop focus
+   * to <body>. The bar owns the entry point while it is showing, otherwise
+   * the replay button does.
    */
   private restoreFocusAfterReplay(): void {
     focusModeControl(this.app, "replay-btn");
@@ -556,10 +596,9 @@ export class ReplayManager {
 
   initializeReplay(moveCamera = true): boolean {
     if (!this.app.fullPathSegments) {
-      showToast(
-        "No flight data available for replay. Please wait for data to load or refresh the page.",
-        "error",
-      );
+      // Said as every other control says it while the flights load, with
+      // what to do next
+      showToast(`${STILL_LOADING_MESSAGE}. Try again in a moment.`);
       return false;
     }
 
@@ -646,8 +685,9 @@ export class ReplayManager {
   }
 
   private setupReplayUI(): void {
+    // The end of the last segment, which the curve times (see replayCurve)
     const lastSegment = this.state.segments[this.state.segments.length - 1];
-    this.state.maxTime = lastSegment?.time ?? 0;
+    this.state.maxTime = this.state.smoothed?.end ?? lastSegment?.time ?? 0;
 
     const slider = domCache.get("replay-slider", HTMLInputElement);
     if (slider) slider.max = this.state.maxTime.toString();
@@ -714,10 +754,14 @@ export class ReplayManager {
     this.state.trailDirty = false;
     if (!this.state.layerActive) return;
     this.state.layerActive = false;
+    this.emptyReplaySources();
+    this.state.trailWrittenTo = null;
+  }
+
+  private emptyReplaySources(): void {
     this.setReplaySource(MAP_SOURCES.replayRoute, []);
     this.setReplaySource(MAP_SOURCES.replayTrail, []);
     this.setReplaySource(MAP_SOURCES.replayTrailRibbons, []);
-    this.state.trailWrittenTo = null;
   }
 
   private setReplaySource(

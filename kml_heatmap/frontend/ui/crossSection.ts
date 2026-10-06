@@ -54,6 +54,7 @@ import { frameCoalescer } from "../utils/frameCoalescer";
 import {
   DEGREES_TO_RADIANS,
   metresPerPixel,
+  wrapDegrees,
   type Coordinate,
 } from "../utils/geometry";
 import { isPageEscape, toLngLat } from "../utils/mapHelpers";
@@ -337,11 +338,18 @@ function createTool(app: MapApp): Tool {
           })
         : null;
     frame = line ? lineFrame(line[0], line[1]) : null;
-    // For the link, to about a metre
+    // For the link, to about a metre. An end the map gave past 180, on a
+    // line across the antimeridian, is written in the world a link keeps to
+    // (see isSectionLine); the line runs the short way round either way.
     app.crossSectionLine =
       line
         ?.flat()
-        .map((degrees) => degrees.toFixed(5))
+        .map((degrees, i) =>
+          (i % 2 && Math.abs(degrees) > 180
+            ? wrapDegrees(degrees)
+            : degrees
+          ).toFixed(5),
+        )
         .join(",") ?? "";
     draw(section);
   };
@@ -654,7 +662,8 @@ function createTool(app: MapApp): Tool {
     // One too short to show leaves the link and the saved state with it
     if (phase !== "shown") app.crossSectionLine = "";
     notify();
-    placeButton.focus({ preventScroll: true });
+    // Into the part on show: on a line of the link, placing is over
+    (phase === "placing" ? placeButton : redraw).focus({ preventScroll: true });
   };
 
   const hide = (): void => {

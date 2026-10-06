@@ -295,7 +295,8 @@ export function followFlightProfile(app: MapApp): HTMLElement {
     ground.setAttribute("d", `${floor}L${xOf(count - 1)} ${VIEW_H}Z`);
 
     const unit = " " + heightUnit(profile);
-    const highest = `${formatNumber(profile.maxAltitudeFt)} ft`;
+    // Above sea level, where the lowest is above the ground: said so
+    const highest = `${formatNumber(profile.maxAltitudeFt)} ft MSL`;
     const lowest = profile.lowestEnRouteFt;
     const figures = [
       ["Highest", highest],

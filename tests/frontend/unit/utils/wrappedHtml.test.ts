@@ -69,12 +69,12 @@ describe("wrappedHtml", () => {
         '<div class="stat-value">36,089<span class="stat-unit">ft</span></div>',
       );
       expect(html).toContain(
-        '<div class="stat-label">Max Altitude (MSL)</div>',
+        '<div class="stat-label">Max altitude (MSL)</div>',
       );
 
       // Should not include timing data
-      expect(html).not.toContain("Flight Time");
-      expect(html).not.toContain("Max Groundspeed");
+      expect(html).not.toContain("Flight time");
+      expect(html).not.toContain("Max groundspeed");
     });
 
     it("generates stats HTML with timing data", () => {
@@ -83,18 +83,18 @@ describe("wrappedHtml", () => {
       expect(html).toContain(
         '123<span class="stat-unit">h</span> 45<span class="stat-unit">m</span>',
       );
-      expect(html).toContain('<div class="stat-label">Flight Time</div>');
+      expect(html).toContain('<div class="stat-label">Flight time</div>');
       expect(html).toContain(
         '<div class="stat-value">450<span class="stat-unit">kt</span></div>',
       );
-      expect(html).toContain('<div class="stat-label">Max Groundspeed</div>');
+      expect(html).toContain('<div class="stat-label">Max groundspeed</div>');
     });
 
     it("leaves out the altitude card without statistics", () => {
       const html = generateStatsHtml(mockYearStats, null, false);
 
       expect(html).toContain("42");
-      expect(html).not.toContain("Max Altitude");
+      expect(html).not.toContain("Max altitude");
       expect(html).not.toContain('<span class="stat-unit">ft</span>');
     });
 
@@ -106,7 +106,7 @@ describe("wrappedHtml", () => {
 
       const html = generateStatsHtml(mockYearStats, withoutAltitude, false);
 
-      expect(html).not.toContain("Max Altitude");
+      expect(html).not.toContain("Max altitude");
     });
 
     it("handles missing max_groundspeed_knots", () => {
@@ -470,7 +470,7 @@ describe("wrappedHtml", () => {
         '<h2 id="wrapped-top-airports-title" class="top-airports-title">',
       );
       expect(html).toContain(
-        '<span class="section-title-text">Home Base</span></h2>',
+        '<span class="section-title-text">Home base</span></h2>',
       );
       expect(html).toContain(
         '<div class="top-airport-name"><span class="top-airport-place">EDDF</span></div>',

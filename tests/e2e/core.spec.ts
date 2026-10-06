@@ -175,8 +175,8 @@ test.describe("Core", () => {
     // Unavailable, Isolate and Replay keep their name and say why in the
     // title, which a screen reader reads as the description
     for (const [selector, name] of [
-      ["#isolate-btn", "Isolate selected paths"],
-      ["#replay-btn", "Replay selected flight path"],
+      ["#isolate-btn", "Isolate selected flights"],
+      ["#replay-btn", "Replay selected flight"],
     ]) {
       const button = page.locator(selector!);
       await expect(button).toHaveAttribute("aria-disabled", "true");

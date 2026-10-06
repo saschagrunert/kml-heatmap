@@ -62,7 +62,7 @@ function flightTimeCard(flightTime: string): string {
     '<div class="stat-value">' +
     markFlightTimeUnits(flightTime, "stat-unit") +
     "</div>" +
-    '<div class="stat-label">Flight Time</div>' +
+    '<div class="stat-label">Flight time</div>' +
     "</div>"
   );
 }
@@ -88,7 +88,7 @@ export function generateStatsHtml(
         statCard(
           formatNumber(filteredStats?.max_groundspeed_knots || 0),
           "kt",
-          "Max Groundspeed",
+          "Max groundspeed",
         )
       : "") +
     // Like the timing cards: no data, no card, rather than a figure of 0 ft
@@ -97,7 +97,7 @@ export function generateStatsHtml(
       : statCard(
           formatNumber(maxAltitudeM * METERS_TO_FEET),
           "ft",
-          "Max Altitude (MSL)",
+          "Max altitude (MSL)",
         ))
   );
 }
@@ -217,7 +217,7 @@ export function generateHomeBaseHtml(
     : "";
 
   return (
-    wrappedSectionTitle("top-airports-title", "airport", "Home Base") +
+    wrappedSectionTitle("top-airports-title", "airport", "Home base") +
     '<div class="top-airport">' +
     '<div class="top-airport-name">' +
     codeHtml +

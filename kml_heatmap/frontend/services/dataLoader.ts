@@ -214,6 +214,15 @@ interface Download {
   waiters: number;
 }
 
+/** The load of every year, shared by its callers, see loadAndCombineAllYears */
+interface AllYearsRun {
+  promise: Promise<KMLDataset | null>;
+  /** Aborted once every caller has given up on it */
+  controller: AbortController;
+  /** Callers waiting for it; one without a signal waits to the end */
+  waiters: number;
+}
+
 /**
  * Name of the error a year file of another format fails with (decodeYear).
  * Spelled out in both places: an import of the other module would move it
@@ -279,6 +288,8 @@ export class DataLoader {
   private loadingDepth: number;
   /** "all" is among the loads, which decides what the label calls them */
   private loadingAll = false;
+  /** The load of every year in flight, see loadAndCombineAllYears */
+  private allRun: AllYearsRun | null = null;
   /** Counts the operations, so that the indicator can tell them apart */
   private operation = 0;
   private fetchJson: NonNullable<DataLoaderOptions["fetchJson"]>;
@@ -518,7 +529,7 @@ export class DataLoader {
     }
 
     if (year === "all") {
-      return this.loadAndCombineAllYears();
+      return this.loadAndCombineAllYears(signal);
     }
 
     const data = await this.getYear(year, signal);
@@ -653,20 +664,60 @@ export class DataLoader {
    * Load and combine data from all available years.
    * Years that fail to load are reported through onLoadError; the remaining
    * years are still combined. Returns null only when nothing could be loaded.
+   *
+   * Its callers share one load, which is given up on as a year is (see
+   * wait) once each of them has aborted its signal: the indicator lets go
+   * of it, its failures are news to nobody, and the year files go on
+   * downloading into the cache. A caller that comes later starts a load of
+   * its own, which picks the years up where they are.
    * @returns Combined data object or null on error
    */
-  loadAndCombineAllYears(): Promise<KMLDataset | null> {
-    return this.shared("all", () => this.loadAllYears());
+  loadAndCombineAllYears(signal?: AbortSignal): Promise<KMLDataset | null> {
+    const cached = this.cache.get("all");
+    if (cached) return Promise.resolve(cached);
+    // Gave up already: it would wait on the load for good, as its abort
+    // event has fired before it could listen
+    if (signal?.aborted) return Promise.resolve(null);
+    let run = this.allRun;
+    if (!run) {
+      const controller = new AbortController();
+      const promise = this.loadAllYears(controller.signal).finally(() => {
+        if (this.allRun === started) this.allRun = null;
+      });
+      const started: AllYearsRun = { promise, controller, waiters: 0 };
+      run = this.allRun = started;
+    }
+    const joined = run;
+    joined.waiters += signal ? 1 : Infinity;
+    signal?.addEventListener(
+      "abort",
+      () => {
+        if (--joined.waiters > 0) return;
+        if (this.allRun === joined) this.allRun = null;
+        joined.controller.abort();
+      },
+      { once: true },
+    );
+    return joined.promise;
   }
 
-  private async loadAllYears(): Promise<KMLDataset | null> {
+  private async loadAllYears(signal: AbortSignal): Promise<KMLDataset | null> {
     this.loadingDepth++;
     this.loadingAll = true;
+    let held = true;
+    const release = (): void => {
+      if (!held) return;
+      held = false;
+      this.loadingAll = false;
+      this.endLoading();
+    };
+    signal.addEventListener("abort", release, { once: true });
     // The years join a moment later, each with a report of its own. The
     // indicator draws once per frame, so it shows the last of them.
     this.report();
     try {
       const metadata = await this.loadMetadata();
+      if (signal.aborted) return null;
       if (!metadata || !metadata.available_years) {
         logError("No metadata or available years found");
         return null;
@@ -677,8 +728,9 @@ export class DataLoader {
 
       // Load all year files in parallel (deduplicated per year)
       const yearDatasets = await Promise.all(
-        years.map((year) => this.getYear(year)),
+        years.map((year) => this.getYear(year, signal)),
       );
+      if (signal.aborted) return null;
 
       const failedYears = years.filter((_, i) => !yearDatasets[i]);
       if (failedYears.length > 0 && !this.destroyed) {
@@ -702,8 +754,7 @@ export class DataLoader {
       logError("Error loading and combining all years:", error);
       return null;
     } finally {
-      this.loadingAll = false;
-      this.endLoading();
+      release();
     }
   }
 

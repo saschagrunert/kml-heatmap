@@ -22,7 +22,7 @@ import { datasetIndex, type FilterView } from "../calculations/datasetIndex";
 import { flightTotals, type FlightTotals } from "../calculations/flightTotals";
 import { KM_TO_NAUTICAL_MILES } from "../utils/constants";
 import { domCache } from "../utils/domCache";
-import { formatNumber } from "../utils/formatters";
+import { formatFlightTime, formatNumber } from "../utils/formatters";
 import { escapeHtml, pluralFlights } from "../utils/htmlGenerators";
 import { flightRoute } from "./airportFlights";
 import { setStatsTitle } from "./statsPanel";
@@ -63,13 +63,6 @@ const MISSING = "—";
 /** A figure, or the stand-in where there is none */
 function figure(value: number | undefined): string {
   return value === undefined ? MISSING : formatNumber(value);
-}
-
-/** Seconds as a logbook writes a flight time: "1:25" */
-function flightTime(seconds: number | undefined): string {
-  if (seconds === undefined) return MISSING;
-  const minutes = Math.round(seconds / 60);
-  return Math.floor(minutes / 60) + ":" + String(minutes % 60).padStart(2, "0");
 }
 
 /** "3 full stops, 12 touch-and-goes"; none for a flight without landings */
@@ -117,10 +110,14 @@ export const COLUMNS: readonly Column[] = [
   {
     key: "time",
     label: "Time",
-    title: "Flight time (h:mm)",
+    title: "Flight time",
     numeric: true,
     value: (row) => row.totals?.seconds,
-    text: (row) => flightTime(row.totals?.seconds),
+    // As the statistics write it: a logbook's "1:25" reads as a time of day
+    text: (row) => {
+      const seconds = row.totals?.seconds;
+      return seconds === undefined ? MISSING : formatFlightTime(seconds);
+    },
   },
   {
     key: "distance",
