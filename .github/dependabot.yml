@@ -104,6 +104,13 @@ updates:
       # npm install -D --save-exact typescript7@npm:typescript@<version>
       - dependency-name: "typescript"
         update-types: ["version-update:semver-major"]
+      # scripts/build-helpers.js walks the AST of @babel/parser with the
+      # visitor keys and node types of @babel/types, so both stay on one
+      # major: types 8 came out while the parser's latest was still 7, and
+      # the type checks refused the mix. Bump both by hand once parser 8 is
+      # released.
+      - dependency-name: "@babel/types"
+        update-types: ["version-update:semver-major"]
     # A dependency joins the first group it matches, so the named groups come
     # before the catch-all for the remaining minor and patch updates
     groups:
