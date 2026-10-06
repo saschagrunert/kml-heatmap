@@ -42,7 +42,7 @@ from kml_heatmap.path_content import (
     path_content_id,
 )
 from kml_heatmap.segment_codec import FORMAT_VERSION, decode_ground
-from kml_heatmap.site_output import STAGING_PREFIX, SiteOutput
+from kml_heatmap.site_output import STAGING_PREFIX, SiteOutput, day_start
 from kml_heatmap.types import PathMetadata, TrackPoint
 from kml_heatmap.validation import protected_directories
 from tests.conftest import FlatTiles, decoded_segments
@@ -981,10 +981,74 @@ class TestSiteOutput:
         # In the past, whole seconds
         assert all(mtime < 1.3e9 and mtime == int(mtime) for mtime in first.values())
 
-    def test_mtimes_are_left_alone_by_default(self, tmp_path):
+    def test_files_are_dated_to_the_build_day_by_default(self, tmp_path):
+        """Not to the time of the build, which Last-Modified would publish."""
+        out = tmp_path / "out"
         before = time.time()
-        _publish_site(tmp_path / "out")
-        assert (tmp_path / "out" / "index.html").stat().st_mtime >= before - 2
+        _publish_site(out)
+        midnight = day_start()
+        assert midnight <= before < midnight + 86400
+        assert {path.stat().st_mtime for path in out.rglob("*") if path.is_file()} == {
+            midnight
+        }
+
+    def test_a_given_build_day(self, tmp_path):
+        out = tmp_path / "out"
+        with SiteOutput(out, out / "data", build_day=1735689600) as site:
+            _stage_site(site)
+            site.publish([2025])
+        assert (out / "index.html").stat().st_mtime == 1735689600
+
+    def test_a_rebuild_on_the_same_day(self, tmp_path):
+        """An unchanged file keeps its time, a changed one gets a newer one.
+
+        A server that compares the times (python -m http.server) would answer
+        a browser's If-Modified-Since with 304 for the old file otherwise.
+        """
+        out = tmp_path / "out"
+
+        def publish(page):
+            with SiteOutput(out, out / "data", build_day=1735689600) as site:
+                _stage_site(site, version="same")
+                (site.site_stage / "index.html").write_text(page)
+                site.publish([2025])
+            return {
+                name: (out / name).stat().st_mtime
+                for name in ("index.html", "data/2025/data.json")
+            }
+
+        assert publish("one") == {
+            "index.html": 1735689600,
+            "data/2025/data.json": 1735689600,
+        }
+        assert publish("two") == {
+            "index.html": 1735689601,
+            "data/2025/data.json": 1735689600,
+        }
+        assert publish("two")["index.html"] == 1735689601
+        # The next day starts at its own midnight again
+        with SiteOutput(out, out / "data", build_day=1735776000) as site:
+            _stage_site(site, version="same")
+            (site.site_stage / "index.html").write_text("three")
+            site.publish([2025])
+        assert (out / "index.html").stat().st_mtime == 1735776000
+
+    def test_a_time_of_day_left_by_an_older_build_goes(self, tmp_path):
+        """Even for a file the build did not change: it may date a flight."""
+        out = tmp_path / "out"
+        with SiteOutput(out, out / "data", build_day=1735689600) as site:
+            _stage_site(site, version="same")
+            site.publish([2025])
+        # 2025-01-01 14:32 UTC, as a build before the day rule left it
+        for path in out.rglob("*"):
+            if path.is_file():
+                os.utime(path, (1735741920, 1735741920))
+        with SiteOutput(out, out / "data", build_day=1735689600) as site:
+            _stage_site(site, version="same")
+            site.publish([2025])
+        assert {path.stat().st_mtime for path in out.rglob("*") if path.is_file()} == {
+            1735689600
+        }
 
     def test_the_entry_points_are_published_last(self, tmp_path):
         """A page loaded meanwhile never points at a file not in place yet."""

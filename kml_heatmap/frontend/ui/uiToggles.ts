@@ -313,10 +313,9 @@ export class UIToggles {
       ? await withMapStill(map, capture, scale)
       : await capture();
 
-    const filename =
-      "heatmap_" +
-      new Date().toISOString().slice(0, 19).replace(/[:.]/g, "-") +
-      ".jpg";
+    // Named after the year shown, not the time of the export: an image
+    // posted right after a flight would give its time of day away
+    const filename = "heatmap_" + this.app.store.get("selectedYear") + ".jpg";
 
     const outcome = await deliverImage(dataUrl, filename);
     if (outcome === "shared") {

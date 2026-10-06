@@ -13,8 +13,9 @@ __all__ = [
     "parse_timestamp_epoch",
 ]
 
-# A date as flight logs write it into names: "16 Aug 2026" or "2026-08-16"
-DATE_PATTERN = re.compile(r"(\d{2}\s+\w{3}\s+\d{4}|\d{4}-\d{2}-\d{2})")
+# A date as flight logs write it into names: "16 Aug 2026", "6 Aug 2026" or
+# "2026-08-16"
+DATE_PATTERN = re.compile(r"(?<!\d)(\d{1,2}\s+\w{3}\s+\d{4}|\d{4}-\d{2}-\d{2})")
 # "2024-03-14 09:12:00": a space instead of the "T", which some tools write
 # and others read, or a lowercase "t", which RFC 3339 allows
 _LOOSE_TIMESTAMP_PATTERN = re.compile(r"^(\d{4}-\d{2}-\d{2})[ t](\d)")

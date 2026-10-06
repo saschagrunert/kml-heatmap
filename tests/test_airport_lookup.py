@@ -695,6 +695,12 @@ class TestSplitRouteName:
                 ("Private Strip", "EDAQ Halle-Oppin"),
             ),
             ("Some Field - Other Field", ("Some Field", "Other Field")),
+            ("EDDS to EDDP - 6 Aug 2026", ("EDDS", "EDDP")),
+            # VIII is August in a Polish date, no airport code
+            (
+                "Aunt farm 16.VIII.2026 - Home strip",
+                ("Aunt farm 16.VIII.2026", "Home strip"),
+            ),
         ],
     )
     def test_routes(self, name, expected):

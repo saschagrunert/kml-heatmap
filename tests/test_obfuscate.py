@@ -10,11 +10,18 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-from hypothesis import given, settings
+from hypothesis import example, given, settings
 from hypothesis import strategies as st
 
 import kml_heatmap.obfuscate as obfuscate_module
 from kml_heatmap.aircraft import parse_aircraft_from_filename
+from kml_heatmap.date_tokens import (
+    find_date_tokens,
+    find_holiday_tokens,
+    find_partial_date_tokens,
+    find_time_tokens,
+    find_weekday_tokens,
+)
 from kml_heatmap.obfuscate import (
     GENERIC_CREATOR,
     _extract_frac,
@@ -2205,11 +2212,19 @@ class TestNamesAndDescriptions:
                     "16.08.",
                     "2026",
                     "Bob",
+                    "16.VII.2026",
+                    "Christmas",
+                    "1755350000",
+                    "Sa",
                 ]
             ),
             max_size=8,
         )
     )
+    # Found by Hypothesis: each pass of the rewrite took one weekday or year
+    # less, and three passes were not enough
+    @example(["Sat", "Sat", "Sat", "14:30", "2026-08-16"])
+    @example(["16 Aug", "2026", "14:30", "2026", "2026", "2026"])
     def test_the_rewrite_is_idempotent(self, words):
         content = f"<kml><name>{' '.join(words)}</name></kml>"
         once = obfuscate_kml_content(content) or content
@@ -2356,3 +2371,162 @@ class TestRenameDatedFiles:
             main()
         assert [path.name for path in tmp_path.iterdir()] == ["3_DEAGJ_DA20.kml"]
         assert check_directory_obfuscated(tmp_path) == {}
+
+
+class TestRenamedNamesAreClean:
+    """The renamer leaves nothing the check would report, however it nests."""
+
+    @pytest.mark.parametrize(
+        ("name", "renamed"),
+        [
+            ("EDDS Sat 14:30 16 Aug 2026.kml", "EDDS.kml"),
+            ("LOWW_Fri_0930Z_2026-08-14.kml", "LOWW.kml"),
+            ("Sa 14.30 Uhr 16.08.2026 EDDS.kml", "EDDS.kml"),
+            ("EDDS Sat Sat 2026-08-16.kml", "EDDS.kml"),
+            ("EDDS Heiligabend.kml", "EDDS.kml"),
+            ("EDDS 16.VII.2026.kml", "EDDS.kml"),
+        ],
+    )
+    def test_names(self, tmp_path, name, renamed):
+        path = tmp_path / name
+        path.write_text(_kml(""), encoding="utf-8")
+        assert rename_dated_files([path]) == [tmp_path / renamed]
+        assert check_kml_obfuscated(tmp_path / renamed) == []
+
+    @given(
+        st.lists(
+            st.sampled_from(
+                [
+                    "EDDS",
+                    "Bob",
+                    "Sat",
+                    "Fri",
+                    "Sa",
+                    "14:30",
+                    "0930Z",
+                    "14.30 Uhr",
+                    "16 Aug 2026",
+                    "2026-08-16",
+                    "16.08.2026",
+                    "16.VII.2026",
+                    "16Aug",
+                    "Sunday",
+                    "Christmas",
+                    "1755350000",
+                ]
+            ),
+            min_size=1,
+            max_size=7,
+        ),
+        st.sampled_from([" ", "_", "-"]),
+    )
+    def test_a_rename_is_final(self, words, separator):
+        stem = separator.join(words)
+        undated = obfuscate_module._undated_stem(stem)
+        if undated is None:
+            # Nothing to take out: the check finds nothing either
+            undated = stem
+        elif undated:
+            assert obfuscate_module._undated_stem(undated) is None
+        for found in (
+            find_date_tokens(undated, skip_near_jan_first=True),
+            find_partial_date_tokens(undated),
+            find_time_tokens(undated),
+            find_weekday_tokens(undated),
+            find_holiday_tokens(undated),
+        ):
+            assert found == [], (stem, undated)
+
+
+class TestCheckSeesThroughMarkup:
+    def test_a_date_split_by_cdata(self, tmp_path):
+        path = tmp_path / "1_DEHYL_DA40.kml"
+        path.write_text(
+            _kml("<description>Flight 16.<![CDATA[08]]>.2026</description>"),
+            encoding="utf-8",
+        )
+        assert "Date not on Jan 1: 16.08.2026" in check_kml_obfuscated(path)
+
+    def test_cdata_around_a_whole_text_is_scanned_once(self):
+        content = "<description><![CDATA[EDDS 2026-01-01]]></description>"
+        assert obfuscate_module._with_markup_dropped(content) == content
+
+    def test_a_holiday(self, tmp_path):
+        path = tmp_path / "1_DEHYL_DA40.kml"
+        path.write_text(_kml("<name>Heiligabend bei Oma</name>"), encoding="utf-8")
+        assert check_kml_obfuscated(path) == [
+            "Holiday gives the day of the flight away, remove it: Heiligabend"
+        ]
+        assert obfuscate_kml_content(path.read_text(encoding="utf-8")) == _kml(
+            "<name>bei Oma</name>"
+        )
+
+    def test_a_holiday_in_the_file_name(self, tmp_path):
+        path = tmp_path / "1_DEHYL_DA40_Christmas.kml"
+        path.write_text(_kml(""), encoding="utf-8")
+        assert check_kml_obfuscated(path) == ["File name contains a holiday: Christmas"]
+
+    def test_a_place_named_after_a_holiday(self, tmp_path):
+        path = tmp_path / "1_DEHYL_DA40.kml"
+        path.write_text(_kml("<name>YPXM Christmas Island</name>"), encoding="utf-8")
+        assert check_kml_obfuscated(path) == []
+
+    def test_a_roman_month(self, tmp_path):
+        path = tmp_path / "1_DEHYL_DA40.kml"
+        path.write_text(
+            _kml("<name>Aunt farm 16.VII.2026 - Home strip</name>"), encoding="utf-8"
+        )
+        assert check_kml_obfuscated(path) == ["Date not on Jan 1: 16.VII.2026"]
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "Section 2. IV of the AIP",
+            "Leg 3. II done",
+            "Trip 2026. V speeds checked",
+            "SkyDemon v.2024 export",
+            "Flown in summer 2026. I liked it",
+        ],
+    )
+    def test_text_that_only_looks_like_a_roman_month(self, tmp_path, text):
+        content = _kml(f"<description>{text}</description>")
+        path = tmp_path / "1_DEHYL_DA40.kml"
+        path.write_text(content, encoding="utf-8")
+        assert check_kml_obfuscated(path) == []
+        assert obfuscate_kml_content(content) is None
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root lists any directory")
+class TestUnlistedDirectories:
+    def test_a_directory_that_cannot_be_listed_fails_the_check(self, tmp_path):
+        (tmp_path / "1_DEHYL_DA40.kml").write_text(_kml(""), encoding="utf-8")
+        locked = tmp_path / "locked"
+        locked.mkdir()
+        (locked / "2_DEHYL_DA40.kml").write_text(_kml(""), encoding="utf-8")
+        locked.chmod(0)
+        try:
+            assert check_directory_obfuscated(tmp_path) == {
+                "locked/": [
+                    (
+                        "Cannot list the directory, so its files are not "
+                        "checked: fix its permissions"
+                    )
+                ]
+            }
+        finally:
+            locked.chmod(0o755)
+
+    def test_the_check_of_an_unlistable_directory_fails(self, tmp_path, capsys):
+        locked = tmp_path / "locked"
+        locked.mkdir()
+        locked.chmod(0)
+        try:
+            with (
+                patch("sys.argv", ["obfuscate", str(locked), "--check"]),
+                pytest.raises(SystemExit) as exit_info,
+            ):
+                main()
+        finally:
+            locked.chmod(0o755)
+        assert exit_info.value.code == 1
+        assert "Cannot list the directory" in capsys.readouterr().out

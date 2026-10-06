@@ -332,6 +332,16 @@ class TestExtractPlacemarkMetadata:
         assert result["timestamp"] == "16 Aug 2026"
         assert result["year"] == 2026
 
+    def test_a_date_in_the_name_with_a_day_of_one_digit(self):
+        placemark = etree.fromstring(
+            "<Placemark><name>EDDS to EDDP - 6 Aug 2026</name></Placemark>"
+        )
+        result = extract_placemark_metadata(placemark, NS)
+        assert result["timestamp"] == "6 Aug 2026"
+        assert result["year"] == 2026
+        assert result["start_airport"] == "EDDS Stuttgart"
+        assert result["end_airport"] == "EDDP Leipzig/Halle"
+
     def test_route_airports_are_kept_apart(self):
         """LFBN is "Niort - Marais Poitevin"; the display name cannot be split."""
         placemark = etree.fromstring(

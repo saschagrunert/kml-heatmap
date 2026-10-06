@@ -48,12 +48,13 @@ from .site_assets import (
     SITE_FILE_PATTERNS,
     SITE_FILES,
     available_country_flags,
+    build_time,
     missing_build_files,
     package_assets,
     render_html,
     warn_about_a_stale_bundle,
 )
-from .site_output import STABLE_MTIMES_ENV, SiteOutput
+from .site_output import STABLE_MTIMES_ENV, SiteOutput, day_start
 from .validation import foreign_site_files, validate_kml_file, validate_output_dir
 from .workers import WorkerPool, default_worker_count, parse_worker_count
 
@@ -73,6 +74,7 @@ __all__ = [
     "foreign_output_error",
     "load_cached",
     "no_flight_reason",
+    "parse_files",
     "parse_inline",
 ]
 
@@ -336,6 +338,21 @@ def _load_or_parse_here(
     else:
         for kml_file, cache_path in uncached:
             record(parse_inline(kml_file, cache_path))
+
+
+def parse_files(
+    valid_files: list[str], airports: dict[str, AirportRecord]
+) -> list[ParsedFile]:
+    """The parses of files, in their order, as a build reads or parses them.
+
+    From the parse cache, and the misses here or in a process pool (see
+    ``_load_or_parse_here``); ``--list`` reads its files through this.
+    """
+    results: list[ParsedFile] = []
+    _load_or_parse_here(valid_files, results.append, airports)
+    order = {kml_file: index for index, kml_file in enumerate(valid_files)}
+    results.sort(key=lambda parsed: order[parsed.kml_file])
+    return results
 
 
 @contextlib.contextmanager
@@ -606,12 +623,16 @@ def _export_site(
     available_flags = available_country_flags(countries)
 
     data_dir_name = data_dir.name
+    # Read once: the day of map_config.js and that of the file times are
+    # the same, and an invalid SOURCE_DATE_EPOCH is reported once
+    built_at = build_time()
     with SiteOutput(
         output_file.parent,
         data_dir,
         SITE_FILES,
         SITE_FILE_PATTERNS,
         stable_mtimes=os.environ.get(STABLE_MTIMES_ENV) == "1",
+        build_day=day_start(built_at),
     ) as site:
         result = export_all_data(
             all_path_groups,
@@ -638,6 +659,7 @@ def _export_site(
             extent.as_map_bounds(),
             data_dir_name,
             countries,
+            built_at,
         )
         write_previews(
             site.site_stage,

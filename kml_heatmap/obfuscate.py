@@ -20,12 +20,13 @@ EDDP - 16 Aug 2026", "EDDS to EDDP - 2026-08-16") and the SkyDemon marker
 names (Log Start, Takeoff, Landing, Log Stop), which lose their time. A
 date in a name that the parser reads a year from ("16 Aug 2026",
 "2026-08-16") moves to January 1st as well; every other date, part of a
-date, time of day and weekday in a name or a description is taken out
-(``date_tokens.stray_date_spans``), as the check would report it. Every
-``creator`` attribute is replaced with a generic value. Files are rewritten
-atomically and in place; ``rename_dated_files`` removes the date and time
-from Charterware file names ("2026-01-12_1513h_OE-AKI_LOAV-LOAV.kml") and
-the dates from other file names ("1_DEHYL_DA40_16Aug.kml").
+date, time of day, weekday, holiday and Unix time in a name or a
+description is taken out (``date_tokens.stray_date_spans``), as the check
+would report it, until nothing of it is left. Every ``creator`` attribute
+is replaced with a generic value. Files are rewritten atomically and in
+place; ``rename_dated_files`` removes the date and time from Charterware
+file names ("2026-01-12_1513h_OE-AKI_LOAV-LOAV.kml") and the dates from
+other file names ("1_DEHYL_DA40_16Aug.kml").
 """
 
 import argparse
@@ -43,26 +44,29 @@ from .cache import atomic_write
 from .constants import MAX_TIMESTAMP_DISTANCE_SECONDS
 from .date_tokens import (
     CHARTERWARE_DATE_PATTERN,
+    EPOCH_PATTERN,
     MAX_DAYS_AFTER_JAN_1,
     MONTHS_LONG,
     MONTHS_SHORT,
     any_month_number,
     charterware_datetime,
+    epoch_is_obfuscated,
+    epoch_spans,
     find_date_tokens,
+    find_holiday_tokens,
     find_partial_date_tokens,
     find_time_tokens,
     find_weekday_tokens,
     month_number,
-    near_jan_first,
     stray_date_spans,
     without_spans,
 )
 from .helpers import normalize_timestamp_text, parse_iso_timestamp
 from .logger import logger
-from .validation import find_kml_files as _find_kml_files
+from .validation import KmlListing, list_kml_files
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Callable, Iterable
 
 __all__ = [
     "check_directory_obfuscated",
@@ -88,6 +92,11 @@ TIMESTAMP_PATTERN = re.compile(
 CDATA_PATTERN = re.compile(r"^\s*<!\[CDATA\[(.*?)\]\]>\s*$", re.DOTALL)
 # Comments and processing instructions, which the parser drops
 COMMENT_PATTERN = re.compile(r"<!--.*?-->|<\?.*?\?>", re.DOTALL)
+# The marks around a CDATA section, and a section that stands in the middle
+# of a text rather than around all of it ("16.<![CDATA[08]]>.2026"): the
+# text a reader sees runs across it
+CDATA_MARK_PATTERN = re.compile(r"<!\[CDATA\[|\]\]>")
+_SPLIT_CDATA = re.compile(r"[^>\s]<!\[CDATA\[|\]\]>[^<\s]")
 # The declaration a document starts with, the one processing instruction
 # every KML file has
 XML_DECLARATION_PATTERN = re.compile(r"\A\ufeff?\s*<\?xml\b.*?\?>", re.DOTALL)
@@ -130,9 +139,6 @@ ROUTE_DATE_PATTERN = re.compile(
 NAME_YEAR_DATE_PATTERN = re.compile(
     r"(?P<day>\d{1,2})\s+(?P<month>\w{3})\s+(?P<year>\d{4})|(?P<iso_year>\d{4})-\d{2}-\d{2}"
 )
-# How often a name or a description is scrubbed at most: what one pass
-# leaves may read as a date of its own
-_SCRUB_PASSES = 3
 # A name or a description, plain, in CDATA or with a comment or a processing
 # instruction inside, which a reader drops
 TEXT_ELEMENT_PATTERN = re.compile(
@@ -490,13 +496,29 @@ def _name_date_on_jan_first(match: re.Match[str]) -> str:
     return f"01 Jan {match['year']}"
 
 
-def _epoch_spans(text: str) -> list[tuple[int, int]]:
-    """The Unix times of past flights in a text (see ``_find_stray_epochs``)."""
-    return [
-        match.span()
-        for match in _EPOCH_PATTERN.finditer(text)
-        if not _epoch_is_obfuscated(match.group(1))
-    ]
+def _until_unchanged(step: Callable[[str], str], text: str) -> str:
+    """``text`` after ``step``, applied again until it changes nothing.
+
+    What one pass leaves may read as a date of its own, or stand next to
+    one now ("Sat Sat 16 Aug" once the first "Sat" is gone), so a single
+    pass, or any fixed number of them, can leave something the check
+    reports. A pass that changes the text takes something out of it, but
+    for the first one, which may move a date to January 1st and lengthen it
+    by a digit ("6 Aug 2026" is "01 Jan 2026"), so the passes end.
+    """
+    for _ in range(2 * len(text) + 2):
+        again = step(text)
+        if again == text:
+            break
+        text = again
+    return text
+
+
+def _scrubbed_once(kind: str, text: str) -> str:
+    if kind == "name":
+        text = NAME_YEAR_DATE_PATTERN.sub(_name_date_on_jan_first, text)
+    scanned = _without_charterware_dates(text)
+    return without_spans(text, stray_date_spans(scanned) + epoch_spans(scanned))
 
 
 def _scrubbed_text(kind: str, text: str) -> str:
@@ -504,19 +526,12 @@ def _scrubbed_text(kind: str, text: str) -> str:
 
     A date of a name that the parser reads the year from moves to January
     1st (the route names of SkyDemon, "EDDS to EDDP - 16 Aug 2026"), and
-    the rest goes: ``date_tokens.stray_date_spans`` and the Unix times. The
+    the rest goes: ``date_tokens.stray_date_spans`` and the Unix times,
+    until nothing of them is left (see ``_until_unchanged``). The
     Charterware date of a description, which the rewrite has moved already,
     stays.
     """
-    for _ in range(_SCRUB_PASSES):
-        before = text
-        if kind == "name":
-            text = NAME_YEAR_DATE_PATTERN.sub(_name_date_on_jan_first, text)
-        scanned = _without_charterware_dates(text)
-        text = without_spans(text, stray_date_spans(scanned) + _epoch_spans(scanned))
-        if text == before:
-            break
-    return text
+    return _until_unchanged(lambda current: _scrubbed_once(kind, current), text)
 
 
 def _scrub_text_element(match: re.Match[str]) -> str:
@@ -798,15 +813,10 @@ def rename_charterware_files(filepaths: Iterable[Path]) -> list[Path]:
 _NAME_SEPARATORS = re.compile(r"([-_. ])[-_. ]+")
 
 
-def _undated_stem(stem: str) -> str | None:
-    """A file name without what the check reports in it, None if unchanged.
-
-    The dates, parts of dates, times of day and weekdays go with the
-    separator they leave doubled ("1_DEHYL_DA40_16Aug" is "1_DEHYL_DA40").
-    """
-    spans = sorted(stray_date_spans(stem) + _epoch_spans(stem))
+def _undated_once(stem: str) -> str:
+    spans = sorted(stray_date_spans(stem) + epoch_spans(stem))
     if not spans:
-        return None
+        return stem
     kept = []
     position = 0
     for start, end in spans:
@@ -814,6 +824,19 @@ def _undated_stem(stem: str) -> str | None:
         position = max(position, end)
     kept.append(stem[position:])
     return _NAME_SEPARATORS.sub(r"\1", "".join(kept)).strip("-_. ")
+
+
+def _undated_stem(stem: str) -> str | None:
+    """A file name without what the check reports in it, None if unchanged.
+
+    The dates, parts of dates, times of day, weekdays and holidays go with
+    the separator they leave doubled ("1_DEHYL_DA40_16Aug" is
+    "1_DEHYL_DA40"), until nothing of them is left (see
+    ``_until_unchanged``): "EDDS Sat 14:30 16 Aug 2026" loses the "Sat" as
+    well.
+    """
+    undated = _until_unchanged(_undated_once, stem)
+    return None if undated == stem else undated
 
 
 def _aircraft_of(name: str) -> tuple[str | None, str | None]:
@@ -882,20 +905,26 @@ def find_kml_files(directory: Path) -> list[Path]:
     """List the KML files of a directory tree, the ones the generator reads.
 
     The generator (``cli._collect_kml_files``) and this module share
-    ``validation.find_kml_files``, so they agree on the extension (``.kml``
+    ``validation.list_kml_files``, so they agree on the extension (``.kml``
     and ``.KML`` alike) and on the subdirectories: a file in a subfolder of
     the data directory is checked like the generator publishes it. Symlinks
     are skipped with a warning, as the generator refuses them: rewriting one
     would replace the link with a regular file and leave the dates in its
     target.
     """
+    return _list_kml_files(directory).files
+
+
+def _list_kml_files(directory: Path) -> KmlListing:
+    """``find_kml_files`` with the directories that could not be listed."""
+    listing = list_kml_files(directory)
     kml_files = []
-    for path in _find_kml_files(directory):
+    for path in listing.files:
         if path.is_symlink():
             logger.warning("Skipping %s: symlinks are not allowed", path)
         else:
             kml_files.append(path)
-    return kml_files
+    return KmlListing(kml_files, listing.unlisted)
 
 
 def _leftover_temp_files(directory: Path) -> list[Path]:
@@ -923,18 +952,8 @@ def _obfuscate_listed_files(kml_files: list[Path]) -> int:
 
 
 # Date shapes that may appear anywhere in a document written by another tool
-# are those of date_tokens, plus Unix time (seconds or milliseconds), in a
-# data value ("<value>1710406320</value>"), a name ("Flight 1710406320") or
-# anywhere else in the text but the coordinates, which the check leaves out
-# first: ten or thirteen digits that are no part of a longer number. The
-# fraction of a decimal number (12.1710406320) is none either, but a dot
-# after a word ("log.1710406320") is only a separator.
-_EPOCH_PATTERN = re.compile(r"(?<!\d)(?<!\d\.)(\d{13}|\d{10})(?:\.\d+)?(?!\d)")
-# Before 2000 a ten-digit number is no time a flight log would hold
-_EPOCH_START = datetime(2000, 1, 1, tzinfo=UTC).timestamp()
-# The latest a recorded flight can be: its time is never in the future. A
-# day of slack covers a clock ahead of UTC.
-_EPOCH_SLACK = timedelta(days=1)
+# are those of date_tokens, plus Unix time (``date_tokens.EPOCH_PATTERN``)
+# anywhere in the text but the coordinates, which the check leaves out first.
 # A start or end tag with its attributes. Attribute values are ids and
 # references (a 13-digit style id), and the dates in them are checked by the
 # date patterns, so the Unix time scan reads the text between the tags only.
@@ -962,34 +981,21 @@ _REFERENCE_PATTERN = re.compile(
 )
 
 
-def _epoch_is_obfuscated(value: str) -> bool:
-    """Whether a Unix time gives neither a date nor a time of day away.
-
-    The rewrite leaves data values alone, so only midnight passes, on
-    January 1st or the days a flight runs into after it.
-    """
-    seconds = int(value) / (1000 if len(value) == 13 else 1)
-    latest = (datetime.now(UTC) + _EPOCH_SLACK).timestamp()
-    if not _EPOCH_START <= seconds < latest:
-        # Not the time of a past flight: a phone number, a serial number
-        return True
-    dt = datetime.fromtimestamp(seconds, tz=UTC)
-    return near_jan_first(dt.month, dt.day) and dt.time() == time()
-
-
 def _with_markup_dropped(content: str) -> str:
-    """The content, and after it again without comments and PIs.
+    """The content, and after it again without comments, PIs and CDATA marks.
 
     A reader, the parser among them, sees the text of an element without
-    them: "16<!-- -->.08.2026" reads as 16.08.2026, which the patterns only
-    find once the comment is out. The content itself stays, since a comment
+    them: "16<!-- -->.08.2026" reads as 16.08.2026, and so does
+    "16.<![CDATA[08]]>.2026", which the patterns only find once the comment
+    or the CDATA marks are out. The content itself stays, since a comment
     holds dates as well. A document whose only processing instruction is
-    the XML declaration is scanned once.
+    the XML declaration, and whose CDATA sections only wrap whole element
+    texts, is scanned once.
     """
     body = XML_DECLARATION_PATTERN.sub("", content, count=1)
-    if "<!--" not in body and "<?" not in body:
+    if "<!--" not in body and "<?" not in body and not _SPLIT_CDATA.search(body):
         return content
-    return content + "\n" + COMMENT_PATTERN.sub("", body)
+    return content + "\n" + CDATA_MARK_PATTERN.sub("", COMMENT_PATTERN.sub("", body))
 
 
 def _with_unescaped(content: str) -> str:
@@ -1024,8 +1030,8 @@ def _find_stray_epochs(content: str) -> list[str]:
     """
     return [
         match.group(1)
-        for match in _EPOCH_PATTERN.finditer(_epoch_text(content))
-        if not _epoch_is_obfuscated(match.group(1))
+        for match in EPOCH_PATTERN.finditer(_epoch_text(content))
+        if not epoch_is_obfuscated(match.group(1))
     ]
 
 
@@ -1133,6 +1139,10 @@ def check_kml_obfuscated(filepath: Path) -> list[str]:
             f"File name contains a weekday: {text}"
             for text in find_weekday_tokens(filepath.name)
         )
+        violations.extend(
+            f"File name contains a holiday: {text}"
+            for text in find_holiday_tokens(filepath.name)
+        )
         # A name keeps no time of day either ("1_DEHYL_1513h"): the export
         # takes it out, but the file is public. The time slot of a renamed
         # Charterware name is its sequence number.
@@ -1204,6 +1214,10 @@ def check_kml_obfuscated(filepath: Path) -> list[str]:
         for text in find_weekday_tokens(unescaped)
     )
     violations.extend(
+        f"Holiday gives the day of the flight away, remove it: {text}"
+        for text in find_holiday_tokens(unescaped)
+    )
+    violations.extend(
         f"Time of day gives the flight away, remove it: {text}"
         for text in _find_stray_times(without_coordinates, stray_dates)
     )
@@ -1217,8 +1231,18 @@ def _relative_name(path: Path, directory: Path) -> str:
     return path.relative_to(directory).as_posix()
 
 
-def _check_listed_files(kml_files: list[Path], directory: Path) -> dict[str, list[str]]:
+def _check_listed_files(
+    kml_files: list[Path], unlisted: Iterable[Path], directory: Path
+) -> dict[str, list[str]]:
     results: dict[str, list[str]] = {}
+    for path in unlisted:
+        # Its files are neither checked nor certified
+        results[_relative_name(path, directory) + "/"] = [
+            (
+                "Cannot list the directory, so its files are not checked: fix "
+                "its permissions"
+            )
+        ]
     for kml_file in kml_files:
         violations = check_kml_obfuscated(kml_file)
         if violations:
@@ -1238,9 +1262,10 @@ def check_directory_obfuscated(directory: Path) -> dict[str, list[str]]:
 
     Returns a dict mapping file names (relative to ``directory``) to their
     violations; only files with violations are included. A temp file left by
-    an interrupted rewrite is a violation as well.
+    an interrupted rewrite is a violation as well, and so is a directory
+    that cannot be listed.
     """
-    return _check_listed_files(find_kml_files(directory), directory)
+    return _check_listed_files(*_list_kml_files(directory), directory)
 
 
 def main() -> None:
@@ -1265,15 +1290,15 @@ def main() -> None:
         print(f"Error: {args.directory} is not a directory", file=sys.stderr)
         sys.exit(1)
 
-    kml_files = find_kml_files(args.directory)
+    listing = _list_kml_files(args.directory)
     if not args.check:
-        modified = _obfuscate_listed_files(kml_files)
-        print(f"Obfuscated {modified} of {len(kml_files)} KML file(s).")
+        modified = _obfuscate_listed_files(listing.files)
+        print(f"Obfuscated {modified} of {len(listing.files)} KML file(s).")
         # Renamed files carry new names; a file that could not be rewritten
         # (read-only, or a date in a place the tool does not touch) fails below
-        kml_files = find_kml_files(args.directory)
+        listing = _list_kml_files(args.directory)
 
-    violations = _check_listed_files(kml_files, args.directory)
+    violations = _check_listed_files(*listing, args.directory)
     if violations:
         print("Obfuscation violations found:")
         for filename, issues in violations.items():
@@ -1289,7 +1314,7 @@ def main() -> None:
             )
         sys.exit(1)
     if args.check:
-        print(f"All {len(kml_files)} KML file(s) are properly obfuscated.")
+        print(f"All {len(listing.files)} KML file(s) are properly obfuscated.")
 
 
 if __name__ == "__main__":

@@ -192,8 +192,10 @@ class TestCommitMessages:
         assert f"{sha[:7]} commit message: Sunday" in err
         assert "git commit --amend" in err
 
-    @pytest.mark.parametrize("message", ["Flights of 16 Aug", "Trip KW33"])
-    def test_refuses_a_part_of_a_date(self, repo, message):
+    @pytest.mark.parametrize(
+        "message", ["Flights of 16 Aug", "Trip KW33", "Heiligabend bei Oma"]
+    )
+    def test_refuses_what_dates_a_flight(self, repo, message):
         sha = commit(repo, {"data/2.kml": CLEAN_KML, "data/3.kml": CLEAN_KML}, message)
         assert run_check(repo, push_of(sha)) == 1
 

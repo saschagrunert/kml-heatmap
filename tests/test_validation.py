@@ -12,6 +12,7 @@ from kml_heatmap.validation import (
     find_kml_files,
     foreign_site_files,
     is_protected_directory,
+    list_kml_files,
     protected_directories,
     validate_kml_file,
     validate_output_dir,
@@ -297,3 +298,20 @@ class TestFindKmlFiles:
 
     def test_unlistable_directory_yields_nothing(self, tmp_path):
         assert find_kml_files(tmp_path / "missing") == []
+
+    def test_unlistable_directories_come_back(self, tmp_path):
+        (tmp_path / "1_x.kml").touch()
+        missing = tmp_path / "missing"
+        real_iterdir = Path.iterdir
+
+        def iterdir(path):
+            if path == tmp_path / "sub":
+                raise PermissionError("denied")
+            return real_iterdir(path)
+
+        (tmp_path / "sub").mkdir()
+        with patch.object(Path, "iterdir", iterdir):
+            listing = list_kml_files(tmp_path)
+        assert listing.files == [tmp_path / "1_x.kml"]
+        assert listing.unlisted == [tmp_path / "sub"]
+        assert list_kml_files(missing).unlisted == [missing]

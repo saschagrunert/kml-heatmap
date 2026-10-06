@@ -3,7 +3,7 @@
 import contextlib
 import os
 from pathlib import Path, PurePath
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NamedTuple
 
 from .helpers import numeric_filename_key
 from .logger import logger
@@ -69,7 +69,14 @@ def validate_kml_file(file_path: str) -> tuple[bool, str | None]:
     return True, None
 
 
-def find_kml_files(directory: Path) -> list[Path]:
+class KmlListing(NamedTuple):
+    """The KML files of a directory tree, and the directories not listed."""
+
+    files: list[Path]
+    unlisted: list[Path]
+
+
+def list_kml_files(directory: Path) -> KmlListing:
     """List the KML files of a directory tree, the one rule for every caller.
 
     The generator and the obfuscation pass (with its check) have to agree on
@@ -81,11 +88,24 @@ def find_kml_files(directory: Path) -> list[Path]:
     before ``10_x.kml``), subdirectories after the files of their parent.
     Symlinks to files are listed so that the caller can refuse or skip them;
     symlinks to directories are not followed. A directory that cannot be
-    listed yields no files. The AppleDouble files macOS writes next to every
+    listed yields no files, with a warning, and comes back in ``unlisted``:
+    the check has to fail on it rather than certify the files it never saw.
+    The AppleDouble files macOS writes next to every
     file on a foreign disk (``._1_x.kml``) are left out, being no KML, and
     so is ``.git``, which holds no flights. Other hidden files and
     directories are listed: the check has to see every file a build reads.
     """
+    listing = KmlListing([], [])
+    _collect_kml_files(directory, listing)
+    return listing
+
+
+def find_kml_files(directory: Path) -> list[Path]:
+    """The files of ``list_kml_files``, for a caller that only reads them."""
+    return list_kml_files(directory).files
+
+
+def _collect_kml_files(directory: Path, listing: KmlListing) -> None:
     try:
         entries = [
             entry
@@ -93,22 +113,24 @@ def find_kml_files(directory: Path) -> list[Path]:
             if not entry.name.startswith("._") and entry.name != ".git"
         ]
     except OSError as e:
-        logger.debug("Cannot list %s: %s", directory, e)
-        return []
+        logger.warning("Cannot list %s: %s", directory, e)
+        listing.unlisted.append(directory)
+        return
 
-    kml_files = sorted(
-        (
-            path
-            for path in entries
-            if path.suffix.lower() in KML_SUFFIXES
-            and (path.is_file() or path.is_symlink())
-        ),
-        key=lambda path: numeric_filename_key(path.name),
+    listing.files.extend(
+        sorted(
+            (
+                path
+                for path in entries
+                if path.suffix.lower() in KML_SUFFIXES
+                and (path.is_file() or path.is_symlink())
+            ),
+            key=lambda path: numeric_filename_key(path.name),
+        )
     )
     for child in sorted(entries):
         if child.is_dir() and not child.is_symlink():
-            kml_files.extend(find_kml_files(child))
-    return kml_files
+            _collect_kml_files(child, listing)
 
 
 def protected_directories() -> tuple[Path, ...]:

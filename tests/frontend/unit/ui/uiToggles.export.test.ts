@@ -465,7 +465,10 @@ describe("UIToggles export and share", () => {
       expect(createObjectURL).toHaveBeenCalledWith(expect.any(Blob));
       const link = clickedLink();
       expect(link.href).toBe("blob:mock-url");
-      expect(link.download).toMatch(/^heatmap_\d{4}-\d{2}-\d{2}T.*\.jpg$/);
+      // The year shown, never the time of the export
+      expect(link.download).toBe(
+        `heatmap_${app.store.get("selectedYear")}.jpg`,
+      );
       expect(link.isConnected).toBe(false);
       expect(toast()?.textContent).toBe("Map exported");
       // The object URL is released after the download had time to start
