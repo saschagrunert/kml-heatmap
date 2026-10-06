@@ -25,7 +25,7 @@ from kml_heatmap.types import COORDINATE_DECIMALS
 # The exporter's own rounding, which is what the format relies on
 coordinates = st.floats(-180, 180).map(lambda v: round(v, COORDINATE_DECIMALS))
 altitudes = st.integers(-1_000, 60_000).map(lambda v: float(v * 100))
-speeds = st.floats(0, 1000).map(lambda v: round(v, 1))
+speeds = st.integers(0, 1000).map(float)
 times = st.floats(0, 100_000).map(lambda v: round(v, 1))
 starts = st.tuples(coordinates, coordinates).map(list)
 
@@ -66,9 +66,9 @@ class TestRoundTrip:
 class TestEncoding:
     def test_the_first_row_is_a_difference_to_the_start(self):
         start = [50.0, 8.0]
-        encoded = encode_rows(start, [[50.00001, 8.00002, 500.0, 1.5, 2.0]])
+        encoded = encode_rows(start, [[50.00001, 8.00002, 500.0, 2.0, 2.0]])
 
-        assert encoded == [[1], [2], [25], [15], [20]]
+        assert encoded == [[1], [2], [25], [2], [20]]
 
     def test_rows_are_written_column_by_column(self):
         """A column of repeating differences is what gzip compresses best."""
@@ -80,7 +80,7 @@ class TestEncoding:
 
         encoded = encode_rows([50.0, 8.0], path_rows)
 
-        assert encoded == [[1, 1, 1], [0, 0, 0], [25, 1, 1], [900, 0, 0], [10] * 3]
+        assert encoded == [[1, 1, 1], [0, 0, 0], [25, 1, 1], [90, 0, 0], [10] * 3]
 
     def test_a_still_aircraft_encodes_to_zeros(self):
         """Repetition is what makes the format small."""
@@ -122,6 +122,19 @@ class TestEncoding:
         with pytest.raises(ValueError, match="multiple of 20"):
             encode_rows([50.0, 8.0], [[50.1, 8.1, 550.0, 1.0]])
 
+    def test_a_groundspeed_off_whole_knots_is_refused(self):
+        """The speed column is written in whole knots, as the exporter rounds."""
+        with pytest.raises(ValueError, match="whole number of knots"):
+            encode_rows([50.0, 8.0], [[50.1, 8.1, 500.0, 92.5]])
+
+    def test_whole_knots_are_written_as_they_are(self):
+        """No scale: a difference of 3 kt is a 3, not a 30."""
+        columns = encode_rows(
+            [50.0, 8.0], [[50.1, 8.1, 500.0, 90.0], [50.2, 8.2, 500.0, 93.0]]
+        )
+
+        assert columns[3] == [90, 3]
+
     @pytest.mark.parametrize("value", [0.0, -0.00001, 179.99999, -179.99999])
     def test_coordinate_extremes_survive(self, value):
         row = [value, value, 0.0, 0.0]
@@ -133,7 +146,7 @@ class TestEncoding:
 
 def test_the_format_version_is_pinned():
     """Bumping it is a deliberate act; the frontend checks the same number."""
-    assert FORMAT_VERSION == 5
+    assert FORMAT_VERSION == 6
 
 
 grounds = st.lists(

@@ -323,7 +323,7 @@ function isMetadata(value: unknown): value is Metadata {
  * the units a reader thinks in and encoded here, so the guards and the
  * loader are checked against an encoder that is not the one under test.
  */
-const SCALES = [1e5, 1e5, 1 / 20, 10, 10];
+const SCALES = [1e5, 1e5, 1 / 20, 1, 10];
 
 /** Tens of feet, GROUND_STEP of kml_heatmap/segment_codec.py */
 const GROUND_SCALE = 1 / 10;

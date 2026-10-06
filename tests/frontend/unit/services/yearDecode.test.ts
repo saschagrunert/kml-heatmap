@@ -29,8 +29,8 @@ describe("decodeYear", () => {
           "7": path(
             [50, 8],
             [
-              [50.1, 8.1, 500, 1.5, 2],
-              [50.2, 8.2, 600, 2.5],
+              [50.1, 8.1, 500, 2, 2],
+              [50.2, 8.2, 600, 3],
             ],
           ),
           "9": path([51, 9], [[51.1, 9.1, 700, 90]]),
@@ -45,7 +45,7 @@ describe("decodeYear", () => {
     expect([...decoded.lats]).toEqual([50, 50.1, 50.2, 51, 51.1]);
     expect([...decoded.lons]).toEqual([8, 8.1, 8.2, 9, 9.1]);
     expect([...decoded.altitudes]).toEqual([500, 600, 700]);
-    expect([...decoded.speeds]).toEqual([1.5, 2.5, 90]);
+    expect([...decoded.speeds]).toEqual([2, 3, 90]);
     // A row without a time is NaN
     expect([...decoded.times]).toEqual([2, NaN, NaN]);
     expect(decoded.path_info).toEqual([{ id: 7 }, { id: 9 }]);
@@ -471,7 +471,7 @@ describe("expandYearData", () => {
     ).toThrow("segments");
   });
 
-  it.each([undefined, 4, 6, "5"])(
+  it.each([undefined, 5, 7, "6"])(
     "refuses a year file written in format %s",
     (format) => {
       expect(() =>
@@ -490,8 +490,8 @@ describe("expandYearData", () => {
         "1": path(
           [50, 8],
           [
-            [50.1, 8.1, 500, 1.5, 2],
-            [50.2, 8.2, 600, 2.5, 4],
+            [50.1, 8.1, 500, 2, 2],
+            [50.2, 8.2, 600, 3, 4],
           ],
         ),
       }),
@@ -502,14 +502,14 @@ describe("expandYearData", () => {
       [50.1, 8.1],
     ]);
     expect(data.path_segments[0]!.altitude_ft).toBe(500);
-    expect(data.path_segments[0]!.groundspeed_knots).toBe(1.5);
+    expect(data.path_segments[0]!.groundspeed_knots).toBe(2);
     expect(data.path_segments[0]!.time).toBe(2);
     expect(data.path_segments[1]!.coords).toEqual([
       [50.1, 8.1],
       [50.2, 8.2],
     ]);
     expect(data.path_segments[1]!.altitude_ft).toBe(600);
-    expect(data.path_segments[1]!.groundspeed_knots).toBe(2.5);
+    expect(data.path_segments[1]!.groundspeed_knots).toBe(3);
     expect(data.path_segments[1]!.time).toBe(4);
   });
 });

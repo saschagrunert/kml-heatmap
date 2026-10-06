@@ -27,6 +27,10 @@ Format 5 writes the altitudes in steps of 20 ft instead of 100 ft, so a
 1000 ft circuit no longer draws as ten stairs, and carries the landings of
 every flight in its path info (see ``kml_heatmap.landings``).
 
+Format 6 writes the groundspeeds in whole knots instead of tenths. The
+exporter already rounded them to whole knots, so every speed difference
+carried a trailing zero that only cost bytes.
+
 ``kml_heatmap/frontend/services/yearDecode.ts`` mirrors ``decode_rows`` and
 ``decode_ground``; the year file carries ``FORMAT_VERSION`` so the two cannot
 be mismatched silently.
@@ -58,17 +62,16 @@ __all__ = [
 
 # Bumped whenever the layout below changes, so a page never reads a year
 # file written by another release's exporter as if it were its own
-FORMAT_VERSION = 5
+FORMAT_VERSION = 6
 
 # How each column becomes an integer: the step the exporter rounds it to.
 # process_path_segments rounds coordinates to COORDINATE_DECIMALS ...
 COORDINATE_SCALE = 10**COORDINATE_DECIMALS
 # ... altitudes to multiples of 20 ft, which are written in twenties ...
 ALTITUDE_STEP = 20
-# ... and groundspeeds and relative times to one decimal. The exporter
-# rounds the speeds further, to whole knots (see
-# export_pipeline.exported_knots), which the format carries as they are
-SPEED_SCALE = 10
+# ... groundspeeds to whole knots (see export_pipeline.exported_knots) ...
+SPEED_SCALE = 1
+# ... and relative times to one decimal
 TIME_SCALE = 10
 # The ground is written in steps of 10 ft: the altitudes above it are
 # rounded to 20 ft, and a finer ground would only cost bytes
@@ -94,6 +97,9 @@ def _scale(row: SegmentRow) -> list[int | None]:
     if altitude % ALTITUDE_STEP:
         # The format counts in steps; refuse to lose the rest silently
         msg = f"altitude {altitude} is not a multiple of {ALTITUDE_STEP} ft"
+        raise ValueError(msg)
+    if row[SPEED] * SPEED_SCALE % 1:
+        msg = f"groundspeed {row[SPEED]} is not a whole number of knots"
         raise ValueError(msg)
     return [
         round(row[LAT] * COORDINATE_SCALE),
