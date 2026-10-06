@@ -100,7 +100,6 @@ const PARSER_PLUGINS = [
   "decoratorAutoAccessors",
   "deferredImportEvaluation",
   "sourcePhaseImports",
-  "explicitResourceManagement",
 ];
 
 /**
