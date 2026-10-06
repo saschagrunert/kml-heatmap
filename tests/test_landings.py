@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 
 import kml_heatmap.airport_lookup as lookup_module
+import kml_heatmap.landings as landings_module
 from kml_heatmap.airport_lookup import (
     REQUIRE_DATABASE_ENV,
     AirportRecord,
@@ -131,6 +132,23 @@ class TestTheRules:
         assert (found.landings, found.touch_and_goes, found.go_arounds) == (1, 1, 0)
         assert found.touchdowns == [("EXMP", "27"), ("EXMP", "27")]
         assert found.circuits == 2
+
+    def test_a_touch_and_go_slower_than_the_contact_speed_is_a_go_around(self):
+        """Between STOP_KNOTS and CONTACT_KNOTS no contact is recorded.
+
+        A touch-and-go at 30 kt over the ground (into a strong headwind) is
+        therefore counted as a go-around, the same flight at 40 kt as a
+        touch-and-go. This documents the rule; it is not a goal.
+        """
+        slow = Flight().takeoff().circuit().leg(90, 30, -500).leg(10, 30)
+        slow.leg(80, 30, 700).circuit().final().stop()
+        fast = Flight().takeoff().circuit().leg(90, 40, -500).leg(10, 40)
+        fast.leg(80, 40, 700).circuit().final().stop()
+
+        slow_found, fast_found = _detect(slow), _detect(fast)
+
+        assert (slow_found.touch_and_goes, slow_found.go_arounds) == (0, 1)
+        assert (fast_found.touch_and_goes, fast_found.go_arounds) == (1, 0)
 
     def test_the_takeoff_roll_is_no_touch_and_go(self):
         """A touchdown only counts after a climb of 400 ft."""
@@ -556,3 +574,23 @@ class TestRunwayDatabase:
 
     def test_the_list_is_loaded_once_per_process(self):
         assert load_runway_database() is load_runway_database()
+
+
+class TestFieldsOfThisProcess:
+    def test_the_fields_are_built_once_for_the_databases(self):
+        first = landings_module._fields_of_this_process()
+        assert landings_module._fields_of_this_process() is first
+
+    def test_the_fields_follow_the_databases_after_a_reset(self):
+        """A refresh resets the databases: the fields come from the new ones."""
+        before = landings_module._fields_of_this_process()
+        lookup_module.databases.reset()
+        lookup_module.databases.use(
+            {"EXMP": AirportRecord(50.0, 8.0, "Example", "DE", 150.0)}
+        )
+        lookup_module.databases.runways = {"EXMP": FIELD.runways}
+
+        after = landings_module._fields_of_this_process()
+
+        assert after is not before
+        assert len(after) == 1

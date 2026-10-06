@@ -4,7 +4,6 @@
  */
 
 import type { Airport, PathInfo } from "../types";
-import { filterPaths } from "../calculations/statistics";
 import { siteData } from "../state/siteData";
 
 /** Class of the element MapLibre positions; the stylesheet resets it */
@@ -104,23 +103,19 @@ export interface AirportCounts {
 }
 
 /**
- * Calculate airport flight counts based on filtered paths
- * @param pathInfo - Array of path info objects
- * @param year - Year filter
- * @param aircraft - Aircraft filter
+ * Calculate airport flight counts of paths (those a filter keeps: see
+ * FilterView.airportCounts)
+ * @param paths - Array of path info objects
  * @returns Map of airport name to flight count
  */
 export function calculateAirportFlightCounts(
-  pathInfo: PathInfo[],
-  year: string = "all",
-  aircraft: string = "all",
+  paths: readonly PathInfo[],
 ): AirportCounts {
   // No prototype: an airport name is data, and "constructor" is no key
   const counts = Object.create(null) as AirportCounts;
-  const filteredPaths = filterPaths(pathInfo, year, aircraft);
 
   // Count unique airports per flight (avoid double-counting round trips)
-  for (const path of filteredPaths) {
+  for (const path of paths) {
     const uniqueAirports = new Set<string>();
     if (path.start_airport) {
       uniqueAirports.add(path.start_airport);
@@ -163,52 +158,28 @@ export function findHomeBase(airportCounts: AirportCounts): string | null {
  * - selection: airports of the selected paths are added, so a selection
  *   never hides an airport the filter shows (with or without a filter)
  * - isolate mode: only airports of the selected paths
+ * @param filtered - The paths the year/aircraft filter keeps, null for none
+ * @param selectedPathIds - The selected paths
+ * @param isolateSelection - Whether the selection is isolated
+ * @param pathInfoById - The paths of the dataset by id
  * @returns Set of visible airport names, or null when all are visible
  */
-export function calculateVisibleAirports(options: {
-  pathInfo: PathInfo[];
-  selectedYear?: string;
-  selectedAircraft?: string;
-  selectedPathIds?: Set<number>;
-  isolateSelection?: boolean;
-  pathInfoById?: Map<number, PathInfo>;
-}): Set<string> | null {
-  const {
-    pathInfo,
-    selectedYear = "all",
-    selectedAircraft = "all",
-    selectedPathIds = new Set<number>(),
-    isolateSelection = false,
-  } = options;
-
-  const hasFilters = selectedYear !== "all" || selectedAircraft !== "all";
-  const hasSelection = selectedPathIds.size > 0;
-  const hasIsolation = isolateSelection && hasSelection;
-
-  if (!hasFilters && !hasIsolation) {
-    return null;
-  }
+export function calculateVisibleAirports(
+  filtered: readonly PathInfo[] | null,
+  selectedPathIds: ReadonlySet<number>,
+  isolateSelection: boolean,
+  pathInfoById: ReadonlyMap<number, PathInfo>,
+): Set<string> | null {
+  const hasIsolation = isolateSelection && selectedPathIds.size > 0;
+  if (!filtered && !hasIsolation) return null;
 
   const visible = new Set<string>();
-
+  const add = (info: PathInfo | undefined): void => {
+    if (info?.start_airport) visible.add(info.start_airport);
+    if (info?.end_airport) visible.add(info.end_airport);
+  };
   // Isolate mode ignores filter-only airports
-  if (hasFilters && !hasIsolation) {
-    for (const info of filterPaths(pathInfo, selectedYear, selectedAircraft)) {
-      if (info.start_airport) visible.add(info.start_airport);
-      if (info.end_airport) visible.add(info.end_airport);
-    }
-  }
-
-  if (hasSelection) {
-    const byId =
-      options.pathInfoById ?? new Map(pathInfo.map((p) => [p.id, p]));
-    selectedPathIds.forEach((pathId) => {
-      const info = byId.get(pathId);
-      if (!info) return;
-      if (info.start_airport) visible.add(info.start_airport);
-      if (info.end_airport) visible.add(info.end_airport);
-    });
-  }
-
+  if (filtered && !hasIsolation) filtered.forEach(add);
+  for (const pathId of selectedPathIds) add(pathInfoById.get(pathId));
   return visible;
 }

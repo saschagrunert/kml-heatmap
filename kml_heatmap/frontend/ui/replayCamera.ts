@@ -7,7 +7,7 @@
 import type { JumpToOptions, Map as MapLibreMap } from "maplibre-gl";
 import type { MapApp } from "../mapApp";
 import type { ReplayAirplane, ReplayState } from "./replayState";
-import { AUTO_ZOOM_MIN } from "../utils/constants";
+import { AUTO_ZOOM_MIN, MAX_FRAME_S } from "../utils/constants";
 import {
   hasLostContext,
   isBehindGlobe,
@@ -46,9 +46,6 @@ export const RECENTER_PAN_DURATION_MS = 500;
  * speeds up and slows down smoothly, and never overshoots.
  */
 const FOLLOW_TIME_S = 0.6;
-
-/** Longest frame the follow is worked out over (s), as the replay's */
-const FOLLOW_MAX_STEP_S = 0.1;
 
 /** Time the view takes back to where it was before a chase (ms) */
 const CHASE_RESTORE_MS = 800;
@@ -967,7 +964,7 @@ export class ReplayCamera {
     }
     const velocity = before?.velocity ?? { x: 0, y: 0 };
     const dt = before
-      ? Math.min(Math.max((now - before.at) / 1000, 1e-3), FOLLOW_MAX_STEP_S)
+      ? Math.min(Math.max((now - before.at) / 1000, 1e-3), MAX_FRAME_S)
       : 1 / 60;
     // The spring aims as far ahead of the airplane as it flies in the time
     // the spring takes, and so keeps up with it at any speed rather than

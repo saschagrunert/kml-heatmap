@@ -43,7 +43,7 @@ export const mockStatsManagerInstance = {
 
 export const mockAirportManagerInstance = {
   updateAirportPopups: vi.fn(),
-  updateAirportOpacity: vi.fn(),
+  showAirports: vi.fn(),
   updateAirportMarkerSizes: vi.fn(),
   closePopup: vi.fn(),
   activateAirport: vi.fn(),

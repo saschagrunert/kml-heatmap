@@ -18,8 +18,10 @@ from unittest.mock import MagicMock, patch
 import pytest
 from lxml import html as lxml_html
 
+import kml_heatmap.airport_lookup as lookup_module
 import kml_heatmap.cache as cache_module
 import kml_heatmap.data_exporter as exporter_module
+import kml_heatmap.renderer as renderer_module
 from kml_heatmap import path_content
 from kml_heatmap.data_exporter import export_all_data
 from kml_heatmap.exceptions import (
@@ -28,11 +30,12 @@ from kml_heatmap.exceptions import (
     KMLHeatmapError,
     OutputRefusedError,
 )
+from kml_heatmap.geometry import CoordinateExtent
 from kml_heatmap.landings import FlightLandings
 from kml_heatmap.listing import list_flights
+from kml_heatmap.parser import parse_and_cache
 from kml_heatmap.previews import encode_path_id
 from kml_heatmap.renderer import (
-    CoordinateExtent,
     ParsedFile,
     _drop_paths_without_year,
     _export_site,
@@ -48,15 +51,6 @@ from tests.conftest import (
     FIXTURE_RUNWAYS_CSV,
     decoded_segments,
 )
-
-BOUNDS = {
-    "center_lat": 51.0,
-    "center_lon": 13.0,
-    "min_lat": 48.0,
-    "max_lat": 54.0,
-    "min_lon": 9.0,
-    "max_lon": 17.0,
-}
 
 TRACK_KML = """<?xml version="1.0" encoding="UTF-8"?>
 <kml xmlns="http://www.opengis.net/kml/2.2" xmlns:gx="http://www.google.com/kml/ext/2.2">
@@ -179,13 +173,12 @@ class TestCoordinateExtent:
             [TrackPoint(-17.0, 178.5), TrackPoint(-16.0, -179.0), TrackPoint(-18, 179)]
         )
         assert extent == CoordinateExtent(-18.0, -16.0, -179.0, 179.0)
-        bounds = extent.as_map_bounds()
-        assert -180 <= bounds["min_lon"] < bounds["max_lon"] <= 180
-        assert bounds["center_lon"] == pytest.approx(0.0)
+        assert -180 <= extent.min_lon < extent.max_lon <= 180
+        assert extent.center_lon == pytest.approx(0.0)
 
-    def test_map_bounds_with_center(self):
-        bounds = CoordinateExtent(48.0, 54.0, 9.0, 17.0).as_map_bounds()
-        assert bounds == BOUNDS
+    def test_center(self):
+        extent = CoordinateExtent(48.0, 54.0, 9.0, 17.0)
+        assert (extent.center_lat, extent.center_lon) == (51.0, 13.0)
 
 
 class TestMapExtent:
@@ -258,6 +251,65 @@ class TestParseWithoutAPool:
         ):
             _parse_kml_files([str(kmz)])
         parse_in_pool.assert_called_once()
+
+    def test_many_files_read_their_cache_entries_in_the_pool(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        """Hits and misses alike go to the workers, which look the cache up."""
+        cached = tmp_path / "1_DEAGJ_DA20.kml"
+        # A gx:coord outside the track: a warning the cache keeps
+        cached.write_text(
+            TRACK_KML.format(year=2025).replace(
+                "</Document>",
+                "<Placemark><gx:coord>12.0 51.0 100</gx:coord></Placemark></Document>",
+            )
+        )
+        _parse_kml_files([str(cached)])
+        capsys.readouterr()
+        fresh = _write_kml(tmp_path / "2_DEAGJ_DA20.kml", 2026)
+        monkeypatch.setattr("kml_heatmap.renderer.POOLED_CACHE_MIN_BYTES", -1)
+        monkeypatch.setattr("kml_heatmap.renderer.POOLED_CACHE_MIN_WORKERS", 1)
+        pool = _InlineExecutor()
+        submitted = []
+        real_submit = pool.submit
+
+        def submit(fn, *args):
+            submitted.append((fn, args))
+            return real_submit(fn, *args)
+
+        parsed = []
+
+        def parse(kml_file, *args):
+            parsed.append(kml_file)
+            return parse_and_cache(kml_file, *args)
+
+        with (
+            patch.object(pool, "submit", submit),
+            patch("kml_heatmap.workers.ProcessPoolExecutor", pool),
+            patch("kml_heatmap.renderer.parse_and_cache", parse),
+        ):
+            _, metadata, _ = _parse_kml_files([str(cached), fresh])
+
+        assert submitted == [
+            (renderer_module._load_or_parse, (str(cached), None)),
+            (renderer_module._load_or_parse, (fresh, None)),
+        ]
+        # Only the miss is parsed, the hit's warning is logged again
+        assert parsed == [fresh]
+        assert "gx:coord element(s) outside of gx:Track" in capsys.readouterr().err
+        assert [m["year"] for m in metadata] == [2025, 2026]
+
+    def test_without_an_airport_database_no_landing_is_counted(self, tmp_path, capsys):
+        lookup_module.databases.use({})
+        lookup_module.databases.runways = {}
+        files = [_write_kml(tmp_path / "1_DEAGJ_DA20.kml", 2025)]
+
+        _, _, landings = _parse_kml_files(files)
+
+        assert landings == [None]
+        assert "No airport database: the landings are not counted" in (
+            capsys.readouterr().err
+        )
 
     def test_warm_cache_needs_no_pool(self, tmp_path, monkeypatch):
         files = [_write_kml(tmp_path / f"{i}_DEAGJ_DA20.kml", 2025) for i in (1, 2)]
@@ -332,6 +384,19 @@ class TestParseWithErrorHandling:
         path = tmp_path / "bad.kml"
         path.write_text("<not-kml>garbage")
         assert _parse_with_error_handling(str(path)) == ParsedFile(str(path))
+
+    def test_a_bug_of_the_parse_logs_its_traceback(self, tmp_path, capsys):
+        """Only a KMLParseError or OSError is what is wrong with the file."""
+        kml_file = _write_kml(tmp_path / "1_DEAGJ_DA20.kml")
+        with patch(
+            "kml_heatmap.renderer.parse_and_cache",
+            side_effect=ValueError("landing bug"),
+        ):
+            assert _parse_with_error_handling(kml_file) == ParsedFile(kml_file)
+        err = capsys.readouterr().err
+        assert "Unexpected error processing" in err
+        assert "Traceback" in err
+        assert "landing bug" in err
 
     def test_reduces_coordinates_to_count(self, tmp_path):
         kml_file = _write_kml(tmp_path / "1_DEAGJ_DA20.kml")

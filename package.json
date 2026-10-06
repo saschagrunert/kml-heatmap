@@ -31,6 +31,7 @@
   },
   "//dependencies": "Vendored into the page by scripts/vendor.js and published with the site",
   "dependencies": {
+    "flag-icons": "7.5.0",
     "html-to-image": "1.11.13",
     "lucide": "1.48.0",
     "maplibre-gl": "6.11.2"
@@ -47,7 +48,6 @@
     "esbuild": "^0.28.2",
     "eslint": "^10.11.0",
     "fast-check": "4.10.2",
-    "flag-icons": "^7.5.0",
     "jsdom": "^30.1.1",
     "knip": "6.38.0",
     "prettier": "^3.9.9",

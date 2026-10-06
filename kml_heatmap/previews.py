@@ -63,6 +63,7 @@ __all__ = [
     "SITE_PREVIEW",
     "SITE_URL_ENV",
     "STATE_SCHEMA_VERSION",
+    "DrawnPath",
     "PreviewJob",
     "encode_path_id",
     "normalize_site_url",
@@ -450,26 +451,74 @@ def _module_digest() -> bytes:
     return digest.digest()
 
 
+class DrawnPath:
+    """A path an image draws: what it holds, and its track when it is drawn.
+
+    The cache key comes from the points (``digest``), so a build whose
+    images are all cached projects none of them; the track is made once
+    for every image the path is in (its own, its year's and the site's).
+    Only a digest of the points is kept, not the packed points themselves,
+    which would double what the images hold in memory until all are drawn.
+    """
+
+    __slots__ = ("_path", "_track", "digest")
+
+    def __init__(self, path: FlightPath) -> None:
+        """Keep the path and a digest of what ``track_of`` reads of it."""
+        self._path = path
+        self._track: array[float] | None = None
+        content = array(
+            "d",
+            [
+                value
+                for point in path
+                for value in (
+                    point.lat,
+                    point.lon,
+                    math.nan if point.ts is None else point.ts,
+                )
+            ],
+        ).tobytes()
+        #: A digest of the latitude, longitude and time of every point
+        self.digest = hashlib.blake2b(content, digest_size=16).digest()
+
+    def __len__(self) -> int:
+        """How many points it has."""
+        return len(self._path)
+
+    @property
+    def track(self) -> array[float]:
+        """The path as the images draw it (see ``track_of``)."""
+        if self._track is None:
+            self._track = track_of(self._path)
+        return self._track
+
+
 @dataclass(frozen=True)
 class PreviewJob:
     """An image to draw: where it is published and what it shows."""
 
     #: The published path, relative to the page
     name: str
-    tracks: tuple[array[float], ...]
+    paths: tuple[DrawnPath, ...]
 
     def key(self, module_digest: bytes) -> str:
         """The cache key: what it draws and how."""
         digest = hashlib.blake2b(module_digest, digest_size=20)
-        for track in self.tracks:
-            digest.update(struct.pack("<Q", len(track)))
-            digest.update(track.tobytes())
+        for path in self.paths:
+            # Digests are of one size, so a run of them reads one way only
+            digest.update(path.digest)
         return digest.hexdigest()
+
+    @property
+    def tracks(self) -> tuple[array[float], ...]:
+        """The tracks it draws (see ``track_of``)."""
+        return tuple(path.track for path in self.paths)
 
     @property
     def points(self) -> int:
         """How many points it draws, which is about how long it takes."""
-        return sum(len(track) for track in self.tracks) // TRACK_STRIDE
+        return sum(len(path) for path in self.paths)
 
 
 def _write_file(path: Path, data: bytes) -> None:
@@ -725,8 +774,8 @@ def write_previews(
         if year is not None:
             by_year.setdefault(year, []).append(index)
 
-    tracks = (
-        {index: track_of(all_path_groups[index]) for index in path_ids}
+    drawn = (
+        {index: DrawnPath(all_path_groups[index]) for index in path_ids}
         if site_url is not None
         else {}
     )
@@ -747,7 +796,7 @@ def write_previews(
         )
         if site_url is not None:
             jobs.append(
-                PreviewJob(f"{YEAR_DIR}/{year}.png", tuple(tracks[i] for i in indices))
+                PreviewJob(f"{YEAR_DIR}/{year}.png", tuple(drawn[i] for i in indices))
             )
         for index in indices:
             path_id = encode_path_id(path_ids[index])
@@ -773,9 +822,9 @@ def write_previews(
                 ).encode(),
             )
             if site_url is not None:
-                jobs.append(PreviewJob(f"{FLIGHT_DIR}/{path_id}.png", (tracks[index],)))
+                jobs.append(PreviewJob(f"{FLIGHT_DIR}/{path_id}.png", (drawn[index],)))
     if site_url is not None:
-        jobs.append(PreviewJob(SITE_PREVIEW, tuple(tracks[i] for i in sorted(tracks))))
+        jobs.append(PreviewJob(SITE_PREVIEW, tuple(drawn[i] for i in sorted(drawn))))
         render_images(jobs, site_dir)
     logger.info(
         "  Link previews: %d year and %d flight page(s)%s",

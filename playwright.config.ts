@@ -20,6 +20,18 @@ const launchOptions = chromiumPath
   ? { launchOptions: { executablePath: chromiumPath } }
   : {};
 
+/**
+ * The tests that drive the controls of only one layout carry a tag at the
+ * end of their title: @desktop for the columns, legends and hover of a
+ * pointer device, @touch for the tap of a touch device. They still skip
+ * themselves elsewhere, but Playwright splits a project into the shards of
+ * the e2e job by the number of tests, counting those that skip at runtime,
+ * so a shard that drew most of them finished minutes before the others.
+ * Left out here, they are not counted at all.
+ */
+const DESKTOP_ONLY = /@desktop\b/;
+const TOUCH_ONLY = /@touch\b/;
+
 function siteServer(site: Site) {
   return {
     command: `python3 -m http.server ${site.port} -d ${site.dir}`,
@@ -86,6 +98,7 @@ export default defineConfig<object, SiteOptions>({
       // The bar and sheet only exist below the breakpoint; the visual
       // snapshots have a project of their own
       testIgnore: /(mobile|visual)\.spec\.ts$/,
+      grepInvert: TOUCH_ONLY,
       // Software WebGL with four browsers on the runner: the slowest specs
       // (Wrapped's intro, the error-free scans, the cross-section, the
       // selections) took 70 to 80 % of the old 30 s on green runs, and one
@@ -101,6 +114,7 @@ export default defineConfig<object, SiteOptions>({
       // mobile.spec.ts drives the bottom bar and sheet; the other three are
       // viewport-agnostic and run against whichever controls the bar puts up
       testMatch: /(core|layers|mobile|state)\.spec\.ts$/,
+      grepInvert: DESKTOP_ONLY,
       // The bar and sheet are built at runtime and every interaction here
       // goes through them, so a retry would hide exactly the intermittent
       // failures this project exists to catch
@@ -143,6 +157,7 @@ export default defineConfig<object, SiteOptions>({
       // the heat lines and the 3D view, which Safari draws with a WebGL of
       // its own.
       testMatch: /(core|layers|mobile|state)\.spec\.ts$/,
+      grepInvert: DESKTOP_ONLY,
       // Like the mobile project: a retry would hide the flaky bar and sheet
       retries: 0,
       // Software WebGL on a phone, as in the mobile project

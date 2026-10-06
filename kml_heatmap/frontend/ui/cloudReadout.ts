@@ -107,6 +107,13 @@ const ESCAPE_SLACK_PX = 8;
 const READOUT_SLACK_PX = 3;
 
 /**
+ * How long the boxes of the panels over the map are taken as they were
+ * measured (ms): the hover asks on every frame, and a panel or a toast
+ * that comes or goes meanwhile is avoided a moment later
+ */
+const PANELS_TTL_MS = 250;
+
+/**
  * Milliseconds after a touch in which a click or a move of the mouse is
  * the browser's for the tap, not one of a mouse
  */
@@ -193,8 +200,12 @@ export function followCloudReadout(app: MapApp): void {
    */
   let worked: { point: Point; readout: CloudReadout | null } | null = null;
 
+  /** The boxes of the panels over the map, and when they were measured */
+  let panels: { boxes: Edges[]; at: number } | null = null;
+
   const hide = (): void => {
     shownAt = null;
+    panels = null;
     if (box) box.hidden = true;
   };
 
@@ -249,10 +260,14 @@ export function followCloudReadout(app: MapApp): void {
         ":scope > .segment-tooltip, :scope > .segment-popup",
       ),
     );
-    const covered = [
-      ...values,
-      ...boxesOf(document.querySelectorAll(MAP_PANELS_SELECTOR)),
-    ];
+    const now = performance.now();
+    if (!panels || now - panels.at > PANELS_TTL_MS) {
+      panels = {
+        boxes: boxesOf(document.querySelectorAll(MAP_PANELS_SELECTOR)),
+        at: now,
+      };
+    }
+    const covered = [...values, ...panels.boxes];
     const gap = finger ? FINGER_GAP_PX : POINTER_GAP_PX;
     const above = point.y - gap - height;
     const below = point.y + gap;
@@ -300,9 +315,11 @@ export function followCloudReadout(app: MapApp): void {
       box.append(document.createElement("b"), document.createElement("div"));
       container.append(box);
     }
+    // Written only where it changed: the hover shows it on every frame
     const { time, detail } = readoutText(readout);
-    box.firstChild!.textContent = time;
-    box.lastChild!.textContent = detail;
+    const [timeLine, detailLine] = box.children;
+    if (timeLine!.textContent !== time) timeLine!.textContent = time;
+    if (detailLine!.textContent !== detail) detailLine!.textContent = detail;
     box.hidden = false;
     place(point, finger);
   };
@@ -567,6 +584,7 @@ export function followCloudReadout(app: MapApp): void {
   // look once the map is idle (PathHover.rehoverOnIdle). The popups are
   // children of the map's container, and few come and go.
   const popups = new MutationObserver(() => {
+    panels = null;
     if (shownAt) place(shownAt.point, shownAt.finger);
   });
 

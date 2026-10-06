@@ -14,7 +14,7 @@ import os
 import re
 import shutil
 import string
-import subprocess  # nosec B404
+import subprocess
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -31,6 +31,8 @@ from .previews import PREVIEW_FILE_PATTERNS, PREVIEW_FILES, page_preview_tags
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
+
+    from .geometry import CoordinateExtent
 
 __all__ = [
     "BUNDLE_FILE",
@@ -426,7 +428,7 @@ def _github_repository_url(remote: str) -> str:
 
 def _git(git: str, *args: str) -> str:
     """Run git in the package directory and return what it printed."""
-    return subprocess.run(  # noqa: S603 # nosec B603
+    return subprocess.run(  # noqa: S603
         [git, *args],
         cwd=Path(__file__).parent,
         capture_output=True,
@@ -484,7 +486,7 @@ def build_commit() -> BuildCommit:
 
 def _generate_map_config(
     output_dir: Path,
-    bounds: dict[str, float],
+    extent: CoordinateExtent,
     data_dir_name: str,
     built_at: datetime | None = None,
 ) -> None:
@@ -497,10 +499,10 @@ def _generate_map_config(
     commit = build_commit()
     # The fields MapConfig in the frontend's mapApp.ts reads
     config = {
-        "center": [bounds["center_lat"], bounds["center_lon"]],
+        "center": [extent.center_lat, extent.center_lon],
         "bounds": [
-            [bounds["min_lat"], bounds["min_lon"]],
-            [bounds["max_lat"], bounds["max_lon"]],
+            [extent.min_lat, extent.min_lon],
+            [extent.max_lat, extent.max_lon],
         ],
         "cartoApiKey": carto_api_key,
         "dataDir": data_dir_name,
@@ -612,16 +614,17 @@ def _copy_country_flags(output_dir: Path, codes: Iterable[str]) -> None:
 
 def package_assets(
     output_dir: Path,
-    bounds: dict[str, float],
+    extent: CoordinateExtent,
     data_dir_name: str,
     country_codes: Iterable[str] = (),
     built_at: datetime | None = None,
 ) -> None:
     """Generate config and copy static assets (pre-built JS bundles, CSS, icons).
 
-    ``built_at`` is the time of the build, ``build_time`` by default.
+    ``extent`` is what the map opens on (see ``geometry.CoordinateExtent``),
+    ``built_at`` the time of the build, ``build_time`` by default.
     """
-    _generate_map_config(output_dir, bounds, data_dir_name, built_at)
+    _generate_map_config(output_dir, extent, data_dir_name, built_at)
     for bundle in BUNDLE_FILES:
         _copy_javascript_bundle(output_dir, bundle)
     _copy_and_minify_css(output_dir, STATIC_DIR)

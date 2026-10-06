@@ -189,6 +189,23 @@ class TestParseKmlCoordinates:
         assert len(paths) == 1
         assert metadata[0]["year"] == 2025
 
+    def test_elements_in_a_namespace_of_their_own(self, tmp_path):
+        """An unknown namespace below the root is stripped, as if there were none.
+
+        One on the root itself takes the place of the KML namespace instead.
+        """
+        kml = """<?xml version="1.0"?>
+        <kml><Document xmlns="http://example.com/kml"><Placemark><name>Odd</name>
+        <LineString><coordinates>8.5,50.0,300 9.0,51.0,400</coordinates></LineString>
+        <TimeStamp><when>2025-03-15</when></TimeStamp>
+        </Placemark></Document></kml>"""
+        coords, paths, metadata = parse_kml_coordinates(
+            _write(tmp_path, "odd.kml", kml)
+        )
+        assert len(coords) == 2
+        assert len(paths) == 1
+        assert metadata[0]["year"] == 2025
+
     def test_multiple_tracks_produce_multiple_paths(self, tmp_path):
         kml = f"""{KML_HEADER}
   <Document>
@@ -218,6 +235,15 @@ class TestParseKmlCoordinates:
         coords, _, _ = parse_kml_coordinates(_write(tmp_path, "loose.kml", kml))
         assert len(coords) == 1
         assert "outside of gx:Track were ignored" in capsys.readouterr().err
+
+    def test_a_track_inside_a_track_counts_its_coords_once(self, tmp_path, capsys):
+        """No exporter nests them, but no count may come out below zero."""
+        kml = f"""{KML_HEADER}<Document><Placemark><gx:Track>
+        <when>2025-03-15T10:00:00Z</when><gx:coord>9.0 51.0 400</gx:coord>
+        <gx:Track><gx:coord>9.1 51.1 400</gx:coord></gx:Track>
+        </gx:Track></Placemark></Document></kml>"""
+        parse_kml_coordinates(_write(tmp_path, "nested.kml", kml))
+        assert "outside of gx:Track" not in capsys.readouterr().err
 
     def test_gx_coord_counts_in_debug_output(self, tmp_path, capsys):
         from kml_heatmap.logger import set_debug_mode
@@ -893,6 +919,16 @@ class TestKmz:
         )
         with pytest.raises(KMLParseError, match="another archive"):
             _parse_kml_tree(kmz)
+
+    def test_a_damaged_member_name_is_a_bad_archive(self, tmp_path):
+        """zipfile raises a UnicodeDecodeError for it, which is no bug of ours."""
+        kmz = Path(_kmz(tmp_path / "damaged.kmz", {"dö.kml": KMZ_TRACK}))
+        data = kmz.read_bytes()
+        # The name of the local header, which comes first, no longer UTF-8
+        name = "dö".encode()
+        kmz.write_bytes(data.replace(name, b"d\xed\xa0", 1))
+        with pytest.raises(KMLParseError, match="Not a valid KMZ archive"):
+            _parse_kml_tree(str(kmz))
 
     def test_a_member_too_large_is_refused_before_it_is_read(
         self, tmp_path, monkeypatch

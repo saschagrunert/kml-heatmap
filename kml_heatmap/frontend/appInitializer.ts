@@ -104,7 +104,7 @@ export async function loadInitialData(app: MapApp): Promise<void> {
   // its flights used: a first load that failed left the dots of every year
   // on the map, unlabelled.
   createAirportMarkers(app, airports);
-  app.airportManager.updateAirportOpacity();
+  app.airportManager.showAirports();
 
   // The statistics are computed from the loaded paths; the metadata only
   // adds the model names that aircraft.json knows

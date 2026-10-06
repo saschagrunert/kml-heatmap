@@ -18,7 +18,7 @@ its airfields over the flat elevation tiles of the e2e fixture. Run
 
 import os
 import shutil
-import subprocess  # nosec B404
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -56,7 +56,7 @@ def main() -> int:
         shutil.copy(AIRPORTS, cache_dir)
         shutil.copy(RUNWAYS, cache_dir)
         env = {**os.environ, **BUILD_ENVIRONMENT, "KML_HEATMAP_CACHE_DIR": cache_dir}
-        return subprocess.run(  # noqa: S603 # nosec B603
+        return subprocess.run(  # noqa: S603
             [
                 sys.executable,
                 "-m",

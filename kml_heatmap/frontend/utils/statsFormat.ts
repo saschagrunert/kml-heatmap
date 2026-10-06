@@ -99,3 +99,14 @@ export function markFlightTimeUnits(
       "</span>",
   );
 }
+
+/**
+ * Format seconds into flight time string (e.g., "2h 30m")
+ * @param seconds - Total seconds
+ * @returns Formatted flight time
+ */
+export function formatFlightTime(seconds: number): string {
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  return `${hours}h ${minutes}m`;
+}

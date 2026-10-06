@@ -44,17 +44,6 @@ export function formatTrack(bearing: number): string {
 }
 
 /**
- * Format seconds into flight time string (e.g., "2h 30m")
- * @param seconds - Total seconds
- * @returns Formatted flight time
- */
-export function formatFlightTime(seconds: number): string {
-  const hours = Math.floor(seconds / 3600);
-  const minutes = Math.floor((seconds % 3600) / 60);
-  return `${hours}h ${minutes}m`;
-}
-
-/**
  * Format a byte count into a human-readable file size (e.g., "1.1 MB")
  * @param bytes - Size in bytes
  * @returns Formatted size

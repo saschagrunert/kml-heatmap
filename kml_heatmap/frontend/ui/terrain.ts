@@ -93,7 +93,7 @@ export function followTerrain(app: MapApp): void {
       apply();
     });
     app.store.subscribe("reliefShaded", apply);
-    app.store.subscribe("terrainActive", labels);
+    app.store.subscribe("terrainActive", labels.thin);
     // MapLibre restores the relief with the style after a lost WebGL
     // context, but some of what it draws onto it stays black until the
     // relief is built anew
@@ -112,10 +112,16 @@ export function followTerrain(app: MapApp): void {
     // them follow every frame until the map has loaded, as when the relief
     // is switched on (MapLibre 6.10's markers). Not for every frame of
     // the replay's camera, which rests of its own: it updates the whole
-    // style.
+    // style. The far labels follow that camera, which a chase flies for
+    // minutes without a rest, but are walked only once it has reached
+    // another zoom level or tilt.
     const moved = map.on("moveend", (event) => {
-      if (map.getTerrain() && !isReplayCameraMove(event)) map.fire("terrain");
-      labels();
+      if (isReplayCameraMove(event)) {
+        labels.follow();
+        return;
+      }
+      if (map.getTerrain()) map.fire("terrain");
+      labels.thin();
     });
     // A new base style drops the shading, which is none of the app's layers
     // for `withDataLayers` to carry; it goes back where it belongs in it.
@@ -123,7 +129,7 @@ export function followTerrain(app: MapApp): void {
     // labels of a tilted 3D view are left out of anew.
     const styled = map.on("styledata", () => {
       if (app.reliefShaded && !map.getLayer(HILLSHADE_LAYER)) apply();
-      labels();
+      labels.thin();
     });
     // For as long as the app lives, like its other map events
     signal.addEventListener("abort", () => {
@@ -394,16 +400,25 @@ const APP_LAYERS: ReadonlySet<string> = new Set(Object.values(MAP_LAYERS));
  * MapLibre leaves a layer out of every tile below its start. The ranges
  * change only as the map's whole zoom level does, which lays the base map's
  * tiles out once; the ranges of the style come back as the map lies flat
- * or leaves the relief.
+ * or leaves the relief. `thin` walks every label layer; `follow`, for the
+ * frames of the replay's camera, only when the start it asks for is not the
+ * one the last walk gave them.
  */
-function thinFarLabels(app: MapApp, map: MapLibreMap): () => void {
+function thinFarLabels(
+  app: MapApp,
+  map: MapLibreMap,
+): { thin: () => void; follow: () => void } {
   /** The start of every label layer as the style has it */
   const own = new WeakMap<object, number>();
-  return () => {
-    const start =
-      app.terrainActive && map.getPitch() >= THIN_LABELS_PITCH
-        ? Math.floor(map.getZoom()) - LABEL_TILE_LEVELS
-        : null;
+  /** The start the last walk gave the layers, undefined before the first */
+  let given: number | null | undefined;
+  const wanted = (): number | null =>
+    app.terrainActive && map.getPitch() >= THIN_LABELS_PITCH
+      ? Math.floor(map.getZoom()) - LABEL_TILE_LEVELS
+      : null;
+  const thin = (): void => {
+    const start = wanted();
+    given = start;
     for (const id of map.getLayersOrder()) {
       if (APP_LAYERS.has(id)) continue;
       const layer = map.getLayer(id);
@@ -413,5 +428,11 @@ function thinFarLabels(app: MapApp, map: MapLibreMap): () => void {
       if ((layer.minzoom ?? 0) === minzoom) continue;
       map.setLayerZoomRange(id, minzoom, layer.maxzoom ?? 24);
     }
+  };
+  return {
+    thin,
+    follow: () => {
+      if (wanted() !== given) thin();
+    },
   };
 }

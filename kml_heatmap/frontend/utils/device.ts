@@ -13,11 +13,36 @@ import { MOBILE_BREAKPOINT_PX, PHONE_MAX_HEIGHT_PX } from "./constants";
  */
 export const PHONE_LAYOUT_QUERY = `(max-width: ${MOBILE_BREAKPOINT_PX - 0.02}px), (max-height: ${PHONE_MAX_HEIGHT_PX}px)`;
 
+/** The lists of the queries asked, and the matchMedia they came from */
+let lists = new Map<string, MediaQueryList>();
+let listsOf: unknown = null;
+
+/**
+ * The list of a media query, null where there are none (jsdom). One per
+ * query: a MediaQueryList follows the page by itself, and the hover of the
+ * pointer asks on every frame.
+ */
+function mediaList(query: string): MediaQueryList | null {
+  if (typeof window.matchMedia !== "function") return null;
+  // Compared, never called unbound: a page given another matchMedia (a
+  // test's) asks it anew
+  // eslint-disable-next-line @typescript-eslint/unbound-method
+  const matchMedia = window.matchMedia;
+  if (listsOf !== matchMedia) {
+    lists = new Map();
+    listsOf = matchMedia;
+  }
+  let list = lists.get(query);
+  if (!list) {
+    list = window.matchMedia(query);
+    lists.set(query, list);
+  }
+  return list;
+}
+
 /** Whether the page matches a media query; false where there are none */
 export function matchesMedia(query: string): boolean {
-  return (
-    typeof window.matchMedia === "function" && window.matchMedia(query).matches
-  );
+  return mediaList(query)?.matches ?? false;
 }
 
 /**
@@ -25,10 +50,11 @@ export function matchesMedia(query: string): boolean {
  * the size of the window.
  */
 export function isPhoneLayout(): boolean {
-  return typeof window.matchMedia === "function"
-    ? window.matchMedia(PHONE_LAYOUT_QUERY).matches
-    : window.innerWidth < MOBILE_BREAKPOINT_PX ||
-        window.innerHeight <= PHONE_MAX_HEIGHT_PX;
+  return (
+    mediaList(PHONE_LAYOUT_QUERY)?.matches ??
+    (window.innerWidth < MOBILE_BREAKPOINT_PX ||
+      window.innerHeight <= PHONE_MAX_HEIGHT_PX)
+  );
 }
 
 /**
@@ -37,10 +63,10 @@ export function isPhoneLayout(): boolean {
  * mouse most of the time, and lost the hover tooltips for having one.
  */
 export function isTouchDevice(): boolean {
-  if (typeof window.matchMedia === "function") {
-    return window.matchMedia("(hover: none)").matches;
-  }
-  return "ontouchstart" in window || navigator.maxTouchPoints > 0;
+  return (
+    mediaList("(hover: none)")?.matches ??
+    ("ontouchstart" in window || navigator.maxTouchPoints > 0)
+  );
 }
 
 /**

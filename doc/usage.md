@@ -212,7 +212,7 @@ Targets (`make help` prints this list with the current variable values):
 - `test` - Build the frontend bundles, then run the JavaScript and Python test
   suites with coverage
 - `lint` - Run the linters, formatters (check only), type checkers and typos of
-  the CI lint job, plus bandit, which CI runs in the security job
+  the CI lint job
 - `format` - Run formatters
 - `lock` - Regenerate the lock files (`requirements.lock`,
   `requirements-test.lock`, `requirements-build.lock` and
@@ -586,14 +586,16 @@ them is streamed from CARTO (`basemaps.cartocdn.com` for the style,
 [With an API key](#with-an-api-key-optional)). Flights over a black map mean
 those requests fail: a proxy, a firewall or an ad blocker blocks the host, or,
 on a site built with a key, the key is wrong, expired or restricted to another
-referrer. The page says so and offers Retry. To tell the two apart, open the
-browser's developer tools on the Network tab, reload and filter for `cartocdn`:
-a request shown as blocked, cancelled or failed without a status points at the
-network or an extension, so try another network or switch the blocker off for
-the site; a `401` or `403` on the style request points at the key, so check it
-and its referrer restriction in the CARTO dashboard, or build without one, since
-the base map loads without a key today. Nothing of the site is lost either way:
-the flights, the statistics and Replay work over the black map.
+referrer. When the style itself cannot be loaded the page says so and offers
+Retry; blocked tiles, glyphs or sprites only leave holes and a line in the
+browser's console. To tell the two apart, open the browser's developer tools on
+the Network tab, reload and filter for `cartocdn`: a request shown as blocked,
+cancelled or failed without a status points at the network or an extension, so
+try another network or switch the blocker off for the site; a `401` or `403` on
+the style request points at the key, so check it and its referrer restriction in
+the CARTO dashboard, or build without one, since the base map loads without a
+key today. Nothing of the site is lost either way: the flights, the statistics
+and Replay work over the black map.
 
 ### `make check-obfuscation` or the commit hook fails
 

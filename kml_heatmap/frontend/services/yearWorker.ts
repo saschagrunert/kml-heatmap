@@ -12,7 +12,7 @@
  * message handler is installed in a worker and nowhere else.
  */
 
-import { decodeYearBytes } from "./yearDecode";
+import { DATA_FORMAT_VERSION, decodeYearBytes } from "./yearDecode";
 import { transferablesOf } from "./yearDataset";
 import { createYearDecoder } from "./yearDecoder";
 import {
@@ -35,12 +35,16 @@ export type YearRequest = { id: number } & (
   { bytes: ArrayBuffer } | { heat: Float64Array } | { lines: FlatLines }
 );
 
-/** What the worker answers with, under the number of the request */
+/**
+ * What the worker answers with, under the number of the request. An error
+ * names the year file format the worker reads (`format`), so that the page
+ * can tell whether the two came from the same deploy.
+ */
 export type YearResponse = { id: number } & (
   | { decoded: DecodedYear }
   | { drawn: DrawnHeat }
   | { source: Blob }
-  | { error: string }
+  | { error: string; name: string; format: number }
 );
 
 /**
@@ -69,7 +73,11 @@ export function handleRequest(request: YearRequest): {
     return { response: { id, decoded }, transfer: transferablesOf(decoded) };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    return { response: { id, error: message }, transfer: [] };
+    const name = error instanceof Error ? error.name : "Error";
+    return {
+      response: { id, error: message, name, format: DATA_FORMAT_VERSION },
+      transfer: [],
+    };
   }
 }
 

@@ -829,7 +829,7 @@ describe("appInitializer", () => {
       it("hides every airport, which no flights say to show", async () => {
         await loadInitialData(asMapApp(app));
 
-        expect(app.airportManager.updateAirportOpacity).toHaveBeenCalled();
+        expect(app.airportManager.showAirports).toHaveBeenCalled();
       });
 
       it("keeps a year someone picked during the load", async () => {

@@ -1152,7 +1152,11 @@ describe("the figures", () => {
         : 0;
       const before = values.slice();
       expect(densityReference(values)).toBe(expected);
-      // The cells it was given stay as they were
+      // The cells it was given stay as they were, with a scratch grid of
+      // another section's cells too
+      expect(densityReference(values, new Float64Array(2000).fill(99))).toBe(
+        expected,
+      );
       expect(values).toEqual(before);
     }
   });

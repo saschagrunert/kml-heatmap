@@ -1,8 +1,10 @@
 /**
- * What build.js prints of the bundles and the flags it takes
- * (scripts/build-helpers.js). The shaders and the outputs the site
- * publishes are in glsl.test.ts.
+ * What build.js prints of the bundles and the flags it takes, and the
+ * popups' markup it tightens (scripts/build-helpers.js). The shaders and
+ * the outputs the site publishes are in glsl.test.ts.
  */
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   formatBytes,
@@ -10,7 +12,10 @@ import {
   largestInputs,
   overrunSummary,
   parseBuildArgs,
+  tightenMarkup,
 } from "../../../scripts/build-helpers.js";
+
+const FRONTEND_DIR = join(__dirname, "../../../kml_heatmap/frontend");
 
 /** A metafile of one output and the bytes each input takes of it */
 const metafile = (name: string, inputs: Record<string, number>) => ({
@@ -127,5 +132,68 @@ describe("overrunSummary", () => {
       "  wrapped.bundle.js: 44100 B raw, budget 44032 B, 68 B over",
       "  vendor/html-to-image.mjs: could not be measured",
     ]);
+  });
+});
+
+describe("tightenMarkup", () => {
+  it("puts the markup of a literal on one line and leaves the code be", () => {
+    const source = [
+      "// A comment",
+      "const a = 1;",
+      "const html = `",
+      "    <div>",
+      "        <span>${a}</span>",
+      "    </div>`;",
+      "const text = `two",
+      "lines`;",
+    ].join("\n");
+
+    expect(tightenMarkup(source)).toBe(
+      [
+        "// A comment",
+        "const a = 1;",
+        "const html = ` <div> <span>${a}</span> </div>`;",
+        "const text = `two",
+        "lines`;",
+      ].join("\n"),
+    );
+  });
+
+  it("changes only the white space of the popups", () => {
+    const source = readFileSync(
+      join(FRONTEND_DIR, "utils/htmlGenerators.ts"),
+      "utf8",
+    );
+    const tight = tightenMarkup(source, "htmlGenerators.ts");
+
+    expect(tight.length).toBeLessThan(source.length - 300);
+    expect(tight.replace(/\s+/g, "")).toBe(source.replace(/\s+/g, ""));
+    expect(tight).toContain('` <div class="popup-container');
+  });
+
+  it("refuses markup whose white space would change", () => {
+    const pre = "const a = `<div>\n  <pre>x\n  y</pre></div>`;";
+    const attribute = 'const b = `<div title="one\n  two">x</div>`;';
+    const expression = 'const c = (v: string) => `<p title="${v}\n  w">x</p>`;';
+
+    expect(() => tightenMarkup(pre, "a.ts")).toThrow(/a\.ts: .*<pre>/);
+    expect(() => tightenMarkup(attribute, "b.ts")).toThrow(/spans a line/);
+    expect(() => tightenMarkup(expression, "c.ts")).toThrow(/spans a line/);
+  });
+
+  it("lets an attribute value end before the line breaks", () => {
+    const source = 'const a = `<div\n  class="x"\n  title="${1}">y</div>`;';
+
+    expect(tightenMarkup(source)).toBe(
+      'const a = `<div class="x" title="${1}">y</div>`;',
+    );
+  });
+});
+
+describe("the popups the unit tests import", () => {
+  it("are the tightened ones a minified build ships", async () => {
+    const { generateAirportPopupHtml } =
+      await import("../../../kml_heatmap/frontend/utils/htmlGenerators");
+    expect(String(generateAirportPopupHtml)).not.toMatch(/\n\s+</);
   });
 });

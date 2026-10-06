@@ -4,13 +4,11 @@
  * true the map is created with `reduceMotion` and without its tile fade, and
  * the callers that move it pass `animate: false`.
  *
- * The replay asks on every frame it pans. A MediaQueryList follows the
- * setting by itself, so it is created once and read from then on.
+ * The replay asks on every frame it pans; the list of the query is kept
+ * with the others the page asks (utils/device.ts).
  */
-let reducedMotion: MediaQueryList | null = null;
+import { matchesMedia } from "./device";
 
 export function prefersReducedMotion(): boolean {
-  if (typeof window.matchMedia !== "function") return false;
-  reducedMotion ??= window.matchMedia("(prefers-reduced-motion: reduce)");
-  return reducedMotion.matches;
+  return matchesMedia("(prefers-reduced-motion: reduce)");
 }

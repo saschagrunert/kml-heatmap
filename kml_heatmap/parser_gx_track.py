@@ -16,8 +16,8 @@ from .helpers import parse_timestamp_epoch
 from .logger import logger
 from .parser_common import (
     NON_MSL_ALTITUDE_MODES,
-    _build_path_metadata_dict,
     altitude_mode,
+    build_path_metadata_dict,
     empty_placemark_metadata,
     extract_placemark_metadata,
     extract_year_from_timestamp,
@@ -46,14 +46,17 @@ def _find_placemark(track: etree._Element) -> etree._Element | None:
 def _collect_track_children(
     track: etree._Element,
 ) -> tuple[list[str], list[str | None]]:
-    """Collect <when> texts and <gx:coord> texts of a track in document order."""
+    """Collect <when> texts and <gx:coord> texts of a track in document order.
+
+    One walk over the children: only the two tags come through it, and the
+    local name of each ends in "when" or in "coord".
+    """
     whens: list[str] = []
     coords: list[str | None] = []
-    for child in track:
-        name = local_name(child.tag)
-        if name == "when":
+    for child in track.iterchildren("{*}when", "{*}coord"):
+        if child.tag.endswith("when"):
             whens.append((child.text or "").strip())
-        elif name == "coord":
+        else:
             coords.append(child.text)
     return whens, coords
 
@@ -312,7 +315,7 @@ def process_gx_track(
 
         path_groups.append(path)
         path_metadata.append(
-            _build_path_metadata_dict(kml_file, path[0], track_meta, aircraft_info)
+            build_path_metadata_dict(kml_file, path[0], track_meta, aircraft_info)
         )
 
     logger.debug("Parsed %d gx:Track element(s) in %s", len(tracks), filename)

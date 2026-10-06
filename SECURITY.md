@@ -18,7 +18,8 @@ response within a few days.
 
 ## Public tile API key
 
-The generated site embeds the CARTO tile API key in its `map_config.js`. It is a
+The generated site embeds the CARTO tile API key in its `map_config.js`, and in
+the URLs of the two requests `index.html` preloads for the base map. It is a
 public client-side key that the browser needs to load the base map, so it is
 published with the site by design. The `site` job of the `test` workflow reads
 it from the repository secrets (see
@@ -29,13 +30,14 @@ need no key.
 
 ## Automated checks
 
-Every pull request and push runs bandit, `pip-audit` against the hashed lock
-files, `npm audit`, and a gitleaks scan of the whole commit history, and the
-same job runs weekly so new advisories show up without a push. Every GitHub
-Action is pinned by commit SHA and every container image by digest, and every
-job that checks out the repository leaves no credentials in the checkout.
-Dependabot keeps the dependencies current, and `make lock` recompiles the Python
-lock files with the newest releases the ranges allow.
+Every pull request and push runs `pip-audit` against the hashed lock files,
+`npm audit`, and a gitleaks scan: of the commits a pull request or an entry of
+the merge queue adds, of the whole commit history on a push to main. The same
+job runs weekly, with the whole history, so new advisories show up without a
+push. Every GitHub Action is pinned by commit SHA and every container image by
+digest, and every job that checks out the repository leaves no credentials in
+the checkout. Dependabot keeps the dependencies current, and `make lock`
+recompiles the Python lock files with the newest releases the ranges allow.
 
 ## Content Security Policy
 

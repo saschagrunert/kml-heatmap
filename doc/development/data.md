@@ -13,8 +13,10 @@ The dependencies are declared once, in `pyproject.toml`: the runtime
 dependencies plus the `test` and `dev` extras. CI, the container image and the
 setup in [CONTRIBUTING.md](../../CONTRIBUTING.md#setup) install the hashed lock
 files compiled from it instead (`requirements.lock`, `requirements-test.lock`
-and, for the setuptools that builds the package, `requirements-build.lock`), and
-the package on top with `--no-deps`, so nothing is resolved from the ranges.
+and, for the setuptools that builds the package, `requirements-build.lock`), so
+nothing is resolved from the ranges. The setup and the packaging job of CI
+install the package on top with `--no-deps`; the container image installs no
+package at all, it copies the sources and runs them from `PYTHONPATH`.
 Regenerate the lock files with `make lock` after changing the dependencies. The
 test lock is compiled with the runtime lock as a constraint, so a package both
 of them pin has the same version in each. `make lock` runs the pip-tools that
@@ -169,7 +171,8 @@ that build from `data/` restore the tile cache with `actions/cache`.
 
 `yearWorker.bundle.js` is a build of its own and shares nothing with the others:
 it is everything that works on the year files, and on the heat sources made of
-them. The page imports it next to the first year file
+them. The page head preloads it (a `modulepreload` beside the shared chunk), so
+its download overlaps the app's; the loader imports it with the first year file
 (`services/dataLoader.ts`), and the file then starts itself a second time as a
 module worker, which parses and decodes the year files off the main thread and
 hands the columns back as typed arrays; the page builds its dataset from them a

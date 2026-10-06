@@ -5,7 +5,7 @@
  * path_info carries neither, so both are worked out from the segments in
  * one pass over all of them, by the rules the statistics use: the time is
  * the span from the first to the last timed segment (perPathSeconds in
- * statistics.ts), the distance the sum of the segments' great-circle
+ * panelStats.ts), the distance the sum of the segments' great-circle
  * lengths (segmentDistance, which the other statistics share). The result
  * is kept for as long as the dataset's index is (calculations/
  * datasetIndex.ts), so every filter, search and sort of the list reads it

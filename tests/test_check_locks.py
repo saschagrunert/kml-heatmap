@@ -35,6 +35,13 @@ PIP_TOOLS = "7.6.1"
 PLAYWRIGHT = "1.63.0"
 DIGEST = "sha256:" + "ab" * 32
 IMAGE = f"mcr.microsoft.com/playwright:v{PLAYWRIGHT}-noble@{DIGEST}"
+PYTHON = "3.14"
+NODE = "26"
+# The tool sections of pyproject.toml that name the Python version
+TOOLCHAIN = (
+    f'[tool.mypy]\npython_version = "{PYTHON}"\n'
+    f'[tool.ruff]\ntarget-version = "py{PYTHON.replace(".", "")}"\n'
+)
 
 
 @pytest.fixture
@@ -42,10 +49,19 @@ def repo(tmp_path, monkeypatch):
     """A minimal repository in which every check passes."""
     (tmp_path / "pyproject.toml").write_text(
         "[project]\n"
+        f'requires-python = ">={PYTHON}"\n'
         'dependencies = ["lxml>=6.0.2"]\n'
         "[project.optional-dependencies]\n"
         'test = ["pytest>=9.0.2"]\n'
-        f'dev = ["ruff>={RUFF}"]\n',
+        f'dev = ["ruff>={RUFF}"]\n' + TOOLCHAIN,
+        encoding="utf-8",
+    )
+    (tmp_path / ".python-version").write_text(f"{PYTHON}\n", encoding="utf-8")
+    (tmp_path / ".nvmrc").write_text(f"{NODE}\n", encoding="utf-8")
+    (tmp_path / "Dockerfile").write_text(
+        f"FROM docker.io/library/node:{NODE}-slim@{DIGEST} AS js-builder\n"
+        f"FROM docker.io/library/python:{PYTHON}-slim@{DIGEST} AS package\n"
+        f"FROM docker.io/library/python:{PYTHON}-slim@{DIGEST}\n",
         encoding="utf-8",
     )
     (tmp_path / "requirements.lock").write_text(
@@ -66,7 +82,14 @@ def repo(tmp_path, monkeypatch):
         encoding="utf-8",
     )
     (tmp_path / "package.json").write_text(
-        json.dumps({"name": "kml-heatmap", "version": VERSION}), encoding="utf-8"
+        json.dumps(
+            {
+                "name": "kml-heatmap",
+                "version": VERSION,
+                "engines": {"node": f">={NODE}"},
+            }
+        ),
+        encoding="utf-8",
     )
     (tmp_path / "package-lock.json").write_text(
         json.dumps(
@@ -164,11 +187,11 @@ class TestLockFiles:
 
     def test_a_requirement_for_another_platform_is_skipped(self, repo):
         (repo / "pyproject.toml").write_text(
-            "[project]\n"
+            f'[project]\nrequires-python = ">={PYTHON}"\n'
             'dependencies = ["lxml>=6.0.2", "pywin32>=1; sys_platform == \'win32\'"]\n'
             "[project.optional-dependencies]\n"
             'test = ["pytest>=9.0.2"]\n'
-            f'dev = ["ruff>={RUFF}"]\n',
+            f'dev = ["ruff>={RUFF}"]\n' + TOOLCHAIN,
             encoding="utf-8",
         )
 
@@ -177,11 +200,11 @@ class TestLockFiles:
     def test_a_pin_is_matched_regardless_of_name_spelling(self, repo):
         """pip-compile normalises names; the requirement may not be normalised."""
         (repo / "pyproject.toml").write_text(
-            "[project]\n"
+            f'[project]\nrequires-python = ">={PYTHON}"\n'
             'dependencies = ["LXML>=6.0.2"]\n'
             "[project.optional-dependencies]\n"
             'test = ["pytest>=9.0.2"]\n'
-            f'dev = ["ruff>={RUFF}"]\n',
+            f'dev = ["ruff>={RUFF}"]\n' + TOOLCHAIN,
             encoding="utf-8",
         )
 
@@ -393,6 +416,104 @@ class TestPackageVersion:
         assert check_locks.main() == 1
 
         assert "package.json declares no version" in capsys.readouterr().err
+
+
+class TestToolchainVersions:
+    def test_a_python_version_file_ahead_of_the_image_fails(self, repo, capsys):
+        (repo / ".python-version").write_text("3.15\n", encoding="utf-8")
+
+        assert check_locks.main() == 1
+
+        err = capsys.readouterr().err
+        assert (
+            "the Dockerfile builds on python:3.14, the version file asks for 3.15"
+            in err
+        )
+        assert 'requires-python is ">=3.14"' in err
+        assert 'python_version is "3.14"' in err
+        assert 'target-version is "py314"' in err
+        assert "Move .python-version, .nvmrc" in err
+
+    def test_one_stage_on_another_python_fails(self, repo, capsys):
+        dockerfile = repo / "Dockerfile"
+        text = dockerfile.read_text(encoding="utf-8")
+        dockerfile.write_text(
+            text.replace(
+                f"python:{PYTHON}-slim@{DIGEST}\n", f"python:3.13-slim@{DIGEST}\n"
+            ),
+            encoding="utf-8",
+        )
+
+        assert check_locks.main() == 1
+
+        assert "builds on python:3.13" in capsys.readouterr().err
+
+    def test_a_node_image_behind_nvmrc_fails(self, repo, capsys):
+        (repo / ".nvmrc").write_text("27\n", encoding="utf-8")
+
+        assert check_locks.main() == 1
+
+        err = capsys.readouterr().err
+        assert "builds on node:26, the version file asks for 27" in err
+        assert 'package.json engines "node" is ">=26"' in err
+
+    def test_a_dockerfile_without_a_node_image_fails(self, repo, capsys):
+        dockerfile = repo / "Dockerfile"
+        lines = dockerfile.read_text(encoding="utf-8").splitlines(keepends=True)
+        dockerfile.write_text("".join(lines[1:]), encoding="utf-8")
+
+        assert check_locks.main() == 1
+
+        assert "builds on no node image" in capsys.readouterr().err
+
+    def test_a_from_line_with_options_is_read(self, repo, capsys):
+        """A multi-arch build adds --platform before the image."""
+        dockerfile = repo / "Dockerfile"
+        text = dockerfile.read_text(encoding="utf-8")
+        dockerfile.write_text(
+            text.replace("FROM ", "FROM --platform=$BUILDPLATFORM "), encoding="utf-8"
+        )
+
+        assert check_locks.main() == 0
+
+    def test_a_from_line_with_options_on_another_node_fails(self, repo, capsys):
+        dockerfile = repo / "Dockerfile"
+        text = dockerfile.read_text(encoding="utf-8")
+        dockerfile.write_text(
+            text.replace(
+                f"FROM docker.io/library/node:{NODE}",
+                "FROM --platform=$BUILDPLATFORM docker.io/library/node:25",
+            ),
+            encoding="utf-8",
+        )
+
+        assert check_locks.main() == 1
+
+        assert "builds on node:25, the version file asks for" in (
+            capsys.readouterr().err
+        )
+
+    @pytest.mark.parametrize("file", [".nvmrc", ".python-version"])
+    def test_a_missing_version_file_is_a_problem_not_a_crash(self, repo, capsys, file):
+        (repo / file).unlink()
+
+        assert check_locks.main() == 1
+
+        assert f"{file} cannot be read" in capsys.readouterr().err
+
+    def test_an_empty_version_file_is_a_problem(self, repo, capsys):
+        (repo / ".nvmrc").write_text("\n", encoding="utf-8")
+
+        assert check_locks.main() == 1
+
+        assert ".nvmrc is empty" in capsys.readouterr().err
+
+    def test_missing_engines_fail(self, repo, capsys):
+        edit_json(repo / "package.json", engines={})
+
+        assert check_locks.main() == 1
+
+        assert 'package.json engines "node" is "None"' in capsys.readouterr().err
 
 
 class TestAgainstTheRealRepository:

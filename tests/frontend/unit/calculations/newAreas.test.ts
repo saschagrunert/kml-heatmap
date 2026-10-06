@@ -2,7 +2,7 @@
  * The grid of about a square kilometre that tells the places new in a year
  * from those flown before
  */
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import {
   CELL_KM2,
   cellOf,
@@ -10,7 +10,9 @@ import {
   newAreaKm2,
   visitedBefore,
   visitedCells,
+  yearNewAreaKm2,
 } from "../../../../kml_heatmap/frontend/calculations/newAreas";
+import type { KMLDataset } from "../../../../kml_heatmap/frontend/types";
 import {
   DEGREES_TO_RADIANS,
   METRES_PER_DEGREE,
@@ -122,5 +124,52 @@ describe("newAreaKm2", () => {
     expect(visitedBefore([new Set([1]), new Set([2])], 2)).toBe(true);
     expect(visitedBefore([new Set([1])], 2)).toBe(false);
     expect(visitedBefore([], 2)).toBe(false);
+  });
+});
+
+describe("yearNewAreaKm2", () => {
+  /** A flight along the latitude `lat`, a segment of about 700 m a fix */
+  const flightAt = (lat: number): KMLDataset["path_segments"] =>
+    Array.from({ length: 4 }, (_, i) =>
+      createSegment({
+        path_id: 1,
+        coords: [
+          [lat, 12 + i * 0.01],
+          [lat, 12 + (i + 1) * 0.01],
+        ],
+      }),
+    );
+  const held: Record<string, KMLDataset> = {
+    "2023": createDataset([], flightAt(50)),
+    "2024": createDataset([], flightAt(51)),
+  };
+  const years = [2023, 2024, 2025];
+
+  it("from the earlier years the page holds, without loading any", () => {
+    const cached = vi.fn((year: string) => held[year]);
+    const segments = [...flightAt(51), ...flightAt(52)];
+
+    const km2 = yearNewAreaKm2("2025", segments, years, cached);
+
+    // The year before flew the first flight: only the second is new,
+    // about 3 km along the latitude, over a cell or two either side
+    expect(km2).toBeGreaterThanOrEqual(3);
+    expect(km2).toBeLessThanOrEqual(8);
+    expect(yearNewAreaKm2("2025", flightAt(50), years, cached)).toBe(0);
+    // 2024 is compared with 2023 alone, which flew elsewhere
+    expect(yearNewAreaKm2("2024", flightAt(51), years, cached)).toBeGreaterThan(
+      0,
+    );
+    expect(cached).not.toHaveBeenCalledWith("2025");
+  });
+
+  it("not while an earlier year is not loaded, nor where there is none", () => {
+    const segments = flightAt(52);
+    const cached = (year: string): KMLDataset | undefined =>
+      year === "2023" ? undefined : held[year];
+
+    expect(yearNewAreaKm2("2025", segments, years, cached)).toBeNull();
+    expect(yearNewAreaKm2("2023", segments, years, cached)).toBeNull();
+    expect(yearNewAreaKm2("all", segments, years, cached)).toBeNull();
   });
 });

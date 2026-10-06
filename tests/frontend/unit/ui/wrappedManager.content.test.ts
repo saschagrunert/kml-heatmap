@@ -3,7 +3,11 @@
  * generators from a small flight history.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { resetSiteData } from "../../../../kml_heatmap/frontend/state/siteData";
+import {
+  resetSiteData,
+  siteData,
+} from "../../../../kml_heatmap/frontend/state/siteData";
+import type { Metadata } from "../../../../kml_heatmap/frontend/types";
 import { WrappedManager } from "../../../../kml_heatmap/frontend/ui/wrappedManager";
 import { datasetIndex } from "../../../../kml_heatmap/frontend/calculations/datasetIndex";
 import * as statistics from "../../../../kml_heatmap/frontend/calculations/panelStats";
@@ -150,21 +154,20 @@ describe("WrappedManager content", () => {
     expect(texts.some((t) => t.includes("2 countries"))).toBe(true);
   });
 
-  it("names the airspace new in a year where the data manager knows it", () => {
+  it("names the airspace new in a year once the page holds the years before", () => {
+    siteData.metadata = { available_years: [2023, 2024] } as Metadata;
     wrappedManager.showWrapped();
-    // Not known: no year before it, or one the page has not loaded
+    // Not known: the page has not loaded 2023
     expect(el("wrapped-fun-facts").textContent).not.toContain("new airspace");
-    expect(mockApp.dataManager.newAreaKm2).toHaveBeenCalledWith(
-      "2024",
-      expect.any(Array),
-    );
+    expect(mockApp.dataManager.cachedData).toHaveBeenCalledWith("2023");
     wrappedManager.closeWrapped();
 
-    mockApp.dataManager.newAreaKm2.mockReturnValue(1240);
+    // 2023 flew nowhere, so all of 2024 is new
+    mockApp.dataManager.cachedData.mockReturnValue(createDataset([], []));
     wrappedManager.showWrapped();
 
-    expect(el("wrapped-fun-facts").textContent).toContain(
-      "1,240 km² of new airspace in 2024",
+    expect(el("wrapped-fun-facts").textContent).toMatch(
+      /[\d,]+ km² of new airspace in 2024/,
     );
   });
 

@@ -236,7 +236,6 @@ class TestWorkerPool:
             ),
             workers_module.WorkerPool(2, "testing") as pool,
         ):
-            assert pool.fell_back
             assert pool.submit(_double, 2).result() == 4
             assert list(pool.map(_double, [1, 2])) == [2, 4]
         assert "processes for testing failed (no semaphores)" in caplog.text
@@ -249,7 +248,9 @@ class TestWorkerPool:
             workers_module.WorkerPool(2, "testing") as pool,
         ):
             assert pool.submit(_double, 3).result() == 6
-            assert pool.fell_back
+            # Given up: the next task does not try the pool again
+            assert pool.submit(_double, 4).result() == 8
+        pool_class.return_value.submit.assert_called_once()
         pool_class.return_value.shutdown.assert_called_once()
 
     def test_a_broken_pool_does_the_task_again_here(self, caplog):

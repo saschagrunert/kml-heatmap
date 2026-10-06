@@ -4,6 +4,7 @@ import type {
   PathInfo,
 } from "../../../../kml_heatmap/frontend/types";
 import type { SiteData } from "../../../../kml_heatmap/frontend/state/siteData";
+import { filterPaths } from "../../../../kml_heatmap/frontend/calculations/statistics";
 
 type AirportsModule =
   typeof import("../../../../kml_heatmap/frontend/features/airports");
@@ -59,25 +60,33 @@ describe("airports feature", () => {
   describe("calculateAirportFlightCounts", () => {
     it("counts flights to all airports with no filters", () => {
       expect(
-        mod.calculateAirportFlightCounts(mockPathInfo, "all", "all"),
+        mod.calculateAirportFlightCounts(
+          filterPaths(mockPathInfo, "all", "all"),
+        ),
       ).toEqual({ EDAV: 3, EDDF: 2, EDDM: 1, EDDK: 1 });
     });
 
     it("filters by year", () => {
       expect(
-        mod.calculateAirportFlightCounts(mockPathInfo, "2025", "all"),
+        mod.calculateAirportFlightCounts(
+          filterPaths(mockPathInfo, "2025", "all"),
+        ),
       ).toEqual({ EDAV: 3, EDDF: 2 });
     });
 
     it("filters by aircraft", () => {
       expect(
-        mod.calculateAirportFlightCounts(mockPathInfo, "all", "D-EAGJ"),
+        mod.calculateAirportFlightCounts(
+          filterPaths(mockPathInfo, "all", "D-EAGJ"),
+        ),
       ).toEqual({ EDAV: 2, EDDF: 2 });
     });
 
     it("filters by both year and aircraft", () => {
       expect(
-        mod.calculateAirportFlightCounts(mockPathInfo, "2025", "D-EXYZ"),
+        mod.calculateAirportFlightCounts(
+          filterPaths(mockPathInfo, "2025", "D-EXYZ"),
+        ),
       ).toEqual({ EDAV: 1 });
     });
 
@@ -111,7 +120,9 @@ describe("airports feature", () => {
 
     it("returns empty object when no paths match filters", () => {
       expect(
-        mod.calculateAirportFlightCounts(mockPathInfo, "2023", "all"),
+        mod.calculateAirportFlightCounts(
+          filterPaths(mockPathInfo, "2023", "all"),
+        ),
       ).toEqual({});
     });
   });
@@ -131,14 +142,36 @@ describe("airports feature", () => {
   });
 
   describe("calculateVisibleAirports", () => {
+    /** The airports shown for a filter and selection of `pathInfo` */
+    const visibleAirports = (options: {
+      pathInfo: PathInfo[];
+      selectedYear?: string;
+      selectedAircraft?: string;
+      selectedPathIds?: Set<number>;
+      isolateSelection?: boolean;
+      pathInfoById?: Map<number, PathInfo>;
+    }): Set<string> | null => {
+      const {
+        pathInfo,
+        selectedYear = "all",
+        selectedAircraft = "all",
+      } = options;
+      return mod.calculateVisibleAirports(
+        selectedYear === "all" && selectedAircraft === "all"
+          ? null
+          : filterPaths(pathInfo, selectedYear, selectedAircraft),
+        options.selectedPathIds ?? new Set(),
+        options.isolateSelection ?? false,
+        options.pathInfoById ?? new Map(pathInfo.map((p) => [p.id, p])),
+      );
+    };
+
     it("returns null (all visible) without filters or selection", () => {
-      expect(
-        mod.calculateVisibleAirports({ pathInfo: mockPathInfo }),
-      ).toBeNull();
+      expect(visibleAirports({ pathInfo: mockPathInfo })).toBeNull();
     });
 
     it("returns airports of paths matching the year filter", () => {
-      const visible = mod.calculateVisibleAirports({
+      const visible = visibleAirports({
         pathInfo: mockPathInfo,
         selectedYear: "2024",
       });
@@ -146,7 +179,7 @@ describe("airports feature", () => {
     });
 
     it("returns airports of paths matching the aircraft filter", () => {
-      const visible = mod.calculateVisibleAirports({
+      const visible = visibleAirports({
         pathInfo: mockPathInfo,
         selectedAircraft: "D-EAGJ",
       });
@@ -154,7 +187,7 @@ describe("airports feature", () => {
     });
 
     it("adds airports of selected paths to the filtered set", () => {
-      const visible = mod.calculateVisibleAirports({
+      const visible = visibleAirports({
         pathInfo: mockPathInfo,
         selectedYear: "2025",
         selectedPathIds: new Set([3]),
@@ -163,7 +196,7 @@ describe("airports feature", () => {
     });
 
     it("only returns airports of selected paths in isolate mode", () => {
-      const visible = mod.calculateVisibleAirports({
+      const visible = visibleAirports({
         pathInfo: mockPathInfo,
         selectedYear: "2025",
         selectedPathIds: new Set([3]),
@@ -173,7 +206,7 @@ describe("airports feature", () => {
     });
 
     it("ignores isolate mode without a selection", () => {
-      const visible = mod.calculateVisibleAirports({
+      const visible = visibleAirports({
         pathInfo: mockPathInfo,
         selectedYear: "2024",
         isolateSelection: true,
@@ -185,7 +218,7 @@ describe("airports feature", () => {
       // A year filter keeps its airports beside a selection, so no filter
       // must not hide every airport the selection does not touch
       expect(
-        mod.calculateVisibleAirports({
+        visibleAirports({
           pathInfo: mockPathInfo,
           selectedPathIds: new Set([3]),
         }),
@@ -196,7 +229,7 @@ describe("airports feature", () => {
       const byId = new Map<number, PathInfo>([
         [99, { id: 99, start_airport: "LOWW" }],
       ]);
-      const visible = mod.calculateVisibleAirports({
+      const visible = visibleAirports({
         pathInfo: mockPathInfo,
         selectedPathIds: new Set([99, 1]),
         isolateSelection: true,
@@ -207,7 +240,7 @@ describe("airports feature", () => {
     });
 
     it("ignores unknown selected path ids", () => {
-      const visible = mod.calculateVisibleAirports({
+      const visible = visibleAirports({
         pathInfo: mockPathInfo,
         selectedPathIds: new Set([999]),
         isolateSelection: true,

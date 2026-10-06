@@ -56,7 +56,6 @@ updates:
         patterns:
           - "ruff"
           - "mypy"
-          - "bandit"
           - "zizmor"
       # The type stubs of lxml, bumped together with it
       core:
@@ -141,11 +140,14 @@ updates:
           - "minor"
           - "patch"
 
-  # GitHub Actions, pinned by commit SHA in .github/workflows. One pull
-  # request a week for all of them: most bumps are of the same few actions
-  # of GitHub's own, and each pull request is a full CI run.
+  # GitHub Actions, pinned by commit SHA in .github/workflows and in the
+  # composite actions of .github/actions, which "/" alone does not cover.
+  # One pull request a week for all of them: most bumps are of the same few
+  # actions of GitHub's own, and each pull request is a full CI run.
   - package-ecosystem: "github-actions"
-    directory: "/"
+    directories:
+      - "/"
+      - "/.github/actions/*"
     # See the cooldown of the pip entry
     cooldown:
       default-days: 7
@@ -187,7 +189,8 @@ updates:
     ignore:
       # The Python and Node.js versions follow .python-version and .nvmrc,
       # which CI uses and Dependabot does not bump; move all of them together
-      # by hand. Digest updates of the current tags still come through.
+      # by hand (scripts/check_locks.py fails the lint job until every place
+      # agrees). Digest updates of the current tags still come through.
       - dependency-name: "library/python"
         update-types:
           - "version-update:semver-major"

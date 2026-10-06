@@ -922,11 +922,13 @@ counts the popups finds it.
 
 The flat heatmap has no readout. The code comes with the feature bundle, which a
 visit that never turns on the 3D view, a replay, the satellite imagery, the
-cross-section, the hotspot tour or a single selection does not fetch: in 2D it
-would be fetched on every first visit, or add about 3 KB gzipped to a first
-visit that has no room left. The flat map's heat lines already show where the
-time was spent from `z` 12 in. The feature bundle grew by 8.2 KB raw and 3.3 KB
-gzipped; the first visit by a few bytes: the readout imports only what the
+cross-section, the hotspot tour or a single selection, and never points at or
+focuses Wrapped (whose intro draws the cloud, see
+[The cloud in Wrapped's intro](#the-cloud-in-wrappeds-intro)), does not fetch:
+in 2D it would be fetched on every first visit, or add about 3 KB gzipped to a
+first visit that has no room left. The flat map's heat lines already show where
+the time was spent from `z` 12 in. The feature bundle grew by 8.2 KB raw and 3.3
+KB gzipped; the first visit by a few bytes: the readout imports only what the
 shared chunk exports already (each new import from it adds to its export list).
 `cloud-readout.spec.ts` turns the altitude colours on and enters the 3D view by
 its button near the home field (the button leaves the heatmap alone, which it

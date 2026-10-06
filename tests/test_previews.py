@@ -19,6 +19,7 @@ from kml_heatmap import previews
 from kml_heatmap.previews import (
     PREVIEW_HEIGHT,
     PREVIEW_WIDTH,
+    DrawnPath,
     PreviewJob,
     encode_path_id,
     normalize_site_url,
@@ -297,7 +298,7 @@ class TestRenderImages:
     def test_drawn_once_then_taken_from_the_cache(
         self, tmp_path, preview_cache, monkeypatch
     ):
-        job = PreviewJob("f/a.png", (track_of(_circuit()),))
+        job = PreviewJob("f/a.png", (DrawnPath(_circuit()),))
         render_images([job], tmp_path / "first")
         drawn = (tmp_path / "first" / "f" / "a.png").read_bytes()
         assert drawn == render_preview(job.tracks)
@@ -310,8 +311,33 @@ class TestRenderImages:
         render_images([job], tmp_path / "second")
         assert (tmp_path / "second" / "f" / "a.png").read_bytes() == drawn
 
+    def test_a_cached_image_projects_no_track(
+        self, tmp_path, preview_cache, monkeypatch
+    ):
+        render_images([PreviewJob("a.png", (DrawnPath(_circuit()),))], tmp_path / "a")
+
+        def refuse(path):
+            raise AssertionError("projected")
+
+        monkeypatch.setattr(previews, "track_of", refuse)
+        render_images([PreviewJob("a.png", (DrawnPath(_circuit()),))], tmp_path / "b")
+        assert (tmp_path / "b" / "a.png").is_file()
+
+    def test_a_path_is_projected_once_for_all_its_images(self, monkeypatch):
+        projected = []
+
+        def project(path):
+            projected.append(path)
+            return track_of(path)
+
+        monkeypatch.setattr(previews, "track_of", project)
+        path = DrawnPath(_circuit())
+        for job in (PreviewJob("f/a.png", (path,)), PreviewJob("y/1.png", (path,))):
+            assert job.tracks == (track_of(_circuit()),)
+        assert len(projected) == 1
+
     def test_an_image_in_use_outlives_the_pruning(self, tmp_path, preview_cache):
-        used = PreviewJob("a.png", (track_of(_circuit()),))
+        used = PreviewJob("a.png", (DrawnPath(_circuit()),))
         render_images([used], tmp_path / "first")
         (entry,) = preview_cache.iterdir()
         stale = preview_cache / "stale.png"
@@ -325,15 +351,39 @@ class TestRenderImages:
         assert list(preview_cache.iterdir()) == [entry]
 
     def test_the_key_follows_the_tracks_and_the_module(self):
-        one = PreviewJob("a.png", (track_of(_circuit()),))
-        other = PreviewJob("a.png", (track_of(_cross_country()),))
-        both = PreviewJob("b.png", (*one.tracks, *other.tracks))
+        one = PreviewJob("a.png", (DrawnPath(_circuit()),))
+        other = PreviewJob("a.png", (DrawnPath(_cross_country()),))
+        both = PreviewJob("b.png", (*one.paths, *other.paths))
 
         keys = {job.key(b"x") for job in (one, other, both)}
         assert len(keys) == 3
         assert one.key(b"x") != one.key(b"y")
         # Where it is published plays no part
-        assert PreviewJob("c.png", one.tracks).key(b"x") == one.key(b"x")
+        assert PreviewJob("c.png", one.paths).key(b"x") == one.key(b"x")
+
+    def test_the_key_follows_every_value_a_track_is_drawn_from(self):
+        """The latitude, the longitude and the time of each point change the
+        key; the altitude, which the images do not draw, does not."""
+        base = _circuit()
+
+        def key(points):
+            return PreviewJob("a.png", (DrawnPath(points),)).key(b"x")
+
+        first = base[1]
+        changed = [
+            first._replace(lat=first.lat + 1e-9),
+            first._replace(lon=first.lon + 1e-9),
+            first._replace(ts=first.ts + 1),
+            first._replace(ts=None),
+        ]
+        keys = {key([base[0], point, *base[2:]]) for point in changed}
+        assert len(keys | {key(base)}) == len(changed) + 1
+        assert key([base[0], first._replace(alt=9999.0), *base[2:]]) == key(base)
+
+    def test_a_drawn_path_keeps_a_digest_not_its_points(self):
+        path = DrawnPath(_circuit())
+        assert not hasattr(path, "content")
+        assert len(path.digest) == 16
 
     def test_the_module_digest_follows_every_module_that_draws(
         self, tmp_path, monkeypatch
@@ -354,7 +404,7 @@ class TestRenderImages:
         assert len({first, second, previews._module_digest()}) == 3
 
     def test_a_broken_cache_entry_is_drawn_again(self, tmp_path, preview_cache):
-        job = PreviewJob("a.png", (track_of(_circuit()),))
+        job = PreviewJob("a.png", (DrawnPath(_circuit()),))
         render_images([job], tmp_path / "first")
         (entry,) = preview_cache.iterdir()
         entry.write_bytes(b"not a png")
@@ -406,7 +456,7 @@ class TestRenderImages:
             return b"\x89PNG fake"
 
         monkeypatch.setattr(previews, "render_preview", render)
-        tracks = (track_of(_circuit()),)
+        tracks = (DrawnPath(_circuit()),)
 
         render_images(
             [PreviewJob("y/2025.png", tracks), PreviewJob("f/a.png", tracks)],
@@ -424,14 +474,15 @@ class TestRenderImages:
         monkeypatch.setattr(previews, "render_preview", fail)
 
         with pytest.raises(RuntimeError, match=r"link preview f/a\.png"):
-            render_images([PreviewJob("f/a.png", (track_of(_circuit()),))], tmp_path)
+            render_images([PreviewJob("f/a.png", (DrawnPath(_circuit()),))], tmp_path)
 
     def test_a_failed_drawing_in_the_pool_names_the_image(self, tmp_path, monkeypatch):
         monkeypatch.setattr(os, "process_cpu_count", lambda: 2)
         # A position that is no number cannot be placed in the image
-        broken = array("d", [float("nan")] * 6)
+        broken = DrawnPath(_cross_country())
+        broken._track = array("d", [float("nan")] * 6)
         jobs = [
-            PreviewJob("f/a.png", (track_of(_circuit()),)),
+            PreviewJob("f/a.png", (DrawnPath(_circuit()),)),
             PreviewJob("f/b.png", (broken,)),
         ]
 
@@ -453,8 +504,8 @@ class TestRenderImages:
             pool.return_value.submit.return_value = broken
         monkeypatch.setattr(workers_module, "ProcessPoolExecutor", pool)
         jobs = [
-            PreviewJob("f/a.png", (track_of(_circuit()),)),
-            PreviewJob("f/b.png", (track_of(_cross_country()),)),
+            PreviewJob("f/a.png", (DrawnPath(_circuit()),)),
+            PreviewJob("f/b.png", (DrawnPath(_cross_country()),)),
         ]
 
         render_images(jobs, tmp_path / "site")
@@ -466,7 +517,7 @@ class TestRenderImages:
 
     def test_an_unwritable_cache_still_draws(self, tmp_path, preview_cache):
         preview_cache.write_text("a file where the directory should be")
-        job = PreviewJob("a.png", (track_of(_circuit()),))
+        job = PreviewJob("a.png", (DrawnPath(_circuit()),))
 
         render_images([job], tmp_path / "site")
 
@@ -475,8 +526,8 @@ class TestRenderImages:
     def test_several_images_are_drawn_in_a_pool(self, tmp_path, monkeypatch):
         monkeypatch.setattr(os, "process_cpu_count", lambda: 2)
         jobs = [
-            PreviewJob("f/a.png", (track_of(_circuit()),)),
-            PreviewJob("f/b.png", (track_of(_cross_country()),)),
+            PreviewJob("f/a.png", (DrawnPath(_circuit()),)),
+            PreviewJob("f/b.png", (DrawnPath(_cross_country()),)),
         ]
 
         render_images(jobs, tmp_path / "site")

@@ -9,7 +9,6 @@
  */
 
 import { calculateDistance } from "../utils/geometry";
-import { formatFlightTime } from "../utils/formatters";
 import type { Range } from "../state/store";
 import type { PathInfo, PathSegment, AircraftAggregate } from "../types";
 
@@ -30,37 +29,6 @@ export function segmentDistance(segment: PathSegment): number {
     coords && coords.length === 2 ? calculateDistance(coords[0], coords[1]) : 0;
   segment.distance_km = distance;
   return distance;
-}
-
-/**
- * Group timed segments by path and return per-path flight seconds.
- * Shared by aggregateAircraft (per-aircraft time) and
- * calculateFilteredStatistics (total time, see panelStats.ts).
- *
- * Only the first and last time of each path matter, so a running min and
- * max per path replaces collecting every timestamp.
- */
-export function perPathSeconds(
-  segments: PathSegment[],
-  pathIds?: Set<number>,
-): Map<number, number> {
-  const bounds = new Map<number, { min: number; max: number }>();
-  for (const seg of segments) {
-    if (seg.time === undefined) continue;
-    if (pathIds && !pathIds.has(seg.path_id)) continue;
-    const range = bounds.get(seg.path_id);
-    if (!range) {
-      bounds.set(seg.path_id, { min: seg.time, max: seg.time });
-    } else {
-      if (seg.time < range.min) range.min = seg.time;
-      if (seg.time > range.max) range.max = seg.time;
-    }
-  }
-  const result = new Map<number, number>();
-  for (const [pathId, { min, max }] of bounds) {
-    result.set(pathId, max - min);
-  }
-  return result;
 }
 
 /** Half-open index range `[start, end)` of one path within a segment array */
@@ -171,23 +139,19 @@ export function filterPaths(
 }
 
 /**
- * Aggregate aircraft data from path info
+ * Aggregate aircraft data from path info. The flight times are the
+ * statistics panel's to add (see panelStats.ts), which the aircraft
+ * dropdown does without.
  * @param pathInfo - Array of path info objects
  * @returns Array of aircraft objects with registration, type, and flight count
  */
-export function aggregateAircraft(
-  pathInfo: PathInfo[],
-  segments?: PathSegment[],
-  secondsByPath?: Map<number, number>,
-): AircraftAggregate[] {
+export function aggregateAircraft(pathInfo: PathInfo[]): AircraftAggregate[] {
   // A Map, as a registration is data: "constructor" is no key of it
   const aircraftMap = new Map<string, AircraftAggregate>();
-  const pathToReg = new Map<number, string>();
 
   for (const path of pathInfo) {
     if (path.aircraft_registration) {
       const reg = path.aircraft_registration;
-      pathToReg.set(path.id, reg);
       let entry = aircraftMap.get(reg);
       if (!entry) {
         entry = {
@@ -201,21 +165,6 @@ export function aggregateAircraft(
       entry.flights += 1;
       // Mixed sources: a later path may carry the type the first one lacks
       entry.type ??= path.aircraft_type;
-    }
-  }
-
-  if (segments || secondsByPath) {
-    const seconds =
-      secondsByPath ??
-      perPathSeconds(segments ?? [], new Set(pathToReg.keys()));
-    for (const [pathId, secs] of seconds) {
-      const entry = aircraftMap.get(pathToReg.get(pathId) ?? "");
-      if (entry) entry.flight_time_seconds! += secs;
-    }
-    for (const agg of aircraftMap.values()) {
-      if (agg.flight_time_seconds && agg.flight_time_seconds > 0) {
-        agg.flight_time_str = formatFlightTime(agg.flight_time_seconds);
-      }
     }
   }
 

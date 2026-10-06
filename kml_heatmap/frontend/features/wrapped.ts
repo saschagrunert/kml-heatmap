@@ -4,9 +4,9 @@
  */
 
 import { KM_TO_NAUTICAL_MILES } from "../utils/constants";
-import { formatFlightTime, formatNumber } from "../utils/formatters";
+import { formatNumber } from "../utils/formatters";
+import { formatFlightTime } from "../utils/statsFormat";
 import { markup } from "../utils/markup";
-import { filterPaths } from "../calculations/statistics";
 import { collectAirports } from "../calculations/panelStats";
 import { countCountries } from "./countries";
 import { calculateDistance, type Coordinate } from "../utils/geometry";
@@ -113,36 +113,25 @@ export function findClosestReferenceDistance(
 }
 
 /**
- * The figures of Wrapped's title card. They take the distance, the flight
- * time and the aircraft from `filtered`, the statistics of the same filter,
- * rather than walk every segment again for them.
+ * The figures of Wrapped's title card, of the paths the year and aircraft
+ * filter keeps. They take the distance, the flight time and the aircraft
+ * from `filtered`, the statistics of the same filter, rather than walk
+ * every segment again for them.
  */
 export function calculateYearStats(
-  pathInfo: PathInfo[] | null,
-  year: number | string,
+  filteredPaths: PathInfo[],
   aircraftModels: AircraftModels,
-  aircraft: string,
-  preFiltered: { paths: PathInfo[] } | undefined,
   filtered: FilteredStatistics,
 ): YearStats {
-  const emptyResult: YearStats = {
-    total_flights: 0,
-    total_distance_nm: 0,
-    num_airports: 0,
-    airport_names: [],
-    flight_time: "0h 0m",
-    aircraft_list: [],
-  };
-
-  if (!pathInfo || pathInfo.length === 0) {
-    return emptyResult;
-  }
-
-  const filteredPaths =
-    preFiltered?.paths ?? filterPaths(pathInfo, String(year), aircraft);
-
   if (filteredPaths.length === 0) {
-    return emptyResult;
+    return {
+      total_flights: 0,
+      total_distance_nm: 0,
+      num_airports: 0,
+      airport_names: [],
+      flight_time: "0h 0m",
+      aircraft_list: [],
+    };
   }
 
   // Collect airports
@@ -187,7 +176,7 @@ function periodPhrase(year: string): string {
  * @param filteredStats - The statistics of the same selection
  * @param year - The selected year, or "all"
  * @param newAreaKm2 - The area the year's flights passed over and none of
- * an earlier year did (see DataManager.newAreaKm2), where known
+ * an earlier year did (see yearNewAreaKm2), where known
  */
 export function generateFunFacts(
   yearStats: YearStats,
@@ -386,16 +375,6 @@ export function generateFunFacts(
         text: markup`Total flight time: <strong>${duration}</strong> in the air!`,
         category: "time",
         priority: 4,
-      });
-    }
-
-    // Speed facts (lower priority - speed is included in other facts)
-    if (filteredStats.cruise_speed_knots) {
-      facts.push({
-        icon: "speed",
-        text: markup`Average cruise speed: <strong>${formatNumber(filteredStats.cruise_speed_knots)} knots</strong>.`,
-        category: "speed",
-        priority: 3,
       });
     }
 

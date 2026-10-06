@@ -26,6 +26,8 @@ __all__ = [
     "TILE_SIZE",
     "DecodeFailedError",
     "TileKey",
+    "decode_cached_tile",
+    "has_current_pixels",
     "is_tile_png",
 ]
 
@@ -85,7 +87,7 @@ def _pixels_path(path: Path) -> Path:
     return path.with_suffix(PIXELS_SUFFIX)
 
 
-def _has_current_pixels(path: Path) -> bool:
+def has_current_pixels(path: Path) -> bool:
     """Whether the pixels kept of the tile at ``path`` are of this version.
 
     Only the header's magic and version: whether they are of this PNG
@@ -163,7 +165,7 @@ def _elevations_at(planes: bytes, indices: Sequence[int]) -> array[float]:
     )
 
 
-def _decode_cached_tile(path: Path, indices: Sequence[int]) -> array[float] | None:
+def decode_cached_tile(path: Path, indices: Sequence[int]) -> array[float] | None:
     """The elevations of the pixels at ``indices`` of a cached tile.
 
     From the pixels kept of it when there are any, from its PNG otherwise,

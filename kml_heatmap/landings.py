@@ -51,7 +51,6 @@ only falls back to detecting them itself (``detect_landings``) for paths
 that come without them; its workers never load the databases.
 """
 
-import functools
 import math
 import time
 from bisect import bisect_left, bisect_right
@@ -612,10 +611,22 @@ def detect_path_landings(path: FlightPath, fields: FieldIndex) -> FlightLandings
     return detector.finish()
 
 
-@functools.cache
+# The fields of the databases this process loaded, with those databases: at
+# most one entry
+_fields: list[tuple[object, object, FieldIndex]] = []
+
+
 def _fields_of_this_process() -> FieldIndex:
-    """The fields of the databases this process loaded, built once."""
-    return field_index()
+    """The fields of the databases this process loaded, built once for them.
+
+    Built again when the databases changed, as after
+    ``AirportDatabases.reset`` and a refresh.
+    """
+    airports = load_airport_database()
+    runways = load_runway_database()
+    if not _fields or _fields[0][0] is not airports or _fields[0][1] is not runways:
+        _fields[:] = [(airports, runways, field_index(airports, runways))]
+    return _fields[0][2]
 
 
 def path_landings(paths: Sequence[FlightPath]) -> list[FlightLandings | None]:

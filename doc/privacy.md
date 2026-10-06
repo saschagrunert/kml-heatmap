@@ -256,6 +256,7 @@ Removed from the site:
   mark (`1_ANNA_DA40.kml`), with a warning
 
 The CARTO key is a public client-side tile key. It is embedded in the generated
-`map_config.js` and published with the site by design, because the browser needs
-it to load the base map. The generated site is not committed; the key lives in
-the repository secrets and in the deployed site only.
+`map_config.js` and in the two base map URLs `index.html` preloads, and
+published with the site by design, because the browser needs it to load the base
+map. The generated site is not committed; the key lives in the repository
+secrets and in the deployed site only.

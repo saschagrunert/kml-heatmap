@@ -279,6 +279,14 @@ export class LayerGl<U extends string> {
 }
 
 /**
+ * The matrices setProjection hands the shaders, made once: a layer sets
+ * them for each pass and each world copy of every frame, and WebGL copies
+ * them as they are set
+ */
+const mercatorScratch = new Float32Array(16);
+const mainScratch = new Float32Array(16);
+
+/**
  * Set the uniforms of MapLibre's projection prelude for points given from
  * `origin` (see cloudMatrix), on the map or the globe, in the program in use
  */
@@ -295,11 +303,13 @@ export function setProjection(
     globe ? data.fallbackMatrix : data.mainMatrix,
     origin,
     lat,
+    mercatorScratch,
   );
+  if (globe) mainScratch.set(data.mainMatrix);
   gl.uniformMatrix4fv(
     u.u_projection_matrix,
     false,
-    globe ? new Float32Array(data.mainMatrix) : mercator,
+    globe ? mainScratch : mercator,
   );
   if (globe) {
     gl.uniformMatrix4fv(u.u_projection_fallback_matrix, false, mercator);
@@ -403,17 +413,18 @@ export function mercatorUnitMetres(lat: number): number {
  * Mercator units and a height in metres, to where `mercator` takes a point
  * in Mercator units with a height in Mercator units at the latitude `lat`
  * (see getProjectionDataForCustomLayer): `mercator` moved to the origin
- * and its heights scaled to metres, in 64 bits, then as 32
+ * and its heights scaled to metres, in 64 bits, then as 32. Written into
+ * `out`, which the layers hand it again on every frame they draw.
  */
 export function cloudMatrix(
   mercator: ArrayLike<number>,
   origin: readonly [number, number],
   lat: number,
+  out = new Float32Array(16),
 ): Float32Array {
   const [x, y] = origin;
   const metre = 1 / mercatorUnitMetres(lat);
-  const m = Array.from(mercator);
-  const out = new Float32Array(16);
+  const m = mercator;
   for (let row = 0; row < 4; row++) {
     out[row] = m[row]!;
     out[4 + row] = m[4 + row]!;

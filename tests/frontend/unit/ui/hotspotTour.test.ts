@@ -7,7 +7,8 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
-  HotspotTour,
+  createHotspotTour,
+  type HotspotTour,
   TOUR_DWELL_MS,
   TOUR_FLY_MS,
   TOUR_NOTHING_MESSAGE,
@@ -138,7 +139,7 @@ describe("hotspot tour", () => {
     });
     map().jumpTo({ center: [12.4, 51.3], zoom: 8, bearing: 10, pitch: 0 });
     map().jumpTo.mockClear();
-    tour = new HotspotTour(asMapApp(app));
+    tour = createHotspotTour(asMapApp(app));
   });
 
   afterEach(() => {

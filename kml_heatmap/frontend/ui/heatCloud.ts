@@ -306,6 +306,8 @@ export function followHeatCloud(app: MapApp): void {
   let broken = false;
   /** How strongly the cloud is drawn, as the heatmap would be */
   let opacity = 1;
+  /** The stylesheet's dimmed opacity, read the first time it is wanted */
+  let dimmed: number | undefined;
   /**
    * Whether the flights are lifted: as the ribbons, which the layer manager
    * hands to the flat lines from LIFT_MAX_ZOOM on once a zoom has ended
@@ -653,7 +655,7 @@ export function followHeatCloud(app: MapApp): void {
         : app.replayActive
           ? CLOUD_REPLAY_OPACITY
           : dimsHeatCloud(app)
-            ? dimmedHeatmapOpacity()
+            ? (dimmed ??= dimmedHeatmapOpacity())
             : 1;
     if (!map.isZooming()) lifted = isLiftedAt(map.getZoom());
     if (shown()) updatePoints();

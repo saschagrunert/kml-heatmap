@@ -131,7 +131,7 @@ test.describe("Core", () => {
     await expect(mapSurface(page)).toBeAttached();
   });
 
-  test("control buttons are present", async ({ page, isMobile }) => {
+  test("control buttons are present @desktop", async ({ page, isMobile }) => {
     test.skip(
       isMobile,
       "The bottom bar replaces the columns; see mobile.spec.ts",
@@ -188,7 +188,7 @@ test.describe("Core", () => {
     }
   });
 
-  test("every labelled control is named by its label (WCAG 2.5.3)", async ({
+  test("every labelled control is named by its label (WCAG 2.5.3) @desktop", async ({
     page,
     isMobile,
   }) => {
@@ -217,7 +217,7 @@ test.describe("Core", () => {
     await expect(btn).toHaveCSS("opacity", "1");
   });
 
-  test("replay button is enabled but marked unavailable initially", async ({
+  test("replay button is enabled but marked unavailable initially @desktop", async ({
     page,
     isMobile,
   }) => {
@@ -267,7 +267,7 @@ test.describe("Core", () => {
     await expect(page.locator("#replay-controls")).toBeHidden();
   });
 
-  test("the focus ring of a row on a group's corner is not clipped", async ({
+  test("the focus ring of a row on a group's corner is not clipped @desktop", async ({
     page,
     isMobile,
   }) => {
@@ -389,7 +389,9 @@ test.describe("Core", () => {
     expect(await markers.count()).toBeGreaterThan(0);
   });
 
-  test("github footer is visible and labelled on desktop", async ({ page }) => {
+  test("github footer is visible and labelled on desktop @desktop", async ({
+    page,
+  }) => {
     test.skip(
       await usesMobileBar(page),
       "The More sheet carries the GitHub link; see mobile.spec.ts",

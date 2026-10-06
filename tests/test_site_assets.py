@@ -12,6 +12,7 @@ from unittest.mock import patch
 import pytest
 
 import kml_heatmap.site_assets as assets_module
+from kml_heatmap.geometry import CoordinateExtent
 from kml_heatmap.site_assets import (
     BuildCommit,
     _copy_javascript_bundle,
@@ -37,14 +38,7 @@ def _install_vendor_files(tmp_path, monkeypatch):
     return static
 
 
-BOUNDS = {
-    "center_lat": 50.0,
-    "center_lon": 8.0,
-    "min_lat": 49.0,
-    "max_lat": 51.0,
-    "min_lon": 7.0,
-    "max_lon": 9.0,
-}
+BOUNDS = CoordinateExtent(49.0, 51.0, 7.0, 9.0)
 
 
 @pytest.fixture
@@ -111,11 +105,8 @@ class TestMapConfig:
             "commit",
             "commitUrl",
         }
-        assert config["center"] == [BOUNDS["center_lat"], BOUNDS["center_lon"]]
-        assert config["bounds"] == [
-            [BOUNDS["min_lat"], BOUNDS["min_lon"]],
-            [BOUNDS["max_lat"], BOUNDS["max_lon"]],
-        ]
+        assert config["center"] == [50.0, 8.0]
+        assert config["bounds"] == [[49.0, 7.0], [51.0, 9.0]]
         assert config["dataDir"] == 'da"ta'
 
 
@@ -351,7 +342,7 @@ class TestPackageAssets:
             package_assets(tmp_path, BOUNDS, "data")
 
         config = _map_config(tmp_path / "map_config.js")
-        assert config["center"][0] == BOUNDS["center_lat"]
+        assert config["center"][0] == BOUNDS.center_lat
         assert config["cartoApiKey"] == "test-carto's"
         assert re.fullmatch(r"\d{4}-\d{2}-\d{2}", config["builtOn"])
         assert re.fullmatch(r"([0-9a-f]{7})?", config["commit"])

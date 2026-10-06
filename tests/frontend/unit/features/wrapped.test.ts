@@ -12,6 +12,7 @@ import {
 } from "../../../../kml_heatmap/frontend/features/wrapped";
 import * as countries from "../../../../kml_heatmap/frontend/features/countries";
 import { calculateFilteredStatistics } from "../../../../kml_heatmap/frontend/calculations/panelStats";
+import { filterPaths } from "../../../../kml_heatmap/frontend/calculations/statistics";
 import type {
   FunFact,
   PathInfo,
@@ -143,7 +144,9 @@ describe("wrapped feature", () => {
       ...(preFiltered && { preFiltered }),
     }),
   ) {
-    return yearStatsOf(pathInfo, year, models, aircraft, preFiltered, filtered);
+    const paths =
+      preFiltered?.paths ?? filterPaths(pathInfo ?? [], String(year), aircraft);
+    return yearStatsOf(paths, models, filtered);
   }
 
   describe("calculateYearStats", () => {
@@ -502,10 +505,14 @@ describe("wrapped feature", () => {
       expect(time?.text.html).not.toContain("0 hours");
     });
 
-    it("generates speed facts when provided", () => {
-      const facts = generateFunFacts(yearStats, { cruise_speed_knots: 120 });
+    it("names the cruise speed once, with the distance per trip", () => {
+      const texts = generateFunFacts(yearStats, {
+        cruise_speed_knots: 120,
+      }).map((f) => f.text.html);
 
-      expect(facts.some((f) => f.category === "speed")).toBe(true);
+      expect(texts.filter((text) => text.includes("120"))).toEqual([
+        expect.stringContaining("Cruising at <strong>120 kt</strong>"),
+      ]);
     });
 
     it("names the airspace new in the year, once known", () => {

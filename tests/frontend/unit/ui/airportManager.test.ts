@@ -574,7 +574,7 @@ describe("AirportManager", () => {
     });
   });
 
-  describe("updateAirportOpacity", () => {
+  describe("showAirports", () => {
     function hidden(): string[] {
       return Object.keys(markers).filter(
         (name) => markers[name]!.getElement().hidden,
@@ -584,7 +584,7 @@ describe("AirportManager", () => {
     it("shows all airports when no filters or selection", () => {
       for (const marker of Object.values(markers)) marker.setVisible(false);
 
-      airportManager.updateAirportOpacity();
+      airportManager.showAirports();
 
       expect(hidden()).toEqual([]);
     });
@@ -594,7 +594,7 @@ describe("AirportManager", () => {
       // unlabelled (regression)
       mockApp.currentData = null;
 
-      airportManager.updateAirportOpacity();
+      airportManager.showAirports();
 
       expect(hidden()).toEqual(Object.keys(markers));
     });
@@ -616,7 +616,7 @@ describe("AirportManager", () => {
       // Path 3 flew in 2024, to EDDK
       mockApp.selectedPathIds.add(3);
 
-      airportManager.updateAirportOpacity();
+      airportManager.showAirports();
 
       expect(hidden()).toEqual(["LOWW"]);
     });
@@ -624,7 +624,7 @@ describe("AirportManager", () => {
     it("keeps every airport for a selection without a filter (regression)", () => {
       mockApp.selectedPathIds.add(3);
 
-      airportManager.updateAirportOpacity();
+      airportManager.showAirports();
 
       expect(hidden()).toEqual([]);
     });
@@ -765,7 +765,7 @@ describe("AirportManager", () => {
     const labelSource = () => mockApp.map!.source(MAP_SOURCES.airportLabels);
 
     it("hands the label layer every airport, with its flights and the home base", () => {
-      airportManager.updateAirportOpacity();
+      airportManager.showAirports();
 
       expect(labels().map((feature) => feature.properties["name"])).toEqual(
         airports.map((airport) => airport.name),
@@ -792,7 +792,7 @@ describe("AirportManager", () => {
       });
       const names = (): unknown[] =>
         labels().map((feature) => feature.properties["name"]);
-      airportManager.updateAirportOpacity();
+      airportManager.showAirports();
 
       // Looking north over EDDF: EDDK is up at the horizon, three times as
       // far from the camera as EDDF; the others are to the south, near.
@@ -871,7 +871,7 @@ describe("AirportManager", () => {
       await mockApp.mapReady;
       await Promise.resolve();
       const map = mockApp.map!;
-      airportManager.updateAirportOpacity();
+      airportManager.showAirports();
       // What changed during the loss had no source to go to
       const getSource = map.getSource.getMockImplementation()!;
       map.getSource.mockImplementation(() => undefined);
@@ -998,7 +998,6 @@ describe("AirportManager", () => {
 
   describe("store subscriptions", () => {
     it("refreshes once, and writes the labels once, for an update that changes several keys (regression)", () => {
-      const opacity = vi.spyOn(airportManager, "updateAirportOpacity");
       const labels = mockApp.map!.source(MAP_SOURCES.airportLabels).setData;
       labels.mockClear();
 
@@ -1012,7 +1011,6 @@ describe("AirportManager", () => {
         mockApp.store.notifyMutation("selectedPathIds");
       });
 
-      expect(opacity).toHaveBeenCalledTimes(1);
       expect(labels).toHaveBeenCalledTimes(1);
       expect(isHome("EDDF")).toBe(true);
     });
@@ -1026,32 +1024,42 @@ describe("AirportManager", () => {
     });
 
     it("counts the home base again, and refreshes the visibility, when the filter changes", () => {
-      const opacity = vi.spyOn(airportManager, "updateAirportOpacity");
+      const labels = mockApp.map!.source(MAP_SOURCES.airportLabels).setData;
       markers["EDDF"]!.openPopup();
       popup.setHTML.mockClear();
+      labels.mockClear();
 
       mockApp.selectedYear = "2024";
 
       expect(popup.setHTML).toHaveBeenCalledTimes(1);
-      expect(opacity).toHaveBeenCalledTimes(1);
+      expect(labels).toHaveBeenCalledTimes(1);
+      expect(markers["EDDM"]!.getElement().hidden).toBe(true);
 
       mockApp.selectedAircraft = "D-ABCD";
 
       expect(popup.setHTML).toHaveBeenCalledTimes(2);
-      expect(opacity).toHaveBeenCalledTimes(2);
+      expect(labels).toHaveBeenCalledTimes(2);
     });
 
-    it("refreshes only the visibility for a selection change", () => {
-      const opacity = vi.spyOn(airportManager, "updateAirportOpacity");
+    it("refreshes only the visibility for a selection change, and only where it changes", () => {
+      const labels = mockApp.map!.source(MAP_SOURCES.airportLabels).setData;
+      airportManager.showAirports();
       markers["EDDF"]!.openPopup();
       popup.setHTML.mockClear();
+      labels.mockClear();
 
+      // Without a filter every airport shows, the selected flight's too
       mockApp.selectedPathIds.add(3);
       mockApp.store.notifyMutation("selectedPathIds");
+
+      expect(labels).not.toHaveBeenCalled();
+      expect(markers["EDDM"]!.getElement().hidden).toBe(false);
+
       mockApp.isolateSelection = true;
 
       expect(popup.setHTML).not.toHaveBeenCalled();
-      expect(opacity).toHaveBeenCalledTimes(2);
+      expect(labels).toHaveBeenCalledTimes(1);
+      expect(markers["EDDM"]!.getElement().hidden).toBe(true);
     });
 
     it("marks the home base and hides the markers as soon as a dataset arrives", () => {

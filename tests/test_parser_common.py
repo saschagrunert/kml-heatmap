@@ -18,7 +18,7 @@ from kml_heatmap.constants import (
     LON_MIN,
 )
 from kml_heatmap.parser_common import (
-    _build_path_metadata_dict,
+    build_path_metadata_dict,
     empty_placemark_metadata,
     extract_charterware_timestamp,
     extract_placemark_metadata,
@@ -78,6 +78,11 @@ class TestExtractYearFromTimestamp:
         assert extract_year_from_timestamp("2025-01-01T00:30:00+02:00") == 2024
         assert extract_year_from_timestamp("2024-12-31T23:30:00-02:00") == 2025
         assert extract_year_from_timestamp("2025-01-01T00:30:00") == 2025
+
+    def test_no_utc_year_is_no_year(self):
+        """Year 1 east of UTC and 9999 west of it are out of datetime's range."""
+        assert extract_year_from_timestamp("0001-01-01T00:00:00+05:00") is None
+        assert extract_year_from_timestamp("9999-12-31T23:59:59-14:00") is None
 
 
 class TestValidateAndNormalizeCoordinate:
@@ -430,7 +435,7 @@ class TestBuildPathMetadataDict:
     @staticmethod
     def _build(kml_file, point, meta):
         aircraft_info = parse_aircraft_from_filename(kml_file.rsplit("/", 1)[-1])
-        return _build_path_metadata_dict(kml_file, point, meta, aircraft_info)
+        return build_path_metadata_dict(kml_file, point, meta, aircraft_info)
 
     def test_basic_metadata(self):
         result = self._build(

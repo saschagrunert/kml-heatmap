@@ -176,6 +176,16 @@ describe("smoothCells", () => {
     const smoothed = smoothCells(new Float64Array(6).fill(3), 3, 2);
     expect([...smoothed]).toEqual([3, 3, 3, 3, 3, 3]);
   });
+
+  it("writes into the grids it is handed, whatever they held", () => {
+    const values = new Float64Array(5 * 5);
+    values[2 * 5 + 2] = 16;
+    const out = new Float64Array(25).fill(9);
+    const across = new Float64Array(25).fill(9);
+
+    expect(smoothCells(values, 5, 5, out, across)).toBe(out);
+    expect([...out]).toEqual([...smoothCells(values, 5, 5)]);
+  });
 });
 
 describe("clipToCorridor", () => {

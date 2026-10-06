@@ -266,11 +266,6 @@ class TestPruneStaleCacheEntries:
             f"{digest}_v{CACHE_FORMAT_VERSION - 1}_{parser_fingerprint()}"
             f"_{database_fingerprint()}{CACHE_SUFFIX}",
         )
-        old_parser = _entry(
-            cache_dir,
-            f"{digest}_v{CACHE_FORMAT_VERSION}_00000000_"
-            f"{database_fingerprint()}{CACHE_SUFFIX}",
-        )
         old_database = _entry(
             cache_dir,
             f"{digest}_v{CACHE_FORMAT_VERSION}_{parser_fingerprint()}_nodb{CACHE_SUFFIX}",
@@ -280,13 +275,23 @@ class TestPruneStaleCacheEntries:
 
         removed = prune_stale_cache_entries(cache_dir=cache_dir)
 
-        assert removed == 4
+        assert removed == 3
         assert sorted(p.name for p in cache_dir.iterdir()) == sorted(
             [current.name, unrelated.name]
         )
-        assert not any(
-            p.exists() for p in (old_version, old_parser, old_database, legacy)
-        )
+        assert not any(p.exists() for p in (old_version, old_database, legacy))
+
+    def test_entries_of_another_parser_go_by_their_age(self, tmp_path):
+        """A checkout on another commit shares the directory and reads them."""
+        cache_dir = tmp_path / "cache"
+        cache_dir.mkdir()
+        other = f"_v{CACHE_FORMAT_VERSION}_00000000_{database_fingerprint()}"
+        recent = _entry(cache_dir, "a" * 32 + other + CACHE_SUFFIX, age_days=1)
+        old = _entry(cache_dir, "b" * 32 + other + CACHE_SUFFIX, CACHE_MAX_AGE_DAYS + 1)
+
+        assert prune_stale_cache_entries(cache_dir=cache_dir) == 1
+        assert recent.exists()
+        assert not old.exists()
 
     def test_removes_the_uncompressed_entries_of_version_5(self, tmp_path):
         """What an earlier release wrote: plain JSON, under a .json name."""
@@ -478,6 +483,34 @@ class TestSaveAndLoad:
         save_to_cache(cache_path, COORDS, PATHS, METADATA)
         entry = decode_entry(cache_path.read_bytes())
         entry["path_metadata"] = entry["path_metadata"][:-1]
+        cache_path.write_bytes(encode_entry(entry))
+        assert load_cached_parse(cache_path) is None
+
+    @pytest.mark.parametrize(
+        "point",
+        [[50.0, 8.5, "high", 1000.5], [50.0, 8.5, 300.0, {"t": 1}]],
+        ids=["altitude", "time"],
+    )
+    def test_a_point_of_the_wrong_type_is_rejected(self, tmp_path, point):
+        cache_path = tmp_path / "cache.json"
+        cache_path.write_bytes(
+            encode_entry(
+                {
+                    "version": CACHE_FORMAT_VERSION,
+                    "coordinates": [point],
+                    "path_groups": [[0]],
+                    "path_metadata": [{}],
+                    "warnings": [],
+                }
+            )
+        )
+        assert load_cached_parse(cache_path) is None
+
+    def test_metadata_that_is_no_object_is_rejected(self, tmp_path):
+        cache_path = tmp_path / "cache.json"
+        save_to_cache(cache_path, COORDS, PATHS, METADATA)
+        entry = decode_entry(cache_path.read_bytes())
+        entry["path_metadata"] = ["not an object"] * len(entry["path_metadata"])
         cache_path.write_bytes(encode_entry(entry))
         assert load_cached_parse(cache_path) is None
 

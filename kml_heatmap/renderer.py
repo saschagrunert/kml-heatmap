@@ -10,7 +10,7 @@ they hand each other and how a failure is reported (the exceptions of
 import contextlib
 import gc
 import os
-import pickle  # nosec B403
+import pickle
 import time
 from concurrent.futures import as_completed
 from concurrent.futures.process import BrokenProcessPool
@@ -38,6 +38,7 @@ from .export_writers import (
     exported_country_codes,
     free_text_airport_names,
 )
+from .geometry import CoordinateExtent
 from .landings import path_landings
 from .logger import logger
 from .parser import load_cached_entry, parse_and_cache, parse_size
@@ -59,16 +60,15 @@ from .validation import foreign_site_files, validate_kml_file, validate_output_d
 from .workers import WorkerPool, default_worker_count, parse_worker_count
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable, Iterator, Sequence
+    from collections.abc import Callable, Iterator, Sequence
 
     from .airport_lookup import AirportRecord
     from .airports import AirportData
     from .landings import FlightLandings
     from .terrain import TileSource
-    from .types import FlightPathGroup, PathMetadata, TrackPoint
+    from .types import FlightPathGroup, PathMetadata
 
 __all__ = [
-    "CoordinateExtent",
     "ParsedFile",
     "create_progressive_heatmap",
     "foreign_output_error",
@@ -76,6 +76,7 @@ __all__ = [
     "no_flight_reason",
     "parse_files",
     "parse_inline",
+    "preflight",
 ]
 
 # Files that are not in the parse cache are parsed in this process up to
@@ -90,47 +91,6 @@ INLINE_PARSE_MAX_BYTES = 4 * 1024 * 1024
 # 0.1 s here and 0.3 s in the pool, which takes time to start.
 POOLED_CACHE_MIN_BYTES = 128 * 1024 * 1024
 POOLED_CACHE_MIN_WORKERS = 8
-
-
-@dataclass(frozen=True)
-class CoordinateExtent:
-    """Bounding box of a set of coordinates.
-
-    Plain minimum and maximum, also for data on both sides of the
-    antimeridian: the map draws every path, marker and heat point at its own
-    longitude, not where it would be nearest to the others, so a box that
-    wrapped around 180 (179 to 181) would open the map on half of the
-    flights.
-    """
-
-    min_lat: float
-    max_lat: float
-    min_lon: float
-    max_lon: float
-
-    @classmethod
-    def of(cls, coordinates: Iterable[TrackPoint]) -> CoordinateExtent | None:
-        """The extent of the coordinates, or None when there are none."""
-        points = list(coordinates)
-        if not points:
-            return None
-        return cls(
-            min(point.lat for point in points),
-            max(point.lat for point in points),
-            min(point.lon for point in points),
-            max(point.lon for point in points),
-        )
-
-    def as_map_bounds(self) -> dict[str, float]:
-        """The bounds dictionary the map configuration is rendered from."""
-        return {
-            "min_lat": self.min_lat,
-            "max_lat": self.max_lat,
-            "min_lon": self.min_lon,
-            "max_lon": self.max_lon,
-            "center_lat": (self.min_lat + self.max_lat) / 2,
-            "center_lon": (self.min_lon + self.max_lon) / 2,
-        }
 
 
 @dataclass
@@ -164,8 +124,14 @@ def _parse_with_error_handling(
         (coordinates, path_groups, path_metadata), landings = parse_and_cache(
             kml_file, cache_path, path_landings
         )
-    except (OSError, ValueError, TypeError, KMLParseError) as e:
+    except (OSError, KMLParseError) as e:
         logger.error("Error processing %s: %s", kml_file, e)
+        return ParsedFile(kml_file)
+    except ValueError, TypeError:
+        # The parser turns what is wrong with a file into a KMLParseError:
+        # anything else is a bug of the parse or the landings, and its
+        # traceback says where
+        logger.exception("Unexpected error processing %s", kml_file)
         return ParsedFile(kml_file)
     return ParsedFile(kml_file, len(coordinates), path_groups, path_metadata, landings)
 
@@ -656,7 +622,7 @@ def _export_site(
         )
         package_assets(
             site.site_stage,
-            extent.as_map_bounds(),
+            extent,
             data_dir_name,
             countries,
             built_at,
@@ -693,6 +659,40 @@ def foreign_output_error(output_file: str | Path, data_dir: str | Path) -> str |
         f"earlier run of kml-heatmap wrote, such as {found[0]}: choose another "
         "output directory, or pass --force to replace them"
     )
+
+
+def preflight(
+    output_file: str | Path,
+    data_dir: str | Path,
+    inputs: Sequence[str | Path],
+    force: bool = False,
+) -> None:
+    """Refuse a run that could not make a site, before it writes anything.
+
+    Raises ``OutputRefusedError`` for an output directory that overlaps the
+    ``inputs``, a data directory the page could not reach and files of a
+    site no earlier run wrote (unless ``force``, see
+    ``foreign_output_error``), and ``KMLHeatmapError`` when the bundles are
+    missing, which would make a page without its application.
+    """
+    output_dir = Path(output_file).resolve().parent
+    if Path(data_dir).resolve().parent != output_dir:
+        raise OutputRefusedError(
+            f"The data directory {data_dir} must be directly inside the output "
+            f"directory {output_dir}, where the page looks for it"
+        )
+    is_safe, error_msg = validate_output_dir(output_dir, inputs)
+    if not is_safe:
+        raise OutputRefusedError(error_msg or "Unsafe output directory")
+    foreign = None if force else foreign_output_error(output_file, data_dir)
+    if foreign:
+        raise OutputRefusedError(foreign)
+    missing = missing_build_files()
+    if missing:
+        raise KMLHeatmapError(
+            f"JavaScript bundle not found: {', '.join(missing)} (run 'npm run "
+            "build' to generate it); the input files were left unchanged"
+        )
 
 
 def create_progressive_heatmap(
@@ -737,28 +737,8 @@ def create_progressive_heatmap(
     except ValueError as e:
         raise InvalidInputError(str(e)) from None
 
-    # Stage 0: Refuse output directories that overlap with the inputs, a data
-    # directory the page could not reach, and a run that could only produce a
-    # page without its application
-    output_dir = Path(output_file).resolve().parent
-    if Path(data_dir).resolve().parent != output_dir:
-        raise OutputRefusedError(
-            f"The data directory {data_dir} must be directly inside the output "
-            f"directory {output_dir}, where the page looks for it"
-        )
-    is_safe, error_msg = validate_output_dir(output_dir, [*kml_files, *aircraft_files])
-    if not is_safe:
-        raise OutputRefusedError(error_msg or "Unsafe output directory")
-    foreign = None if force else foreign_output_error(output_file, data_dir)
-    if foreign:
-        raise OutputRefusedError(foreign)
-
-    missing = missing_build_files()
-    if missing:
-        raise KMLHeatmapError(
-            f"JavaScript bundle not found: {', '.join(missing)} (run 'npm run "
-            "build' to generate it)"
-        )
+    # Stage 0: Refuse a run that could not make a site
+    preflight(output_file, data_dir, [*kml_files, *aircraft_files], force)
     warn_about_a_stale_bundle()
 
     # Stage 1: Validate and parse. A file that cannot be used fails the run:

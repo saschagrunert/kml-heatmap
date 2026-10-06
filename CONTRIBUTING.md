@@ -84,7 +84,7 @@ your virtual environment and `node_modules`, the same way CI does, so no
 container is involved:
 
 ```bash
-make lint            # lock files and version pins, ruff (check and format), mypy, bandit, zizmor, tsc (frontend, build scripts, tests), eslint, knip, prettier, typos
+make lint            # lock files and version pins, ruff (check and format), mypy, zizmor, tsc (frontend, build scripts, tests), eslint, knip, prettier, typos
 make format          # ruff format, prettier
 make test            # npm run build, then vitest and pytest with coverage; pytest flags are in doc/development/testing.md
 npm run test:e2e     # Playwright: desktop, mobile and WebKit (see doc/development/testing.md)
@@ -150,7 +150,10 @@ here, not an oversight: adding the parentheses back is undone on the next
   is pushed on top. `make lock` compiles the test lock with the runtime lock as
   a constraint, so the pins both files share cannot drift apart. Nothing
   regenerates them on a schedule: run `make lock` yourself to pick up new
-  releases, and push it on top of a Dependabot `pip` pull request.
+  releases, and push it on top of a Dependabot `pip` pull request. Like
+  Dependabot it skips releases younger than seven days;
+  `make lock LOCK_COOLDOWN=` takes the newest ones, for a range raised by hand
+  to a release that is younger.
 - The published page carries MapLibre GL JS and html-to-image itself:
   `scripts/vendor.js` takes them out of `node_modules` at build time, so
   `package-lock.json` is the only place their versions are pinned and Dependabot
