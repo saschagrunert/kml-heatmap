@@ -5,8 +5,10 @@
  * tests hold is the one check that the shipped shaders say what the
  * written ones say.
  */
-import { readdirSync, readFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { build, type BuildFailure } from "esbuild";
 import { describe, expect, it } from "vitest";
 import {
   assertExpectedOutputs,
@@ -59,7 +61,7 @@ describe("the shaders of the custom layers, tightened", () => {
     "%s: are the same tokens as written, line for line",
     (name) => {
       const source = readFileSync(join(UI_DIR, name), "utf8");
-      for (const { raw } of glslLiterals(source, name)) {
+      for (const { raw } of glslLiterals(source)) {
         const { text, open, close } = parts(raw);
         const tight = tightenGlsl(text, open, close);
         expect(tokens(tight)).toEqual(tokens(text));
@@ -75,11 +77,11 @@ describe("the shaders of the custom layers, tightened", () => {
 
   it.each(LAYERS)("%s: is left as it is outside its shaders", (name) => {
     const source = readFileSync(join(UI_DIR, name), "utf8");
-    const tight = tightenShaders(source, name);
+    const tight = tightenShaders(source);
     // Every literal is tightened in place: what lies between them is
     // the source's own, byte for byte
-    const literals = glslLiterals(source, name);
-    const tightLiterals = glslLiterals(tight, name);
+    const literals = glslLiterals(source);
+    const tightLiterals = glslLiterals(tight);
     expect(tightLiterals).toHaveLength(literals.length);
     let at = 0;
     let tightAt = 0;
@@ -90,6 +92,103 @@ describe("the shaders of the custom layers, tightened", () => {
       tightAt = other.end;
     });
     expect(tight.slice(tightAt)).toBe(source.slice(at));
+  });
+});
+
+describe("glslLiterals", () => {
+  it("gives each part with its delimiters, as the source writes it", () => {
+    const source = "const s = `uniform float a;${b}\nvoid main() {}${c}`;";
+    expect(glslLiterals(source).map(({ raw }) => raw)).toEqual([
+      "`uniform float a;${",
+      "}\nvoid main() {}${",
+      "}`",
+    ]);
+    for (const { start, end, raw } of glslLiterals(source)) {
+      expect(source.slice(start, end)).toBe(raw);
+    }
+  });
+
+  it("reads TypeScript, and skips template literal types", () => {
+    const source = [
+      "type T = { a: number };",
+      "const f = <K extends string>(k: K): K => k;",
+      "const v = (x as unknown as T) satisfies T;",
+      "type G = `gl_${number}`;",
+      "const g = (n: number): `uniform ${number}` => `gl_${n}` as const;",
+      "export const s: string = `uniform vec2 u;` as const;",
+    ].join("\n");
+    expect(glslLiterals(source).map(({ raw }) => raw)).toEqual([
+      "`gl_${",
+      "}`",
+      "`uniform vec2 u;`",
+    ]);
+  });
+
+  it("finds a literal inside another one's expression, and tagged ones", () => {
+    const source =
+      "const s = `${`uniform int i;`} gl_Position`; const t = tag`gl_x`;";
+    expect(glslLiterals(source).map(({ raw }) => raw)).toEqual([
+      "`${",
+      "} gl_Position`",
+      "`uniform int i;`",
+      "`gl_x`",
+    ]);
+  });
+
+  it("judges a literal by its text, never by what it interpolates", () => {
+    expect(glslLiterals("const s = `a ${gl_x} b`;")).toEqual([]);
+  });
+
+  it.each([
+    ["decorators", "@dec class A { @dec m() { return `gl_a`; } }"],
+    ["a decorated export", "@dec export class B { s = `gl_b`; }"],
+    [
+      "accessor fields",
+      "class C { accessor y = `gl_c`; static accessor z = 2; }",
+    ],
+    ["deferred imports", 'import defer * as ns from "./x";\nconst s = `gl_d`;'],
+    [
+      "source phase imports",
+      'import source w from "./x.wasm";\nconst s = `gl_e`;',
+    ],
+    ["using declarations", "{ using r = res(); const s = `gl_f`; }"],
+    [
+      "import attributes",
+      'import j from "./a.json" with { type: "json" };\nconst s = `gl_g`;',
+    ],
+  ])("reads %s, as TypeScript and esbuild do", (_name, source) => {
+    expect(glslLiterals(source)).toHaveLength(1);
+  });
+
+  it("finds nothing in a source that does not parse, and leaves it as written", () => {
+    const broken = "const = `gl_Position`;";
+    expect(glslLiterals(broken)).toEqual([]);
+    expect(tightenShaders(broken)).toBe(broken);
+  });
+
+  it("leaves a syntax error to esbuild, which names the file and the line", async () => {
+    const source = "const ok = `uniform float a;`;\nconst = 1;\n";
+    const path = join(mkdtempSync(join(tmpdir(), "glsl-")), "brokenLayer.ts");
+    writeFileSync(path, source);
+    const failure = await build({
+      entryPoints: [path],
+      write: false,
+      logLevel: "silent",
+      plugins: [
+        {
+          name: "shaders",
+          setup(plugin) {
+            plugin.onLoad({ filter: /brokenLayer\.ts$/ }, () => ({
+              contents: tightenShaders(source),
+              loader: "ts",
+            }));
+          },
+        },
+      ],
+    }).catch((error: unknown) => error as BuildFailure);
+    const [error] = (failure as BuildFailure).errors;
+    expect(error?.location?.file).toMatch(/brokenLayer\.ts$/);
+    expect(error?.location?.line).toBe(2);
   });
 });
 

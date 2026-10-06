@@ -43,11 +43,17 @@ the flights is in [Rendering](rendering.md) and [Heat](heat.md), the tests in
   `features.bundle.js`, `wrapped.bundle.js`, `shared.bundle.js`,
   `yearWorker.bundle.js`, their source maps, `vendor/` and `flags/`)
 - **Build scripts** `build.js` and `scripts/*.js`, plain JavaScript with JSDoc
-  types that `tsconfig.node.json` checks (`npm run typecheck`). TypeScript stays
-  on 6.x for now: the TypeScript 7 compiler checks every tsconfig here without
-  an error, but typescript-eslint does not support it yet, and its package no
-  longer exports the compiler API that `scripts/build-helpers.js` parses the
-  shaders with
+  types that `tsconfig.node.json` checks (`npm run typecheck`). The type checks
+  run TypeScript 7 (the `typescript7` alias of `package.json`, called by path
+  because both TypeScript packages ship a `tsc`). `typescript` 6.x stays only
+  for typescript-eslint, which does not support 7 yet; it goes once it does.
+  Until then `node_modules/.bin/tsc`, an editor's workspace TypeScript and the
+  type-aware ESLint rules run 6.x, so check types with `npm run typecheck`, not
+  a bare `tsc`. Dependabot skips npm aliases, so `typescript7` is bumped by hand
+  (`npm install -D --save-exact typescript7@npm:typescript@<version>`).
+  `scripts/build-helpers.js` finds the shaders and the popup markup it tightens
+  with `@babel/parser` and `@babel/types`, as TypeScript 7 only exports its
+  compiler API as an unstable preview
 - **Tests** in `tests/frontend/` and `tests/e2e/` (see [Testing](testing.md))
 
 ## State and links
