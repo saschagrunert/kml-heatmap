@@ -37,8 +37,10 @@ const featureBundle = vi.hoisted(() => ({
 vi.mock("../../../../kml_heatmap/frontend/services/featureLoader", async () => {
   const { followTerrain } =
     await import("../../../../kml_heatmap/frontend/ui/terrain");
-  const { ribbonFeatures } =
+  const { ribbonBox, ribbonFeatures, ribbonLiftPx, viewLeaves } =
     await import("../../../../kml_heatmap/frontend/ui/pathRibbons");
+  const { followsLevel } =
+    await import("../../../../kml_heatmap/frontend/calculations/lift");
   const { heldGroundedFlights, releaseGroundedFlights, releaseGroundProfiles } =
     await import("../../../../kml_heatmap/frontend/calculations/groundProfile");
   const { followHeatCloud, followSelectionRibbons } = featureBundle;
@@ -47,6 +49,10 @@ vi.mock("../../../../kml_heatmap/frontend/services/featureLoader", async () => {
     followHeatCloud,
     followSelectionRibbons,
     ribbonFeatures,
+    ribbonBox,
+    ribbonLiftPx,
+    viewLeaves,
+    followsLevel,
     heldGroundedFlights,
     releaseGroundedFlights,
     releaseGroundProfiles,

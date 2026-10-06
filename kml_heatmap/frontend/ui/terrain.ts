@@ -26,7 +26,7 @@ import {
   TERRAIN_TILE_MAX_ZOOM,
   TERRAIN_TILE_SIZE_PX,
 } from "../calculations/lift";
-import { EXAGGERATION_STATE } from "../calculations/ribbonPaint";
+import { EXAGGERATION_STATE, ribbonHeights } from "../calculations/ribbonPaint";
 import { MAP_LAYERS, MAP_SOURCES } from "../utils/constants";
 import {
   cssVar,
@@ -46,6 +46,39 @@ const TERRAIN_TILE_URL =
  * drawn, and belongs with the base map rather than with the app's layers.
  */
 export const HILLSHADE_LAYER = "terrain-hillshade";
+
+/**
+ * Give every layer of ribbons the paint that lifts them (see
+ * ribbonHeights): the map creates them without it, so its expressions come
+ * with this bundle rather than with the first visit. Every ribbon is
+ * written by this bundle, in the turn the 3D view follows the relief or
+ * later, and the map pauses a source whose paint changed until its worker
+ * has the new layer, so none is drawn without it. A base style the map
+ * applies as a difference keeps it (see withDataLayers in mapLayers.ts);
+ * one built anew, a frame later, from the style of before, and the style
+ * restored after a lost WebGL context, from the one of the loss, may come
+ * without it, and get it again as they load. A layer that has it is left
+ * alone.
+ */
+function paintRibbons(map: MapLibreMap): void {
+  let paint: ReturnType<typeof ribbonHeights> | undefined;
+  for (const id of RIBBON_SOURCES) {
+    // Every style event comes here: a layer that has its paint keeps it,
+    // and is left alone rather than set again and drawn again
+    if (
+      !map.getLayer(id) ||
+      map.getPaintProperty(id, "fill-extrusion-height") !== undefined
+    ) {
+      continue;
+    }
+    paint ??= ribbonHeights();
+    const { base, height } = paint;
+    map.setPaintProperty(id, "fill-extrusion-base", base, { validate: false });
+    map.setPaintProperty(id, "fill-extrusion-height", height, {
+      validate: false,
+    });
+  }
+}
 
 /**
  * Switch the relief on and off with terrainActive, its exaggeration with
@@ -76,6 +109,7 @@ export function followTerrain(app: MapApp): void {
   void app.mapReady.then(() => {
     const signal = app.signal;
     if (signal.aborted) return;
+    paintRibbons(map);
     const settle = settleRibbons(app, map, signal);
     const labels = thinFarLabels(app, map);
     const ribbons = exaggerateRibbons(app, map, signal);
@@ -128,6 +162,7 @@ export function followTerrain(app: MapApp): void {
     // Its labels come with the zoom ranges of the style, which the far
     // labels of a tilted 3D view are left out of anew.
     const styled = map.on("styledata", () => {
+      paintRibbons(map);
       if (app.reliefShaded && !map.getLayer(HILLSHADE_LAYER)) apply();
       labels.thin();
     });

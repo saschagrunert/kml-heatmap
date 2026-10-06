@@ -70,19 +70,22 @@ exaggeration to every ribbon, so a flight stays at its height only where the
 ribbon's lift is exaggerated as much as the relief; the map takes one
 exaggeration for the relief, and rebuilds it on every change (a few
 milliseconds). Both therefore go by the relief level (`reliefLevel` in
-`calculations/lift.ts`, and in the store): the whole level the ribbons are cut
-for, up to 11. `liftExaggeration` gives one number per level, 10 out to level 7
-(`z` 8 in the UI), then 7, 4, and 2 from level 10 in. The ramp down began a
-level further out, at 7, 4 and 2 for levels 7 to 9, where over a region (`z` 7
-to 9 tilted by 45 to 60 degrees) the 1,000 to 3,000 ft of a light aircraft were
-a few pixels next to the kilometres between its fields and the cloud looked like
-the flat heatmap tilted. `LayerManager.syncTerrain` changes the level only as a
-zoom ends, and `ui/terrain.ts` sets the relief's exaggeration then; the flights
-are cut once for the new level, as wide as it asks, over the cut of before. What
-the two share is `ui/reliefState.ts`: it writes the store's relief switches in
-the order the map needs them, counts the visits of a level, holds whether the
-ribbons show and lists their sources. `calculations/lift.ts` is the policy of
-levels and heights; the curve through the fixes, the ground of a flight, the
+`calculations/liftZoom.ts`, and in the store): the whole level the ribbons are
+cut for, up to 11. `liftExaggeration` gives one number per level, 10 out to
+level 7 (`z` 8 in the UI), then 7, 4, and 2 from level 10 in. The ramp down
+began a level further out, at 7, 4 and 2 for levels 7 to 9, where over a region
+(`z` 7 to 9 tilted by 45 to 60 degrees) the 1,000 to 3,000 ft of a light
+aircraft were a few pixels next to the kilometres between its fields and the
+cloud looked like the flat heatmap tilted. `LayerManager.syncTerrain` changes
+the level only as a zoom ends, and `ui/terrain.ts` sets the relief's
+exaggeration then; the flights are cut once for the new level, as wide as it
+asks, over the cut of before. What the two share is `ui/reliefState.ts`: it
+writes the store's relief switches in the order the map needs them, counts the
+visits of a level, holds whether the ribbons show and lists their sources.
+`calculations/liftZoom.ts` holds the zoom policy the app needs before the
+feature bundle arrives (lifted zooms, relief level, ribbon width zoom), and
+`calculations/lift.ts` the rest of the policy of levels and heights, which comes
+with that bundle; the curve through the fixes, the ground of a flight, the
 ribbons and their paint are `smoothing.ts`, `groundProfile.ts`, `ribbons.ts` and
 `ribbonPaint.ts` beside it.
 
@@ -107,19 +110,21 @@ level or two further out, and at a tilt of 75 degrees and more the nearest ones
 one or two further in. So a ribbon carries the ground of the levels around its
 own (`GROUND_LEVELS`: two out, one out and one in), as offsets `o-2`, `o-1` and
 `o1` to the ground its height `h` is above, beside the level `l` it was cut for
-(`ribbonProperties`). The paint (`ribbonHeights`) is a `step` by zoom, which
-MapLibre works out for each tile at the tile's own zoom, and takes the ground of
-the tile's level, the nearest carried beyond them (the nearest tiles of a steep
-tilt stand on the ground of `o1`); the band of height goes by the middle of the
-tile's level, as the width does, and on a level further out than the one cut for
-by the next level in, as thin as the interpolation by zoom before it had the
-distance of a tilted view. The offsets are the smoothed ground of the other
-levels worked out in the browser (`groundProfilesFt`, kept per level for the
-dataset), rounded to a quarter of a pixel of the level (`groundOffsetStepFt`)
-and left out where that is zero, which over flat land most of them are. Ground
-of every level from the build would have cost 10 columns of the year files for
-what the browser smooths from one (the ground column is about 200 KB of 2025's
-1.6 MB, 36 KB gzipped).
+(`ribbonProperties`). The ribbon layers are created without this paint, which
+comes with the feature bundle: `paintRibbons` in `ui/terrain.ts` sets it once
+the map is ready and again on a style that lost it. The paint (`ribbonHeights`)
+is a `step` by zoom, which MapLibre works out for each tile at the tile's own
+zoom, and takes the ground of the tile's level, the nearest carried beyond them
+(the nearest tiles of a steep tilt stand on the ground of `o1`); the band of
+height goes by the middle of the tile's level, as the width does, and on a level
+further out than the one cut for by the next level in, as thin as the
+interpolation by zoom before it had the distance of a tilted view. The offsets
+are the smoothed ground of the other levels worked out in the browser
+(`groundProfilesFt`, kept per level for the dataset), rounded to a quarter of a
+pixel of the level (`groundOffsetStepFt`) and left out where that is zero, which
+over flat land most of them are. Ground of every level from the build would have
+cost 10 columns of the year files for what the browser smooths from one (the
+ground column is about 200 KB of 2025's 1.6 MB, 36 KB gzipped).
 
 ### Exaggeration and settling
 

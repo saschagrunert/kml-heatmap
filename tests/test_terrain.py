@@ -1560,7 +1560,7 @@ def _ts_constant(relative, name):
         ("services/yearDecode.ts", "TIME_SCALE", TIME_SCALE),
         # The page draws the relief from the tiles the ground was sampled
         # from, and no finer
-        ("calculations/lift.ts", "TERRAIN_TILE_MAX_ZOOM", TERRAIN_ZOOM),
+        ("calculations/liftZoom.ts", "TERRAIN_TILE_MAX_ZOOM", TERRAIN_ZOOM),
         # The units the altitudes and distances are exported and shown in
         ("utils/constants.ts", "METERS_TO_FEET", METERS_TO_FEET),
         ("utils/constants.ts", "KM_TO_NAUTICAL_MILES", KM_TO_NAUTICAL_MILES),

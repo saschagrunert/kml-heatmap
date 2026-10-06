@@ -18,9 +18,10 @@
  * out the map is: at true scale a circuit is a hair above the ground at
  * any zoom where the airfield is more than a dot.
  *
- * This module is the policy: from which zoom the flights are drawn flat,
- * the relief level a zoom is drawn for, how much each level exaggerates,
- * and how high a point is drawn on the screen. The curve through the
+ * This module is the policy: from which zoom the flights are drawn flat
+ * and the relief level a zoom is drawn for (liftZoom.ts, which comes with
+ * the app, re-exported here), how much each level exaggerates, and how
+ * high a point is drawn on the screen. The curve through the
  * fixes is smoothing.ts, the ground of a flight groundProfile.ts, the
  * ribbons cut along the curve ribbons.ts, and the paint that lifts them
  * ribbonPaint.ts.
@@ -32,6 +33,21 @@ import {
   metresPerPixel,
 } from "../utils/geometry";
 import { FEET_TO_METERS } from "../utils/constants";
+import {
+  RELIEF_MAX_LEVEL,
+  reliefLevel,
+  TERRAIN_TILE_MAX_ZOOM,
+} from "./liftZoom";
+
+export {
+  isLiftedAt,
+  LIFT_MAX_ZOOM,
+  liftFt,
+  RELIEF_MAX_LEVEL,
+  reliefLevel,
+  ribbonWidthZoom,
+  TERRAIN_TILE_MAX_ZOOM,
+} from "./liftZoom";
 
 /**
  * A sloping ribbon is cut into pieces this many feet apart; a piece is one
@@ -40,37 +56,8 @@ import { FEET_TO_METERS } from "../utils/constants";
  */
 export const LIFT_STEP_FT = 20;
 
-/**
- * The map zoom from which the flights are drawn flat again, as lines, in
- * the 3D view. Zoomed in that far the camera is a few hundred metres up,
- * lower than a circuit even at true scale: the flights around it would
- * stand as walls in front of it, fill the screen from above, or be behind
- * it, and only the taxiing on the ground would be left to see.
- */
-export const LIFT_MAX_ZOOM = 17;
-
-/**
- * The deepest level of the elevation tiles, the one the build samples the
- * ground at (TERRAIN_ZOOM in terrain.py); the map stretches it beyond.
- */
-export const TERRAIN_TILE_MAX_ZOOM = 10;
-
 /** The pixels an elevation tile spans (see ui/terrain.ts) */
 export const TERRAIN_TILE_SIZE_PX = 256;
-
-/**
- * The whole level the relief and the heights of the flights are drawn for
- * at the map zoom `zoom`: the level the ribbons are cut for (see
- * ribbonWidthZoom), up to the one whose ribbons stand on the deepest
- * elevation tiles (see reliefPixelM), from where neither the exaggeration
- * nor the ground changes any more.
- */
-export function reliefLevel(zoom: number): number {
-  return Math.min(Math.max(ribbonWidthZoom(zoom), 0), RELIEF_MAX_LEVEL);
-}
-
-/** The last relief level, see reliefLevel */
-export const RELIEF_MAX_LEVEL = TERRAIN_TILE_MAX_ZOOM + 1;
 
 /**
  * The relief levels, counted from the one the flights are cut for, whose
@@ -167,25 +154,6 @@ export function followsLevel(cut: number, level: number): boolean {
  */
 export function ribbonId(level: number, epoch: number): number {
   return level + (RELIEF_MAX_LEVEL + 1) * epoch;
-}
-
-/** Whether the 3D view lifts the flights at the map zoom `zoom` */
-export function isLiftedAt(zoom: number): boolean {
-  return zoom < LIFT_MAX_ZOOM;
-}
-
-/**
- * The zoom a ribbon's width is worked out for at the map zoom `zoom`: the
- * whole level it is in. A change of it is what cuts the flights again, and
- * what hands them to the lines at LIFT_MAX_ZOOM.
- */
-export function ribbonWidthZoom(zoom: number): number {
-  return Math.floor(zoom);
-}
-
-/** A segment's altitude as feet above its flight's ground, never below */
-export function liftFt(altitudeFt: number, groundFt: number): number {
-  return Math.max(altitudeFt - groundFt, 0);
 }
 
 /**

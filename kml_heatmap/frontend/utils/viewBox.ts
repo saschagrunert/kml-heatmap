@@ -4,8 +4,9 @@
  * Zoomed in, a ribbon is cut into pieces for the pixels of its zoom level
  * (see screenCut), and the flights of a year come to tens of thousands of
  * them. Only those around the view are written then, and written again as
- * the view leaves that part: by the layer manager for the colour layers,
- * and by ui/selectionRibbons.ts for the lines of a selection.
+ * the view leaves that part: for the colour layers by the layer manager,
+ * through ui/pathRibbons.ts, and by ui/selectionRibbons.ts for the lines
+ * of a selection. It comes with the feature bundle, which cuts them.
  */
 import type { Map as MapLibreMap } from "maplibre-gl";
 import { FEET_TO_METERS } from "./constants";

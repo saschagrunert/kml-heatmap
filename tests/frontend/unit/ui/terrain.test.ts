@@ -21,7 +21,11 @@ import {
   liftExaggeration,
   ribbonId,
 } from "../../../../kml_heatmap/frontend/calculations/lift";
-import { ribbonHeightFt } from "../../../../kml_heatmap/frontend/calculations/ribbonPaint";
+import {
+  ribbonHeightFt,
+  ribbonHeights,
+} from "../../../../kml_heatmap/frontend/calculations/ribbonPaint";
+import { RIBBON_SOURCES } from "../../../../kml_heatmap/frontend/ui/reliefState";
 import {
   groundedFlights,
   groundProfilesFt,
@@ -297,6 +301,42 @@ describe("the relief", () => {
     });
   });
 
+  it("gives every layer of ribbons the paint that lifts them, which the map creates them without", async () => {
+    const paint = (id: string): unknown[] => [
+      map().getPaintProperty(id, "fill-extrusion-base"),
+      map().getPaintProperty(id, "fill-extrusion-height"),
+    ];
+    for (const id of RIBBON_SOURCES) {
+      expect(paint(id)).toEqual([undefined, undefined]);
+    }
+
+    await follow();
+
+    const { base, height } = ribbonHeights();
+    for (const id of RIBBON_SOURCES) expect(paint(id)).toEqual([base, height]);
+    // A new base style keeps it (see withDataLayers)
+    swapBaseStyle(CARTO_LIKE);
+    for (const id of RIBBON_SOURCES) expect(paint(id)).toEqual([base, height]);
+    // A style built anew without it (restored after a lost WebGL context,
+    // or a base style the map could not apply as a difference) gets it
+    // again as it loads
+    for (const id of RIBBON_SOURCES) {
+      map().setPaintProperty(id, "fill-extrusion-base", undefined);
+      map().setPaintProperty(id, "fill-extrusion-height", undefined);
+    }
+    map().emit("styledata");
+    for (const id of RIBBON_SOURCES) expect(paint(id)).toEqual([base, height]);
+    // A style event of a style that kept it sets nothing again
+    map().setPaintProperty.mockClear();
+    map().emit("styledata");
+    expect(map().setPaintProperty).not.toHaveBeenCalledWith(
+      expect.anything(),
+      "fill-extrusion-height",
+      expect.anything(),
+      expect.anything(),
+    );
+  });
+
   it("gives the trail and the selection their opacity again after a lost WebGL context", async () => {
     // Hidden as the context is lost, and shown by the longest wait during
     // the loss: MapLibre restores the style of the loss, the trail hidden
@@ -444,8 +484,10 @@ const featureBundle = vi.hoisted(() => ({
 vi.mock("../../../../kml_heatmap/frontend/services/featureLoader", async () => {
   const { followTerrain } =
     await import("../../../../kml_heatmap/frontend/ui/terrain");
-  const { ribbonFeatures } =
+  const { ribbonBox, ribbonFeatures, ribbonLiftPx, viewLeaves } =
     await import("../../../../kml_heatmap/frontend/ui/pathRibbons");
+  const { followsLevel } =
+    await import("../../../../kml_heatmap/frontend/calculations/lift");
   const { heldGroundedFlights, releaseGroundedFlights, releaseGroundProfiles } =
     await import("../../../../kml_heatmap/frontend/calculations/groundProfile");
   const { followHeatCloud, followSelectionRibbons } = featureBundle;
@@ -454,6 +496,10 @@ vi.mock("../../../../kml_heatmap/frontend/services/featureLoader", async () => {
     followHeatCloud,
     followSelectionRibbons,
     ribbonFeatures,
+    ribbonBox,
+    ribbonLiftPx,
+    viewLeaves,
+    followsLevel,
     heldGroundedFlights,
     releaseGroundedFlights,
     releaseGroundProfiles,

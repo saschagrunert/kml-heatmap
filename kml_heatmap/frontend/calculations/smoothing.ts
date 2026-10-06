@@ -13,7 +13,7 @@ import {
 } from "../utils/geometry";
 import { METERS_TO_FEET } from "../utils/constants";
 import { unwrapLng } from "../utils/mapHelpers";
-import { liftFt } from "./lift";
+import { liftFt } from "./liftZoom";
 
 /**
  * The steepest a flight climbs or descends on its ribbon, in feet per foot
