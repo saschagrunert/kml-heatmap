@@ -17,7 +17,7 @@ import type { KMLDataset, RawYearData } from "../types";
  * Wire format of the year files this build reads (kml_heatmap/segment_codec.py).
  * A file written by another release is refused rather than misread.
  */
-export const DATA_FORMAT_VERSION = 5;
+export const DATA_FORMAT_VERSION = 6;
 
 /**
  * How the encoded columns become values again, the mirror of
@@ -26,7 +26,7 @@ export const DATA_FORMAT_VERSION = 5;
  */
 const COORDINATE_SCALE = 1e5;
 const ALTITUDE_STEP = 20;
-const SPEED_SCALE = 10;
+const SPEED_SCALE = 1;
 const TIME_SCALE = 10;
 const GROUND_STEP = 10;
 

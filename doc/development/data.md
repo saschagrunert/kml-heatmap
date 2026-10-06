@@ -101,11 +101,19 @@ minutes. A row without times gets its share of the path's average speed.
 
 ## Year file format
 
-The year files are data format 5 (`FORMAT_VERSION` in
+The year files are data format 6 (`FORMAT_VERSION` in
 `kml_heatmap/segment_codec.py`, `DATA_FORMAT_VERSION` in
 `services/yearDecode.ts`; bump both together, the page refuses any other).
-Format 5 writes the altitudes in steps of 20 ft instead of 100 ft, which costs
-about 4 % more gzipped year files on `data/`, and adds the landings of every
+
+Format 6 writes the groundspeeds in whole knots instead of tenths of a knot. The
+exporter rounds them to whole knots already (`exported_knots` in
+`kml_heatmap/export_pipeline.py`), so the tenths only added a trailing zero to
+every speed difference: 2.3 % of the year files on `data/`, 0.9 % gzipped. The
+encoder refuses a speed that is not a whole number of knots. Times stay at a
+tenth of a second, which the replay needs for fixes less than a second apart.
+
+Format 5 wrote the altitudes in steps of 20 ft instead of 100 ft, which cost
+about 4 % more gzipped year files on `data/`, and added the landings of every
 flight with timestamps to its `path_info`: `landings`, `touch_and_goes`,
 `go_arounds` and the `touchdowns` as `[airport, runway]`.
 `kml_heatmap/landings.py` reads them with the parse of each file (in the parse
@@ -113,12 +121,6 @@ workers) from the full-precision track, with the fields and the runways of the
 OurAirports database (`load_runway_database` caches `runways.csv` next to
 `airports.csv`), and the parse cache keeps them with the paths; its key covers
 both databases. The page only adds them up.
-
-The speed column is written in tenths of a knot, but the exporter rounds the
-speeds to whole knots (`exported_knots` in `kml_heatmap/export_pipeline.py`),
-which takes an eighth off the compressed year files: the format and the decoder
-were the same, so that change took no new version. Times stay at a tenth of a
-second, which the replay needs for fixes less than a second apart.
 
 Format 4 added a `ground` column per path: the ground under every row in steps
 of 10 ft, as differences like the other columns, left out for a path whose

@@ -84,15 +84,14 @@ round to the same coordinate (standing still), which keeps the rows contiguous.
 Every value above is written as an integer difference to the row before it
 rather than as the number itself (`kml_heatmap/segment_codec.py`, mirrored by
 `decodeYear` in `services/yearDecode.ts`, which the page runs in a worker). The
-exporter has already rounded each column to a fixed step (1e-5 degrees, 20 ft, 1
-kt, 0.1 s and 10 ft of ground), so counting in the step of the format (1e-5
-degrees, 20 ft, 0.1 kt, 0.1 s and 10 ft) is exact, and neighbouring rows barely
-differ: the encoding is lossless and roughly halves a year file. Writing the
-rows column by column puts the repeating differences of one quantity next to
-each other, which takes another sixth off the compressed download. The numbers
-the page works with are the ones described above; only the file is written this
-way. The page skips the rest of a path, with a warning in the console, from the
-first value that is not a number.
+exporter has already rounded each column to the step the format counts in (1e-5
+degrees, 20 ft, 1 kt, 0.1 s and 10 ft of ground), so every value is a whole
+number of steps, and neighbouring rows barely differ: the encoding is lossless
+and roughly halves a year file. Writing the rows column by column puts the
+repeating differences of one quantity next to each other, which takes another
+sixth off the compressed download. The numbers the page works with are the ones
+described above; only the file is written this way. The page skips the rest of a
+path, with a warning in the console, from the first value that is not a number.
 
 ## Index files and loading
 

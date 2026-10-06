@@ -78,7 +78,7 @@ export interface PathSegment {
 /**
  * Encoded columns of one path, as written by the exporter
  * (kml_heatmap/segment_codec.py): latitude, longitude, altitude in steps of
- * 20 ft and groundspeed in tenths of a knot, then the relative time in
+ * 20 ft and groundspeed in whole knots, then the relative time in
  * tenths of a second when any row has one (null for a row without). Each
  * entry is the difference to the row before, as a scaled integer.
  *

@@ -74,7 +74,7 @@ export class FakeYearWorker {
  * in the units a reader thinks in and encode them, so a test says what it
  * means and the decoder is still checked against an independent encoder.
  */
-const SCALES = [1e5, 1e5, 1 / 20, 10, 10];
+const SCALES = [1e5, 1e5, 1 / 20, 1, 10];
 
 /**
  * One path's exported segments, given as plain `[lat, lon, ft, kt, s?]` rows,
