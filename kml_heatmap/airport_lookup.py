@@ -231,7 +231,7 @@ def _fetch_database(database: _CsvDatabase) -> bool:
     try:
         logger.info("📥 Downloading the OurAirports %s...", name)
         context = ssl.create_default_context()
-        with urlopen(  # noqa: S310 # nosec B310
+        with urlopen(  # noqa: S310
             database.url, timeout=DOWNLOAD_TIMEOUT_SECONDS, context=context
         ) as response:
             final_url = response.url

@@ -495,9 +495,7 @@ describe("LayerManager drawing", () => {
       expect(
         mockApp.statsManager.updateStatsForSelection,
       ).not.toHaveBeenCalled();
-      expect(
-        mockApp.airportManager.updateAirportOpacity,
-      ).not.toHaveBeenCalled();
+      expect(mockApp.airportManager.showAirports).not.toHaveBeenCalled();
     });
 
     it("updates the altitude legend with the full range", () => {

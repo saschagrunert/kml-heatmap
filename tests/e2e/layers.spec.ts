@@ -176,7 +176,10 @@ test.describe("Layers", () => {
     await gotoApp(page);
   });
 
-  test("heatmap button toggles heatmap layer", async ({ page, isMobile }) => {
+  test("heatmap button toggles heatmap layer @desktop", async ({
+    page,
+    isMobile,
+  }) => {
     test.skip(
       isMobile,
       "The Layers sheet drives this below the breakpoint; see mobile.spec.ts",
@@ -197,7 +200,7 @@ test.describe("Layers", () => {
     await expectToggle(btn, true);
   });
 
-  test("the heat legend shows with the heatmap and says what its colours stand for", async ({
+  test("the heat legend shows with the heatmap and says what its colours stand for @desktop", async ({
     page,
     isMobile,
   }) => {
@@ -246,7 +249,7 @@ test.describe("Layers", () => {
     await expect(legend).toBeVisible();
   });
 
-  test("altitude toggle shows altitude layer and legend", async ({
+  test("altitude toggle shows altitude layer and legend @desktop", async ({
     page,
     isMobile,
   }) => {
@@ -280,7 +283,7 @@ test.describe("Layers", () => {
     await expect(altLegend).toBeHidden();
   });
 
-  test("airspeed toggle shows airspeed layer and legend", async ({
+  test("airspeed toggle shows airspeed layer and legend @desktop", async ({
     page,
     isMobile,
   }) => {
@@ -313,7 +316,7 @@ test.describe("Layers", () => {
     await expect(airspeedLegend).toBeHidden();
   });
 
-  test("altitude and airspeed are mutually exclusive", async ({
+  test("altitude and airspeed are mutually exclusive @desktop", async ({
     page,
     isMobile,
   }) => {
@@ -333,7 +336,7 @@ test.describe("Layers", () => {
     await expectToggle(altBtn, false);
   });
 
-  test("airports button toggles airport markers", async ({
+  test("airports button toggles airport markers @desktop", async ({
     page,
     isMobile,
   }) => {
@@ -358,7 +361,7 @@ test.describe("Layers", () => {
     await expect(page.locator(".airport-marker").first()).toBeAttached();
   });
 
-  test("the aviation button toggles the open flightmaps layer", async ({
+  test("the aviation button toggles the open flightmaps layer @desktop", async ({
     page,
     isMobile,
   }) => {
@@ -423,7 +426,7 @@ test.describe("Layers", () => {
     await expect(details).toContainText(/kt/);
   }
 
-  test("hovering over path segment shows tooltip with flight data", async ({
+  test("hovering over path segment shows tooltip with flight data @desktop", async ({
     page,
     isMobile,
   }) => {
@@ -438,7 +441,7 @@ test.describe("Layers", () => {
     await expectSegmentDetails(page.locator(".segment-tooltip").first());
   });
 
-  test("tapping a path segment shows a popup with flight data", async ({
+  test("tapping a path segment shows a popup with flight data @touch", async ({
     page,
     isMobile,
   }) => {
@@ -453,7 +456,7 @@ test.describe("Layers", () => {
     await expectSegmentDetails(mapPopupContent(page).first());
   });
 
-  test("the popup of a tapped path can be closed without touching the flight (regression)", async ({
+  test("the popup of a tapped path can be closed without touching the flight (regression) @touch", async ({
     page,
     isMobile,
   }) => {

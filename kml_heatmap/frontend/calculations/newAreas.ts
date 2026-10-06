@@ -7,8 +7,7 @@
  * A kilometre is coarse on purpose: a route flown a few hundred metres
  * beside last year's is the same country seen again, not new ground.
  *
- * The data manager counts the area for Wrapped (DataManager.newAreaKm2), so
- * this module is part of the shared chunk: see features.ts.
+ * Only Wrapped counts the area, so this module is part of its bundle.
  */
 import type { KMLDataset, PathSegment } from "../types";
 import {
@@ -98,4 +97,30 @@ export function newAreaKm2(
     if (!visitedBefore(earlier, cell)) fresh++;
   }
   return fresh * CELL_KM2;
+}
+
+/**
+ * The area in square kilometres that `segments` of `year` pass over and no
+ * flight of an earlier one of `years` did. Worked out from the earlier
+ * years `cached` holds already, without loading any: null for a year with
+ * none before it, the view of all years, or while one of them is not
+ * loaded. They are all a year's view has once all years or each of the
+ * earlier ones were shown; loading them for Wrapped alone would fetch more
+ * than the year itself.
+ */
+export function yearNewAreaKm2(
+  year: string,
+  segments: readonly PathSegment[],
+  years: readonly number[],
+  cached: (year: string) => KMLDataset | undefined,
+): number | null {
+  const earlier: Set<number>[] = [];
+  for (const known of years) {
+    // None is before "all"
+    if (!(known < Number(year))) continue;
+    const data = cached(String(known));
+    if (!data) return null;
+    earlier.push(datasetCells(data));
+  }
+  return earlier.length > 0 ? newAreaKm2(segments, earlier) : null;
 }

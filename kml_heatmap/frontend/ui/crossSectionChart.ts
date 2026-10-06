@@ -90,17 +90,21 @@ export function densityColour(
 
 /**
  * The seconds of the cell the colours reach white at. A selection rather
- * than a sort: it runs every frame a handle of the line is dragged.
+ * than a sort, among the filled cells copied into `scratch`: it runs every
+ * frame a handle of the line is dragged.
  */
-export function densityReference(seconds: Float64Array): number {
-  const filled = seconds.filter((value) => value > 0);
-  if (!filled.length) return 0;
+export function densityReference(
+  seconds: Float64Array,
+  scratch = new Float64Array(seconds.length),
+): number {
+  let count = 0;
+  for (const value of seconds) {
+    if (value > 0) scratch[count++] = value;
+  }
+  if (!count) return 0;
   return nthSmallest(
-    filled,
-    Math.min(
-      filled.length - 1,
-      Math.floor(filled.length * DENSITY_REFERENCE_QUANTILE),
-    ),
+    scratch.subarray(0, count),
+    Math.min(count - 1, Math.floor(count * DENSITY_REFERENCE_QUANTILE)),
   );
 }
 
@@ -165,6 +169,14 @@ export function createChart(
   let densityRef = 0;
   /** The density image's pixels, made once and cleared for each section */
   let image: ImageData | null = null;
+  /**
+   * The grids the density is worked out in, made once: a section is drawn
+   * on every frame of a drag
+   */
+  const density = new Float64Array(COLUMNS * ROWS);
+  const scratch = new Float64Array(COLUMNS * ROWS);
+  /** The scale the ticks were written for */
+  let ticked = "";
   /** The place on the map the pointer on the chart stands for */
   let dot: Marker | null = null;
 
@@ -180,8 +192,8 @@ export function createChart(
     const shown = section;
     // The density image, a pixel per cell, the bottom row last
     const context = cellImage.getContext("2d");
-    const density = smoothCells(shown.seconds, COLUMNS, ROWS);
-    densityRef = densityReference(density);
+    smoothCells(shown.seconds, COLUMNS, ROWS, density, scratch);
+    densityRef = densityReference(density, scratch);
     if (context) {
       if (image) image.data.fill(0);
       else image = context.createImageData(COLUMNS, ROWS);
@@ -199,17 +211,22 @@ export function createChart(
     const { bottomFt, topFt, gridStepFt } = shown;
     const yOf = (feet: number): string =>
       (VIEW_H - ((feet - bottomFt) / (topFt - bottomFt)) * VIEW_H).toFixed(1);
-    let lines = "";
-    ticks.replaceChildren();
-    for (let feet = bottomFt; feet < topFt; feet += gridStepFt) {
-      if (feet > bottomFt) lines += `M0 ${yOf(feet)}H${VIEW_W}`;
-      const tick = element("span", "section-tick", ticks);
-      tick.style.bottom = `${((feet - bottomFt) / (topFt - bottomFt)) * 100}%`;
-      tick.textContent = formatNumber(feet);
+    // The scale stays while a drag keeps to its heights
+    const scale = `${bottomFt} ${topFt} ${gridStepFt} ${heightUnit(shown)}`;
+    if (scale !== ticked) {
+      ticked = scale;
+      let lines = "";
+      ticks.replaceChildren();
+      for (let feet = bottomFt; feet < topFt; feet += gridStepFt) {
+        if (feet > bottomFt) lines += `M0 ${yOf(feet)}H${VIEW_W}`;
+        const tick = element("span", "section-tick", ticks);
+        tick.style.bottom = `${((feet - bottomFt) / (topFt - bottomFt)) * 100}%`;
+        tick.textContent = formatNumber(feet);
+      }
+      element("span", "section-tick section-unit", ticks).textContent =
+        heightUnit(shown);
+      grid.setAttribute("d", lines);
     }
-    element("span", "section-tick section-unit", ticks).textContent =
-      heightUnit(shown);
-    grid.setAttribute("d", lines);
     // Above sea level, the ground under the flights, filled in
     let floor = "";
     if (shown.reference === "msl" && shown.groundFt) {

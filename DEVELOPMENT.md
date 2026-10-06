@@ -51,10 +51,9 @@ npm run format:check     # Check code formatting
 
 ```bash
 pytest                                  # Run all tests (see Testing for the CI flags)
-python scripts/check_locks.py           # Lock files, Playwright image and version pins
+python scripts/check_locks.py           # Lock files, Playwright image, version and toolchain pins
 ruff check . && ruff format --check .   # Lint and formatting
 mypy .                                  # Type checking
-bandit -r kml_heatmap -ll               # Security scan
 typos                                   # Spell check (config in _typos.toml)
 gitleaks dir .                          # Secret scan (config in .gitleaks.toml)
 make check-obfuscation                  # data/ and visual fixtures obfuscated

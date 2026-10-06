@@ -4,8 +4,26 @@
  * bundle does this, so it is kept out of utils/domCache.ts, which is part
  * of the first visit.
  */
-import { HIDEABLE_CONTROL_IDS } from "../utils/constants";
 import { domCache } from "../utils/domCache";
+
+/**
+ * Elements hidden while Wrapped has the map. The two control columns and the
+ * statistics rail go as a whole, with every control, title and separator
+ * inside them; the rest are panels that live outside them.
+ *
+ * The loading indicator is not listed: the dialog covers it anyway, and
+ * restoring the display saved on opening put back a `block` that a load
+ * finishing in the meantime had already cleared, stranding the indicator.
+ */
+export const HIDEABLE_CONTROL_IDS = [
+  "left-buttons",
+  "right-buttons",
+  "stats-rail",
+  "altitude-legend",
+  "airspeed-legend",
+  "heat-legend",
+  "selection-chip",
+] as const;
 
 /**
  * Hide the controls that must not show while Wrapped has the map, and

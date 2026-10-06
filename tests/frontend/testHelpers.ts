@@ -103,7 +103,7 @@ interface MockManagers {
     applyHeatmapEmphasis: Mock;
     showHeatmap: Mock;
     dismissFailures: Mock;
-    newAreaKm2: Mock;
+    cachedData: Mock;
     failureNote: ((message: string) => void) | null;
     heatRequests: number;
   };
@@ -139,7 +139,7 @@ interface MockManagers {
   };
   airportManager: {
     updateAirportPopups: Mock;
-    updateAirportOpacity: Mock;
+    showAirports: Mock;
     updateAirportMarkerSizes: Mock;
     activateAirport: Mock;
     airportLabelAt: Mock;
@@ -302,7 +302,7 @@ function createMockManagers(): MockManagers {
       applyHeatmapEmphasis: vi.fn(),
       showHeatmap: vi.fn(),
       dismissFailures: vi.fn(),
-      newAreaKm2: vi.fn(() => null),
+      cachedData: vi.fn(() => undefined),
       failureNote: null,
       heatRequests: 0,
     },
@@ -338,7 +338,7 @@ function createMockManagers(): MockManagers {
     },
     airportManager: {
       updateAirportPopups: vi.fn(),
-      updateAirportOpacity: vi.fn(),
+      showAirports: vi.fn(),
       updateAirportMarkerSizes: vi.fn(),
       activateAirport: vi.fn(),
       airportLabelAt: vi.fn(() => null),

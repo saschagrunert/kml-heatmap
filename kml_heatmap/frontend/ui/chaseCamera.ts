@@ -12,9 +12,9 @@
  * one jump, never an animation, which started from rest on every frame.
  */
 import { LngLat, type Map as MapLibreMap } from "maplibre-gl";
+import { MAX_FRAME_S } from "../utils/constants";
 import {
   DEGREES_TO_RADIANS as RAD,
-  EARTH_CIRCUMFERENCE_M,
   focalLengthPx,
   TILE_SIZE_PX,
   turnOf,
@@ -25,6 +25,7 @@ import {
   mapSize,
   REPLAY_CAMERA_MOVE,
 } from "../utils/mapHelpers";
+import { mercatorUnitMetres } from "./glLayer";
 import {
   heightAtZoomFt,
   type GroundedHeight,
@@ -95,9 +96,6 @@ const CHASE_MAX_LEAD = 45;
  * (exaggerated): it tilts down steeper rather than fly into a ridge
  */
 const CHASE_CLEARANCE_M = 150;
-
-/** Longest frame a spring is worked out over (s), as the replay's */
-const MAX_STEP_S = 0.1;
 
 /**
  * One frame of a critically damped spring that takes about `time` seconds:
@@ -327,9 +325,12 @@ export class ChaseCamera {
     };
   }
 
-  /** Metres of height a map pixel is at `lat` and `world` pixels around */
+  /**
+   * Metres of height a map pixel is at `lat` and `world` pixels around, on
+   * the sphere MapLibre measures the elevation on
+   */
   private static metresPerPx(lat: number, world: number): number {
-    return (EARTH_CIRCUMFERENCE_M * Math.cos(lat * RAD)) / world;
+    return mercatorUnitMetres(lat) / world;
   }
 
   /**
@@ -383,7 +384,7 @@ export class ChaseCamera {
         panel && panel > top ? Math.min(panel - top, height) : height;
     }
     const dt = this.at
-      ? Math.min(Math.max((now - this.at) / 1000, 1e-3), MAX_STEP_S)
+      ? Math.min(Math.max((now - this.at) / 1000, 1e-3), MAX_FRAME_S)
       : 1 / 60;
     this.at = now;
 

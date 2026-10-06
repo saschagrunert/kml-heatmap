@@ -14,7 +14,7 @@ import {
   showToast,
 } from "../../../../kml_heatmap/frontend/utils/toast";
 import * as motion from "../../../../kml_heatmap/frontend/utils/motion";
-import { HIDEABLE_CONTROL_IDS } from "../../../../kml_heatmap/frontend/utils/constants";
+import { HIDEABLE_CONTROL_IDS } from "../../../../kml_heatmap/frontend/ui/wrappedChrome";
 import { LngLat, Popup } from "../../../mocks/maplibre-gl";
 import { asMapApp, type MockApp } from "../../testHelpers";
 import type { AirportMarker } from "../../../../kml_heatmap/frontend/types";

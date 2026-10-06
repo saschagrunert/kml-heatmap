@@ -1,6 +1,9 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
 import { createYearDecoder } from "../../../../kml_heatmap/frontend/services/yearDecoder";
-import { expandYearData } from "../../../../kml_heatmap/frontend/services/yearDecode";
+import {
+  DATA_FORMAT_VERSION,
+  expandYearData,
+} from "../../../../kml_heatmap/frontend/services/yearDecode";
 import { logError } from "../../../../kml_heatmap/frontend/utils/logger";
 import { drawHeat } from "../../../../kml_heatmap/frontend/services/heatSource";
 import { heatColumns } from "../../../../kml_heatmap/frontend/calculations/heatExposure";
@@ -234,17 +237,58 @@ describe("createYearDecoder", () => {
 
     it("decodes a year the worker failed over again, and keeps the worker", async () => {
       const decoder = createYearDecoder({ createWorker });
-      const bad = decoder.decode(yearBytes({ format: -1 }));
+      const bad = decoder.decode(yearBytes(null));
 
       // The error itself, not the text the worker sent
-      await expect(bad).rejects.toThrow(/another release/);
+      await expect(bad).rejects.toThrow(/expected an object/);
       expect(logError).toHaveBeenCalledWith(
         "Year worker could not decode:",
-        expect.stringContaining("another release"),
+        expect.stringContaining("expected an object"),
       );
       expect(worker.terminate).not.toHaveBeenCalled();
       await expect(decoder.decode(yearBytes(year))).resolves.toEqual(expanded);
       expect(worker.requests).toHaveLength(2);
+    });
+
+    it("takes a file of another release from the worker, without reading it again", async () => {
+      worker.answers = false;
+      const decoder = createYearDecoder({ createWorker });
+      // Bytes the page could read: it does not, as the worker's answer is
+      // the file's, which only another release would read
+      const stale = decoder.decode(yearBytes(year));
+
+      worker.say({
+        id: 0,
+        error: "format 5, expected 6; written by another release",
+        name: "StaleDataError",
+        format: DATA_FORMAT_VERSION,
+      });
+
+      await expect(stale).rejects.toMatchObject({
+        name: "StaleDataError",
+        message: expect.stringContaining("another release") as string,
+      });
+      expect(logError).not.toHaveBeenCalled();
+    });
+
+    it("decodes here when a worker of another deploy calls the file stale", async () => {
+      worker.answers = false;
+      const decoder = createYearDecoder({ createWorker });
+      // The worker's script is newer than the page and its year file
+      const owed = decoder.decode(yearBytes(year));
+
+      worker.say({
+        id: 0,
+        error: "written by another release",
+        name: "StaleDataError",
+        format: DATA_FORMAT_VERSION + 1,
+      });
+
+      await expect(owed).resolves.toEqual(expanded);
+      expect(logError).toHaveBeenCalledWith(
+        "Year worker could not decode:",
+        "written by another release",
+      );
     });
 
     it("decodes here when the worker failed over a file that is fine", async () => {
@@ -252,7 +296,12 @@ describe("createYearDecoder", () => {
       const decoder = createYearDecoder({ createWorker });
       const owed = decoder.decode(yearBytes(year));
 
-      worker.say({ id: 0, error: "out of memory" });
+      worker.say({
+        id: 0,
+        error: "out of memory",
+        name: "RangeError",
+        format: DATA_FORMAT_VERSION,
+      });
 
       await expect(owed).resolves.toEqual(expanded);
     });
@@ -334,7 +383,12 @@ describe("createYearDecoder", () => {
       const decoder = createYearDecoder({ createWorker });
       const owed = decoder.drawHeat(points, weights);
 
-      worker.say({ id: 0, error: "out of memory" });
+      worker.say({
+        id: 0,
+        error: "out of memory",
+        name: "RangeError",
+        format: DATA_FORMAT_VERSION,
+      });
 
       await expectDrawn(await owed);
       expect(logError).toHaveBeenCalledWith(
@@ -374,7 +428,14 @@ describe("createYearDecoder", () => {
       await decoder.decode(yearBytes(year));
 
       expect(() => worker.answer(worker.requests[0]!)).not.toThrow();
-      expect(() => worker.say({ id: 99, error: "stray" })).not.toThrow();
+      expect(() =>
+        worker.say({
+          id: 99,
+          error: "stray",
+          name: "Error",
+          format: DATA_FORMAT_VERSION,
+        }),
+      ).not.toThrow();
       expect(logError).not.toHaveBeenCalled();
     });
 

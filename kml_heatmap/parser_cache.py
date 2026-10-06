@@ -168,10 +168,11 @@ def _is_stale(entry: Path, now: float) -> bool:
     elif (
         not entry.name.endswith(CACHE_SUFFIX)
         or int(match["version"]) != CACHE_FORMAT_VERSION
-        or match["parser"] != parser_fingerprint()
         or match["database"] != database_fingerprint()
     ):
         return True
+    # An entry of another parser goes by its age: a worktree on another
+    # commit shares the cache directory and still reads its own entries
     try:
         age_seconds = now - entry.stat().st_mtime
     except OSError:
@@ -183,8 +184,10 @@ def prune_stale_cache_entries(cache_dir: Path | None = None) -> int:
     """Remove the cache entries that are no longer useful in one directory pass.
 
     An entry goes when no current key can produce it (a legacy name, another
-    format version, parser or airport database) or when it has not been used
-    for ``CACHE_MAX_AGE_DAYS``, like a temp file an interrupted write left.
+    format version or airport database) or when it has not been used for
+    ``CACHE_MAX_AGE_DAYS``, like a temp file an interrupted write left or an
+    entry of another parser version, which a checkout on another commit that
+    shares the cache directory may still read.
     Reading an entry renews it. Other files are left alone. Returns the
     number of removed entries.
     """
@@ -264,7 +267,12 @@ def _landings_from_json(item: Any, paths: int) -> list[FlightLandings | None]:
 
 def _point_from_json(item: Any) -> TrackPoint:
     lat, lon, alt, ts = item
-    return TrackPoint(float(lat), float(lon), alt, ts)
+    return TrackPoint(
+        float(lat),
+        float(lon),
+        None if alt is None else float(alt),
+        None if ts is None else float(ts),
+    )
 
 
 def _metadata_list(value: Any, paths: int) -> list[PathMetadata]:
@@ -277,6 +285,8 @@ def _metadata_list(value: Any, paths: int) -> list[PathMetadata]:
         raise TypeError("path_metadata must be a list")
     if len(value) != paths:
         raise ValueError("path_groups and path_metadata differ in length")
+    if not all(isinstance(item, dict) for item in value):
+        raise TypeError("path_metadata items must be objects")
     return value
 
 

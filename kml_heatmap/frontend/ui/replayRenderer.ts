@@ -310,6 +310,10 @@ export class ReplayRenderer {
     });
   }
 
+  /** What the readout shows: the segment, and its track as written */
+  private shownReadout: { segment: PathSegment | null; track: string } | null =
+    null;
+
   /**
    * Create the readout strip inside the replay panel once. It reports the
    * values of the current position, so it must never be a live region: the
@@ -322,6 +326,7 @@ export class ReplayRenderer {
     const strip = document.createElement("div");
     strip.className = "replay-readout";
     strip.id = "replay-readout";
+    this.shownReadout = null;
 
     READOUT_CELLS.forEach(([id, label], index) => {
       const cell = document.createElement("div");
@@ -356,15 +361,20 @@ export class ReplayRenderer {
 
   /**
    * Write the values of the current position. Only changed cells are
-   * touched, so a paused replay does not keep dirtying the DOM.
+   * touched, so a paused replay does not keep dirtying the DOM, and nothing
+   * is formatted while the segment and the track as written stay.
    */
   private updateReadout(segment: PathSegment | null, bearing: number): void {
+    const track = segment ? formatTrack(bearing) : READOUT_PLACEHOLDER;
+    const shown = this.shownReadout;
+    if (shown?.segment === segment && shown.track === track) return;
+    this.shownReadout = { segment, track };
     const feet = segment?.altitude_ft ?? 0;
     const knots = segment?.groundspeed_knots ?? 0;
     // Grouped digits, like the legends, the statistics panel and the segment
     // tooltip, rather than a fourth style
     const values: string[] = segment
-      ? [formatNumber(feet) + " ft", formatSpeed(knots), formatTrack(bearing)]
+      ? [formatNumber(feet) + " ft", formatSpeed(knots), track]
       : [READOUT_PLACEHOLDER, READOUT_PLACEHOLDER, READOUT_PLACEHOLDER];
     // Every other surface pairs both unit systems, so this one does too
     const alts: string[] = segment

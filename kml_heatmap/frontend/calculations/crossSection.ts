@@ -606,20 +606,24 @@ export function windowSeconds(
  * `values`, a grid of `columns` by `rows`, smoothed by a cell either way
  * (a kernel of 1, 2, 1 across and up), so the chart reads as a density
  * rather than as cells. It reaches no further than a cell, well within the
- * cells the readout adds up (see windowSeconds).
+ * cells the readout adds up (see windowSeconds). Written into `out`, by
+ * way of `across`, which a chart that draws a section on every frame of a
+ * drag hands it again each time.
  */
 export function smoothCells(
   values: Float64Array,
   columns: number,
   rows: number,
+  out = new Float64Array(values.length),
+  across = new Float64Array(values.length),
 ): Float64Array {
   const pass = (
     from: Float64Array,
+    to: Float64Array,
     step: number,
     length: number,
     at: (index: number) => number,
   ): Float64Array => {
-    const out = new Float64Array(from.length);
     for (let index = 0; index < from.length; index++) {
       const position = at(index);
       let sum = 2 * from[index]!;
@@ -632,10 +636,10 @@ export function smoothCells(
         sum += from[index + step]!;
         weight++;
       }
-      out[index] = sum / weight;
+      to[index] = sum / weight;
     }
-    return out;
+    return to;
   };
-  const across = pass(values, 1, columns, (index) => index % columns);
-  return pass(across, columns, rows, (index) => (index / columns) | 0);
+  pass(values, across, 1, columns, (index) => index % columns);
+  return pass(across, out, columns, rows, (index) => (index / columns) | 0);
 }

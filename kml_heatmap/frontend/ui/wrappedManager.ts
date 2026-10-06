@@ -31,6 +31,7 @@ import {
 } from "../calculations/panelStats";
 import type { FilteredStatistics } from "../types";
 import { datasetIndex, type FilterView } from "../calculations/datasetIndex";
+import { yearNewAreaKm2 } from "../calculations/newAreas";
 import { logError } from "../utils/logger";
 import {
   generateStatsHtml,
@@ -383,7 +384,7 @@ export class WrappedManager {
       this.app.map.fitBounds(fitTarget, this.fitOptions());
     }
 
-    // Hide controls in wrapped view FIRST
+    // The controls go while the dialog has the map (see hideControls)
     this.savedControlDisplays = hideControls();
 
     // Show modal first to ensure wrapped-map-container has dimensions
@@ -576,21 +577,14 @@ export class WrappedManager {
     // Use the currently selected year (including 'all')
     const year = this.app.selectedYear;
 
-    const aircraft = this.app.selectedAircraft;
-
     // The filter view of the dataset is shared with the statistics panel,
     // so a filter it already computed is not walked again here
-    const data = this.app.currentData;
     const view = this.filterView();
-    const preFiltered = { paths: view?.paths ?? [] };
     const segments = view?.segments() ?? [];
 
     const yearStats = calculateYearStats(
-      data?.path_info ?? [],
-      year,
+      view?.paths ?? [],
       this.app.aircraftModels,
-      aircraft,
-      preFiltered,
       filteredStats,
     );
 
@@ -613,12 +607,17 @@ export class WrappedManager {
 
     // Build fun facts section with dynamic, varied facts. The airspace new
     // in the year is counted from the earlier years the page holds already
-    // (see DataManager.newAreaKm2), and left out unless it holds them all
+    // (see yearNewAreaKm2), and left out unless it holds them all
     const funFacts = generateFunFacts(
       yearStats,
       filteredStats,
       year,
-      this.app.dataManager.newAreaKm2(year, segments),
+      yearNewAreaKm2(
+        year,
+        segments,
+        siteData.metadata?.available_years ?? [],
+        (known) => this.app.dataManager.cachedData(known),
+      ),
     );
 
     const funFactsHtml = generateFunFactsHtml(funFacts);

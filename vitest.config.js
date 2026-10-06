@@ -1,7 +1,21 @@
 import { defineConfig } from "vitest/config";
 import { fileURLToPath } from "node:url";
+import { tightenMarkup } from "./scripts/build-helpers.js";
 
 export default defineConfig({
+  // The popups as a minified build ships them (the markup plugin of
+  // build.js), so the tests see the markup the site does
+  plugins: [
+    {
+      name: "markup",
+      enforce: "pre",
+      transform(code, id) {
+        return /[\\/]utils[\\/]htmlGenerators\.ts$/.test(id)
+          ? { code: tightenMarkup(code, id), map: null }
+          : undefined;
+      },
+    },
+  ],
   test: {
     globals: true,
     environment: "jsdom",

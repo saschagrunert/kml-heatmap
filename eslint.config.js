@@ -2,6 +2,7 @@
 
 import { readFileSync } from "node:fs";
 import eslint from "@eslint/js";
+import { defineConfig } from "eslint/config";
 import tseslint from "typescript-eslint";
 
 /**
@@ -26,7 +27,7 @@ function gitignorePatterns() {
     });
 }
 
-export default tseslint.config(
+export default defineConfig(
   {
     ignores: [
       ...gitignorePatterns(),

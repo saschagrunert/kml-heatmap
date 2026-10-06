@@ -23,8 +23,8 @@ from .logger import logger
 from .terrain_pixels import (
     DecodeFailedError,
     TileKey,
-    _decode_cached_tile,
-    _has_current_pixels,
+    decode_cached_tile,
+    has_current_pixels,
     is_tile_png,
 )
 from .workers import WorkerPool, default_worker_count
@@ -376,9 +376,9 @@ class TerrariumTiles:
         # starting the pool.
         # The pixels of an older version count: after an upgrade every tile
         # is decoded again, which the pool takes a tenth of the time for
-        to_decode = sum(not _has_current_pixels(path) for path in paths)
+        to_decode = sum(not has_current_pixels(path) for path in paths)
         if to_decode < DECODE_POOL_MIN_TILES:
-            decoded = list(map(_decode_cached_tile, paths, indices, strict=True))
+            decoded = list(map(decode_cached_tile, paths, indices, strict=True))
         else:
             workers = min(default_worker_count(), len(cached))
             # The workers log at the parent's level, so --debug names the
@@ -390,7 +390,7 @@ class TerrariumTiles:
                 try:
                     decoded = list(
                         pool.map(
-                            _decode_cached_tile,
+                            decode_cached_tile,
                             paths,
                             indices,
                             chunksize=max(1, len(cached) // (workers * 4)),
@@ -417,6 +417,6 @@ class TerrariumTiles:
     ) -> list[array[float] | None]:
         """Decode the tiles in this process, after the pool failed."""
         try:
-            return list(map(_decode_cached_tile, paths, indices, strict=True))
+            return list(map(decode_cached_tile, paths, indices, strict=True))
         except MemoryError as e:
             raise DecodeFailedError(str(e) or type(e).__name__) from e

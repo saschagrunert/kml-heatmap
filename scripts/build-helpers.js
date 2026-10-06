@@ -57,6 +57,18 @@ export function tightenGlsl(text, open, close) {
  * @returns {{start: number, end: number, raw: string}[]}
  */
 export function glslLiterals(source, path = "shader.ts") {
+  return literalParts(source, path, (text) => /gl_|uniform /.test(text));
+}
+
+/**
+ * The parts of the template literals of `source` whose text `accept`
+ * takes, as glslLiterals gives them
+ * @param {string} source
+ * @param {string} path
+ * @param {(text: string) => boolean} accept
+ * @returns {{start: number, end: number, raw: string}[]}
+ */
+function literalParts(source, path, accept) {
   const file = ts.createSourceFile(path, source, ts.ScriptTarget.Latest);
   /** @type {{start: number, end: number, raw: string}[]} */
   const parts = [];
@@ -67,7 +79,7 @@ export function glslLiterals(source, path = "shader.ts") {
       : ts.isNoSubstitutionTemplateLiteral(node)
         ? [node]
         : [];
-    if (/gl_|uniform /.test(literals.map((part) => part.text).join(""))) {
+    if (accept(literals.map((part) => part.text).join(""))) {
       for (const part of literals) {
         const start = part.getStart(file);
         parts.push({
@@ -102,6 +114,59 @@ export function tightenShaders(source, path) {
     const text = tightenGlsl(raw.slice(1, -close), raw[0] === "`", close === 1);
     contents =
       contents.slice(0, start + 1) + text + contents.slice(end - close);
+  }
+  return contents;
+}
+
+/**
+ * Fail on markup whose white space is not free to collapse: a <pre> or a
+ * <textarea> keeps it, and so does an attribute value that spans a line.
+ * Such markup would read differently once tightenMarkup put it on one
+ * line, so the build stops instead of shipping it.
+ * @param {string} text - The text of a template literal, without the
+ *   expressions it interpolates
+ * @param {string} path
+ */
+function assertTightenable(text, path) {
+  const keeps = /<(pre|textarea)\b/i.exec(text);
+  if (keeps) {
+    throw new Error(
+      `${path}: a template literal holds <${keeps[1]}>, whose white space ` +
+        "tightenMarkup would collapse",
+    );
+  }
+  if (/=\s*(["'])[^"'<>]*\n/.test(text)) {
+    throw new Error(
+      `${path}: an attribute value of a template literal spans a line, ` +
+        "which tightenMarkup would put on one",
+    );
+  }
+}
+
+/**
+ * `source` with the markup of its template literals on one line: each line
+ * break and the indentation after it as a single space, which HTML reads
+ * the same, as it collapses every run of white space outside an attribute
+ * value into one. What the markup plugin of build.js hands esbuild for
+ * utils/htmlGenerators.ts, whose popups are indented literals, and whose
+ * attribute values never span a line.
+ * @param {string} source
+ * @param {string} [path]
+ * @returns {string}
+ */
+export function tightenMarkup(source, path = "markup.ts") {
+  // From the end, so the offsets of those before stay where they were
+  const parts = literalParts(source, path, (text) => {
+    if (!/<\/?[a-z]/.test(text)) return false;
+    assertTightenable(text, path);
+    return true;
+  }).sort((a, b) => b.end - a.end);
+  let contents = source;
+  for (const { start, end, raw } of parts) {
+    contents =
+      contents.slice(0, start) +
+      raw.replace(/\n[ \t]*/g, " ") +
+      contents.slice(end);
   }
   return contents;
 }

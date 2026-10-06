@@ -45,7 +45,6 @@ from .constants import METERS_TO_FEET
 from .exceptions import TerrainUnavailableError
 from .geometry import TERRAIN_MAX_LATITUDE, planar_metres
 from .logger import logger
-from .png import decode_png
 from .segment_codec import ALTITUDE, GROUND_STEP, LAT, LON, SPEED
 from .terrain_fetch import TERRAIN_CACHE_DIR, TerrariumTiles
 from .terrain_pixels import TILE_SIZE, DecodeFailedError, TileKey
@@ -65,7 +64,6 @@ __all__ = [
     "TerrariumTiles",
     "TileKey",
     "TileSource",
-    "decode_png",
     "elevations_by_coordinate",
     "ground_profile_ft",
     "sample_path_elevations",

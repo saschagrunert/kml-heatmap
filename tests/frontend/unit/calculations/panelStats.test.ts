@@ -446,6 +446,36 @@ describe("panel statistics", () => {
       expect(stats.aircraft_list).toHaveLength(2);
     });
 
+    it("adds each aircraft's flight time, a registration naming an object property too", () => {
+      const stats = calculateFilteredStatistics({
+        pathInfo: [
+          { id: 1, aircraft_registration: "constructor" },
+          { id: 2, aircraft_registration: "constructor" },
+          { id: 3, aircraft_registration: "D-EAGJ" },
+        ],
+        segments: [
+          createSegment({ path_id: 1, time: 0 }),
+          createSegment({ path_id: 1, time: 3600 }),
+          createSegment({ path_id: 2, time: 100 }),
+          createSegment({ path_id: 2, time: 1900 }),
+          createSegment({ path_id: 3 }),
+        ],
+        year: "all",
+        aircraft: "all",
+      });
+
+      const byRegistration = Object.fromEntries(
+        stats.aircraft_list.map((a) => [
+          a.registration,
+          [a.flight_time_seconds, a.flight_time_str],
+        ]),
+      );
+      expect(byRegistration).toEqual({
+        constructor: [5400, "1h 30m"],
+        "D-EAGJ": [0, undefined],
+      });
+    });
+
     it("applies aircraft filter", () => {
       const stats = calculateFilteredStatistics({
         pathInfo: mockPathInfo,

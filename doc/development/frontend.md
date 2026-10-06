@@ -43,7 +43,11 @@ the flights is in [Rendering](rendering.md) and [Heat](heat.md), the tests in
   `features.bundle.js`, `wrapped.bundle.js`, `shared.bundle.js`,
   `yearWorker.bundle.js`, their source maps, `vendor/` and `flags/`)
 - **Build scripts** `build.js` and `scripts/*.js`, plain JavaScript with JSDoc
-  types that `tsconfig.node.json` checks (`npm run typecheck`)
+  types that `tsconfig.node.json` checks (`npm run typecheck`). TypeScript stays
+  on 6.x for now: the TypeScript 7 compiler checks every tsconfig here without
+  an error, but typescript-eslint does not support it yet, and its package no
+  longer exports the compiler API that `scripts/build-helpers.js` parses the
+  shaders with
 - **Tests** in `tests/frontend/` and `tests/e2e/` (see [Testing](testing.md))
 
 ## State and links

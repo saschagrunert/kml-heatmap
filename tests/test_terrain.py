@@ -33,7 +33,7 @@ from kml_heatmap.exceptions import TerrainUnavailableError
 from kml_heatmap.geometry import METRES_PER_DEGREE
 from kml_heatmap.logger import logger
 from kml_heatmap.path_content import PATH_ID_BITS
-from kml_heatmap.png import PngError
+from kml_heatmap.png import PngError, decode_png
 from kml_heatmap.segment_codec import (
     ALTITUDE_STEP,
     COORDINATE_SCALE,
@@ -47,7 +47,6 @@ from kml_heatmap.terrain import (
     TILE_SIZE,
     TerrariumTiles,
     TileKey,
-    decode_png,
     elevations_by_coordinate,
     ground_profile_ft,
     sample_elevations,
@@ -889,6 +888,23 @@ class TestTerrariumTiles:
         assert answered == {tile: array("d", [10.0]) for tile in wanted}
         assert pauses == [fetch_module.FETCH_RETRY_SECONDS] * 3
 
+    def test_a_host_given_up_meanwhile_is_not_asked_again(
+        self, tmp_path, monkeypatch, connections
+    ):
+        """Another tile's fetch may give the host up while this one pauses."""
+
+        def answer(path):
+            raise TimeoutError("slow")
+
+        connections.answer = staticmethod(answer)
+        tiles = TerrariumTiles(tmp_path)
+        monkeypatch.setattr(
+            "kml_heatmap.terrain_fetch.time.sleep", lambda _: tiles._offline.set()
+        )
+
+        assert tiles.pixels({TileKey(10, 1, 1): [0]}) == {}
+        assert len(connections.requests) == 1
+
     def test_the_pause_grows_with_every_attempt(self, tmp_path, monkeypatch):
         pauses: list[float] = []
 
@@ -1290,7 +1306,7 @@ class TestTerrariumTiles:
             self._failing_pool(in_map=BrokenProcessPool("a worker died")),
         )
         monkeypatch.setattr(
-            fetch_module, "_decode_cached_tile", MagicMock(side_effect=MemoryError)
+            fetch_module, "decode_cached_tile", MagicMock(side_effect=MemoryError)
         )
 
         with caplog.at_level(logging.WARNING, logger="kml_heatmap"):

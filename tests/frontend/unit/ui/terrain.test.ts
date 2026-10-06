@@ -345,6 +345,26 @@ describe("the relief", () => {
       expect(start("place_town")).toBe(0);
     });
 
+    it("follow the replay's camera, walked only for another zoom level or tilt", async () => {
+      swapBaseStyle(CARTO_LIKE);
+      await follow();
+      app.terrainActive = true;
+      // A chase flies for minutes without a rest
+      map().jumpTo({ zoom: 6.5, pitch: 70 });
+      map().emit("moveend", REPLAY_CAMERA_MOVE);
+      expect(start("place_town")).toBe(5);
+
+      const walks = vi.spyOn(map(), "getLayersOrder");
+      walks.mockClear();
+      map().jumpTo({ zoom: 6.9 });
+      map().emit("moveend", REPLAY_CAMERA_MOVE);
+      expect(walks).not.toHaveBeenCalled();
+
+      map().jumpTo({ zoom: 9.2 });
+      map().emit("moveend", REPLAY_CAMERA_MOVE);
+      expect(start("place_town")).toBe(8);
+    });
+
     it("are left alone off the relief, and in a new base style too", async () => {
       await follow();
       map().jumpTo({ zoom: 6.5, pitch: 70 });

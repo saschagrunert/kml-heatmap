@@ -5,7 +5,14 @@ here, each with the exact value and formula its callers used before they
 were shared, so that no exported number moves.
 """
 
+from dataclasses import dataclass
 from math import atan2, cos, degrees, hypot, log, pi, radians, sin, sqrt, tan
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
+
+    from .types import TrackPoint
 
 __all__ = [
     "EARTH_RADIUS_KM",
@@ -13,6 +20,7 @@ __all__ = [
     "MAX_LATITUDE",
     "METRES_PER_DEGREE",
     "TERRAIN_MAX_LATITUDE",
+    "CoordinateExtent",
     "haversine_distance",
     "longitude_difference",
     "planar_km",
@@ -102,3 +110,43 @@ def web_mercator(lat: float, lon: float) -> tuple[float, float]:
         (lon + 180.0) / 360.0,
         (1.0 - log(tan(pi / 4 + phi / 2)) / pi) / 2.0,
     )
+
+
+@dataclass(frozen=True)
+class CoordinateExtent:
+    """Bounding box of a set of coordinates.
+
+    Plain minimum and maximum, also for data on both sides of the
+    antimeridian: the map draws every path, marker and heat point at its own
+    longitude, not where it would be nearest to the others, so a box that
+    wrapped around 180 (179 to 181) would open the map on half of the
+    flights.
+    """
+
+    min_lat: float
+    max_lat: float
+    min_lon: float
+    max_lon: float
+
+    @classmethod
+    def of(cls, coordinates: Iterable[TrackPoint]) -> CoordinateExtent | None:
+        """The extent of the coordinates, or None when there are none."""
+        points = list(coordinates)
+        if not points:
+            return None
+        return cls(
+            min(point.lat for point in points),
+            max(point.lat for point in points),
+            min(point.lon for point in points),
+            max(point.lon for point in points),
+        )
+
+    @property
+    def center_lat(self) -> float:
+        """The latitude halfway between the extremes."""
+        return (self.min_lat + self.max_lat) / 2
+
+    @property
+    def center_lon(self) -> float:
+        """The longitude halfway between the extremes."""
+        return (self.min_lon + self.max_lon) / 2

@@ -46,6 +46,22 @@ describe("prefersReducedMotion", () => {
     expect(matchMedia).toHaveBeenCalledTimes(1);
   });
 
+  it("asks a replaced matchMedia anew, like every other query", async () => {
+    const { prefersReducedMotion } = await loadMotion(() => ({
+      matches: false,
+    }));
+    expect(prefersReducedMotion()).toBe(false);
+
+    const replaced = vi.fn(() => ({ matches: true }));
+    Object.defineProperty(window, "matchMedia", {
+      value: replaced,
+      configurable: true,
+    });
+
+    expect(prefersReducedMotion()).toBe(true);
+    expect(replaced).toHaveBeenCalledTimes(1);
+  });
+
   it("is false without matchMedia", async () => {
     const { prefersReducedMotion } = await loadMotion(undefined);
 

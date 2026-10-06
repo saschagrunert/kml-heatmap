@@ -16,7 +16,7 @@ import {
   replayAllPoints,
   type ReplayAllPoints,
 } from "../calculations/replayAll";
-import { FEET_TO_METERS, MAP_LAYERS } from "../utils/constants";
+import { FEET_TO_METERS, MAP_LAYERS, MAX_FRAME_S } from "../utils/constants";
 import { logError } from "../utils/logger";
 import {
   hasLostContext,
@@ -42,9 +42,6 @@ export const REPLAY_ALL_SPEED = 200;
  */
 const TRAIL_FADE_S = 3;
 const TRAIL_MOST_S = 1500;
-
-/** The longest step one frame moves the clock by, as for one flight */
-const MAX_FRAME_S = 0.1;
 
 /** Degrees a second the orbit turns the camera by: two minutes a round */
 const ORBIT_DEG_PER_S = 3;

@@ -13,7 +13,7 @@ import type { MapApp } from "../mapApp";
 import { calculateVisibleAirports, findHomeBase } from "../features/airports";
 import type { AirportCounts } from "../features/airports";
 import { datasetIndex } from "../calculations/datasetIndex";
-import type { Airport } from "../types";
+import type { Airport, KMLDataset } from "../types";
 import {
   AIRPORT_HIDE_MARKERS_BELOW_ZOOM,
   AIRPORT_SIZE_ZOOMS,
@@ -37,6 +37,15 @@ import { siteData } from "../state/siteData";
 import { airportLabelFeatures, setAirportLabelHover } from "./airportLabels";
 import { prefersReducedMotion } from "../utils/motion";
 import { listFlights } from "./airportFlights";
+
+/** Whether two sets of airports (null for all) hold the same ones */
+function sameAirports(
+  a: ReadonlySet<string> | null,
+  b: ReadonlySet<string> | null,
+): boolean {
+  if (a === null || b === null) return a === b;
+  return a.size === b.size && [...a].every((name) => b.has(name));
+}
 
 /** The airports of the site, none until airports.json has loaded */
 function siteAirports(): Airport[] {
@@ -143,6 +152,8 @@ export class AirportManager {
   private openAirport: string | null = null;
   /** The airports shown under the filter and selection, null for all */
   private visibleAirports: ReadonlySet<string> | null = null;
+  /** The counts the labels were last written with */
+  private labelledCounts: AirportCounts | null = null;
   /** The airports too far towards the horizon to be shown */
   private farAirports: ReadonlySet<string> = new Set();
   /** The airport whose label is under the pointer */
@@ -185,7 +196,7 @@ export class AirportManager {
     // per update rather than once per key; only the second writes the
     // labels.
     app.store.subscribeKeys(POPUP_KEYS, () => this.updateAirportPopups());
-    app.store.subscribeKeys(VISIBILITY_KEYS, () => this.updateAirportOpacity());
+    app.store.subscribeKeys(VISIBILITY_KEYS, () => this.showAirports(false));
 
     // A popup would be left pointing at nothing
     app.store.subscribe("airportsVisible", (visible) => {
@@ -238,7 +249,7 @@ export class AirportManager {
   /**
    * Update the home-base marker and the open popup with the counts of the
    * current year/aircraft filter; the labels, which mark the home base as
-   * well, follow the visibility (see updateAirportOpacity)
+   * well, follow the visibility (see showAirports)
    */
   updateAirportPopups(): void {
     // Home base: airport with most flights in the current filter
@@ -420,23 +431,47 @@ export class AirportManager {
     else element.removeAttribute("aria-controls");
   }
 
-  updateAirportOpacity(): void {
+  /**
+   * Show the airports of the data, the filter and the selection. A click
+   * on a flight changes the selection alone, which outside isolation shows
+   * no airport the filter does not: unless `always` (the default, for the
+   * markers just made), the markers and the labels stay as they are while
+   * neither the airports nor their counts change.
+   */
+  showAirports(always = true): void {
     const data = this.app.currentData;
     // No dataset, no flights to say which airports to show: before the
     // first one has loaded, or after it failed to, none is
     const visibleAirports = data
-      ? calculateVisibleAirports({
-          pathInfo: data.path_info,
-          selectedYear: this.app.selectedYear,
-          selectedAircraft: this.app.selectedAircraft,
-          selectedPathIds: this.app.selectedPathIds,
-          isolateSelection: this.app.isolateSelection,
-          pathInfoById: datasetIndex(data).pathInfoById,
-        })
+      ? this.visibleAirportsOf(data)
       : new Set<string>();
+    const counts = this.airportFlightCounts();
+    if (
+      !always &&
+      counts === this.labelledCounts &&
+      sameAirports(visibleAirports, this.visibleAirports)
+    ) {
+      return;
+    }
 
     this.visibleAirports = visibleAirports;
+    this.labelledCounts = counts;
     this.applyVisibility();
+  }
+
+  /** The airports the filter and the selection show of `data` */
+  private visibleAirportsOf(data: KMLDataset): Set<string> | null {
+    const year = this.app.selectedYear;
+    const aircraft = this.app.selectedAircraft;
+    const index = datasetIndex(data);
+    return calculateVisibleAirports(
+      year === "all" && aircraft === "all"
+        ? null
+        : index.filter(year, aircraft).paths,
+      this.app.selectedPathIds,
+      this.app.isolateSelection,
+      index.pathInfoById,
+    );
   }
 
   /**
@@ -465,10 +500,7 @@ export class AirportManager {
         }
       }
     }
-    const previous = this.farAirports;
-    if (far.size === previous.size && [...far].every((n) => previous.has(n))) {
-      return;
-    }
+    if (sameAirports(far, this.farAirports)) return;
     this.farAirports = far;
     this.applyVisibility();
   }

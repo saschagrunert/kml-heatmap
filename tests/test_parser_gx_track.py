@@ -8,7 +8,11 @@ from kml_heatmap.aircraft import parse_aircraft_from_filename
 from kml_heatmap.constants import KML_NAMESPACES
 from kml_heatmap.helpers import parse_timestamp_epoch
 from kml_heatmap.parser_common import local_name
-from kml_heatmap.parser_gx_track import parse_gx_tracks, process_gx_track
+from kml_heatmap.parser_gx_track import (
+    _collect_track_children,
+    parse_gx_tracks,
+    process_gx_track,
+)
 from kml_heatmap.types import FlightPath, FlightPathGroup, PathMetadata, TrackPoint
 
 KML_NS = KML_NAMESPACES["kml"]
@@ -69,6 +73,26 @@ def _run(tracks):
         parse_aircraft_from_filename("1_DEAGJ_DA20.kml"),
     )
     return coordinates, path_groups, path_metadata
+
+
+class TestCollectTrackChildren:
+    def test_interleaved_and_grouped_children_give_the_same_lists(self):
+        whens = ["2025-01-01T10:00:00Z", " 2025-01-01T10:00:05Z ", ""]
+        coords = ["8.0 50.0 100", "8.1 50.1 110", None]
+        one = _track(_document(), coords, whens, interleave=True)
+        other = _track(_document(), coords, whens, interleave=False)
+
+        expected = ([w.strip() for w in whens], coords)
+        assert _collect_track_children(one) == expected
+        assert _collect_track_children(other) == expected
+
+    def test_children_without_a_namespace_and_others_are_told_apart(self):
+        track = etree.fromstring(
+            "<Track><when>a</when><coord>1 2 3</coord><altitudeMode>absolute"
+            "</altitudeMode><whenever>x</whenever><when>b</when></Track>"
+        )
+
+        assert _collect_track_children(track) == (["a", "b"], ["1 2 3"])
 
 
 class TestLocalName:

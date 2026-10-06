@@ -118,11 +118,14 @@ jobs:
         run: npm run lint:unused
       # The workflows, the composite actions and dependabot.yml: template
       # injection, credentials left in the checkout, unpinned actions and
-      # the like. zizmor comes with the dev extra in requirements-test.lock;
-      # without a token it runs its offline audits only, the same as
-      # `make lint`.
+      # the like. zizmor comes with the dev extra in requirements-test.lock.
+      # With the job's token it also runs its online audits (impostor
+      # commits, actions with known advisories, a pin whose comment names
+      # another version); `make lint` runs them when GH_TOKEN is set.
       - name: Audit the workflows
         if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: zizmor --min-severity medium .github
       # The check imports nothing but the standard library
       - name: Check that the KML files are obfuscated
@@ -522,7 +525,8 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          # gitleaks scans the whole commit history
+          # gitleaks scans the whole commit history, or the commits of a pull
+          # request from its base on
           fetch-depth: 0
           persist-credentials: false
       # npm audit reads package-lock.json and installs nothing, so without
@@ -535,8 +539,6 @@ jobs:
           npm-cache: "false"
       - name: Install Python dependencies
         run: pip install --require-hashes -r requirements-test.lock
-      - name: Run bandit
-        run: bandit -r kml_heatmap -ll
       # pip-audit is pinned in requirements-test.lock like every other tool.
       # Every lock file, also the ones only the packaging job and `make lock`
       # install. pip-audit resolves the files of one call together, and only
@@ -557,10 +559,14 @@ jobs:
       # digest is the multi-arch index of the tag; a bump of the hook rev has
       # to update it by hand (`docker manifest inspect -v` or the registry's
       # Docker-Content-Digest header), and the step fails until it does. The
-      # config's [[allowlists]] needs gitleaks 8.25 or newer.
+      # config's [[allowlists]] needs gitleaks 8.25 or newer. A pull request
+      # and an entry of the merge queue scan only the commits they add on top
+      # of their base (the whole history took over two minutes a run); a push
+      # to main and the weekly run scan the whole history.
       - name: Scan the commit history for secrets
         env:
           GITLEAKS_IMAGE: ghcr.io/gitleaks/gitleaks@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f # v8.30.1
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
         run: |
           version=$(awk '$3 == "https://github.com/gitleaks/gitleaks" { found = 1; next } found && $1 == "rev:" { print $2; exit }' .pre-commit-config.yaml)
           test -n "$version" || { echo "::error::no gitleaks rev in .pre-commit-config.yaml"; exit 1; }
@@ -569,8 +575,12 @@ jobs:
             echo "::error::the pinned gitleaks image is $pulled, the pre-commit hook $version; update the digest in test.yml"
             exit 1
           }
+          range=()
+          if [ -n "$BASE_SHA" ]; then
+            range=(--log-opts="$BASE_SHA..HEAD")
+          fi
           docker run --rm -v "$PWD:/repo:ro" "$GITLEAKS_IMAGE" \
-            git --redact --verbose --config /repo/.gitleaks.toml /repo
+            git --redact --verbose --config /repo/.gitleaks.toml "${range[@]}" /repo
 
   container:
     # Not for Dependabot's Python bumps, see the top (also for the zizmor

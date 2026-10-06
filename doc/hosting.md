@@ -74,9 +74,10 @@ starts with a fresh saved state, since the key names the directory.
 
 The file names never change between builds: the bundles are `mapApp.bundle.js`
 and so on in every build, and the hash of the sources is written inside them
-(the first line of a bundle, and the build stamp in `map_config.js`), not into
-their names. So nothing may be cached as if it were immutable, and a rebuild has
-to reach the browser through revalidation:
+(the first line of a bundle), not into their names; `map_config.js` carries the
+build date and commit under the same name in every build too. So nothing may be
+cached as if it were immutable, and a rebuild has to reach the browser through
+revalidation:
 
 | Path                                                                        | Cache policy                                                                                                                              |
 | --------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |

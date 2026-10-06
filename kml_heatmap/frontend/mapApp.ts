@@ -340,7 +340,7 @@ export class MapApp {
   /** The year a first visit opens on: the newest one, see resolveYearSelection */
   defaultYear = "all";
 
-  // Managers (initialized in initialize(), always available after construction)
+  // Managers, created by initialize() and there from then on
   stateManager!: StateManager;
   dataManager!: DataManager;
   layerManager!: LayerManager;

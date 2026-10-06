@@ -33,14 +33,9 @@ import {
   MAP_SOURCES,
 } from "../../../../kml_heatmap/frontend/utils/constants";
 import { domCache } from "../../../../kml_heatmap/frontend/utils/domCache";
-import {
-  resetSiteData,
-  siteData,
-} from "../../../../kml_heatmap/frontend/state/siteData";
 import type {
   KMLDataset,
   LoadingState,
-  Metadata,
 } from "../../../../kml_heatmap/frontend/types";
 import type { DataLoaderOptions } from "../../../../kml_heatmap/frontend/services/dataLoader";
 import {
@@ -1199,9 +1194,7 @@ describe("DataManager", () => {
       expect(
         mockApp.statsManager.updateStatsForSelection,
       ).not.toHaveBeenCalled();
-      expect(
-        mockApp.airportManager.updateAirportOpacity,
-      ).not.toHaveBeenCalled();
+      expect(mockApp.airportManager.showAirports).not.toHaveBeenCalled();
     });
   });
 
@@ -1683,61 +1676,15 @@ describe("DataManager", () => {
     });
   });
 
-  describe("the airspace new in a year, counted for Wrapped", () => {
-    /** A flight along the latitude `lat`, a segment of about 700 m a fix */
-    const flightAt = (lat: number): KMLDataset["path_segments"] =>
-      Array.from({ length: 4 }, (_, i) =>
-        createSegment({
-          path_id: 1,
-          coords: [
-            [lat, 12 + i * 0.01],
-            [lat, 12 + (i + 1) * 0.01],
-          ],
-        }),
-      );
-    const years: Record<string, KMLDataset> = {
-      "2023": createDataset([], flightAt(50)),
-      "2024": createDataset([], flightAt(51)),
-    };
+  it("hands out the years the loader holds, without loading any", () => {
+    const data = createDataset([], []);
+    loaderMocks.cachedData.mockImplementation((year: string) =>
+      year === "2024" ? data : undefined,
+    );
 
-    beforeEach(() => {
-      siteData.metadata = {
-        available_years: [2023, 2024, 2025],
-      } as Metadata;
-      loaderMocks.cachedData.mockImplementation((year: string) => years[year]);
-    });
-
-    afterEach(() => {
-      resetSiteData();
-    });
-
-    it("from the earlier years the page holds, without loading any", () => {
-      const segments = [...flightAt(51), ...flightAt(52)];
-
-      const km2 = dataManager.newAreaKm2("2025", segments);
-
-      // The year before flew the first flight: only the second is new,
-      // about 3 km along the latitude, over a cell or two either side
-      expect(km2).toBeGreaterThanOrEqual(3);
-      expect(km2).toBeLessThanOrEqual(8);
-      expect(dataManager.newAreaKm2("2025", flightAt(50))).toBe(0);
-      // 2024 is compared with 2023 alone, which flew elsewhere
-      expect(dataManager.newAreaKm2("2024", flightAt(51))).toBeGreaterThan(0);
-      expect(loaderMocks.cachedData).not.toHaveBeenCalledWith("2025");
-      expect(loaderMocks.loadData).not.toHaveBeenCalled();
-    });
-
-    it("not while an earlier year is not loaded, nor where there is none", () => {
-      const segments = flightAt(52);
-      loaderMocks.cachedData.mockImplementation((year: string) =>
-        year === "2023" ? undefined : years[year],
-      );
-
-      expect(dataManager.newAreaKm2("2025", segments)).toBeNull();
-      expect(dataManager.newAreaKm2("2023", segments)).toBeNull();
-      expect(dataManager.newAreaKm2("all", segments)).toBeNull();
-      expect(loaderMocks.loadData).not.toHaveBeenCalled();
-    });
+    expect(dataManager.cachedData("2024")).toBe(data);
+    expect(dataManager.cachedData("2023")).toBeUndefined();
+    expect(loaderMocks.loadData).not.toHaveBeenCalled();
   });
 
   describe("a lost WebGL context", () => {

@@ -7,7 +7,10 @@ import {
   type YearResponse,
   type YearWorkerScope,
 } from "../../../../kml_heatmap/frontend/services/yearWorker";
-import { decodeYear } from "../../../../kml_heatmap/frontend/services/yearDecode";
+import {
+  DATA_FORMAT_VERSION,
+  decodeYear,
+} from "../../../../kml_heatmap/frontend/services/yearDecode";
 import {
   drawHeat,
   linesSource,
@@ -48,9 +51,13 @@ describe("handleRequest", () => {
       bytes: yearBytes({ format: -1 }),
     });
 
+    // By its name too, which the page tells a file of another release by
     expect(response).toEqual({
       id: 3,
       error: expect.stringContaining("another release") as string,
+      name: "StaleDataError",
+      // And the format it reads, which the page tells another deploy by
+      format: DATA_FORMAT_VERSION,
     });
     expect(transfer).toEqual([]);
   });
@@ -74,7 +81,12 @@ describe("handleRequest", () => {
     const { response } = handleRequest({ id: 5, bytes: yearBytes(year) });
 
     parse.mockRestore();
-    expect(response).toEqual({ id: 5, error: "odd" });
+    expect(response).toEqual({
+      id: 5,
+      error: "odd",
+      name: "Error",
+      format: DATA_FORMAT_VERSION,
+    });
   });
 });
 
@@ -120,7 +132,12 @@ describe("handleRequest for the heat sources", () => {
       heat: undefined as unknown as Float64Array,
     });
 
-    expect(response).toEqual({ id: 5, error: expect.any(String) as string });
+    expect(response).toEqual({
+      id: 5,
+      error: expect.any(String) as string,
+      name: "TypeError",
+      format: DATA_FORMAT_VERSION,
+    });
   });
 });
 

@@ -11,7 +11,7 @@ in every worker. ``--jobs`` caps every pool (see ``configure_workers``).
 import contextlib
 import math
 import os
-import pickle  # nosec B403
+import pickle
 from concurrent.futures import Executor, Future, ProcessPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
 from typing import TYPE_CHECKING, Any
@@ -95,7 +95,7 @@ def init_worker(log_level: int, airport_database: bytes | None = None) -> None:
     set_log_level(log_level)
     if airport_database is not None:
         with contextlib.suppress(Exception):
-            database = pickle.loads(airport_database)  # noqa: S301  # nosec B301
+            database = pickle.loads(airport_database)  # noqa: S301
             use_airport_database(database)
 
 
@@ -131,11 +131,6 @@ class WorkerPool(Executor):
             )
         except _CANNOT_START as e:
             self.fall_back(e)
-
-    @property
-    def fell_back(self) -> bool:
-        """Whether the tasks run in this process."""
-        return self._pool is None
 
     def fall_back(self, error: BaseException) -> None:
         """Give the pool up for this process, with a warning the first time."""

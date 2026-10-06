@@ -123,9 +123,7 @@ describe("PathSelection", () => {
       expect(
         mockApp.statsManager.updateStatsForSelection,
       ).not.toHaveBeenCalled();
-      expect(
-        mockApp.airportManager.updateAirportOpacity,
-      ).not.toHaveBeenCalled();
+      expect(mockApp.airportManager.showAirports).not.toHaveBeenCalled();
       expect(
         mockApp.replayManager.updateReplayButtonState,
       ).not.toHaveBeenCalled();

@@ -16,7 +16,7 @@ import {
 } from "./heldControls";
 import { setControlIcon } from "../utils/icons";
 import { STILL_LOADING_MESSAGE } from "./actions";
-import { AUTO_ZOOM_FOLLOW, MAP_SOURCES } from "../utils/constants";
+import { AUTO_ZOOM_FOLLOW, MAP_SOURCES, MAX_FRAME_S } from "../utils/constants";
 import { airplaneLiftPx, heightAtZoomFt } from "../calculations/airplaneLift";
 import { liftExaggeration, reliefLevel } from "../calculations/lift";
 import type { SmoothedFlights } from "../calculations/smoothing";
@@ -168,7 +168,7 @@ const FIT_BOUNDS_PADDING = 50;
  * A frame after a stall (a busy main thread, a laptop waking up) would
  * otherwise jump the replay ahead by the whole stall times the speed.
  */
-export const MAX_FRAME_DELTA_MS = 100;
+export const MAX_FRAME_DELTA_MS = MAX_FRAME_S * 1000;
 
 export class ReplayManager {
   private app: MapApp;

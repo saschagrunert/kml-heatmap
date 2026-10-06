@@ -240,20 +240,8 @@ export const HEATMAP_LAYER_IDS = [
 ] as const;
 
 /**
- * Elements hidden while Wrapped has the map. The two control columns and the
- * statistics rail go as a whole, with every control, title and separator
- * inside them; the rest are panels that live outside them.
- *
- * The loading indicator is not listed: the dialog covers it anyway, and
- * restoring the display saved on opening put back a `block` that a load
- * finishing in the meantime had already cleared, stranding the indicator.
+ * Longest frame the replays, their camera and its springs are worked out
+ * over (s): a frame after a stall (a busy main thread, a laptop waking up)
+ * would jump them on by the whole stall
  */
-export const HIDEABLE_CONTROL_IDS = [
-  "left-buttons",
-  "right-buttons",
-  "stats-rail",
-  "altitude-legend",
-  "airspeed-legend",
-  "heat-legend",
-  "selection-chip",
-] as const;
+export const MAX_FRAME_S = 0.1;

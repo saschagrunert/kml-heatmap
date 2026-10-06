@@ -2,8 +2,9 @@
 """Check that the hashed lock files still satisfy pyproject.toml (and the
 pip-tools lock its requirements-tools.in), that the Playwright image is
 pinned by digest and matches the pinned library (in every job of the
-workflow and in the commands the documentation quotes), and that the package
-version is the same on both sides of the project.
+workflow and in the commands the documentation quotes), that the package
+version is the same on both sides of the project, and that every file that
+names the Python or Node.js version names the same one.
 
 Dependabot raises the ranges in pyproject.toml but cannot recompile the
 lock files, and CI installs the lock files. Without this check such a pull
@@ -42,6 +43,12 @@ PLAYWRIGHT_IMAGE = re.compile(
 )
 # The documents that quote the image for running the visual tests locally
 PLAYWRIGHT_IMAGE_DOCS = ("CONTRIBUTING.md", "doc/development/testing.md")
+# A base image of the Dockerfile and the version of its tag, the part before
+# the first hyphen: python of "FROM docker.io/library/python:3.14-slim@...",
+# also after options such as "FROM --platform=$BUILDPLATFORM"
+DOCKER_BASE_IMAGE = re.compile(
+    r"^FROM\s+(?:--\S+\s+)*(?:\S+/)?(python|node):([0-9][0-9.]*)", re.MULTILINE
+)
 
 
 @functools.cache
@@ -165,6 +172,67 @@ def playwright_image_mismatches() -> list[str]:
     return problems
 
 
+def toolchain_mismatches(pyproject: dict[str, Any]) -> list[str]:
+    """Check every place that names the Python or Node.js version.
+
+    CI sets up the versions of .python-version and .nvmrc, the container
+    image builds on the tags of its FROM lines, and pyproject.toml and
+    package.json state the oldest version the code is written for. A bump
+    of one of them alone passes every job that does not read the others
+    (the image kept building on the old Python), so they are compared here.
+    """
+    problems: list[str] = []
+    versions: dict[str, str] = {}
+    for name, file in (("python", ".python-version"), ("node", ".nvmrc")):
+        try:
+            version = (ROOT / file).read_text(encoding="utf-8").strip()
+        except OSError as e:
+            problems.append(f"{file} cannot be read ({e.strerror or e})")
+            continue
+        if not version:
+            problems.append(f"{file} is empty")
+            continue
+        versions[name] = version
+    python = versions.get("python")
+    node = versions.get("node")
+    tool = pyproject.get("tool", {})
+    with open(ROOT / "package.json", encoding="utf-8") as f:
+        engines = json.load(f).get("engines", {})
+    expected: dict[str, tuple[Any, str]] = {}
+    if python is not None:
+        expected["pyproject.toml requires-python"] = (
+            pyproject["project"].get("requires-python"),
+            f">={python}",
+        )
+        expected["pyproject.toml [tool.mypy] python_version"] = (
+            tool.get("mypy", {}).get("python_version"),
+            python,
+        )
+        expected["pyproject.toml [tool.ruff] target-version"] = (
+            tool.get("ruff", {}).get("target-version"),
+            "py" + python.replace(".", ""),
+        )
+    if node is not None:
+        expected['package.json engines "node"'] = (engines.get("node"), f">={node}")
+    problems.extend(
+        f'{source} is "{actual}", .python-version and .nvmrc ask for "{wanted}"'
+        for source, (actual, wanted) in expected.items()
+        if actual != wanted
+    )
+    dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+    images = DOCKER_BASE_IMAGE.findall(dockerfile)
+    for name, wanted in versions.items():
+        tags = [tag for image, tag in images if image == name]
+        if not tags:
+            problems.append(f"the Dockerfile builds on no {name} image")
+        problems.extend(
+            f"the Dockerfile builds on {name}:{tag}, the version file asks for {wanted}"
+            for tag in tags
+            if tag != wanted
+        )
+    return problems
+
+
 def read_pins(lock: str) -> dict[str, str]:
     """Map each package pinned in a pip-compile output to its version."""
     text = (ROOT / lock).read_text(encoding="utf-8")
@@ -248,14 +316,16 @@ def main() -> int:
 
     image_problems = playwright_image_mismatches()
     version_problems = version_mismatches()
+    toolchain_problems = toolchain_mismatches(pyproject)
 
-    if not problems and not image_problems and not version_problems:
+    if not (problems or image_problems or version_problems or toolchain_problems):
         print(
             "The lock files satisfy pyproject.toml and requirements-tools.in, "
-            "the Playwright image matches and the package version agrees."
+            "the Playwright image matches, the package version agrees and "
+            "the Python and Node.js versions agree."
         )
         return 0
-    for problem in problems + image_problems + version_problems:
+    for problem in problems + image_problems + version_problems + toolchain_problems:
         print(f"error: {problem}", file=sys.stderr)
     if problems:
         print(
@@ -276,6 +346,13 @@ def main() -> int:
         print(
             "Set the same version in kml_heatmap/__init__.py and package.json, "
             "then run `npm install` to carry it into package-lock.json.",
+            file=sys.stderr,
+        )
+    if toolchain_problems:
+        print(
+            "Move .python-version, .nvmrc, the FROM lines of the Dockerfile, "
+            "requires-python, the mypy and ruff target versions and the "
+            "engines of package.json together.",
             file=sys.stderr,
         )
     return 1

@@ -431,6 +431,28 @@ class TestDownloadFailureMarker:
         with patch.object(lookup_module, "CACHE_FILE", blocker / "airports.csv"):
             assert _download_airport_database() is False
 
+    def test_a_cache_directory_without_write_access(self, tmp_path, caplog):
+        """A read-only mount: nothing is downloaded that could not be kept."""
+        with (
+            patch.object(lookup_module, "CACHE_FILE", tmp_path / "airports.csv"),
+            patch("kml_heatmap.airport_lookup.os.access", return_value=False),
+            patch.object(lookup_module, "urlopen") as mock_urlopen,
+        ):
+            assert _download_airport_database() is False
+        mock_urlopen.assert_not_called()
+        assert "Airport cache directory is not writable" in caplog.text
+
+    def test_a_cache_directory_that_cannot_be_made_still_loads(self, tmp_path, caplog):
+        """Only the lock needs the directory; the valid cache is read anyway."""
+        blocker = tmp_path / "file"
+        blocker.write_text("not a directory")
+        with (
+            patch.object(lookup_module, "CACHE_DIR", blocker / "cache"),
+            caplog.at_level(logging.DEBUG, logger="kml_heatmap"),
+        ):
+            lookup_module._ensure_cache_file()
+        assert "Cannot create cache directory" in caplog.text
+
 
 class TestDatabaseFingerprint:
     def test_changes_with_the_runways(self, tmp_path):

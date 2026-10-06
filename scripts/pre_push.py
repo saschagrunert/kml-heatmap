@@ -21,7 +21,7 @@ flight in it dates that flight to about the day it was pushed.
 """
 
 import shutil
-import subprocess  # nosec B404
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -41,7 +41,7 @@ def _git(repo: Path, *args: str) -> bytes:
     git = shutil.which("git")
     if git is None:
         raise OSError("git is not on PATH")
-    return subprocess.run(  # noqa: S603 # nosec B603
+    return subprocess.run(  # noqa: S603
         [git, *args],
         cwd=repo,
         capture_output=True,

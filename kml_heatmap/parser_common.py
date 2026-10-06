@@ -54,9 +54,9 @@ def altitude_mode(geometry: etree._Element) -> str | None:
     A gx:Track without one of its own has that of the gx:MultiTrack it is
     in, if that has one.
     """
-    for child in geometry:
-        if local_name(child.tag) == "altitudeMode":
-            return (child.text or "").strip() or None
+    mode = geometry.find("{*}altitudeMode")
+    if mode is not None:
+        return (mode.text or "").strip() or None
     parent = geometry.getparent()
     if parent is not None and local_name(parent.tag) == "MultiTrack":
         return altitude_mode(parent)
@@ -102,7 +102,11 @@ def extract_year_from_timestamp(timestamp: str | None) -> int | None:
     parsed = parse_iso_timestamp(timestamp)
     if parsed is not None:
         if parsed.tzinfo is not None:
-            parsed = parsed.astimezone(UTC)
+            try:
+                parsed = parsed.astimezone(UTC)
+            # Year 1 east of UTC, or 9999 west of it, has no UTC year
+            except OverflowError:
+                return None
         return parsed.year
 
     # A date string ("03 Mar 2025", "2025-03-03"), also one that holds a "T"
@@ -346,7 +350,7 @@ def extract_placemark_metadata(
     }
 
 
-def _build_path_metadata_dict(
+def build_path_metadata_dict(
     kml_file: str,
     path_start: TrackPoint,
     placemark_meta: PlacemarkMetadata,

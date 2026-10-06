@@ -5,7 +5,6 @@ import {
   aggregateAircraft,
   altitudeRangeFt,
   buildSegmentRanges,
-  perPathSeconds,
   segmentRangesFor,
   segmentsForPathIds,
 } from "../../../../kml_heatmap/frontend/calculations/statistics";
@@ -13,13 +12,14 @@ import {
 import {
   calculateTotalDistance,
   filterSegmentsByPaths,
+  perPathSeconds,
 } from "../../../../kml_heatmap/frontend/calculations/panelStats";
 import { METERS_TO_FEET } from "../../../../kml_heatmap/frontend/utils/constants";
 import type {
   PathInfo,
   PathSegment,
 } from "../../../../kml_heatmap/frontend/types";
-import { createSegment, segmentOf } from "../../testHelpers";
+import { segmentOf } from "../../testHelpers";
 
 const FT = (meters: number): number => meters * METERS_TO_FEET;
 
@@ -201,27 +201,20 @@ describe("statistics calculations", () => {
     });
 
     it("takes a registration that names an object property as data (regression)", () => {
-      const aircraft = aggregateAircraft(
-        [
-          {
-            id: 1,
-            aircraft_registration: "constructor",
-            aircraft_type: "C172",
-          },
-          { id: 2, aircraft_registration: "__proto__", aircraft_type: "PA28" },
-          { id: 3, aircraft_registration: "__proto__", aircraft_type: "PA28" },
-        ],
-        [
-          createSegment({ path_id: 1, time: 0 }),
-          createSegment({ path_id: 1, time: 60 }),
-        ],
-      );
+      const aircraft = aggregateAircraft([
+        {
+          id: 1,
+          aircraft_registration: "constructor",
+          aircraft_type: "C172",
+        },
+        { id: 2, aircraft_registration: "__proto__", aircraft_type: "PA28" },
+        { id: 3, aircraft_registration: "__proto__", aircraft_type: "PA28" },
+      ]);
 
       expect(aircraft.map((a) => [a.registration, a.type, a.flights])).toEqual([
         ["__proto__", "PA28", 2],
         ["constructor", "C172", 1],
       ]);
-      expect(aircraft[1]!.flight_time_seconds).toBe(60);
       // Nothing was written into the prototype of every object
       expect(({} as Record<string, unknown>)["flights"]).toBeUndefined();
     });

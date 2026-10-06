@@ -13,19 +13,19 @@ import {
   KM_TO_NAUTICAL_MILES,
   METERS_TO_FEET,
 } from "../utils/constants";
-import { formatFlightTime } from "../utils/formatters";
+import { formatFlightTime } from "../utils/statsFormat";
 import {
   aggregateAircraft,
   altitudeRangeFt,
   filterPaths,
   heightsAboveGround,
   pathsById,
-  perPathSeconds,
   segmentDistance,
   segmentsForPathIds,
 } from "./statistics";
 import type { FilterView } from "./datasetIndex";
 import type {
+  AircraftAggregate,
   PathInfo,
   PathSegment,
   AltitudeStats,
@@ -33,6 +33,62 @@ import type {
   FilteredStatistics,
   LandingTotals,
 } from "../types";
+
+/**
+ * Group timed segments by path and return per-path flight seconds.
+ * Shared by the per-aircraft times (addFlightTimes) and the total time of
+ * calculateFilteredStatistics.
+ *
+ * Only the first and last time of each path matter, so a running min and
+ * max per path replaces collecting every timestamp.
+ */
+export function perPathSeconds(
+  segments: PathSegment[],
+  pathIds?: Set<number>,
+): Map<number, number> {
+  const bounds = new Map<number, { min: number; max: number }>();
+  for (const seg of segments) {
+    if (seg.time === undefined) continue;
+    if (pathIds && !pathIds.has(seg.path_id)) continue;
+    const range = bounds.get(seg.path_id);
+    if (!range) {
+      bounds.set(seg.path_id, { min: seg.time, max: seg.time });
+    } else {
+      if (seg.time < range.min) range.min = seg.time;
+      if (seg.time > range.max) range.max = seg.time;
+    }
+  }
+  const result = new Map<number, number>();
+  for (const [pathId, { min, max }] of bounds) {
+    result.set(pathId, max - min);
+  }
+  return result;
+}
+
+/**
+ * Add each aircraft's flight time, from the seconds of its paths (see
+ * perPathSeconds)
+ */
+function addFlightTimes(
+  aircraftList: AircraftAggregate[],
+  paths: PathInfo[],
+  secondsByPath: Map<number, number>,
+): void {
+  // A Map, as a registration is data: "constructor" is no key of it
+  const byRegistration = new Map(
+    aircraftList.map((aircraft) => [aircraft.registration, aircraft]),
+  );
+  for (const path of paths) {
+    const entry = byRegistration.get(path.aircraft_registration ?? "");
+    const seconds = secondsByPath.get(path.id);
+    if (entry && seconds) entry.flight_time_seconds! += seconds;
+  }
+  for (const aircraft of aircraftList) {
+    if (aircraft.flight_time_seconds && aircraft.flight_time_seconds > 0) {
+      aircraft.flight_time_str = formatFlightTime(aircraft.flight_time_seconds);
+    }
+  }
+}
 
 /**
  * Filter segments by path IDs
@@ -291,11 +347,8 @@ function* statisticsSteps(
     new Set(filteredPaths.map((p) => p.id)),
   );
   yield;
-  const aircraftList = aggregateAircraft(
-    filteredPaths,
-    filteredSegments,
-    secondsByPath,
-  );
+  const aircraftList = aggregateAircraft(filteredPaths);
+  addFlightTimes(aircraftList, filteredPaths, secondsByPath);
 
   // Calculate metrics
   const totalDistanceKm = calculateTotalDistance(filteredSegments);

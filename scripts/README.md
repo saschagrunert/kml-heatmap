@@ -102,6 +102,11 @@ else reads together:
   check too, rather than leaving the command it moved to unchecked.
 - `__version__` in `kml_heatmap/__init__.py` matches `version` in `package.json`
   and both version fields of `package-lock.json`.
+- The Python version of `.python-version` is the one of the `python` base images
+  in the `Dockerfile`, `requires-python`, mypy's `python_version` and ruff's
+  `target-version`, and the Node.js major version of `.nvmrc` is the one of the
+  `node` base image and `engines` in `package.json`. Dependabot bumps none of
+  them, so they move together by hand.
 
 The pre-commit hook revisions are not checked: the linters and formatters run
 from the project environment, so they have no revision of their own to drift.
@@ -112,7 +117,10 @@ from the project environment, so they have no revision of their own to drift.
 The pre-push hook, installed once per clone with `make hooks`. It runs the
 obfuscation check on every KML file that the commits about to be pushed add or
 change, and refuses the push when one carries a real date or when it cannot run
-the check. It needs nothing beyond Python; `--no-verify` skips it.
+the check. It also refuses a commit message that dates a flight the commit adds
+or changes (`Add flight 16 Aug 2026`), and warns when the push adds a single
+flight, which the commit then dates to about the day it was pushed. It needs
+nothing beyond Python; `--no-verify` skips it.
 
 `make hooks` installs a copy of `pre-push-hook`, which runs `pre_push.py` of the
 worktree the push comes from: the worktrees of a clone share one hooks

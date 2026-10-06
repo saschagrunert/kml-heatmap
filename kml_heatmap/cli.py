@@ -23,7 +23,7 @@ from .exceptions import (
     OutputRefusedError,
 )
 from .logger import logger, set_debug_mode, set_info_stream, set_log_level
-from .validation import find_kml_files, validate_kml_file, validate_output_dir
+from .validation import find_kml_files, validate_kml_file
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -338,26 +338,11 @@ def _generate(
     aircraft_files = _find_aircraft_files(kml_files, roots)
 
     # Lazy for the same reasons as the previews above
-    from .renderer import (  # noqa: PLC0415
-        create_progressive_heatmap,
-        foreign_output_error,
-    )
-    from .site_assets import missing_build_files  # noqa: PLC0415
+    from .renderer import create_progressive_heatmap, preflight  # noqa: PLC0415
 
-    # All are checked again inside create_progressive_heatmap, which is
-    # public API; checking here stops before --obfuscate-inputs rewrites them
-    is_safe, error_msg = validate_output_dir(output_dir, [*kml_files, *aircraft_files])
-    if not is_safe:
-        raise OutputRefusedError(error_msg or "Unsafe output directory")
-    foreign = None if force else foreign_output_error(output_file, data_dir)
-    if foreign:
-        raise OutputRefusedError(foreign)
-    missing = missing_build_files()
-    if missing:
-        raise KMLHeatmapError(
-            f"JavaScript bundle not found: {', '.join(missing)} (run 'npm run "
-            "build' to generate it); the input files were left unchanged"
-        )
+    # Checked again inside create_progressive_heatmap, which is public API;
+    # checking here stops before --obfuscate-inputs rewrites the inputs
+    preflight(output_file, data_dir, [*kml_files, *aircraft_files], force)
 
     output_dir.mkdir(parents=True, exist_ok=True)
 

@@ -52,7 +52,6 @@
   --color-accent-cyan: #00f2fe;
   --color-accent-gold: #ffd93d;
   --color-accent-orange: #ffa500;
-  --color-accent-mint: #66cdaa;
   --color-home-blue: #007bff;
   /* The same blue a step darker, for text on it: --color-text reads at
      5.2:1 on this where it reached 3.6:1 on the marker's own blue */
@@ -83,7 +82,6 @@
   --color-accent-red-rgb: 245, 87, 108;
   --color-accent-orange-rgb: 255, 165, 0;
   --color-accent-gold-rgb: 255, 217, 61;
-  --color-accent-mint-rgb: 102, 205, 170;
   /* Deep navy face of the Wrapped cards; the only multi-stop surface fill */
   --gradient-wrapped-card: linear-gradient(
     135deg,

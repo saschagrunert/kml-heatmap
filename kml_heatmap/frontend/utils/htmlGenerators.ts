@@ -13,16 +13,10 @@ import { getColorForAirspeed, getColorForAltitude, rgbToRgba } from "./colors";
 import { FEET_TO_METERS, NAUTICAL_MILES_TO_KM } from "./constants";
 import { formatNumber, formatTrack } from "./formatters";
 import { calculateBearing, ddToDms, type Coordinate } from "./geometry";
+import { escapeHtml } from "./escape";
 import { icon, type IconName } from "./icons";
 
-export function escapeHtml(str: string): string {
-  return str
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
-}
+export { escapeHtml } from "./escape";
 
 /**
  * A count with its noun, pluralised: `pluralize(1, "flight")` is "1 flight",

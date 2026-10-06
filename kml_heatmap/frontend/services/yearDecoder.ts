@@ -22,7 +22,7 @@
  */
 
 import { logError } from "../utils/logger";
-import { decodeYearBytes } from "./yearDecode";
+import { DATA_FORMAT_VERSION, decodeYearBytes } from "./yearDecode";
 import { buildDatasetInSlices, combineYearData } from "./yearDataset";
 import { drawHeat, flatLines, linesSource, type DrawnHeat } from "./heatSource";
 import { heatColumns } from "../calculations/heatExposure";
@@ -185,19 +185,27 @@ export function createYearDecoder(
    * The worker's answer to `body`, taken by `take`, or else `work` done on the
    * main thread: where there is no worker, or it failed over the request
    * (logged as what it could not do, `what`). If the fault is in the data, the
-   * work fails the same way, with the error and not its text.
+   * work fails the same way, with the error and not its text. An error
+   * the work would only meet again (`final` of the worker's answer) is not
+   * worked for twice: it is thrown as the worker's, by its name and message.
    */
   const answerOf = async <T>(
     what: string,
     body: DistributiveOmit<YearRequest, "id">,
     take: (response: YearResponse) => T | undefined,
     work: () => T,
+    final: (answer: { name: string; format: number }) => boolean = () => false,
   ): Promise<T> => {
     if (destroyed) throw new Error("year decoder destroyed");
     const response = worker ? await askWorker(worker, body) : null;
     const taken = response ? take(response) : undefined;
     if (taken !== undefined) return taken;
     if (response && "error" in response) {
+      if (final(response)) {
+        throw Object.assign(new Error(response.error), {
+          name: response.name,
+        });
+      }
       logError(`Year worker could not ${what}:`, response.error);
     }
     return work();
@@ -210,6 +218,15 @@ export function createYearDecoder(
         { bytes },
         (response) => ("decoded" in response ? response.decoded : undefined),
         () => decodeYearBytes(bytes),
+        // A file of another release is one on the page too (decodeYear),
+        // and a page open over a deploy would parse megabytes to find it.
+        // Only when the worker reads the page's format, though:
+        // yearWorker.bundle.js has no content hash and Pages caches it for
+        // 600 s, so a deploy between the page's import of the file and the
+        // worker's own fetch of it can start a worker of another release,
+        // which finds the page's year file stale. The page then decodes it.
+        ({ name, format }) =>
+          name === "StaleDataError" && format === DATA_FORMAT_VERSION,
       );
       for (const warning of decoded.warnings) console.warn(warning);
       return buildDatasetInSlices(decoded);

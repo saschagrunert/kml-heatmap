@@ -149,12 +149,11 @@ hooks: ## Install the pre-push hook that refuses to push KML files with real dat
 	@if command -v pre-commit >/dev/null 2>&1; then pre-commit install; else \
 	  echo "warning: pre-commit is not installed, skipping its hooks (see CONTRIBUTING.md)" >&2; fi
 
-lint: ## Run the linters, formatters (check only), type checkers and typos of the CI lint job, plus bandit, which CI runs in the security job
+lint: ## Run the linters, formatters (check only), type checkers and typos of the CI lint job
 	python scripts/check_locks.py
 	ruff check .
 	ruff format --check .
 	mypy .
-	bandit -r kml_heatmap -ll
 	npm run typecheck
 	npm run typecheck:tests
 	npm run lint
@@ -191,23 +190,29 @@ test: ## Build the frontend bundles, then run the JavaScript and Python test sui
 # with isolation pip would fetch whatever release satisfies the range, with
 # no hash. setuptools is one of the packages pip-compile leaves out unless
 # told otherwise, hence --allow-unsafe.
+# --upgrade moves every package to its newest release, so only releases at
+# least LOCK_COOLDOWN old are considered (pip's --uploaded-prior-to, which
+# pip-compile hands on): the same seven days Dependabot waits (see
+# dependabot.yml), which a release pulled again within days never reaches.
+# `make lock LOCK_COOLDOWN=` takes the newest releases, for a pin raised by
+# hand to one that is younger.
+LOCK_COOLDOWN ?= P7D
+LOCK_COMPILE = CUSTOM_COMPILE_COMMAND="make lock" "$$tmp/bin/pip-compile" --quiet \
+	--generate-hashes --strip-extras --upgrade \
+	$(if $(LOCK_COOLDOWN),--pip-args "--uploaded-prior-to=$(LOCK_COOLDOWN)")
 lock: ## Regenerate the lock files from pyproject.toml and requirements-tools.in with pip-compile
 	@tmp=$$(mktemp -d) && \
 	  python -m venv "$$tmp" && \
 	  "$$tmp/bin/pip" install --quiet --disable-pip-version-check --require-hashes -r requirements-tools.lock && \
-	  CUSTOM_COMPILE_COMMAND="make lock" "$$tmp/bin/pip-compile" --quiet \
-	    --generate-hashes --strip-extras --upgrade \
+	  $(LOCK_COMPILE) \
 	    --output-file=requirements.lock pyproject.toml && \
-	  CUSTOM_COMPILE_COMMAND="make lock" "$$tmp/bin/pip-compile" --quiet \
-	    --generate-hashes --strip-extras --upgrade --extra test --extra dev \
+	  $(LOCK_COMPILE) --extra test --extra dev \
 	    --constraint requirements.lock \
 	    --output-file=requirements-test.lock pyproject.toml && \
-	  CUSTOM_COMPILE_COMMAND="make lock" "$$tmp/bin/pip-compile" --quiet \
-	    --generate-hashes --strip-extras --upgrade --allow-unsafe \
+	  $(LOCK_COMPILE) --allow-unsafe \
 	    --only-build-deps --build-deps-for wheel \
 	    --output-file=requirements-build.lock pyproject.toml && \
-	  CUSTOM_COMPILE_COMMAND="make lock" "$$tmp/bin/pip-compile" --quiet \
-	    --generate-hashes --strip-extras --upgrade --allow-unsafe \
+	  $(LOCK_COMPILE) --allow-unsafe \
 	    --output-file=requirements-tools.lock requirements-tools.in; \
 	  status=$$?; rm -rf "$$tmp"; exit $$status
 
@@ -216,5 +221,9 @@ clean: ## Remove the container image (when a runtime is available) and local bui
 	rm -rf htmlcov coverage coverage.xml .coverage .coverage.* test-results playwright-report \
 	  visual-site e2e-sites bundle-meta.json \
 	  dist build *.egg-info .mypy_cache .ruff_cache .pytest_cache .hypothesis \
+	  .playwright-mcp \
 	  kml_heatmap/static/*.bundle.js kml_heatmap/static/*.map \
 	  kml_heatmap/static/vendor kml_heatmap/static/flags
+	find . \( -path ./node_modules -o -path ./.git -o -path ./.claude \
+	  -o -path ./.venv -o -path ./venv \) -prune -o \
+	  -type d -name __pycache__ -prune -exec rm -rf {} +

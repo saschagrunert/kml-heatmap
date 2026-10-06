@@ -5,7 +5,7 @@ import os
 import zipfile
 import zlib
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 from lxml import etree
 
@@ -48,14 +48,22 @@ __all__ = [
 # metadata of each path
 type ParseResult = tuple[FlightPath, FlightPathGroup, list[PathMetadata]]
 
-# gx:coord elements the track parser never reads. libxml2 counts them in one
-# pass; walking the tree twice in Python took a fifth of the parse time.
-_LOOSE_GX_COORDS = etree.XPath(
-    "count(//*[local-name()='coord'][not(ancestor::*[local-name()='Track'])])"
-)
-_TRACK_GX_COORDS = etree.XPath(
-    "count(//*[local-name()='Track']//*[local-name()='coord'])"
-)
+
+def _gx_coord_counts(root: etree._Element) -> tuple[int, int]:
+    """The gx:coord elements in a gx:Track and those the track parser ignores.
+
+    Both counts come from wildcard iterations, which run in C: an XPath
+    that walked the ancestors of every coord took a tenth of a parse. A
+    track inside another (no exporter writes one) is counted with the
+    outer one, not a second time.
+    """
+    in_tracks = sum(
+        1
+        for track in root.iter("{*}Track")
+        if next(track.iterancestors("{*}Track"), None) is None
+        for _ in track.iter("{*}coord")
+    )
+    return in_tracks, sum(1 for _ in root.iter("{*}coord")) - in_tracks
 
 
 # Archives inside a KMZ, which it is not unpacked into
@@ -157,7 +165,15 @@ def _read_kmz(kmz_file: str) -> bytes:
                 )
             with archive.open(document) as member:
                 data = member.read(MAX_KML_FILE_SIZE + 1)
-    except (zipfile.BadZipFile, zipfile.LargeZipFile, EOFError, zlib.error) as e:
+    # ValueError: a member name that is no UTF-8 (UnicodeDecodeError) or an
+    # offset before the start of the file, which a damaged archive holds
+    except (
+        zipfile.BadZipFile,
+        zipfile.LargeZipFile,
+        EOFError,
+        zlib.error,
+        ValueError,
+    ) as e:
         raise KMLParseError(f"Not a valid KMZ archive: {e}", file_path=kmz_file) from e
     # A compression method zipfile does not know (such as Deflate64). Before
     # RuntimeError, which it is a kind of.
@@ -279,13 +295,12 @@ def _extract_kml_elements(
         )
 
     if tracks:
-        if logger.isEnabledFor(logging.DEBUG):
-            logger.debug(
-                "Found %d gx:Track element(s) with %d gx:coord elements",
-                len(tracks),
-                int(cast("float", _TRACK_GX_COORDS(root))),
-            )
-        loose_gx_coords = int(cast("float", _LOOSE_GX_COORDS(root)))
+        track_gx_coords, loose_gx_coords = _gx_coord_counts(root)
+        logger.debug(
+            "Found %d gx:Track element(s) with %d gx:coord elements",
+            len(tracks),
+            track_gx_coords,
+        )
         if loose_gx_coords:
             logger.warning(
                 "%s: %d gx:coord element(s) outside of gx:Track were ignored",

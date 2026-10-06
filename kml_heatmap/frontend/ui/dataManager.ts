@@ -15,7 +15,6 @@ import type { Coordinate } from "../utils/geometry";
 import { DataLoader } from "../services/dataLoader";
 import { datasetIndex } from "../calculations/datasetIndex";
 import { segmentsForPathIds } from "../calculations/statistics";
-import { datasetCells, newAreaKm2 } from "../calculations/newAreas";
 import { calculateAltitudeRange } from "../features/layers";
 import { heatWeight, type SegmentWeight } from "../calculations/heatLines";
 import { flatCurves } from "../calculations/curves";
@@ -28,7 +27,6 @@ import { frameCoalescer } from "../utils/frameCoalescer";
 import { logError } from "../utils/logger";
 import { cssVar, whenContextRestored } from "../utils/mapHelpers";
 import { dismissToast, showToast, type ToastAction } from "../utils/toast";
-import { siteData } from "../state/siteData";
 import { dimsHeatmap } from "./layerVisibility";
 import {
   HEATMAP_OPACITY,
@@ -153,6 +151,12 @@ export class DataManager {
    */
   private heatWritten: Heat | null = null;
   private isolatedWritten: Heat | null = null;
+  /**
+   * The stylesheet's dimmed opacity, read the first time it is wanted: a
+   * computed style read during a change can force the page's styles to be
+   * worked out again, and the token does not change
+   */
+  private dimmedOpacity: number | undefined;
   /** The heat the heat lines source was last worked out for, if any */
   private heatLinesFor: Heat | null = null;
   /** Counts the requests for heat lines: only the last one is written */
@@ -333,7 +337,7 @@ export class DataManager {
     // The store may change before the style, and with it the layer, is there
     if (!map?.getLayer(MAP_LAYERS.heat)) return;
     const opacity = dimsHeatmap(this.app)
-      ? dimmedHeatmapOpacity()
+      ? (this.dimmedOpacity ??= dimmedHeatmapOpacity())
       : HEATMAP_OPACITY;
     // One of the two heatmaps is drawn, the one of an isolated selection
     // while there is one; at no opacity the map leaves the other out. The
@@ -677,35 +681,12 @@ export class DataManager {
   }
 
   /**
-   * The area in square kilometres that `segments` of `year` pass over and
-   * no flight of an earlier year did, for Wrapped (see
-   * calculations/newAreas.ts). Worked out from the earlier years this
-   * session holds already, without loading any: null for a year with none
-   * before it, the view of all years, or while one of them is not loaded.
-   * They are all a year's view has once all years or each of the earlier
-   * ones were shown; loading them for Wrapped alone would fetch more than
-   * the year itself.
+   * The dataset of a year this session holds already, without loading it
+   * (Wrapped counts the airspace new in a year from those: see
+   * calculations/newAreas.ts)
    */
-  newAreaKm2(year: string, segments: readonly PathSegment[]): number | null {
-    const earlier = this.earlierCells(year);
-    return earlier && newAreaKm2(segments, earlier);
-  }
-
-  /**
-   * The cells of each year before `year` (see datasetCells), from the
-   * datasets this session holds: null for a year with none before it, the
-   * view of all years, or while one of them is not loaded
-   */
-  private earlierCells(year: string): Set<number>[] | null {
-    const earlier: Set<number>[] = [];
-    for (const known of siteData.metadata?.available_years ?? []) {
-      // None is before "all"
-      if (!(known < Number(year))) continue;
-      const data = this.dataLoader.cachedData(String(known));
-      if (!data) return null;
-      earlier.push(datasetCells(data));
-    }
-    return earlier.length > 0 ? earlier : null;
+  cachedData(year: string): KMLDataset | undefined {
+    return this.dataLoader.cachedData(year);
   }
 
   /**

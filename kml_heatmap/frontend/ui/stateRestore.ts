@@ -38,10 +38,10 @@ export async function applyPendingFilterChanges(app: MapApp): Promise<void> {
   const aircraftSelect = domCache.get("aircraft-select", HTMLSelectElement);
   // Capture both before filtering: switching the year rebuilds the aircraft
   // dropdown and would otherwise overwrite a pending aircraft selection.
-  // A dropdown that shows no year is one whose first load failed (see
-  // loadInitialData), not one someone changed
+  // A first load that failed leaves its year in the dropdown (see
+  // loadInitialData), so it is no change either
   const pendingYear =
-    yearSelect && yearSelect.value && yearSelect.value !== app.selectedYear
+    yearSelect && yearSelect.value !== app.selectedYear
       ? yearSelect.value
       : null;
   const pendingAircraft =

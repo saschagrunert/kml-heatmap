@@ -49,11 +49,7 @@ import { siteData } from "../state/siteData";
 import { applyToggleButtonState } from "../utils/buttonState";
 import { focusModeControl, holdControls } from "./heldControls";
 import { domCache } from "../utils/domCache";
-import {
-  DEGREES_TO_RADIANS,
-  EARTH_CIRCUMFERENCE_M,
-  TILE_SIZE_PX,
-} from "../utils/geometry";
+import { DEGREES_TO_RADIANS, metresPerPixel } from "../utils/geometry";
 import { setControlIcon, type IconName } from "../utils/icons";
 import { isPageEscape, mapSize, toLngLat } from "../utils/mapHelpers";
 import { prefersReducedMotion } from "../utils/motion";
@@ -153,7 +149,7 @@ export interface TourView extends UserMapView {
 type TourCamera = Pick<UserMapView, "center" | "zoom" | "bearing" | "pitch">;
 
 /** A place of the tour, as it is shown */
-export interface TourStop {
+interface TourStop {
   /** "Home field EDAQ Halle-Oppin" */
   name: string;
   /** "32 h, 22% of the time" */
@@ -171,11 +167,10 @@ export function tourZoom(
   height: number,
 ): number {
   const span = Math.max(hotspot.radiusM * TOUR_SPAN_RADII, TOUR_MIN_SPAN_M);
-  const metresPerPixel = span / Math.max(Math.min(width, height), 1);
+  const wanted = span / Math.max(Math.min(width, height), 1);
   const cos = Math.cos(hotspot.center[0] * DEGREES_TO_RADIANS);
-  const zoom = Math.log2(
-    (EARTH_CIRCUMFERENCE_M * cos) / (TILE_SIZE_PX * metresPerPixel),
-  );
+  // The zoom at which a pixel of the place is `wanted` metres
+  const zoom = Math.log2((metresPerPixel(0) * cos) / wanted);
   return Math.min(Math.max(zoom, TOUR_ZOOM.min), TOUR_ZOOM.max);
 }
 
@@ -247,273 +242,245 @@ interface TourPanel {
 }
 
 /** The tour of one app, and its panel */
-export class HotspotTour {
-  private readonly app: MapApp;
-  /** The map of the app, while the tour runs */
-  private map: MapLibreMap | null = null;
-  private stops: TourStop[] = [];
-  private index = 0;
-  /** Whether it moves on by itself; never under reduced motion */
-  private playing = false;
-  /** Whether it only steps on as asked: reduced motion, as it started */
-  private stepping = false;
-  /** What the camera is doing at the place of `index` */
-  private phase: "fly" | "dwell" = "fly";
-  private timer: ReturnType<typeof setTimeout> | undefined;
-  /** When the phase ends, by Date.now() */
-  private due = 0;
-  /** What was left of the phase as the tour paused, in ms */
-  private left = 0;
-  /**
-   * Whether the camera flies to the place of a step taken while the tour
-   * is paused, which goes on as asked: a pause stops only the flight that
-   * was under way as it was pressed
-   */
-  private flying = false;
-  /** The user's view, while it runs */
-  private saved: TourView | null = null;
-  /**
-   * Whether a move of the tour's own is under way: one the map has not
-   * ended, as it ends a move for another that starts (see end)
-   */
-  private moving = false;
-  /**
-   * The view the camera flies back to after the tour, until it gets
-   * there or is stopped: a tour started again on the way goes back to it,
-   * not to wherever the flight back had come to
-   */
-  private returning: TourCamera | null = null;
-  /** Gives the held controls back as they were (see holdControls) */
-  private release: (() => void) | null = null;
-  /** Ends what follows the map and the store while it runs */
-  private listening: AbortController | null = null;
-  private panel: TourPanel | null = null;
-
-  constructor(app: MapApp) {
-    this.app = app;
-    // Escape stops it, as it closes the replay; not from a popup or a
-    // marker, which it closes first
-    document.addEventListener(
-      "keydown",
-      (event) => {
-        if (!this.map || !isPageEscape(event)) return;
-        event.preventDefault();
-        this.stop();
-      },
-      { signal: app.signal },
-    );
-    // A hidden tab stops the camera's frames and not the tour's timer,
-    // which then took the next step mid-flight and jumped on return: the
-    // tour pauses as a click on Pause would, and plays on once the tab is
-    // back, if it was playing
-    let resumeOnShow = false;
-    document.addEventListener(
-      "visibilitychange",
-      () => {
-        if (document.hidden) {
-          resumeOnShow = this.playing;
-          this.pause();
-        } else if (resumeOnShow) {
-          resumeOnShow = false;
-          this.resume();
-        }
-      },
-      { signal: app.signal },
-    );
-    // An app made anew on the page builds a panel of its own
-    app.signal.addEventListener("abort", () => {
-      this.end("abandon");
-      this.panel?.root.remove();
-    });
-  }
-
+export interface HotspotTour {
   /** Whether it runs */
-  get isOpen(): boolean {
-    return this.map !== null;
-  }
-
+  readonly isOpen: boolean;
   /** Whether it moves on by itself */
-  get isPlaying(): boolean {
-    return this.playing;
-  }
-
+  readonly isPlaying: boolean;
   /** The place it is at or on its way to, from 0 */
-  get current(): number {
-    return this.index;
-  }
-
+  readonly current: number;
   /** How many places it has */
-  get length(): number {
-    return this.stops.length;
-  }
-
-  toggle(): void {
-    if (this.map) this.stop();
-    else this.start();
-  }
-
+  readonly length: number;
+  toggle(): void;
   /**
    * Start at the busiest place of what the heatmap shows. Not while a
    * replay runs or Wrapped is open, which have the map, nor for a view
    * without time logged anywhere, which says so.
    */
-  start(): void {
-    const app = this.app;
-    const map = app.map;
-    if (this.map || !map || app.replayActive || app.wrappedVisible) return;
-    const stops = tourStops(app, map);
-    if (stops.length === 0) {
-      showToast(TOUR_NOTHING_MESSAGE, "info");
-      return;
-    }
-    // Its line is drawn on the map the camera flies from, as for a replay
-    if (crossSectionOpen(app)) toggleCrossSection(app);
-    this.map = map;
-    this.stops = stops;
-    const center = map.getCenter();
-    const saved: TourView = {
-      center: { lat: center.lat, lng: center.lng },
-      zoom: map.getZoom(),
-      bearing: map.getBearing(),
-      pitch: restingPitch(app),
-      // On the way back from a tour before, the view that one started from
-      ...this.returning,
-      globeVisible: app.globeVisible,
-      threeDVisible: app.threeDVisible,
-      heatmapVisible: app.heatmapVisible,
-    };
-    this.returning = null;
-    this.saved = saved;
-    // Before the switches, whose change the state manager saves
-    app.tourView = saved;
-    app.store.batch(() => {
-      app.threeDVisible = true;
-      app.heatmapVisible = true;
-    });
-    this.release?.();
-    this.release = holdControls(
-      HELD_CONTROL_IDS,
-      "the hotspot tour",
-      this.app.signal,
-    );
-    this.showRunning(true);
-
-    const listening = new AbortController();
-    this.listening = listening;
-    // The map ends a move as it comes to rest, is stopped, or another
-    // starts, and the script's rest (restCamera) ends it too
-    const moved = map.on("moveend", () => {
-      this.moving = false;
-    });
-    followTakeover(
-      map,
-      () => this.end("takeover"),
-      listening.signal,
-      (event) =>
-        event instanceof KeyboardEvent && KEYS_NOT_TAKING_OVER.has(event.key),
-    );
-    const store = app.store;
-    const unsubscribe = [
-      // Other flights are not what it was asked to tour
-      store.subscribe("currentData", () => this.end("return")),
-      // Nor is the map its own any more once either comes on
-      store.subscribeKeys(["replayActive", "wrappedVisible"], () =>
-        this.end("abandon"),
-      ),
-    ];
-    listening.signal.addEventListener("abort", () => {
-      for (const stop of unsubscribe) stop();
-      moved.unsubscribe();
-    });
-
-    this.stepping = prefersReducedMotion();
-    this.playing = !this.stepping;
-    const panel = this.panelOf();
-    panel.root.hidden = false;
-    this.goTo(0);
-    (this.stepping ? panel.next : panel.play).focus();
-  }
-
+  start(): void;
   /** Stop, and fly back to the view it started from */
-  stop(): void {
-    this.end("return");
-  }
-
+  stop(): void;
   /** Hold it where it is */
-  pause(): void {
-    if (!this.map || !this.playing) return;
-    this.playing = false;
-    clearTimeout(this.timer);
-    this.left = Math.max(this.due - Date.now(), 0);
-    this.flying = false;
-    this.moving = false;
-    this.map.stop();
-    restCamera(this.map);
-    this.sync();
-    this.announce("Tour paused");
-  }
-
+  pause(): void;
   /** Go on from where it was held */
-  resume(): void {
-    const map = this.map;
-    if (!map || this.playing || this.stepping) return;
-    this.playing = true;
-    if (this.phase === "dwell") {
-      this.turn(this.left);
-    } else if (this.flying) {
-      // Lands as it would have: no new flight from half way
-      this.after(Math.max(this.due - Date.now(), 0), () => this.dwell());
-    } else {
-      const left = Math.max(this.left, TOUR_MIN_LEG_MS);
-      flyToStop(map, this.stops[this.index]!.camera, left);
-      this.moving = true;
-      this.after(left, () => this.dwell());
-    }
-    this.flying = false;
-    this.sync();
-    this.announce("Tour playing");
-  }
-
+  resume(): void;
   /** The next place, or the end after the last */
-  next(): void {
-    if (!this.map) return;
-    if (this.index + 1 >= this.stops.length) this.stop();
-    else this.goTo(this.index + 1);
-  }
-
+  next(): void;
   /** The place before; none before the first */
-  previous(): void {
-    if (this.map && this.index > 0) this.goTo(this.index - 1);
-  }
+  previous(): void;
+}
+
+/**
+ * The tour of `app`. A closure rather than a class, as the cross-section
+ * and the profile are: a bundle keeps the names of a class's members.
+ */
+export function createHotspotTour(app: MapApp): HotspotTour {
+  /** The map of the app, while the tour runs */
+  let tourMap: MapLibreMap | null = null;
+  let places: TourStop[] = [];
+  let at = 0;
+  /** Whether it moves on by itself; never under reduced motion */
+  let playing = false;
+  /** Whether it only steps on as asked: reduced motion, as it started */
+  let stepping = false;
+  /** What the camera is doing at the place of `at` */
+  let phase: "fly" | "dwell" = "fly";
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  /** When the phase ends, by Date.now() */
+  let due = 0;
+  /** What was left of the phase as the tour paused, in ms */
+  let remaining = 0;
+  /**
+   * Whether the camera flies to the place of a step taken while the tour
+   * is paused, which goes on as asked: a pause stops only the flight that
+   * was under way as it was pressed
+   */
+  let flying = false;
+  /** The user's view, while it runs */
+  let savedView: TourView | null = null;
+  /**
+   * Whether a move of the tour's own is under way: one the map has not
+   * ended, as it ends a move for another that starts (see end)
+   */
+  let moving = false;
+  /**
+   * The view the camera flies back to after the tour, until it gets
+   * there or is stopped: a tour started again on the way goes back to it,
+   * not to wherever the flight back had come to
+   */
+  let returnView: TourCamera | null = null;
+  /** Gives the held controls back as they were (see holdControls) */
+  let release: (() => void) | null = null;
+  /** Ends what follows the map and the store while it runs */
+  let listeners: AbortController | null = null;
+  let tourPanel: TourPanel | null = null;
+
+  const tour: HotspotTour = {
+    get isOpen() {
+      return tourMap !== null;
+    },
+
+    get isPlaying() {
+      return playing;
+    },
+
+    get current() {
+      return at;
+    },
+
+    get length() {
+      return places.length;
+    },
+
+    toggle() {
+      if (tourMap) tour.stop();
+      else tour.start();
+    },
+
+    start() {
+      const map = app.map;
+      if (tourMap || !map || app.replayActive || app.wrappedVisible) return;
+      const stops = tourStops(app, map);
+      if (stops.length === 0) {
+        showToast(TOUR_NOTHING_MESSAGE, "info");
+        return;
+      }
+      // Its line is drawn on the map the camera flies from, as for a replay
+      if (crossSectionOpen(app)) toggleCrossSection(app);
+      tourMap = map;
+      places = stops;
+      const center = map.getCenter();
+      const saved: TourView = {
+        center: { lat: center.lat, lng: center.lng },
+        zoom: map.getZoom(),
+        bearing: map.getBearing(),
+        pitch: restingPitch(app),
+        // On the way back from a tour before, the view that one started from
+        ...returnView,
+        globeVisible: app.globeVisible,
+        threeDVisible: app.threeDVisible,
+        heatmapVisible: app.heatmapVisible,
+      };
+      returnView = null;
+      savedView = saved;
+      // Before the switches, whose change the state manager saves
+      app.tourView = saved;
+      app.store.batch(() => {
+        app.threeDVisible = true;
+        app.heatmapVisible = true;
+      });
+      release?.();
+      release = holdControls(HELD_CONTROL_IDS, "the hotspot tour", app.signal);
+      showRunning(true);
+
+      const listening = new AbortController();
+      listeners = listening;
+      // The map ends a move as it comes to rest, is stopped, or another
+      // starts, and the script's rest (restCamera) ends it too
+      const moved = map.on("moveend", () => {
+        moving = false;
+      });
+      followTakeover(
+        map,
+        () => end("takeover"),
+        listening.signal,
+        (event) =>
+          event instanceof KeyboardEvent && KEYS_NOT_TAKING_OVER.has(event.key),
+      );
+      const store = app.store;
+      const unsubscribe = [
+        // Other flights are not what it was asked to tour
+        store.subscribe("currentData", () => end("return")),
+        // Nor is the map its own any more once either comes on
+        store.subscribeKeys(["replayActive", "wrappedVisible"], () =>
+          end("abandon"),
+        ),
+      ];
+      listening.signal.addEventListener("abort", () => {
+        for (const stop of unsubscribe) stop();
+        moved.unsubscribe();
+      });
+
+      stepping = prefersReducedMotion();
+      playing = !stepping;
+      const panel = panelOf();
+      panel.root.hidden = false;
+      goTo(0);
+      (stepping ? panel.next : panel.play).focus();
+    },
+
+    stop() {
+      end("return");
+    },
+
+    pause() {
+      if (!tourMap || !playing) return;
+      playing = false;
+      clearTimeout(timer);
+      remaining = Math.max(due - Date.now(), 0);
+      flying = false;
+      moving = false;
+      tourMap.stop();
+      restCamera(tourMap);
+      sync();
+      announce("Tour paused");
+    },
+
+    resume() {
+      const map = tourMap;
+      if (!map || playing || stepping) return;
+      playing = true;
+      if (phase === "dwell") {
+        turn(remaining);
+      } else if (flying) {
+        // Lands as it would have: no new flight from half way
+        after(Math.max(due - Date.now(), 0), dwell);
+      } else {
+        const left = Math.max(remaining, TOUR_MIN_LEG_MS);
+        flyToStop(map, places[at]!.camera, left);
+        moving = true;
+        after(left, dwell);
+      }
+      flying = false;
+      sync();
+      announce("Tour playing");
+    },
+
+    next() {
+      if (!tourMap) return;
+      if (at + 1 >= places.length) tour.stop();
+      else goTo(at + 1);
+    },
+
+    previous() {
+      if (tourMap && at > 0) goTo(at - 1);
+    },
+  };
 
   /**
    * Go to the place of `index`: fly there and turn over it while it plays,
    * fly there and wait while it is paused, cut to it under reduced motion
    */
-  private goTo(index: number): void {
-    const map = this.map!;
-    const stop = this.stops[index]!;
-    this.index = index;
-    clearTimeout(this.timer);
-    this.sync();
-    this.announce(
-      `${index + 1} of ${this.stops.length}: ${stop.name}, ${stop.detail}`,
-    );
-    if (this.stepping) {
-      this.phase = "dwell";
+  function goTo(index: number): void {
+    const map = tourMap!;
+    const stop = places[index]!;
+    at = index;
+    clearTimeout(timer);
+    sync();
+    announce(`${index + 1} of ${places.length}: ${stop.name}, ${stop.detail}`);
+    if (stepping) {
+      phase = "dwell";
       jumpToStop(map, stop.camera);
       restCamera(map);
       return;
     }
-    this.phase = "fly";
-    this.due = Date.now() + TOUR_FLY_MS;
-    this.flying = !this.playing;
+    phase = "fly";
+    due = Date.now() + TOUR_FLY_MS;
+    flying = !playing;
     flyToStop(map, stop.camera, TOUR_FLY_MS);
     // After the move, which ends the one before
-    this.moving = true;
-    this.after(TOUR_FLY_MS, () =>
-      this.playing ? this.dwell() : this.arrive(),
-    );
+    moving = true;
+    after(TOUR_FLY_MS, () => (playing ? dwell() : arrive()));
   }
 
   /**
@@ -522,51 +489,50 @@ export class HotspotTour {
    * off until then). Paused, it waits there, the whole turn over the
    * place still to come.
    */
-  private arrive(): void {
-    this.phase = "dwell";
-    this.flying = false;
-    this.left = TOUR_DWELL_MS;
-    restCamera(this.map!);
+  function arrive(): void {
+    phase = "dwell";
+    flying = false;
+    remaining = TOUR_DWELL_MS;
+    restCamera(tourMap!);
   }
 
   /** Arrived, and the camera turns over the place, then moves on */
-  private dwell(): void {
-    this.arrive();
-    this.turn(TOUR_DWELL_MS);
+  function dwell(): void {
+    arrive();
+    turn(TOUR_DWELL_MS);
   }
 
   /** Turn to where the turn over this place ends, in `ms`, then move on */
-  private turn(ms: number): void {
-    const bearing = this.stops[this.index]!.camera.bearing + TOUR_TURN_DEG;
-    turnTo(this.map!, bearing, ms);
-    this.moving = true;
-    this.after(ms, () => this.next());
+  function turn(ms: number): void {
+    const bearing = places[at]!.camera.bearing + TOUR_TURN_DEG;
+    turnTo(tourMap!, bearing, ms);
+    moving = true;
+    after(ms, () => tour.next());
   }
 
   /** Take the next step in `ms`; a pause, a step or the end cancel it */
-  private after(ms: number, step: () => void): void {
-    clearTimeout(this.timer);
-    this.due = Date.now() + ms;
-    this.timer = setTimeout(step, ms);
+  function after(ms: number, step: () => void): void {
+    clearTimeout(timer);
+    due = Date.now() + ms;
+    timer = setTimeout(step, ms);
   }
 
-  private end(how: TourEnd): void {
-    const map = this.map;
+  function end(how: TourEnd): void {
+    const map = tourMap;
     if (!map) return;
-    const app = this.app;
-    const saved = this.saved!;
-    const panel = this.panel!;
+    const saved = savedView!;
+    const panel = tourPanel!;
     const hadFocus = panel.root.contains(document.activeElement);
-    this.map = null;
-    this.saved = null;
-    this.playing = false;
-    clearTimeout(this.timer);
-    this.listening?.abort();
-    this.listening = null;
+    tourMap = null;
+    savedView = null;
+    playing = false;
+    clearTimeout(timer);
+    listeners?.abort();
+    listeners = null;
     app.tourView = null;
-    this.release?.();
-    this.release = null;
-    this.showRunning(false);
+    release?.();
+    release = null;
+    showRunning(false);
     panel.root.hidden = true;
     document.body.style.removeProperty(TOUR_PANEL_HEIGHT_VAR);
     if (app.signal.aborted) return;
@@ -578,13 +544,13 @@ export class HotspotTour {
       // switches are the user's now, saved as they are.
       map.stop();
       restCamera(map);
-    } else if (how === "abandon" && this.moving) {
+    } else if (how === "abandon" && moving) {
       // A flight or a turn of the tour's own would go on under what took
       // the map, out of the app's sight. Only its own: a move of what took
       // the map has ended it already (see `moving`).
       map.stop();
     }
-    this.moving = false;
+    moving = false;
     // The view and the switches the user took the map over with are theirs
     if (how === "takeover") {
       app.stateManager.scheduleSave();
@@ -607,9 +573,9 @@ export class HotspotTour {
         map.flyTo({ ...view, duration: TOUR_RETURN_MS });
         // Until it gets there or is stopped: registered after the flight,
         // whose start ended the move before it
-        this.returning = returning;
+        returnView = returning;
         map.once("moveend", () => {
-          if (this.returning === returning) this.returning = null;
+          if (returnView === returning) returnView = null;
         });
       }
     }
@@ -623,7 +589,7 @@ export class HotspotTour {
    * The page as the tour runs or not: its control and the body. The
    * phone's bar follows `tourView` in the store.
    */
-  private showRunning(running: boolean): void {
+  function showRunning(running: boolean): void {
     document.body.classList.toggle(TOUR_ACTIVE_CLASS, running);
     const button = domCache.get(TOUR_BUTTON_ID);
     if (button) {
@@ -633,18 +599,18 @@ export class HotspotTour {
   }
 
   /** The panel as the tour stands */
-  private sync(): void {
-    const panel = this.panel!;
-    const stop = this.stops[this.index]!;
-    const last = this.index + 1 >= this.stops.length;
-    panel.count.textContent = `${this.index + 1} of ${this.stops.length}`;
+  function sync(): void {
+    const panel = tourPanel!;
+    const stop = places[at]!;
+    const last = at + 1 >= places.length;
+    panel.count.textContent = `${at + 1} of ${places.length}`;
     panel.name.textContent = stop.name;
     panel.detail.textContent = stop.detail;
-    panel.play.hidden = this.stepping;
-    setControlIcon(panel.play, this.playing ? "pause" : "play", 20);
-    nameButton(panel.play, this.playing ? "Pause the tour" : "Play the tour");
+    panel.play.hidden = stepping;
+    setControlIcon(panel.play, playing ? "pause" : "play", 20);
+    nameButton(panel.play, playing ? "Pause the tour" : "Play the tour");
     // Not disabled, which would drop its focus: said, and a press ignored
-    panel.previous.setAttribute("aria-disabled", String(this.index === 0));
+    panel.previous.setAttribute("aria-disabled", String(at === 0));
     nameButton(panel.next, last ? "End the tour" : "Next hotspot");
     // A long name takes a second line on a phone
     document.body.style.setProperty(
@@ -654,13 +620,13 @@ export class HotspotTour {
   }
 
   /** Speak a message through the panel's own live region */
-  private announce(message: string): void {
-    announceInRegion(this.panel!.live, message);
+  function announce(message: string): void {
+    announceInRegion(tourPanel!.live, message);
   }
 
   /** The panel, built the first time the tour starts */
-  private panelOf(): TourPanel {
-    if (this.panel) return this.panel;
+  function panelOf(): TourPanel {
+    if (tourPanel) return tourPanel;
     const root = document.createElement("div");
     root.id = "hotspot-tour";
     root.setAttribute("role", "region");
@@ -680,18 +646,18 @@ export class HotspotTour {
     const detail = line("detail");
 
     const previous = tourButton("hotspot-tour-previous-btn", "collapse", () =>
-      this.previous(),
+      tour.previous(),
     );
     nameButton(previous, "Previous hotspot");
     const play = tourButton("hotspot-tour-play-btn", "pause", () => {
-      if (this.playing) this.pause();
-      else this.resume();
+      if (playing) tour.pause();
+      else tour.resume();
     });
     const next = tourButton("hotspot-tour-next-btn", "chevronRight", () =>
-      this.next(),
+      tour.next(),
     );
     const exit = tourButton("hotspot-tour-stop-btn", "close", () =>
-      this.stop(),
+      tour.stop(),
     );
     nameButton(exit, "Stop the tour and go back");
     const buttons = document.createElement("div");
@@ -706,9 +672,46 @@ export class HotspotTour {
 
     root.append(caption, buttons, live);
     document.body.append(root);
-    this.panel = { root, count, name, detail, previous, play, next, live };
-    return this.panel;
+    tourPanel = { root, count, name, detail, previous, play, next, live };
+    return tourPanel;
   }
+
+  // Escape stops it, as it closes the replay; not from a popup or a
+  // marker, which it closes first
+  document.addEventListener(
+    "keydown",
+    (event) => {
+      if (!tourMap || !isPageEscape(event)) return;
+      event.preventDefault();
+      tour.stop();
+    },
+    { signal: app.signal },
+  );
+  // A hidden tab stops the camera's frames and not the tour's timer,
+  // which then took the next step mid-flight and jumped on return: the
+  // tour pauses as a click on Pause would, and plays on once the tab is
+  // back, if it was playing
+  let resumeOnShow = false;
+  document.addEventListener(
+    "visibilitychange",
+    () => {
+      if (document.hidden) {
+        resumeOnShow = playing;
+        tour.pause();
+      } else if (resumeOnShow) {
+        resumeOnShow = false;
+        tour.resume();
+      }
+    },
+    { signal: app.signal },
+  );
+  // An app made anew on the page builds a panel of its own
+  app.signal.addEventListener("abort", () => {
+    end("abandon");
+    tourPanel?.root.remove();
+  });
+
+  return tour;
 }
 
 /** The tour of each app, made the first time it is started */
@@ -718,7 +721,7 @@ const tours = new WeakMap<MapApp, HotspotTour>();
 export function toggleHotspotTour(app: MapApp): void {
   let tour = tours.get(app);
   if (!tour) {
-    tour = new HotspotTour(app);
+    tour = createHotspotTour(app);
     tours.set(app, tour);
   }
   tour.toggle();

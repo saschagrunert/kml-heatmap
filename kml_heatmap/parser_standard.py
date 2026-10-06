@@ -9,7 +9,7 @@ from .geometry import haversine_distance
 from .helpers import parse_timestamp_epoch
 from .logger import logger
 from .parser_common import (
-    _build_path_metadata_dict,
+    build_path_metadata_dict,
     empty_placemark_metadata,
     parse_coordinate_point,
 )
@@ -107,7 +107,7 @@ def process_standard_coordinates(
         if len(current_path) > 1:
             path_groups.append(current_path)
             path_metadata.append(
-                _build_path_metadata_dict(
+                build_path_metadata_dict(
                     kml_file, current_path[0], metadata, aircraft_info
                 )
             )

@@ -21,7 +21,7 @@ gzipped sizes CI prints when a budget is close.
 | `BUDGET_APP`           | The first visit: `mapApp.bundle.js` and the `shared.bundle.js` it loads with it                  |
 | `BUDGET_FEATURES`      | `features.bundle.js`: replay, the 3D view, the imagery, the profile, the cross-section, the tour |
 | `BUDGET_WRAPPED`       | `wrapped.bundle.js`: Wrapped, the statistics panel and the flight list                           |
-| `BUDGET_WORKER`        | `yearWorker.bundle.js`, fetched next to the first year file                                      |
+| `BUDGET_WORKER`        | `yearWorker.bundle.js`, preloaded in the page head and started with the first year file          |
 | `BUDGET_MAPLIBRE`      | The vendored MapLibre GL JS modules and stylesheet, less the styles of controls the app lacks    |
 | `BUDGET_HTML_TO_IMAGE` | The vendored html-to-image module, loaded on the first export                                    |
 

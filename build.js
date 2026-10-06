@@ -19,6 +19,7 @@ import {
   outputNamed,
   overrunSummary,
   parseBuildArgs,
+  tightenMarkup,
   tightenShaders,
 } from "./scripts/build-helpers.js";
 import {
@@ -153,6 +154,27 @@ const shaderPlugin = {
   },
 };
 
+/**
+ * The popups of utils/htmlGenerators.ts without the line breaks and the
+ * indentation of their template literals (tightenMarkup), which esbuild
+ * keeps as they are written. Minified builds only; the unit tests run the
+ * same transform (vitest.config.js), and markup whose white space matters
+ * (a <pre>, an attribute value over two lines) fails the build.
+ * @type {import("esbuild").Plugin}
+ */
+const markupPlugin = {
+  name: "markup",
+  setup(build) {
+    build.onLoad(
+      { filter: /[\\/]utils[\\/]htmlGenerators\.ts$/ },
+      async (args) => {
+        const source = await readFile(args.path, "utf8");
+        return { contents: tightenMarkup(source, args.path), loader: "ts" };
+      },
+    );
+  },
+};
+
 // The page loads mapApp.bundle.js as a module. Replay and Wrapped are a
 // quarter of the frontend and most visits open neither, so features.ts
 // (replay) and wrapped.ts (Wrapped and the statistics panel) are entry
@@ -213,7 +235,7 @@ const buildOptions = {
   plugins: [
     maplibreVendorPlugin,
     yearWorkerPlugin,
-    ...(minify ? [shaderPlugin] : []),
+    ...(minify ? [shaderPlugin, markupPlugin] : []),
   ],
 };
 
@@ -370,10 +392,10 @@ const BUDGET_FEATURES = { raw: 147.25 * 1024, gzip: 55.25 * 1024 };
 // feature bundle that the app does not have as well. About 14.1 KB gzipped
 // in CI when it was last set.
 const BUDGET_WRAPPED = { raw: 43 * 1024, gzip: 15 * 1024 };
-// The year worker (services/yearWorker.ts): fetched by every visit, but next
-// to the first year file rather than ahead of the app, so it holds up
-// nothing. It decodes the year files and draws the heat sources off the main
-// thread. About 4.2 KB gzipped when it was last set.
+// The year worker (services/yearWorker.ts): fetched by every visit, preloaded
+// in the page head beside the app and started with the first year file. It
+// decodes the year files and draws the heat sources off the main thread.
+// About 4.2 KB gzipped when it was last set.
 const BUDGET_WORKER = { raw: 10 * 1024, gzip: 5 * 1024 };
 
 // The vendored files are copied as they are but for a few bytes of fixes

@@ -54,6 +54,7 @@ import {
   ZoomIn,
   type IconNode,
 } from "lucide";
+import { escapeHtml } from "./escape";
 import { logError } from "./logger";
 
 export type IconName =
@@ -224,15 +225,6 @@ export function iconSizeOf(el: HTMLElement): IconSize {
     : DEFAULT_ICON_SIZE;
 }
 
-/** Escape a caller string for use inside a double-quoted attribute */
-function escapeAttribute(value: string): string {
-  return value
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-}
-
 /**
  * Markup for one icon. Only `title` reaches the output from a caller, and it
  * is attribute-escaped, so the result is safe to insert with innerHTML
@@ -251,7 +243,7 @@ export function icon(
 ): string {
   const stroke = STROKE_FOR_SIZE[size] ?? "1.8";
   const label = title
-    ? ' role="img" aria-label="' + escapeAttribute(title) + '"'
+    ? ' role="img" aria-label="' + escapeHtml(title) + '"'
     : ' aria-hidden="true" focusable="false"';
   const paint =
     variant === "solid"
