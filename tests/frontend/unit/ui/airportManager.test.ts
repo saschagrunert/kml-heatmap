@@ -417,6 +417,11 @@ describe("AirportManager", () => {
       expect(markers["EDDM"]!.isPopupOpen()).toBe(true);
       expect(expanded("EDDF")).toBe("false");
       expect(expanded("EDDM")).toBe("true");
+      // The marker whose popup is open names it
+      const controls = (name: string): string | null =>
+        markers[name]!.getElement().getAttribute("aria-controls");
+      expect(controls("EDDF")).toBeNull();
+      expect(controls("EDDM")).toBe("airport-popup");
     });
 
     it("keeps the popup open through a double click or a double tap", () => {

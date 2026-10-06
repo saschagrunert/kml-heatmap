@@ -337,7 +337,7 @@ function distanceMetrics(stats: FilteredStatistics): Metric[] {
   if (stats.num_paths > 0) {
     const avgDistanceNm = stats.total_distance_nm / stats.num_paths;
     metrics.push({
-      label: "Average Distance per Trip",
+      label: "Average distance per trip",
       value: formatNumber(avgDistanceNm, 1),
       unit: "nm",
       alt: formatNumber(avgDistanceNm * NAUTICAL_MILES_TO_KM, 1),
@@ -347,7 +347,7 @@ function distanceMetrics(stats: FilteredStatistics): Metric[] {
 
   if (stats.longest_flight_nm && stats.longest_flight_nm > 0) {
     metrics.push({
-      label: "Longest Flight",
+      label: "Longest flight",
       value: formatNumber(stats.longest_flight_nm, 1),
       unit: "nm",
       alt: formatNumber(stats.longest_flight_km || 0, 1),
@@ -371,12 +371,12 @@ function cruiseReference(stats: FilteredStatistics): string {
 function speedMetrics(stats: FilteredStatistics): Metric[] {
   const metrics: Metric[] = [];
   const speeds: Array<[string, number | undefined]> = [
-    ["Average Groundspeed", stats.avg_groundspeed_knots],
+    ["Average groundspeed", stats.avg_groundspeed_knots],
     [
-      "Cruise Speed (> 1000 ft " + cruiseReference(stats) + ")",
+      "Cruise speed (> 1000 ft " + cruiseReference(stats) + ")",
       stats.cruise_speed_knots,
     ],
-    ["Max Groundspeed", stats.max_groundspeed_knots],
+    ["Max groundspeed", stats.max_groundspeed_knots],
   ];
 
   for (const [label, knots] of speeds) {
@@ -401,7 +401,7 @@ function altitudeMetrics(stats: FilteredStatistics): Metric[] {
   // 0 ft is an altitude; undefined means the filter has none
   if (stats.max_altitude_ft !== undefined) {
     metrics.push({
-      label: "Max Altitude (MSL)",
+      label: "Max altitude (MSL)",
       value: formatNumber(stats.max_altitude_ft),
       unit: "ft",
       alt: formatNumber(stats.max_altitude_ft * FEET_TO_METERS),
@@ -410,7 +410,7 @@ function altitudeMetrics(stats: FilteredStatistics): Metric[] {
 
     if (stats.total_altitude_gain_ft !== undefined) {
       metrics.push({
-        label: "Elevation Gain",
+        label: "Elevation gain",
         value: formatNumber(stats.total_altitude_gain_ft),
         unit: "ft",
         alt: formatNumber(stats.total_altitude_gain_ft * FEET_TO_METERS),
@@ -424,7 +424,7 @@ function altitudeMetrics(stats: FilteredStatistics): Metric[] {
     stats.most_common_cruise_altitude_ft > 0
   ) {
     metrics.push({
-      label: "Most Common Cruise Altitude (" + cruiseReference(stats) + ")",
+      label: "Most common cruise altitude (" + cruiseReference(stats) + ")",
       value: formatNumber(stats.most_common_cruise_altitude_ft),
       unit: "ft",
       alt: formatNumber(stats.most_common_cruise_altitude_m || 0),
@@ -449,10 +449,10 @@ function landingMetrics(stats: FilteredStatistics): Metric[] {
     unit: "",
   });
   return [
-    count("Full-Stop Landings", landings.landings),
-    count("Touch-and-Goes", landings.touchAndGoes),
+    count("Full-stop landings", landings.landings),
+    count("Touch-and-goes", landings.touchAndGoes),
     // Low approaches among them: GPS cannot tell the two apart
-    count("Go-Arounds", landings.goArounds),
+    count("Go-arounds", landings.goArounds),
   ];
 }
 
@@ -583,7 +583,7 @@ export class StatsManager {
     const selectedSegments = segmentsForPathIds(segments, selected);
 
     // A selection without segments still gets rendered: leaving the previous
-    // flight's numbers under the "Selected Paths" title would be worse
+    // flight's numbers under the title of a selection would be worse
     const selectedStats = calculateFilteredStatistics({
       pathInfo: selectedPathInfo,
       segments: selectedSegments,
@@ -604,8 +604,8 @@ export class StatsManager {
 
     if (isSelection) {
       html +=
-        '<div class="kh-stats-note">Showing stats for ' +
-        pluralize(stats.num_paths, "selected path") +
+        '<div class="kh-stats-note">Showing statistics for ' +
+        pluralize(stats.num_paths, "selected flight") +
         "</div>";
     }
 
@@ -627,7 +627,7 @@ export class StatsManager {
               "kh-stats-lead-unit",
             )
           : escapeHtml(MISSING_VALUE),
-        "Total Flight Time",
+        "Total flight time",
       ) +
       leadItem(formatNumber(stats.num_paths), "", "Flights") +
       leadItem(formatNumber(stats.num_airports), "", "Airports") +

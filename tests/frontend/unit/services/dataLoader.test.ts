@@ -1098,6 +1098,97 @@ describe("DataLoader", () => {
       expect(mockHideLoading).toHaveBeenCalledOnce();
     });
 
+    it("lets go of 'all' once every caller gave up on it, and says none of its failures", async () => {
+      withSizes({ "2024": 100, "2025": 300 });
+      defineYear(2024);
+      defineYear(2025);
+
+      const controller = new AbortController();
+      const loading = loader.loadData("all", controller.signal);
+      await vi.waitFor(() => expect(Object.keys(requests)).toHaveLength(2));
+      controller.abort();
+
+      expect(mockHideLoading).toHaveBeenCalledOnce();
+      request(2024).settle();
+      request(2025).settle(false);
+      expect(await loading).toBeNull();
+      expect(onLoadError).not.toHaveBeenCalled();
+      expect(mockHideLoading).toHaveBeenCalledOnce();
+
+      // The year that arrived went into the cache all the same
+      await loader.loadData("2024");
+      expect(Object.keys(requests)).toHaveLength(2);
+    });
+
+    it("keeps 'all' up while one of its callers still waits", async () => {
+      withSizes({ "2025": 300 });
+      defineYear(2025);
+
+      const controller = new AbortController();
+      const first = loader.loadData("all", controller.signal);
+      const second = loader.loadData("all", new AbortController().signal);
+      await vi.waitFor(() => expect(Object.keys(requests)).toHaveLength(1));
+      controller.abort();
+
+      expect(mockHideLoading).not.toHaveBeenCalled();
+      request(2025).settle();
+      expect(await second).not.toBeNull();
+      expect(await first).toBe(await second);
+      expect(mockHideLoading).toHaveBeenCalledOnce();
+    });
+
+    it("does not hold 'all' up for a caller that gave up before it came", async () => {
+      withSizes({ "2025": 300 });
+      defineYear(2025);
+
+      const controller = new AbortController();
+      const waiting = loader.loadData("all", controller.signal);
+      await vi.waitFor(() => expect(Object.keys(requests)).toHaveLength(1));
+      const late = new AbortController();
+      late.abort();
+      expect(await loader.loadData("all", late.signal)).toBeNull();
+      controller.abort();
+
+      // The one caller that joined gave up, so the indicator lets go
+      expect(mockHideLoading).toHaveBeenCalledOnce();
+      request(2025).settle();
+      expect(await waiting).toBeNull();
+    });
+
+    it("starts 'all' over for a caller that comes after every other gave up", async () => {
+      withSizes({ "2025": 300 });
+      defineYear(2025);
+
+      const controller = new AbortController();
+      const given = loader.loadData("all", controller.signal);
+      await vi.waitFor(() => expect(Object.keys(requests)).toHaveLength(1));
+      controller.abort();
+      const again = loader.loadData("all");
+      request(2025).settle();
+
+      expect(await given).toBeNull();
+      expect(await again).not.toBeNull();
+      // One request for the file, which both loads waited for
+      expect(Object.keys(requests)).toHaveLength(1);
+      expect(mockHideLoading).toHaveBeenCalledTimes(2);
+    });
+
+    it("lets go of 'all' given up on while its index loads", async () => {
+      defineYear(2025);
+      files["test-data/metadata.json"] = {
+        available_years: [2025],
+        year_file_bytes: { "2025": 300 },
+      };
+
+      const controller = new AbortController();
+      const loading = loader.loadData("all", controller.signal);
+      controller.abort();
+
+      expect(await loading).toBeNull();
+      expect(Object.keys(requests)).toHaveLength(0);
+      expect(mockHideLoading).toHaveBeenCalled();
+    });
+
     it("counts the operations: one more for every load that joins or fails", async () => {
       withSizes({ "2024": 100, "2025": 100 });
       defineYear(2025);

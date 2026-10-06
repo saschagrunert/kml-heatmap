@@ -8,6 +8,7 @@ import {
   REPLAY_PANEL_HEIGHT_VAR,
 } from "../../../../kml_heatmap/frontend/ui/replayManager";
 import { REPLAY_PRECONDITION_MESSAGE } from "../../../../kml_heatmap/frontend/ui/replayButton";
+import { STILL_LOADING_MESSAGE } from "../../../../kml_heatmap/frontend/ui/actions";
 import {
   LIVE_REGION_DELAY_MS,
   TOAST_STATUS_ID,
@@ -261,10 +262,7 @@ describe("ReplayManager activation", () => {
     it("swaps the replay button to stop without losing its label", () => {
       mockApp.selectedPathIds = new Set([1]);
       // As the template names it
-      el("replay-btn").setAttribute(
-        "aria-label",
-        "Replay selected flight path",
-      );
+      el("replay-btn").setAttribute("aria-label", "Replay selected flight");
 
       replayManager.toggleReplay();
 
@@ -278,17 +276,14 @@ describe("ReplayManager activation", () => {
       // A toggle keeps its name: "Stop replay, pressed" said the opposite
       // of what a press does. aria-pressed carries the state.
       expect(replayBtn.getAttribute("aria-label")).toBe(
-        "Replay selected flight path",
+        "Replay selected flight",
       );
-      expect(replayBtn.title).toBe("Replay selected flight path");
+      expect(replayBtn.title).toBe("Replay selected flight");
     });
 
     it("restores the replay button on deactivation", () => {
       mockApp.selectedPathIds = new Set([1]);
-      el("replay-btn").setAttribute(
-        "aria-label",
-        "Replay selected flight path",
-      );
+      el("replay-btn").setAttribute("aria-label", "Replay selected flight");
       replayManager.toggleReplay();
 
       replayManager.toggleReplay();
@@ -301,7 +296,7 @@ describe("ReplayManager activation", () => {
       );
       expect(replayBtn.getAttribute("aria-pressed")).toBe("false");
       expect(replayBtn.getAttribute("aria-label")).toBe(
-        "Replay selected flight path",
+        "Replay selected flight",
       );
     });
 
@@ -335,6 +330,47 @@ describe("ReplayManager activation", () => {
       expect(
         document.body.style.getPropertyValue(REPLAY_PANEL_HEIGHT_VAR),
       ).toBe("");
+    });
+
+    it("measures the panel again as it wraps anew, a phone turned", () => {
+      const observers: {
+        callback: () => void;
+        observed: Element[];
+        disconnect: () => void;
+      }[] = [];
+      vi.stubGlobal(
+        "ResizeObserver",
+        class {
+          observed: Element[] = [];
+          disconnect = vi.fn();
+          observe = (target: Element) => this.observed.push(target);
+          constructor(readonly callback: () => void) {
+            observers.push(this);
+          }
+        },
+      );
+      mockApp.selectedPathIds = new Set([1]);
+      const panel = el("replay-controls");
+      let height = 167;
+      Object.defineProperty(panel, "offsetHeight", {
+        get: () => height,
+        configurable: true,
+      });
+      replayManager.toggleReplay();
+      const watch = observers.find((o) => o.observed.includes(panel))!;
+
+      height = 220;
+      watch.callback();
+      expect(
+        document.body.style.getPropertyValue(REPLAY_PANEL_HEIGHT_VAR),
+      ).toBe("220px");
+
+      replayManager.toggleReplay();
+      expect(watch.disconnect).toHaveBeenCalled();
+      expect(
+        document.body.style.getPropertyValue(REPLAY_PANEL_HEIGHT_VAR),
+      ).toBe("");
+      vi.unstubAllGlobals();
     });
 
     it("hands the height of the legend on screen to the stylesheet too", () => {
@@ -785,6 +821,20 @@ describe("ReplayManager activation", () => {
       expect(document.activeElement).toBe(el("replay-btn"));
     });
 
+    it("leaves focus the user took elsewhere where it is as it closes", () => {
+      activate();
+      // The flight profile, say, outside the panel
+      const elsewhere = document.createElement("button");
+      document.body.append(elsewhere);
+      elsewhere.focus();
+
+      replayManager.toggleReplay();
+
+      expect(mockApp.replayActive).toBe(false);
+      expect(document.activeElement).toBe(elsewhere);
+      elsewhere.remove();
+    });
+
     it("reports the values of the current position", () => {
       activate();
 
@@ -820,16 +870,17 @@ describe("ReplayManager activation", () => {
   });
 
   describe("initializeReplay", () => {
-    it("returns false and shows toast if no data is loaded", () => {
+    it("returns false and says the flights are still loading if no data is loaded", () => {
       mockApp.currentData = null;
       mockApp.selectedPathIds = new Set([1]);
 
       const result = replayManager.initializeReplay();
 
       expect(result).toBe(false);
-      const toast = document.querySelector(".toast-notification");
-      expect(toast).not.toBeNull();
-      expect(toast!.classList.contains("toast-error")).toBe(true);
+      // As every control says it meanwhile, and what to do next
+      expect(toastText()).toBe(
+        `${STILL_LOADING_MESSAGE}. Try again in a moment.`,
+      );
     });
 
     it("returns false when no path is selected", () => {
@@ -963,16 +1014,18 @@ describe("ReplayManager activation", () => {
       expect(replayManager.state.colorSpeedRange).toBe(mockApp.airspeedRange);
     });
 
-    it("sets replayMaxTime from last segment and updates the slider", () => {
+    it("sets replayMaxTime from the end of the last segment and updates the slider", () => {
       mockApp.selectedPathIds = new Set([1]);
 
       replayManager.initializeReplay();
 
-      expect(replayManager.state.maxTime).toBe(120);
+      // The last segment, which starts at 120 s, takes as long as its 13 km
+      // at its 130 kt do, held to LAST_SEGMENT_MAX_S (see replayCurve)
+      expect(replayManager.state.maxTime).toBe(240);
       const slider = el("replay-slider") as HTMLInputElement;
-      expect(slider.max).toBe("120");
-      expect(el("replay-slider-end").textContent).toBe("2:00");
-      expect(slider.getAttribute("aria-valuetext")).toBe("0:00 of 2:00");
+      expect(slider.max).toBe("240");
+      expect(el("replay-slider-end").textContent).toBe("4:00");
+      expect(slider.getAttribute("aria-valuetext")).toBe("0:00 of 4:00");
     });
 
     it("sets the replay layer up with the route and an empty trail", () => {

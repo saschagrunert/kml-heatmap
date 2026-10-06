@@ -1364,6 +1364,9 @@ describe("ReplayRenderer", () => {
         mockReplayManager.state.currentTime = 15;
         // Halfway along a segment climbing from 1000 to 2000 ft
         mockReplayManager.state.segments = makeChain([1000, 2000, 2000]);
+        // The last at the speed of the one before, which then keeps its own
+        // all along (see replayCurve)
+        mockReplayManager.state.segments.at(-1)!.groundspeed_knots = 0;
         lifted(true);
       });
 
@@ -2380,6 +2383,36 @@ describe("ReplayRenderer", () => {
         runFrame();
       }
       expect(rests()).toEqual(["moveend", "moveend"]);
+    });
+
+    it("finds the airplane in the copy of the world the map looks at, past the antimeridian", () => {
+      // The map has wrapped its centre back west of 180; the flight's
+      // curve goes on past it
+      map.jumpTo({ center: [-179.99, 50] });
+      mockReplayManager.state.airplaneMarker = makeAirplane();
+      mockReplayManager.state.currentTime = 5;
+      mockReplayManager.state.segments = [
+        makeSegment({
+          time: 0,
+          coords: [
+            [50, 179.98],
+            [50.01, 180.02],
+          ],
+        }),
+      ];
+      airplaneAt(400, 300);
+      map.project.mockClear();
+      vi.mocked(map.jumpTo).mockClear();
+
+      callUpdateDisplay(true);
+
+      // In the middle of the map there, not a world away: no jump
+      expect(map.jumpTo).not.toHaveBeenCalled();
+      const lngs = map.project.mock.calls.map(([at]) =>
+        Array.isArray(at) ? (at as number[])[0]! : (at as { lng: number }).lng,
+      );
+      expect(lngs.length).toBeGreaterThan(0);
+      for (const lng of lngs) expect(Math.abs(lng + 179.99)).toBeLessThan(1);
     });
 
     it("tells the map the camera has come to rest as the replay closes", () => {

@@ -8,13 +8,13 @@ import {
   createAirportElement,
   setAirportElementHome,
 } from "./features/airports";
-import { setUnavailable } from "./utils/buttonState";
+import { setUnavailable, setUnavailableFor } from "./utils/buttonState";
 import { domCache } from "./utils/domCache";
 import { applyMetricColors, pluralFlights } from "./utils/htmlGenerators";
 import { createActivationFilter, toLngLat } from "./utils/mapHelpers";
 import { announceStatus, showToast } from "./utils/toast";
 import { setAirportLabelHover } from "./ui/airportLabels";
-import { NO_DATA_MESSAGE } from "./ui/actions";
+import { NO_DATA_MESSAGE, NO_TIMING_MESSAGE } from "./ui/actions";
 import { datasetIndex } from "./calculations/datasetIndex";
 import { calculateAirspeedRange } from "./features/layers";
 import type { MapApp } from "./mapApp";
@@ -139,7 +139,8 @@ export async function loadInitialData(app: MapApp): Promise<void> {
   // follows the store (see setupButtonSync); only this is owned here.
   const airspeedBtn = domCache.get("airspeed-btn");
   if (airspeedBtn) {
-    setUnavailable(airspeedBtn, !hasTimingData);
+    // Dimmed, its tooltip says why rather than what it would colour
+    setUnavailableFor(airspeedBtn, hasTimingData ? null : NO_TIMING_MESSAGE);
     if (hasTimingData) airspeedBtn.removeAttribute("aria-describedby");
     else airspeedBtn.setAttribute("aria-describedby", "airspeed-reason");
   }

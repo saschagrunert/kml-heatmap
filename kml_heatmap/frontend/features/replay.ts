@@ -53,7 +53,15 @@ export interface ReplayCurve extends SmoothedFlights {
    * smoothed (see replayCurve)
    */
   times: Float64Array;
+  /** When the airplane is at the end of the last segment (see replayCurve) */
+  end: number;
 }
+
+/**
+ * Longest time the last segment takes (s), which ends at no fix: one
+ * logged at a crawl would otherwise hold the replay for minutes
+ */
+const LAST_SEGMENT_MAX_S = 120;
 
 /** Fixes on either side of one that its time is smoothed over */
 const TIME_WINDOW = 2;
@@ -153,6 +161,24 @@ export function replayCurve(
   // The speed of a segment, or null without a time to tell
   const speed = (i: number): number | null =>
     seconds[i]! > 0 ? length[i]! / seconds[i]! : null;
+  // The last segment has no next one to end at: it takes the time its
+  // length does at its logged groundspeed, or at the speed of the one
+  // before, and the airplane flies it rather than jumping to its end
+  const last = count - 1;
+  if (last >= 0 && length[last]! > 0) {
+    const knots = segments[last]!.groundspeed_knots;
+    const metresPerSecond =
+      knots > 0 ? (knots * 1852) / 3600 : joined(last) ? speed(last - 1) : 0;
+    if (metresPerSecond) {
+      const flown = Math.min(
+        length[last]! / metresPerSecond,
+        LAST_SEGMENT_MAX_S,
+      );
+      // Up to a whole second, a step of the timeline's slider: one between
+      // two could not be reached by dragging to its end
+      seconds[last] = Math.ceil(times[last]! + flown) - times[last]!;
+    }
+  }
   // The speed at the fix a segment starts at
   const atStart = new Float64Array(count);
   for (let i = 0; i < count; i++) {
@@ -174,7 +200,8 @@ export function replayCurve(
     startSlope[i] = atStart[i]! * seconds[i]!;
     endSlope[i] = (joined(i + 1) ? atStart[i + 1]! : own) * seconds[i]!;
   }
-  return { ...curves, along, startSlope, endSlope, times };
+  const end = last >= 0 ? times[last]! + seconds[last]! : 0;
+  return { ...curves, along, startSlope, endSlope, times, end };
 }
 
 /**

@@ -552,8 +552,8 @@ button or a click on the map closes it.
   always), so a single flight and Replay are reachable from the keyboard: Tab to
   a marker, Enter opens the popup and moves focus into it, Escape closes it and
   returns focus to the marker
-- **Isolate** - Show only the selected paths, and the heat of those flights
-  alone, hiding all other paths
+- **Isolate** - Show only the selected flights, and their heat alone, hiding all
+  other flights
 
 ## Shareable URLs
 

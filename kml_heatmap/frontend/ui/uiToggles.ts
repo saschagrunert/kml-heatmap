@@ -5,7 +5,7 @@ import type { MapApp } from "../mapApp";
 import { setControlLabel } from "../utils/buttonState";
 import { canShareLink, isPhoneLayout, isSmallDevice } from "../utils/device";
 import { domCache } from "../utils/domCache";
-import { importWithRetry } from "../services/lazyImport";
+import { TRY_AGAIN, importWithRetry } from "../services/lazyImport";
 import { logError } from "../utils/logger";
 import { withMapStill } from "../utils/mapHelpers";
 import { showToast } from "../utils/toast";
@@ -109,9 +109,16 @@ export function dataUrlToBlob(dataUrl: string): Blob {
   return new Blob([bytes], { type });
 }
 
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
+/**
+ * Said when an export fails. What failed goes to the console: html-to-image
+ * rejects with an Event as often as with an Error, which read as
+ * "[object Event]".
+ */
+export const EXPORT_FAILED_MESSAGE = "Could not export the image. Try again.";
+
+/** Said when html-to-image cannot be fetched (see loadHtmlToImage) */
+export const EXPORT_UNAVAILABLE_MESSAGE =
+  "Export is unavailable: its code could not be loaded" + TRY_AGAIN;
 
 function isAbortError(error: unknown): boolean {
   return error instanceof Error && error.name === "AbortError";
@@ -220,8 +227,12 @@ export class UIToggles {
     visible: boolean,
   ): void {
     if (setColorLayer(this.app, mode, visible)) {
-      const label = mode === "altitude" ? "Groundspeed" : "Altitude";
-      showToast(`${label} layer disabled`, "info");
+      // "Disabled" is what the page says of a control that cannot be used
+      const [off, on] =
+        mode === "altitude"
+          ? ["Groundspeed", "altitude"]
+          : ["Altitude", "groundspeed"];
+      showToast(`${off} off, colouring by ${on}`, "info");
     }
   }
 
@@ -262,7 +273,8 @@ export class UIToggles {
 
     void this.runExport(mapContainer)
       .catch((error: unknown) => {
-        showToast("Export failed: " + errorMessage(error), "error");
+        logError("Export failed:", error);
+        showToast(EXPORT_FAILED_MESSAGE, "error");
       })
       .finally(restore);
   }
@@ -270,7 +282,7 @@ export class UIToggles {
   private async runExport(mapContainer: HTMLElement): Promise<void> {
     const htmlToImage = await loadHtmlToImage();
     if (!htmlToImage) {
-      showToast("Export unavailable", "error");
+      showToast(EXPORT_UNAVAILABLE_MESSAGE, "error");
       return;
     }
 

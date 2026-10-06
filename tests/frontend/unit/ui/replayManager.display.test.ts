@@ -254,10 +254,10 @@ describe("ReplayManager display", () => {
 
       replayManager.updateReplayDisplay();
 
-      expect(el("replay-time-display").textContent).toBe("1:00 / 2:00");
+      expect(el("replay-time-display").textContent).toBe("1:00 / 4:00");
       const slider = el("replay-slider") as HTMLInputElement;
       expect(slider.value).toBe("60");
-      expect(slider.getAttribute("aria-valuetext")).toBe("1:00 of 2:00");
+      expect(slider.getAttribute("aria-valuetext")).toBe("1:00 of 4:00");
     });
 
     it("keeps the current time out of the start of the timeline", () => {
@@ -298,7 +298,7 @@ describe("ReplayManager display", () => {
       replayManager.state.currentTime = 61;
       replayManager.updateReplayDisplay();
 
-      expect(timeDisplay.textContent).toBe("1:01 / 2:00");
+      expect(timeDisplay.textContent).toBe("1:01 / 4:00");
     });
 
     it("draws path segments incrementally from the last drawn index", () => {
@@ -460,7 +460,17 @@ describe("ReplayManager display", () => {
       replayManager.updateReplayDisplay();
       expect(airplane().getLatLng()).toEqual([48.1, 16.1]);
 
+      // The last segment from its start to the end of the replay
       replayManager.state.currentTime = 120;
+      replayManager.updateReplayDisplay();
+      expect(airplane().getLatLng()).toEqual([48.2, 16.2]);
+      replayManager.state.currentTime = 180;
+      replayManager.updateReplayDisplay();
+      const [lat, lon] = airplane().getLatLng();
+      expect(lat).toBeGreaterThan(48.2);
+      expect(lat).toBeLessThan(48.3);
+      expect(lon).toBeGreaterThan(16.2);
+      replayManager.state.currentTime = replayManager.state.maxTime;
       replayManager.updateReplayDisplay();
       expect(airplane().getLatLng()).toEqual([48.3, 16.3]);
     });
@@ -596,7 +606,7 @@ describe("ReplayManager display", () => {
       expect(generateSegmentPopupHtml).toHaveBeenCalledWith(
         expect.objectContaining({
           segment: replayManager.state.segments[1],
-          title: "Current Position",
+          title: "Current position",
         }),
       );
     });

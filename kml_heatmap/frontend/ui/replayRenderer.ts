@@ -414,7 +414,7 @@ export class ReplayRenderer {
       position,
       altRange: state.colorAltRange,
       speedRange: state.colorSpeedRange,
-      title: "Current Position",
+      title: "Current position",
       icon: "aircraftTop",
     });
 
@@ -616,15 +616,13 @@ export class ReplayRenderer {
     const currentTime = state.currentTime;
     // A segment's time is when it starts, so until the next segment's time
     // the airplane is on this one, moving from its first point to its
-    // second. The last segment has no end time and is shown at its end.
+    // second. The last one ends with the replay (see replayCurve).
     const [[lat1, lon1], [lat2, lon2]] = segment.coords;
     let fraction = 1;
-    if (next) {
-      const start = segment.time ?? 0;
-      const duration = (next.time ?? 0) - start;
-      if (duration > 0) {
-        fraction = Math.min(Math.max((currentTime - start) / duration, 0), 1);
-      }
+    const start = segment.time ?? 0;
+    const duration = (next ? (next.time ?? 0) : state.maxTime) - start;
+    if (duration > 0) {
+      fraction = Math.min(Math.max((currentTime - start) / duration, 0), 1);
     }
     // On the flight's curve, where the lines and the trail run, as far
     // along it as the time says (see replayPoint); in the 3D view at its

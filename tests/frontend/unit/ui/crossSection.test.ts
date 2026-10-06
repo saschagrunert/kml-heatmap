@@ -26,6 +26,7 @@ import {
   sectionSummary,
 } from "../../../../kml_heatmap/frontend/ui/crossSectionText";
 import type { CrossSection } from "../../../../kml_heatmap/frontend/calculations/crossSection";
+import { isSectionLine } from "../../../../kml_heatmap/frontend/state/urlState";
 import { MobileSheet } from "../../../../kml_heatmap/frontend/ui/mobileSheet";
 import type { PathSegment } from "../../../../kml_heatmap/frontend/types";
 import type {
@@ -511,6 +512,20 @@ describe("cross-section", () => {
       expect(app.crossSectionLine).toBe("");
     });
 
+    it("writes a line across the antimeridian for the link within 180 degrees", async () => {
+      const { app, map, canvas } = await setup();
+      // The map's centre just west of 180: the east end comes past it
+      map.jumpTo({ center: [179.99, LAT], zoom: 12 });
+      await open(app);
+
+      drawLine(canvas);
+
+      const [, west, , east] = app.crossSectionLine.split(",").map(Number);
+      expect(west).toBeCloseTo(179.955, 4);
+      expect(east).toBeCloseTo(-179.975, 4);
+      expect(isSectionLine(app.crossSectionLine)).toBe(true);
+    });
+
     it("opens on the line of the link, drawn and ready to read", async () => {
       const line = `${LAT},${LON - 0.035},${LAT},${LON + 0.035}`;
       const { app, map } = await setup({ crossSectionLine: line });
@@ -519,6 +534,11 @@ describe("cross-section", () => {
 
       expect(part(".section-plot").hidden).toBe(false);
       expect(summary()).not.toBeNull();
+      // On the control that draws a new line, the one on show
+      expect(document.activeElement).toBe(
+        part(".section-btn[aria-label='Draw a new line']"),
+      );
+      expect(document.activeElement?.closest("[hidden]")).toBeNull();
       expect(map.dragPan.isEnabled()).toBe(true);
       expect(handles().map((handle) => handle.map)).toEqual([map, map]);
       expect(app.crossSectionLine.split(",").map(Number)).toEqual([

@@ -73,8 +73,7 @@ describe("StatsManager", () => {
 
     const railTitle = document.createElement("h2");
     railTitle.id = "stats-rail-title";
-    railTitle.innerHTML =
-      '<span class="kh-stats-title-text">Flight Statistics</span>';
+    railTitle.innerHTML = '<span class="kh-stats-title-text">Statistics</span>';
     document.body.appendChild(railTitle);
 
     statsPanel = document.createElement("div");
@@ -140,12 +139,12 @@ describe("StatsManager", () => {
 
       expect(
         document.getElementById("stats-rail-title")!.textContent,
-      ).toContain("Flight Statistics");
+      ).toContain("Statistics");
       expect(leadValue(statsPanel, "Flights")).toBe("1");
       expect(statsPanel.textContent).toContain("3 data points");
       expect(statsPanel.textContent).toContain("EDDF");
       expect(statsPanel.textContent).not.toContain("EDDK");
-      expect(leadValue(statsPanel, "Total Flight Time")).toBe("0h 10m");
+      expect(leadValue(statsPanel, "Total flight time")).toBe("0h 10m");
     });
 
     it("shows statistics for the selected paths only", () => {
@@ -155,9 +154,9 @@ describe("StatsManager", () => {
 
       expect(
         document.getElementById("stats-rail-title")!.textContent,
-      ).toContain("Selected Paths Statistics");
+      ).toContain("Statistics of the selection");
       expect(statsPanel.textContent).toContain(
-        "Showing stats for 1 selected path",
+        "Showing statistics for 1 selected flight",
       );
       // unique coordinates of the selected segments
       expect(statsPanel.textContent).toContain("2 data points");
@@ -182,7 +181,7 @@ describe("StatsManager", () => {
       statsManager.updateStatsForSelection();
 
       expect(statsPanel.innerHTML).not.toBe("before");
-      expect(statsPanel.textContent).toContain("0 selected paths");
+      expect(statsPanel.textContent).toContain("0 selected flights");
       expect(leadValue(statsPanel, "Flights")).toBe("0");
     });
 
@@ -251,16 +250,16 @@ describe("StatsManager", () => {
         (row) => row.textContent,
       );
       expect(rows).toEqual([
-        "Full-Stop Landings115",
-        "Touch-and-Goes1,179",
-        "Go-Arounds5",
+        "Full-stop landings115",
+        "Touch-and-goes1,179",
+        "Go-arounds5",
       ]);
     });
 
     it("leaves the landings out where the flights carry none", () => {
       statsManager.updateStatsPanel(mockStats, false);
 
-      expect(statsPanel.textContent).not.toContain("Touch-and-Goes");
+      expect(statsPanel.textContent).not.toContain("Touch-and-goes");
     });
 
     it("says when the panel has more below it than it can show", () => {
@@ -291,7 +290,7 @@ describe("StatsManager", () => {
 
       expect(
         document.getElementById("stats-rail-title")!.textContent,
-      ).toContain("Flight Statistics");
+      ).toContain("Statistics");
       const sections = [
         ...statsPanel.querySelectorAll("h3.kh-stats-section-title"),
       ].map((el) => el.querySelector(".kh-stats-section-label")!.textContent);
@@ -325,12 +324,12 @@ describe("StatsManager", () => {
       ].map((el) => el.textContent);
       expect(labels).toEqual([
         "Distance",
-        "Total Flight Time",
+        "Total flight time",
         "Flights",
         "Airports",
       ]);
       expect(leadValue(statsPanel, "Distance")).toBe("2,700.0nm");
-      expect(leadValue(statsPanel, "Total Flight Time")).toBe("25h 30m");
+      expect(leadValue(statsPanel, "Total flight time")).toBe("25h 30m");
       expect(leadValue(statsPanel, "Flights")).toBe("50");
       expect(leadValue(statsPanel, "Airports")).toBe("3");
       // The metric equivalent of the distance stays on the lead figure
@@ -349,7 +348,7 @@ describe("StatsManager", () => {
       expect(statsPanel.querySelectorAll(".kh-stats-lead-item")).toHaveLength(
         4,
       );
-      expect(leadValue(statsPanel, "Total Flight Time")).toBe("—");
+      expect(leadValue(statsPanel, "Total flight time")).toBe("—");
       expect(leadValue(statsPanel, "Flights")).toBe("50");
     });
 
@@ -358,9 +357,9 @@ describe("StatsManager", () => {
 
       expect(
         document.getElementById("stats-rail-title")!.textContent,
-      ).toContain("Selected Paths Statistics");
+      ).toContain("Statistics of the selection");
       expect(statsPanel.querySelector(".kh-stats-note")!.textContent).toBe(
-        "Showing stats for 50 selected paths",
+        "Showing statistics for 50 selected flights",
       );
     });
 
@@ -371,7 +370,7 @@ describe("StatsManager", () => {
       );
 
       expect(statsPanel.querySelector(".kh-stats-note")!.textContent).toBe(
-        "Showing stats for 1 selected path",
+        "Showing statistics for 1 selected flight",
       );
       expect(statsPanel.querySelector(".kh-stats-footer")!.textContent).toBe(
         "1 data point",
@@ -381,24 +380,24 @@ describe("StatsManager", () => {
     it("renders all metrics with both unit systems", () => {
       statsManager.updateStatsPanel(mockStats, false);
 
-      expect(metricRow(statsPanel, "Average Distance per Trip")).toBe(
+      expect(metricRow(statsPanel, "Average distance per trip")).toBe(
         "54.0nm (100.0km)",
       );
-      expect(metricRow(statsPanel, "Longest Flight")).toBe("270.0nm (500.0km)");
-      expect(metricRow(statsPanel, "Average Groundspeed")).toBe(
+      expect(metricRow(statsPanel, "Longest flight")).toBe("270.0nm (500.0km)");
+      expect(metricRow(statsPanel, "Average groundspeed")).toBe(
         "120kt (222km/h)",
       );
-      expect(metricRow(statsPanel, "Cruise Speed (> 1000 ft AGL)")).toBe(
+      expect(metricRow(statsPanel, "Cruise speed (> 1000 ft AGL)")).toBe(
         "125kt (232km/h)",
       );
-      expect(metricRow(statsPanel, "Max Groundspeed")).toBe("150kt (278km/h)");
-      expect(metricRow(statsPanel, "Max Altitude (MSL)")).toBe(
+      expect(metricRow(statsPanel, "Max groundspeed")).toBe("150kt (278km/h)");
+      expect(metricRow(statsPanel, "Max altitude (MSL)")).toBe(
         "10,000ft (3,048m)",
       );
-      expect(metricRow(statsPanel, "Elevation Gain")).toBe(
+      expect(metricRow(statsPanel, "Elevation gain")).toBe(
         "50,000ft (15,240m)",
       );
-      expect(metricRow(statsPanel, "Most Common Cruise Altitude (AGL)")).toBe(
+      expect(metricRow(statsPanel, "Most common cruise altitude (AGL)")).toBe(
         "5,500ft (1,676m)",
       );
     });
@@ -412,10 +411,10 @@ describe("StatsManager", () => {
       );
 
       expect(
-        metricRow(statsPanel, "Cruise Speed (> 1000 ft above field)"),
+        metricRow(statsPanel, "Cruise speed (> 1000 ft above field)"),
       ).toBe("125kt (232km/h)");
       expect(
-        metricRow(statsPanel, "Most Common Cruise Altitude (above field)"),
+        metricRow(statsPanel, "Most common cruise altitude (above field)"),
       ).toBe("5,500ft (1,676m)");
       expect(statsPanel.textContent).not.toContain("AGL");
     });
@@ -634,7 +633,7 @@ describe("StatsManager", () => {
         false,
       );
 
-      expect(leadValue(statsPanel, "Total Flight Time")).toBe("<b>1h</b>");
+      expect(leadValue(statsPanel, "Total flight time")).toBe("<b>1h</b>");
       expect(statsPanel.querySelector("b")).toBeNull();
       expect(statsPanel.innerHTML).toContain("&lt;b&gt;1h&lt;/b&gt;");
     });
@@ -678,13 +677,13 @@ describe("StatsManager", () => {
       expect(statsPanel.querySelectorAll(".kh-stats-lead-item")).toHaveLength(
         4,
       );
-      expect(leadValue(statsPanel, "Total Flight Time")).toBe("—");
+      expect(leadValue(statsPanel, "Total flight time")).toBe("—");
       expect(statsPanel.querySelectorAll(".kh-stats-section")).toHaveLength(0);
       expect(statsPanel.querySelector("details")).toBeNull();
-      expect(text).not.toContain("Average Distance");
-      expect(text).not.toContain("Longest Flight");
+      expect(text).not.toContain("Average distance");
+      expect(text).not.toContain("Longest flight");
       expect(text).not.toContain("Groundspeed");
-      expect(text).not.toContain("Max Altitude");
+      expect(text).not.toContain("Max altitude");
       expect(text).toContain("0 data points");
     });
 
@@ -694,8 +693,8 @@ describe("StatsManager", () => {
         false,
       );
 
-      expect(metricRow(statsPanel, "Max Altitude (MSL)")).toContain("0ft");
-      expect(metricRow(statsPanel, "Elevation Gain")).toContain("0ft");
+      expect(metricRow(statsPanel, "Max altitude (MSL)")).toContain("0ft");
+      expect(metricRow(statsPanel, "Elevation gain")).toContain("0ft");
     });
 
     it("does nothing if the panel element is missing", () => {
@@ -757,7 +756,7 @@ describe("StatsManager", () => {
       mockApp.store.notifyMutation("selectedPathIds");
       expect(
         document.getElementById("stats-rail-title")!.textContent,
-      ).toContain("Selected Paths Statistics");
+      ).toContain("Statistics of the selection");
 
       mockApp.currentData = null;
       expect(leadValue(statsPanel, "Flights")).toBe("0");

@@ -604,6 +604,8 @@ describe("appInitializer", () => {
       expect(btn.disabled).toBe(false);
       expect(btn.getAttribute("aria-disabled")).toBe("true");
       expect(btn.getAttribute("aria-describedby")).toBe("airspeed-reason");
+      // A pointer reads why as well, not what it would colour
+      expect(btn.title).toBe("No timing data in the flights");
       expect(app.airspeedRange).toEqual({ min: 0, max: 200 });
     });
 

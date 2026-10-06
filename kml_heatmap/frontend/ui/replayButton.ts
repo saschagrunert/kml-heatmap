@@ -6,10 +6,10 @@
  * to explain itself from the first paint, long before anyone opens replay
  * and the feature bundle is fetched.
  */
-import { setUnavailable } from "../utils/buttonState";
+import { setUnavailableFor } from "../utils/buttonState";
 import { domCache } from "../utils/domCache";
 
-export const REPLAY_BUTTON_LABEL = "Replay selected flight path";
+export const REPLAY_BUTTON_LABEL = "Replay selected flight";
 export const REPLAY_PRECONDITION_MESSAGE =
   "Pick one flight with timing data to replay, under Statistics, Flights";
 
@@ -25,9 +25,5 @@ export function updateReplayButtonState(ready: boolean): void {
   // aria-disabled says so without taking it out of the tab order, which
   // the disabled attribute would, and the stylesheet dims it. A mode that
   // holds the button keeps its own title until it ends
-  setUnavailable(
-    btn,
-    !ready,
-    ready ? REPLAY_BUTTON_LABEL : REPLAY_PRECONDITION_MESSAGE,
-  );
+  setUnavailableFor(btn, ready ? null : REPLAY_PRECONDITION_MESSAGE);
 }

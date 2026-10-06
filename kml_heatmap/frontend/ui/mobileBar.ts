@@ -479,6 +479,7 @@ export class MobileBar {
         id: "reset-view",
         icon: "reset",
         label: "Reset view",
+        hint: () => app.resetViewReason(),
         isDisabled: () => !app.canResetView(),
         // With nothing to reset a tap does nothing, and the sheet stays
         closeOnSelect: false,

@@ -264,6 +264,9 @@ function showIntroChrome(phase: IntroPhase): void {
   modal?.classList.toggle("is-intro", playing);
   modal?.classList.toggle("is-settling", phase === "settle");
   domCache.get("wrapped-map-container")?.classList.toggle("is-dark", playing);
+  // Held back under the map, the cards are out of the tab order as well:
+  // side by side they are only see-through, not gone
+  domCache.get("wrapped-cards-column")?.toggleAttribute("inert", playing);
   const skip = domCache.get("wrapped-skip-btn");
   if (!skip) return;
   // A button that hides drops its focus to <body>

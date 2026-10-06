@@ -5,6 +5,7 @@ import {
   TOAST_STACK_ID,
   TOAST_STATUS_ID,
   announceInRegion,
+  announceStatus,
   dismissToast,
   showToast,
 } from "../../../../kml_heatmap/frontend/utils/toast";
@@ -330,5 +331,60 @@ describe("announceInRegion", () => {
     vi.advanceTimersByTime(LIVE_REGION_DELAY_MS);
 
     expect(region.textContent).toBe("Replay closed");
+  });
+
+  it("reads a toast out with the message that came after it", () => {
+    const region = document.createElement("div");
+
+    announceInRegion(region, "D-EXYZ has no flights in 2024", true);
+    announceInRegion(region, "Showing 2023");
+    announceInRegion(region, "Showing 2024");
+    announceInRegion(region, "D-EXYZ has no flights in 2024", true);
+    vi.advanceTimersByTime(LIVE_REGION_DELAY_MS);
+
+    expect(region.textContent).toBe(
+      "D-EXYZ has no flights in 2024. Showing 2024.",
+    );
+  });
+
+  it("reads a toast that came after a status after it", () => {
+    const region = document.createElement("div");
+
+    announceInRegion(region, "Showing 2024");
+    announceInRegion(region, "Aircraft filter cleared", true);
+    vi.advanceTimersByTime(LIVE_REGION_DELAY_MS);
+
+    expect(region.textContent).toBe("Showing 2024. Aircraft filter cleared.");
+  });
+
+  it("says a status that repeats a toast of the moment once", () => {
+    const region = document.createElement("div");
+
+    announceInRegion(region, "Select flights to isolate", true);
+    announceInRegion(region, "Select flights to isolate");
+    vi.advanceTimersByTime(LIVE_REGION_DELAY_MS);
+
+    expect(region.textContent).toBe("Select flights to isolate");
+  });
+});
+
+describe("showToast and announceStatus", () => {
+  beforeEach(() => {
+    document.body.innerHTML = "";
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("keeps the toast that a status right after it would silence", () => {
+    showToast("Some flights of the link are no longer there.");
+    announceStatus("Showing 2024");
+    vi.advanceTimersByTime(LIVE_REGION_DELAY_MS);
+
+    expect(document.getElementById(TOAST_STATUS_ID)!.textContent).toBe(
+      "Some flights of the link are no longer there. Showing 2024.",
+    );
   });
 });

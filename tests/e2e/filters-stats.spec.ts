@@ -159,9 +159,7 @@ test.describe("Filters and Statistics", () => {
     // Its figures, not the loading line of the first opening
     const panel = await waitForStatsContent(page);
 
-    await expect(page.locator("#stats-rail-title")).toContainText(
-      "Flight Statistics",
-    );
+    await expect(page.locator("#stats-rail-title")).toHaveText("Statistics");
     // The count decides the plural, so match the shape rather than a literal,
     // grouped by thousands as the rail writes it. Matched on the element: the
     // panel's text runs straight on into the build line below it.
@@ -183,9 +181,9 @@ test.describe("Filters and Statistics", () => {
     const panel = await waitForStatsContent(page);
 
     // The build reads them from the logs, which all have timestamps
-    await expect(panel).toContainText("Full-Stop Landings");
-    await expect(panel).toContainText("Touch-and-Goes");
-    await expect(panel).toContainText("Go-Arounds");
+    await expect(panel).toContainText("Full-stop landings");
+    await expect(panel).toContainText("Touch-and-goes");
+    await expect(panel).toContainText("Go-arounds");
   });
 
   test("stats panel shows airports and aircraft", async ({ page }) => {
@@ -208,10 +206,10 @@ test.describe("Filters and Statistics", () => {
     await selectPathForReplay(page);
 
     await expect(page.locator("#stats-rail-title")).toContainText(
-      "Selected Paths Statistics",
+      "Statistics of the selection",
     );
     // Exactly one path is selected, and the readout counts it in words
-    await expect(panel).toContainText(/1 selected paths?/);
+    await expect(panel).toContainText(/1 selected flights?/);
     expect(await panel.textContent()).not.toBe(globalText);
   });
 
@@ -224,12 +222,11 @@ test.describe("Filters and Statistics", () => {
 
     const pathId = await selectPathForReplay(page);
     const title = page.locator("#stats-rail-title");
-    await expect(title).toContainText("Selected Paths Statistics");
+    await expect(title).toContainText("Statistics of the selection");
 
     await togglePathSelection(page, pathId, 0);
 
-    await expect(title).toContainText("Flight Statistics");
-    await expect(title).not.toContainText("Selected Paths");
+    await expect(title).toHaveText("Statistics");
   });
 
   test("year filter updates stats panel content", async ({ page }) => {
@@ -269,9 +266,7 @@ test.describe("Filters and Statistics", () => {
 
     await aircraftSelect.selectOption("all");
     await waitForAircraftFilter(page, "all");
-    await expect(page.locator("#stats-rail-title")).toContainText(
-      "Flight Statistics",
-    );
+    await expect(page.locator("#stats-rail-title")).toHaveText("Statistics");
     await expect.poll(() => panel.textContent()).toBe(allText);
   });
 

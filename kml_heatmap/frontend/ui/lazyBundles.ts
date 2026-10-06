@@ -20,6 +20,7 @@ import {
   noticeSiteUpdate,
   wasSiteUpdated,
 } from "../services/featureLoader";
+import { TRY_AGAIN } from "../services/lazyImport";
 import { logError } from "../utils/logger";
 import { prefersReducedMotion } from "../utils/motion";
 import { dismissToast, showToast } from "../utils/toast";
@@ -32,15 +33,15 @@ import { whenIdle } from "../utils/whenIdle";
  * html-to-image is missing.
  */
 export const REPLAY_UNAVAILABLE_MESSAGE =
-  "Replay is unavailable: its code could not be loaded";
+  "Replay is unavailable: its code could not be loaded" + TRY_AGAIN;
 export const TOUR_UNAVAILABLE_MESSAGE =
-  "The hotspot tour is unavailable: its code could not be loaded";
+  "The hotspot tour is unavailable: its code could not be loaded" + TRY_AGAIN;
 export const WRAPPED_UNAVAILABLE_MESSAGE =
-  "Wrapped is unavailable: its code could not be loaded";
+  "Wrapped is unavailable: its code could not be loaded" + TRY_AGAIN;
 export const STATS_UNAVAILABLE_MESSAGE =
-  "The statistics are unavailable: their code could not be loaded";
+  "Statistics are unavailable: their code could not be loaded" + TRY_AGAIN;
 export const CROSS_SECTION_UNAVAILABLE_MESSAGE =
-  "The cross-section is unavailable: its code could not be loaded";
+  "The cross-section is unavailable: its code could not be loaded" + TRY_AGAIN;
 
 /** What a control starts in the feature bundle once it has arrived */
 export type FeatureToggle = keyof Pick<

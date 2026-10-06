@@ -3,6 +3,8 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
+  EXPORT_FAILED_MESSAGE,
+  EXPORT_UNAVAILABLE_MESSAGE,
   MAX_CANVAS_PIXELS,
   UIToggles,
   dataUrlToBlob,
@@ -345,7 +347,7 @@ describe("UIToggles export and share", () => {
       uiToggles.exportMap();
       await finishExport();
 
-      expect(toast()?.textContent).toBe("Export failed: tainted");
+      expect(toast()?.textContent).toBe(EXPORT_FAILED_MESSAGE);
       expect(el("map").contains(canvas)).toBe(true);
       expect(el("map").querySelector("img")).toBeNull();
     });
@@ -393,7 +395,7 @@ describe("UIToggles export and share", () => {
       await finishExport();
 
       expect(app.map!.getPixelRatio()).toBe(1);
-      expect(toast()?.textContent).toBe("Export failed: tainted");
+      expect(toast()?.textContent).toBe(EXPORT_FAILED_MESSAGE);
       expect(btn.getAttribute("aria-disabled")).not.toBe("true");
     });
 
@@ -406,7 +408,7 @@ describe("UIToggles export and share", () => {
       uiToggles.exportMap();
       await finishExport();
 
-      expect(toast()?.textContent).toBe("Export failed: context lost");
+      expect(toast()?.textContent).toBe(EXPORT_FAILED_MESSAGE);
       expect(toJpeg).not.toHaveBeenCalled();
       expect(el("map").contains(app.map!.getCanvas())).toBe(true);
     });
@@ -607,7 +609,7 @@ describe("UIToggles export and share", () => {
       uiToggles.exportMap();
       await finishExport();
 
-      expect(toast()?.textContent).toBe("Export unavailable");
+      expect(toast()?.textContent).toBe(EXPORT_UNAVAILABLE_MESSAGE);
       expect(toast()?.classList.contains("toast-error")).toBe(true);
       expect(btn.getAttribute("aria-disabled")).not.toBe("true");
       expect(btn.textContent).toBe("Export image");
@@ -621,7 +623,7 @@ describe("UIToggles export and share", () => {
       uiToggles.exportMap();
       await finishExport();
 
-      expect(toast()?.textContent).toBe("Export failed: Export failed");
+      expect(toast()?.textContent).toBe(EXPORT_FAILED_MESSAGE);
       expect(toast()?.classList.contains("toast-error")).toBe(true);
       expect(btn.getAttribute("aria-disabled")).not.toBe("true");
       expect(btn.textContent).toBe("Export image");

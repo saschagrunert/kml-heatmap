@@ -92,7 +92,7 @@ export function toMapCenter(center: {
 }
 
 /** Degrees wrapped into -180 to 180 */
-function wrapDegrees(degrees: number): number {
+export function wrapDegrees(degrees: number): number {
   return ((((degrees + 180) % 360) + 360) % 360) - 180;
 }
 

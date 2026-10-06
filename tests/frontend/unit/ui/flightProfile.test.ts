@@ -163,14 +163,14 @@ describe("flight profile", () => {
       expect(root.classList.contains("is-timed")).toBe(true);
       expect(document.body.classList.contains("profile-open")).toBe(true);
       const stats = text(root, ".profile-stats");
-      expect(stats).toContain("Highest 3,040 ft");
+      expect(stats).toContain("Highest 3,040 ft MSL");
       expect(stats).toContain("Lowest en route 800 ft AGL");
       // A length of time, not a clock: "2:16" read as hours and minutes
       expect(stats).toContain("Below 1,000 ft AGL 2 min");
       expect(text(root, ".profile-axis")).toBe("0:009:00");
       expect(
         root.querySelector(".profile-plot")!.getAttribute("aria-label"),
-      ).toBe("Altitude over time, 0:00 to 9:00, highest 3,040 ft");
+      ).toBe("Altitude over time, 0:00 to 9:00, highest 3,040 ft MSL");
       expect(root.querySelector(".profile-line")!.getAttribute("d")).toMatch(
         /^M0\.0 /,
       );
@@ -226,7 +226,7 @@ describe("flight profile", () => {
 
       app.currentData = createDataset([{ id: 7 }], segments);
 
-      expect(text(root, ".profile-stats")).toContain("Highest 4,000 ft");
+      expect(text(root, ".profile-stats")).toContain("Highest 4,000 ft MSL");
     });
 
     it("steps aside for Wrapped", () => {

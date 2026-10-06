@@ -6,6 +6,7 @@
  */
 import type { MapApp } from "../mapApp";
 import type { ToggleAction } from "../state/toggles";
+import { setUnavailable } from "../utils/buttonState";
 import { logError } from "../utils/logger";
 import { showToast } from "../utils/toast";
 import { focusStatsRail } from "./appChrome";
@@ -41,6 +42,42 @@ export const NEED_DATA: ReadonlySet<ActionName> = new Set<ActionName>([
  */
 export function flightsFailed(): boolean {
   return document.body.classList.contains("flights-failed");
+}
+
+/** Why the map could not start, once failStart said so */
+export function startFailure(): string | undefined {
+  return document.body.dataset["startFailure"];
+}
+
+/** Whether a press on a control is answered with the start failure */
+let pressesAnswered = false;
+
+/**
+ * The map could not start (reportInitFailure in mapApp.ts): every control
+ * is unavailable, and says why in the words of the notice on the map. A
+ * press says it too. The app's own listeners went with a map that never
+ * loaded (`destroy()` aborts them), so the page answers it, ahead of any
+ * that are left.
+ */
+export function failStart(message: string): void {
+  document.body.dataset["startFailure"] = message;
+  for (const control of document.querySelectorAll<HTMLElement>(
+    "[data-action]",
+  )) {
+    setUnavailable(control, true, message);
+  }
+  if (pressesAnswered) return;
+  pressesAnswered = true;
+  const answer = (event: Event): void => {
+    const failure = startFailure();
+    if (!failure) return;
+    if (!(event.target instanceof Element)) return;
+    if (!event.target.closest("[data-action]")) return;
+    event.stopPropagation();
+    showToast(failure);
+  };
+  document.addEventListener("click", answer, true);
+  document.addEventListener("change", answer, true);
 }
 
 /**
@@ -157,6 +194,12 @@ export function runAction(app: MapApp, action: ActionName, e?: Event): boolean {
   const handlers: Partial<Record<string, ActionHandler>> = actionHandlers(app);
   const fn = handlers[action];
   if (!fn) return false;
+  // A key or the phone's bar may still call this after a failed start
+  const failure = startFailure();
+  if (failure) {
+    showToast(failure);
+    return false;
+  }
   if (app.isInitializing && DEFERRED_WHILE_INITIALIZING.has(action)) {
     // The controls look ready and a click would do nothing without a word.
     // Not for a filter, whose change is applied once the load is over.

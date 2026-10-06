@@ -96,7 +96,11 @@ function createMockApp() {
     // actions that need data through the same check as the desktop controls
     isInitializing: false,
     canResetView(): boolean {
-      return !this.isInitializing && !this.isReset();
+      return this.resetViewReason() === null;
+    },
+    resetViewReason(): string | null {
+      if (this.isInitializing) return "Still loading the flights";
+      return this.isReset() ? "Nothing to reset" : null;
     },
   };
   // The same accessors as the app's, so the bar reads the store through them

@@ -9,12 +9,13 @@ import {
 } from "../utils/buttonState";
 import { domCache } from "../utils/domCache";
 import { loadFeatures } from "../services/featureLoader";
+import { TRY_AGAIN } from "../services/lazyImport";
 import { HEAT_SHOWN_STATE } from "../mapLayers";
 import { dismissToast, showToast } from "../utils/toast";
 
 /** Said when the imagery's code cannot be fetched and the switch goes off */
 export const SATELLITE_UNAVAILABLE_MESSAGE =
-  "Satellite imagery is unavailable: its code could not be loaded";
+  "Satellite imagery is unavailable: its code could not be loaded" + TRY_AGAIN;
 
 /** The keys the layers follow */
 const LAYER_KEYS: readonly (keyof StoreState)[] = [

@@ -94,6 +94,21 @@ export function setUnavailable(
 }
 
 /**
+ * setUnavailable for a control whose title, while it can act, is its
+ * aria-label: `reason` says why it cannot, null that it can
+ */
+export function setUnavailableFor(
+  control: HTMLElement,
+  reason: string | null,
+): void {
+  setUnavailable(
+    control,
+    reason !== null,
+    reason ?? control.getAttribute("aria-label") ?? "",
+  );
+}
+
+/**
  * Set the text of a control button without touching its icon.
  * A button that carries no label span gets one: assigning `textContent`
  * would drop every child, the injected `svg.icon` included.

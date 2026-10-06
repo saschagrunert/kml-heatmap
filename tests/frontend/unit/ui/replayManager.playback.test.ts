@@ -417,6 +417,26 @@ describe("ReplayManager playback", () => {
       expect(featuresOf(trail)).toHaveLength(2);
     });
 
+    it("empties the route and the trail the style brings back, once a replay closed while the WebGL context was lost", () => {
+      const { route, trail } = replaySources(mockApp);
+      const map = mockApp.map!;
+      replayManager.seekReplay("100");
+      vi.advanceTimersByTime(16);
+      expect(featuresOf(trail)).toHaveLength(2);
+      const getSource = map.getSource.getMockImplementation()!;
+      map.getSource.mockImplementation(() => undefined);
+      replayManager.toggleReplay();
+      expect(mockApp.replayActive).toBe(false);
+      map.getSource.mockImplementation(getSource);
+      expect(featuresOf(route)).toHaveLength(1);
+
+      map.emit("webglcontextrestored");
+      map.emit("style.load");
+
+      expect(featuresOf(route)).toEqual([]);
+      expect(featuresOf(trail)).toEqual([]);
+    });
+
     it("writes nothing to a map the app has let go of after a lost WebGL context", () => {
       const { route } = replaySources(mockApp);
       const map = mockApp.map!;
@@ -462,7 +482,7 @@ describe("ReplayManager playback", () => {
       replayManager.stopReplay();
 
       expect((el("replay-slider") as HTMLInputElement).value).toBe("0");
-      expect(el("replay-time-display").textContent).toBe("0:00 / 2:00");
+      expect(el("replay-time-display").textContent).toBe("0:00 / 4:00");
     });
   });
 

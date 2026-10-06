@@ -160,12 +160,14 @@ describe("htmlGenerators", () => {
       const html = generateAirportPopupHtml(params);
 
       expect(html).toContain('class="popup-container kh-popup-airport"');
+      // Focus lands on it, so it has a name a screen reader can say
+      expect(html).toContain('role="group"');
       expect(html).toContain('class="popup-header kh-popup-header-airport"');
       expect(html).toContain("Frankfurt EDDF");
       expect(html).toContain('href="https://www.google.com/maps?q=50.1,8.67"');
       expect(html).toContain('class="kh-popup-link"');
       expect(html).toContain(params.latDms);
-      expect(html).toContain('class="kh-popup-metric-label">Total Flights');
+      expect(html).toContain('class="kh-popup-metric-label">Flights shown');
       expect(html).toContain('class="popup-metric-value kh-popup-accent">20');
       expect(html).not.toContain("style=");
       expect(html).not.toContain("HOME");
@@ -260,7 +262,8 @@ describe("htmlGenerators", () => {
     it("uses default title and icon", () => {
       const html = generateSegmentPopupHtml(fullParams);
 
-      expect(html).toContain("Segment Data");
+      expect(html).toContain("On this flight");
+      expect(html).toContain(icon("aircraft", 20));
       // Drawn from the icon family rather than an emoji, which renders at a
       // different weight and baseline on every platform
       expect(html).toContain("<svg");
@@ -270,14 +273,14 @@ describe("htmlGenerators", () => {
     it("uses custom title and icon when provided", () => {
       const html = generateSegmentPopupHtml({
         ...fullParams,
-        title: "Current Position",
+        title: "Current position",
         icon: "aircraftTop",
       });
 
-      expect(html).toContain("Current Position");
+      expect(html).toContain("Current position");
       expect(html).toContain(icon("aircraftTop", 20));
-      expect(html).not.toContain("Segment Data");
-      expect(html).not.toContain(icon("airport", 20));
+      expect(html).not.toContain("On this flight");
+      expect(html).not.toContain(icon("aircraft", 20));
     });
 
     it("shows a sea-level altitude, and no groundspeed where there is none", () => {

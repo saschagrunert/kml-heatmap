@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
   CONTROL_COLUMNS,
+  ISOLATE_HINT,
   mapChromePadding,
   PathSelection,
 } from "../../../../kml_heatmap/frontend/ui/pathSelection";
@@ -49,6 +50,7 @@ describe("PathSelection", () => {
     vi.clearAllMocks();
     btn = document.createElement("button");
     btn.id = "isolate-btn";
+    btn.setAttribute("aria-label", "Isolate selected flights");
     document.body.appendChild(btn);
 
     chip = document.createElement("div");
@@ -283,11 +285,14 @@ describe("PathSelection", () => {
       expect(restyles()).toBe(1);
     });
 
-    it("does nothing when no paths are selected", () => {
+    it("says how to select when no paths are selected", () => {
       pathSelection.toggleIsolateSelection();
 
       expect(mockApp.isolateSelection).toBe(false);
       expect(rebuilds()).toBe(0);
+      expect(document.querySelector(".toast-notification")?.textContent).toBe(
+        ISOLATE_HINT,
+      );
     });
 
     it("frames the isolated flights, and leaves the view alone on the way out", () => {
@@ -908,7 +913,7 @@ describe("PathSelection", () => {
       mockApp.selectedPathIds.add(1);
       mockApp.store.notifyMutation("selectedPathIds");
       expect(btn.getAttribute("aria-disabled")).toBe("false");
-      expect(btn.title).toBe("Isolate selected paths");
+      expect(btn.title).toBe("Isolate selected flights");
 
       mockApp.isolateSelection = true;
       expect(btn.getAttribute("aria-disabled")).toBe("false");

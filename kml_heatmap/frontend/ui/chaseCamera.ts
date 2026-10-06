@@ -20,7 +20,11 @@ import {
   turnOf,
 } from "../utils/geometry";
 import { lngLatOfMercator, mercatorOf } from "../utils/mercator";
-import { mapSize, REPLAY_CAMERA_MOVE } from "../utils/mapHelpers";
+import {
+  hasLostContext,
+  mapSize,
+  REPLAY_CAMERA_MOVE,
+} from "../utils/mapHelpers";
 import {
   heightAtZoomFt,
   type GroundedHeight,
@@ -549,7 +553,9 @@ export class ChaseCamera {
     this.panelWatch?.disconnect();
     const elevation = map.getCenterElevation();
     map.setCenterClampedToGround(true);
-    if (map.getTerrain() || !elevation) return;
+    // A map without its WebGL context is not moved: the listeners of the
+    // move would ask it what it cannot answer (see hasLostContext)
+    if (hasLostContext(map) || map.getTerrain() || !elevation) return;
     const center = map.getCenter();
     const { world, distance } = this.scale(map.getZoom());
     const metresPerPx = ChaseCamera.metresPerPx(center.lat, world);

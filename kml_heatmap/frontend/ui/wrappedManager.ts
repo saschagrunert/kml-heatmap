@@ -531,7 +531,8 @@ export class WrappedManager {
     const year = this.app.selectedYear;
     const all = year === "all";
     const title = all ? "Your Flight History" : "Your Year in Flight";
-    const period = all ? "All Years" : year;
+    // In the words of the year select
+    const period = all ? "All years" : year;
     for (const [id, text] of [
       ["wrapped-title", title],
       ["wrapped-intro-heading", title],

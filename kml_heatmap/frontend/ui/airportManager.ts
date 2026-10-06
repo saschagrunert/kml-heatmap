@@ -21,7 +21,10 @@ import {
   MAP_SOURCES,
 } from "../utils/constants";
 import { ddToDms } from "../utils/geometry";
-import { generateAirportPopupHtml } from "../utils/htmlGenerators";
+import {
+  AIRPORT_POPUP_ID,
+  generateAirportPopupHtml,
+} from "../utils/htmlGenerators";
 import {
   cameraDistanceRatio,
   closeWhenBehindGlobe,
@@ -410,9 +413,11 @@ export class AirportManager {
 
   /** Tell assistive technology whether an airport's popup is open */
   private setExpanded(name: string, expanded: boolean): void {
-    this.app.airportMarkers[name]
-      ?.getElement()
-      .setAttribute("aria-expanded", String(expanded));
+    const element = this.app.airportMarkers[name]?.getElement();
+    if (!element) return;
+    element.setAttribute("aria-expanded", String(expanded));
+    if (expanded) element.setAttribute("aria-controls", AIRPORT_POPUP_ID);
+    else element.removeAttribute("aria-controls");
   }
 
   updateAirportOpacity(): void {

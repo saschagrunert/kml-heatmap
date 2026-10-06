@@ -26,6 +26,7 @@ import { MAP_MAX_ZOOM } from "../utils/constants";
 import { applyToggleButtonState } from "../utils/buttonState";
 import {
   focusModeControl,
+  focusWasIn,
   holdControls,
   REPLAY_HELD_CONTROL_IDS,
 } from "./heldControls";
@@ -35,7 +36,7 @@ import { isPageEscape } from "../utils/mapHelpers";
 import { prefersReducedMotion } from "../utils/motion";
 import { announceInRegion, announceStatus, showToast } from "../utils/toast";
 import { nameButton } from "./crossSectionElements";
-import { REPLAY_PANEL_HEIGHT_VAR } from "./replayManager";
+import { followPanelHeight } from "./replayManager";
 import { restingPitch } from "./replayState";
 import { mapChromePadding } from "./pathSelection";
 import { REPLAY_ALL_SPEED, ReplayAllPlayer } from "./replayAllPlayer";
@@ -134,6 +135,8 @@ export class ReplayAllControls {
   private stopWatchingUser: (() => void) | null = null;
   /** Gives the held controls back as they were (see holdControls) */
   private release: (() => void) | null = null;
+  /** Ends followPanelHeight of the open panel */
+  private unfollowPanel: (() => void) | null = null;
 
   constructor(app: MapApp) {
     this.app = app;
@@ -212,10 +215,8 @@ export class ReplayAllControls {
     this.sync();
     // The toasts stack above the panel (see features.css), measured with
     // its clock, which on a phone takes a row of its own
-    document.body.style.setProperty(
-      REPLAY_PANEL_HEIGHT_VAR,
-      panel.offsetHeight + "px",
-    );
+    this.unfollowPanel?.();
+    this.unfollowPanel = followPanelHeight(panel, this.app.signal);
     const button = domCache.get(REPLAY_ALL_BUTTON_ID);
     if (button) {
       setControlIcon(button, "stop");
@@ -274,11 +275,13 @@ export class ReplayAllControls {
   close(): void {
     if (!this.open) return;
     this.open = false;
+    const hadFocus = focusWasIn(this.panel);
     this.stopWatchingUser?.();
     this.stopWatchingUser = null;
     this.player.stop();
     if (this.panel) this.panel.hidden = true;
-    document.body.style.removeProperty(REPLAY_PANEL_HEIGHT_VAR);
+    this.unfollowPanel?.();
+    this.unfollowPanel = null;
     document.body.classList.remove("replay-all-active");
     const button = domCache.get(REPLAY_ALL_BUTTON_ID);
     if (button) {
@@ -305,7 +308,7 @@ export class ReplayAllControls {
         state.layingBack = null;
       });
     }
-    focusModeControl(this.app, REPLAY_ALL_BUTTON_ID);
+    if (hadFocus) focusModeControl(this.app, REPLAY_ALL_BUTTON_ID);
     announceStatus("Replay of all flights closed");
   }
 

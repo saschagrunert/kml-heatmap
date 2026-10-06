@@ -132,6 +132,8 @@ describe("Wrapped's intro", () => {
     expect(modal().classList.contains("is-intro")).toBe(true);
     expect(mapPanel().classList.contains("is-dark")).toBe(true);
     expect(skipButton().hidden).toBe(false);
+    // Out of the tab order under the map as well, side by side too
+    expect(column().hasAttribute("inert")).toBe(true);
     expect(el("wrapped-intro-heading").textContent).toBe(
       el("wrapped-title").textContent,
     );
@@ -192,6 +194,7 @@ describe("Wrapped's intro", () => {
     expect(modal().classList.contains("is-intro")).toBe(false);
     expect(modal().classList.contains("is-settling")).toBe(true);
     expect(skipButton().hidden).toBe(true);
+    expect(column().hasAttribute("inert")).toBe(false);
     expect(map().resize.mock.calls.length).toBe(measured);
     // Onto the flat heatmap and the projection of before as it sets off,
     // which the camera settles in: the overview a skip shows, and a

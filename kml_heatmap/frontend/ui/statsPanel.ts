@@ -35,8 +35,8 @@ export function setStatsTitle(isSelection: boolean): void {
   );
   if (textEl) {
     textEl.textContent = isSelection
-      ? "Selected Paths Statistics"
-      : "Flight Statistics";
+      ? "Statistics of the selection"
+      : "Statistics";
   }
 }
 
