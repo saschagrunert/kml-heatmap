@@ -7,6 +7,7 @@ import type {
   PathInfo,
   PathSegment,
   KMLDataset,
+  Metadata,
 } from "../../kml_heatmap/frontend/types";
 import { datasetIndex } from "../../kml_heatmap/frontend/calculations/datasetIndex";
 import { ReplayState } from "../../kml_heatmap/frontend/ui/replayState";
@@ -105,6 +106,7 @@ interface MockManagers {
     dismissFailures: Mock;
     cachedData: Mock;
     failureNote: ((message: string) => void) | null;
+    onMetadata: ((metadata: Metadata) => void) | null;
     heatRequests: number;
   };
   layerManager: {
@@ -121,8 +123,11 @@ interface MockManagers {
     updateAircraftDropdown: Mock;
     filterByYear: Mock;
     filterByAircraft: Mock;
-    retryLoad: Mock;
+    pickYear: Mock;
+    loadShownYear: Mock;
     cancelPending: Mock;
+    loading: boolean;
+    onLoadChange: (() => void) | null;
   };
   statsManager: {
     updateStatsPanel: Mock;
@@ -304,6 +309,7 @@ function createMockManagers(): MockManagers {
       dismissFailures: vi.fn(),
       cachedData: vi.fn(() => undefined),
       failureNote: null,
+      onMetadata: null,
       heatRequests: 0,
     },
     layerManager: {
@@ -320,8 +326,11 @@ function createMockManagers(): MockManagers {
       updateAircraftDropdown: vi.fn(),
       filterByYear: vi.fn().mockResolvedValue(undefined),
       filterByAircraft: vi.fn().mockResolvedValue(undefined),
-      retryLoad: vi.fn().mockResolvedValue(true),
+      pickYear: vi.fn(),
+      loadShownYear: vi.fn().mockResolvedValue(true),
       cancelPending: vi.fn(),
+      loading: false,
+      onLoadChange: null,
     },
     statsManager: {
       updateStatsPanel: vi.fn(),

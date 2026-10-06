@@ -241,6 +241,7 @@ def _windowed_groundspeed_before_prefix_sums(current, timed):
     return None if speed > MAX_GROUNDSPEED_KNOTS else speed
 
 
+@pytest.mark.repo_data
 @pytest.mark.skipif(not DATA_DIR.is_dir(), reason="needs the data/ flights")
 @pytest.mark.parametrize(
     "name", ["1_DEAGJ_DA20.kml", "41_DELGD_C182.kml", "100_DEAGJ_DA20.kml"]

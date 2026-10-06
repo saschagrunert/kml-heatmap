@@ -1,8 +1,10 @@
 """Per-path export helpers: path info entries and segment rows."""
 
+from functools import lru_cache
 from itertools import pairwise
 from typing import TYPE_CHECKING
 
+from .airport_lookup import airport_icao_code
 from .airports import extract_airport_name, route_airports
 from .constants import ALTITUDE_GAIN_HYSTERESIS_FT, METERS_TO_FEET
 from .date_tokens import strip_dates
@@ -19,7 +21,7 @@ from .segment_codec import ALTITUDE_STEP
 from .types import COORDINATE_DECIMALS
 
 if TYPE_CHECKING:
-    from collections.abc import Collection, Sequence
+    from collections.abc import Sequence
 
     from .landings import FlightLandings
     from .types import FlightPath, PathInfo, PathMetadata, SegmentRow
@@ -76,12 +78,36 @@ def altitude_gain_m(altitudes_m: Sequence[float]) -> float:
     return gain
 
 
+@lru_cache(maxsize=4)
+def _markers_by_code(airport_names: frozenset[str]) -> dict[str, str]:
+    """The name of the marker of every ICAO code among ``airport_names``."""
+    markers: dict[str, str] = {}
+    for name in sorted(airport_names):
+        code = airport_icao_code(name)
+        if code:
+            markers.setdefault(code, name)
+    return markers
+
+
+def _marker_name(name: str | None, airport_names: frozenset[str]) -> str | None:
+    """The marker of an end of a path, None when it has none.
+
+    ``airports.deduplicate_airports`` merges the names of one ICAO code into
+    one marker under the first name ("EDZZ local flight"), and the end of
+    another flight ("EDZZ" of "EDZZ - EDDF") is that marker as well.
+    """
+    if name is None or name in airport_names:
+        return name
+    code = airport_icao_code(name)
+    return _markers_by_code(airport_names).get(code) if code else None
+
+
 def build_path_info(
     path: FlightPath,
     metadata: PathMetadata,
     path_id: int,
     year: int,
-    airport_names: Collection[str] | None = None,
+    airport_names: frozenset[str] | None = None,
     landings: FlightLandings | None = None,
 ) -> PathInfo:
     """Build the path info entry of an exported path.
@@ -98,8 +124,9 @@ def build_path_info(
     count as an airport nobody can see. The marker rules are those of
     ``airports.deduplicate_airports`` and ``airports.extract_airport_name``:
     a name holding an ICAO code, or an airport of a route of more than one
-    word, at a real start or landing. A name that is no route ("EDDS" for a
-    local flight) is the start of the path when it is one of the markers,
+    word, at a real start or landing; a name with the ICAO code of a marker
+    is that marker. A name that is no route ("EDDS" for a local flight) is
+    the start of the path when it is one of the markers,
     since ``airports.deduplicate_airports`` puts the start of every path on
     the map under its name. None keeps every route name (for callers
     without airports) and no other.
@@ -114,8 +141,8 @@ def build_path_info(
             # The marker of a single airport, named as export_writers names
             # it (route_airports found no route in the name)
             start_airport = extract_airport_name(metadata.get("airport_name", ""))
-        start_airport = start_airport if start_airport in airport_names else None
-        end_airport = end_airport if end_airport in airport_names else None
+        start_airport = _marker_name(start_airport, airport_names)
+        end_airport = _marker_name(end_airport, airport_names)
 
     info: PathInfo = {"id": path_id, "year": year}
 

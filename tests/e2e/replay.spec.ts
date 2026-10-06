@@ -151,6 +151,9 @@ test.describe("Replay", () => {
       () => window.mapApp!.replayState.maxTime,
     );
     const midpoint = Math.floor(maxTime / 2);
+    const drawnBefore = await page.evaluate(
+      () => window.mapApp!.replayState.lastDrawnIndex,
+    );
 
     await page.evaluate(
       (val) => window.mapApp!.replayManager!.seekReplay(String(val)),
@@ -165,9 +168,10 @@ test.describe("Replay", () => {
       "aria-valuetext",
       /^\d+(:\d{2}){1,2} of \d+(:\d{2}){1,2}$/,
     );
+    // Drawn up to the middle, past where it was
     expect(
       await page.evaluate(() => window.mapApp!.replayState.lastDrawnIndex),
-    ).toBeGreaterThanOrEqual(0);
+    ).toBeGreaterThan(Math.max(drawnBefore, 0));
   });
 
   test("changeReplaySpeed updates speed", async ({ page }) => {

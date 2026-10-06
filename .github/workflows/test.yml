@@ -14,8 +14,8 @@
 # release in it already passes, as the setuptools bump of ab4db1f did),
 # and the unit job would fail with it, on the lock check of
 # test_check_locks.py. The jobs that build and drive the site (unit,
-# packaging, e2e-sites and the e2e and visual jobs after it, container)
-# therefore skip Dependabot's own pushes to its pull requests
+# packaging, e2e-sites and the e2e and visual jobs after it) therefore
+# skip Dependabot's own pushes to its pull requests
 # from a dependabot/pip/ branch. `github.actor` is whoever pushed (a re-run
 # keeps it), so the push of the lock files runs all of them. zizmor calls
 # the actor spoofable: here it can only skip jobs, and only in a pull
@@ -159,13 +159,21 @@ jobs:
         run: python -m kml_heatmap data --output-dir docs
         env:
           KML_HEATMAP_REQUIRE_AIRPORT_DB: "1"
+      # In an order of its own every run, so a test that only passes after
+      # another one shows; the log names the seed to repeat it with
+      # (`npx vitest run --sequence.seed=<seed>`). pytest does the same
+      # through pytest-randomly (`pytest --randomly-seed=<seed>`).
       - name: Run JavaScript tests with coverage
-        run: npm run test:coverage
+        run: npm run test:coverage -- --sequence.shuffle
       # Also enforces fail_under from pyproject.toml. A bare --cov measures
       # the sources [tool.coverage.run] names, the scripts among them. The
       # slowest tests are listed, so one that grows shows in the log.
+      # A copy of the repository with flights of its own skips the tests
+      # written against these (see doc/hosting.md)
       - name: Run Python tests with coverage
         run: pytest -n auto --durations=15 --cov --cov-branch --cov-report=xml:coverage/coverage.xml --cov-report=term
+        env:
+          KML_HEATMAP_OWN_FLIGHTS: ${{ vars.KML_HEATMAP_OWN_FLIGHTS }}
       - name: Upload coverage to Codecov
         if: github.actor != 'dependabot[bot]'
         uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
@@ -175,12 +183,15 @@ jobs:
           fail_ci_if_error: false
           verbose: true
 
+  # The wheel and the container image, each installed and run as a user
+  # would. One job: either took about 35 s, most of it to set up a runner,
+  # and a job of its own waited for a runner of its own.
   packaging:
     # Not for Dependabot's Python bumps, see the top (also for the zizmor
     # finding this ignores)
     if: *skip-pip-bumps # zizmor: ignore[bot-conditions]
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 25
     steps:
       - *checkout
       - name: Set up Python and Node.js
@@ -228,6 +239,35 @@ jobs:
           "$RUNNER_TEMP/wheel-venv/bin/kml-heatmap" --version
           "$RUNNER_TEMP/wheel-venv/bin/kml-heatmap" --no-terrain smoke/input --output-dir smoke/site
           python "$GITHUB_WORKSPACE/scripts/smoke_site.py" check smoke
+      # The image itself is not published
+      - name: Build the container image
+        run: docker build -t kml-heatmap .
+      # Runs the image the way the Makefile does, the flights read-only, with
+      # the airport and runway fixtures in place of the OurAirports downloads
+      # (scripts/smoke_site.py, run with the runner's Python, which does not
+      # have the package).
+      # Without a network the elevation tiles cannot be fetched either, which
+      # the build has to get through with the ground left out, and the check
+      # finds the fixtures in the cache still as they were.
+      - name: Generate a site with the image
+        run: |
+          smoke="$RUNNER_TEMP/smoke-image"
+          python3 scripts/smoke_site.py prepare "$smoke"
+          docker run --rm --network none --user "$(id -u):$(id -g)" -e HOME=/tmp \
+            -v "$smoke/input:/data/input:ro" -v "$smoke/site:/data/site" -v "$smoke/cache:/cache" \
+            kml-heatmap input --output-dir site
+          python3 scripts/smoke_site.py check "$smoke"
+      # The same run as the image's own user (USER app, no home directory),
+      # which the --user flag above bypasses. The mounts are world-writable
+      # because that user exists only inside the image.
+      - name: Generate a site as the image user
+        run: |
+          smoke="$RUNNER_TEMP/smoke-image-app"
+          python3 scripts/smoke_site.py prepare --world-writable "$smoke"
+          docker run --rm --network none \
+            -v "$smoke/input:/data/input:ro" -v "$smoke/site:/data/site" -v "$smoke/cache:/cache" \
+            kml-heatmap input --output-dir site
+          python3 scripts/smoke_site.py check "$smoke"
 
   # The sites the e2e jobs test, built once for all of them. The published
   # site has a tile API key and a default build has none, so there are two:
@@ -247,11 +287,16 @@ jobs:
         with:
           python-lock: requirements.lock
       # tests/e2e/fixtures.ts answers the tile servers locally, so the dummy
-      # key never leaves the runner
+      # key never leaves the runner. Without the ground of a flight the
+      # deploy fails (the site job), so a pull request that adds one over a
+      # tile that cannot be fetched fails here already, and the e2e jobs
+      # test a site with all of its ground. The build without a key reads
+      # the same tiles from the cache this one filled.
       - name: Build the site with a dummy tile API key
         run: python -m kml_heatmap data --output-dir e2e-sites/dummy
         env:
           KML_HEATMAP_REQUIRE_AIRPORT_DB: "1"
+          KML_HEATMAP_REQUIRE_TERRAIN: "1"
           CARTO_API_KEY: e2e-carto
       - name: Build the site without a tile API key
         run: python -m kml_heatmap data --output-dir e2e-sites/none
@@ -296,15 +341,18 @@ jobs:
   e2e:
     name: e2e (${{ matrix.name }})
     needs: e2e-sites
-    # Not for Dependabot's Playwright bumps, see the top
+    # Not for Dependabot's Playwright bumps, see the top, and not in a copy
+    # of the repository with flights of its own: the specs expect these
+    # (KML_HEATMAP_OWN_FLIGHTS, see doc/hosting.md)
     if: >- # zizmor: ignore[bot-conditions]
       github.event_name != 'schedule' &&
+      vars.KML_HEATMAP_OWN_FLIGHTS != '1' &&
       !(github.event.pull_request.user.login == 'dependabot[bot]' &&
       github.actor == 'dependabot[bot]' &&
       startsWith(github.head_ref, 'dependabot/npm_and_yarn/playwright'))
     runs-on: ubuntu-24.04
     # The heavy tests allow up to five minutes each (the relief tests of
-    # orientation.spec.ts three), so their jobs get longer
+    # 3d-relief.spec.ts three), so their jobs get longer
     timeout-minutes: ${{ matrix.timeout-minutes || 15 }}
     container:
       image: mcr.microsoft.com/playwright:v1.63.0-noble@sha256:eff16c30e6f3f4af0a03fa4b706120d5e9b0891c344a27d64559aff5900a4a27
@@ -314,11 +362,11 @@ jobs:
       fail-fast: false
       # Every project runs against the published setup, with the dummy key.
       # Without a key only the requests for the base map change, so that
-      # variant (site: none) runs just the specs that make and check those
-      # requests, on the desktop, instead of the whole suite a second time.
-      # It has a job of its own: after the tests of the first desktop shard
-      # it made that the slowest job of the run by about a minute, more than
-      # the setup of a runner costs.
+      # variant (site: none) runs just the tests that make and check those
+      # requests, tagged @keys at the end of their titles, on the desktop,
+      # instead of the whole suite a second time. Its job needs the other
+      # site, so it is one of its own; with the tag it runs six tests, where
+      # the three specs it ran before took two to two and a half minutes.
       #
       # Software WebGL runs one browser per core of the 4-vCPU runner. The
       # desktop and mobile projects are split into three shards each and
@@ -327,7 +375,14 @@ jobs:
       # mobile shards the second needed about 315 s of tests against 150 to
       # 220 s of the first (the phone's state.spec.ts tests take 30 to 44 s
       # each), and the one webkit job ran its 114 tests for 6.7 minutes, the
-      # longest job of the run.
+      # longest job of the run. The desktop shards are weighted
+      # (PWTEST_SHARD_WEIGHTS, the share of the tests each shard gets, in
+      # file order; whole numbers, Playwright reads them with parseInt, so
+      # "0.85" would be 0 and leave a shard empty): the last one always drew
+      # the slow specs state,
+      # selection and wrapped-export, 955 s of tests against 681 s of the
+      # first. The variable is Playwright's own but not documented; should
+      # an update drop it, the shards split evenly again, as before.
       #
       # The tests tagged @heavy (HEAVY in tests/e2e/fixtures.ts) draw the 3D
       # view or turn the globe with the flights on it, which takes seconds per
@@ -339,22 +394,26 @@ jobs:
       # (failOnFlakyTests) and doubles an attempt of minutes: with it, a run
       # where they all time out would outlast the job and lose its report.
       # The relief tests among them still run one after the other in one
-      # worker (orientation.spec.ts). The other jobs of the desktop and
-      # webkit-desktop projects leave them out. A tag that matches nothing
-      # leaves the heavy jobs with no tests, which fails them.
+      # worker (3d-relief.spec.ts, which sorts first so that worker starts
+      # them at once). The other jobs of the desktop and webkit-desktop
+      # projects leave them out. A tag that matches nothing leaves the heavy
+      # jobs with no tests, which fails them.
       matrix:
         include:
           - name: desktop-1
             project: desktop
             shard: 1/3
+            shard-weights: &desktop-weights "24:20:17"
             grep-invert: "@heavy"
           - name: desktop-2
             project: desktop
             shard: 2/3
+            shard-weights: *desktop-weights
             grep-invert: "@heavy"
           - name: desktop-3
             project: desktop
             shard: 3/3
+            shard-weights: *desktop-weights
             grep-invert: "@heavy"
           - name: desktop-heavy
             project: desktop
@@ -365,7 +424,7 @@ jobs:
           - name: desktop-no-key
             project: desktop
             site: none
-            specs: base-style.spec.ts error-free.spec.ts layers.spec.ts
+            grep: "@keys"
           - name: mobile-1
             project: mobile
             shard: 1/3
@@ -420,12 +479,12 @@ jobs:
           E2E_API_KEYS: ${{ matrix.site || 'dummy' }}
           PROJECT: ${{ matrix.project }}
           SHARD: ${{ matrix.shard }}
+          PWTEST_SHARD_WEIGHTS: ${{ matrix.shard-weights }}
           GREP: ${{ matrix.grep }}
           GREP_INVERT: ${{ matrix.grep-invert }}
           WORKERS: ${{ matrix.workers }}
           RETRIES: ${{ matrix.retries }}
           DEBUG: ${{ matrix.debug }}
-          SPECS: ${{ matrix.specs }}
         run: |
           args=(--project="$PROJECT")
           if [ -n "$SHARD" ]; then args+=(--shard="$SHARD"); fi
@@ -433,9 +492,6 @@ jobs:
           if [ -n "$GREP_INVERT" ]; then args+=(--grep-invert="$GREP_INVERT"); fi
           if [ -n "$WORKERS" ]; then args+=(--workers="$WORKERS"); fi
           if [ -n "$RETRIES" ]; then args+=(--retries="$RETRIES"); fi
-          # SPECS is a list of file names, split into words on purpose
-          # shellcheck disable=SC2206
-          if [ -n "$SPECS" ]; then args+=($SPECS); fi
           npx playwright test "${args[@]}"
       # Also when the job timed out or was cancelled: the traces of the tests
       # that failed until then are what shows why
@@ -582,43 +638,6 @@ jobs:
           docker run --rm -v "$PWD:/repo:ro" "$GITLEAKS_IMAGE" \
             git --redact --verbose --config /repo/.gitleaks.toml "${range[@]}" /repo
 
-  container:
-    # Not for Dependabot's Python bumps, see the top (also for the zizmor
-    # finding this ignores)
-    if: *skip-pip-bumps # zizmor: ignore[bot-conditions]
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
-    steps:
-      - *checkout
-      # The image itself is not published
-      - name: Build the container image
-        run: docker build -t kml-heatmap .
-      # Runs the image the way the Makefile does, with the airport and runway
-      # fixtures in place of the OurAirports downloads (scripts/smoke_site.py,
-      # run with the runner's Python, which does not have the package).
-      # Without a network the elevation tiles cannot be fetched either, which
-      # the build has to get through with the ground left out, and the check
-      # finds the fixtures in the cache still as they were.
-      - name: Generate a site with the image
-        run: |
-          smoke="$RUNNER_TEMP/smoke"
-          python3 scripts/smoke_site.py prepare "$smoke"
-          docker run --rm --network none --user "$(id -u):$(id -g)" -e HOME=/tmp \
-            -v "$smoke/input:/data/input" -v "$smoke/site:/data/site" -v "$smoke/cache:/cache" \
-            kml-heatmap input --output-dir site
-          python3 scripts/smoke_site.py check "$smoke"
-      # The same run as the image's own user (USER app, no home directory),
-      # which the --user flag above bypasses. The mounts are world-writable
-      # because that user exists only inside the image.
-      - name: Generate a site as the image user
-        run: |
-          smoke="$RUNNER_TEMP/smoke-app"
-          python3 scripts/smoke_site.py prepare --world-writable "$smoke"
-          docker run --rm --network none \
-            -v "$smoke/input:/data/input" -v "$smoke/site:/data/site" -v "$smoke/cache:/cache" \
-            kml-heatmap input --output-dir site
-          python3 scripts/smoke_site.py check "$smoke"
-
   # The one status a ruleset on main requires of a pull request and of each
   # entry of the merge queue: every test job a pull request runs, whatever
   # the matrix, so a job or a shard added later needs no change of the
@@ -626,8 +645,10 @@ jobs:
   # does not wait for it (below): a new advisory would hold back every pull
   # request, the flights among them. A job may be skipped only where its own
   # condition skips it on purpose, Dependabot's own pushes to a pip or a
-  # Playwright branch (see the top); anywhere else a skip, a failure or a
-  # cancellation fails this job. The weekly run has none of these jobs.
+  # Playwright branch (see the top), and the e2e jobs in a copy of the
+  # repository with flights of its own (KML_HEATMAP_OWN_FLIGHTS); anywhere
+  # else a skip, a failure or a cancellation fails this job. The weekly run
+  # has none of these jobs.
   checks:
     needs:
       - lint
@@ -636,7 +657,6 @@ jobs:
       - e2e-sites
       - e2e
       - visual
-      - container
     if: ${{ always() && github.event_name != 'schedule' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -650,8 +670,12 @@ jobs:
             github.actor == 'dependabot[bot]' &&
             (startsWith(github.head_ref, 'dependabot/pip/') ||
             startsWith(github.head_ref, 'dependabot/npm_and_yarn/playwright')) }}
+          OWN_FLIGHTS: ${{ vars.KML_HEATMAP_OWN_FLIGHTS }}
         run: |
           echo "$RESULTS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
+          if [ "$OWN_FLIGHTS" = 1 ]; then
+            RESULTS=$(echo "$RESULTS" | jq '.e2e.result |= if . == "skipped" then "success" else . end')
+          fi
           allowed='["success"]'
           if [ "$SKIPS_ALLOWED" = true ]; then allowed='["success", "skipped"]'; fi
           failed=$(echo "$RESULTS" | jq -r --argjson allowed "$allowed" \

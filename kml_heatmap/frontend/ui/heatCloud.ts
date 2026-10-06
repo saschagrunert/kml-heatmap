@@ -86,6 +86,7 @@ import { cloudExposure, cloudLook } from "./heatCloudShaders";
 import { followCloudReadout } from "./cloudReadout";
 import { replayAllTime } from "./replayAll";
 import { REPLAY_ALL_LAYER } from "./replayAllLayer";
+import { placeBelow } from "./glLayer";
 
 /**
  * The layer the cloud is drawn below: the first of the ribbons, above every
@@ -593,20 +594,7 @@ export function followHeatCloud(app: MapApp): void {
       if (on) map.removeLayer(HEAT_CLOUD_LAYER);
       return;
     }
-    const before = [REPLAY_ALL_LAYER, CLOUD_BEFORE].find((id) =>
-      map.getLayer(id),
-    );
-    if (!on) {
-      map.addLayer(layer, before);
-      return;
-    }
-    // A new base style keeps the layer, which is none it knows of, but
-    // not necessarily where it was
-    if (!before) return;
-    const order = map.getLayersOrder();
-    if (order.indexOf(HEAT_CLOUD_LAYER) !== order.indexOf(before) - 1) {
-      map.moveLayer(HEAT_CLOUD_LAYER, before);
-    }
+    placeBelow(map, layer, on, [REPLAY_ALL_LAYER, CLOUD_BEFORE]);
   };
 
   /** The 3D switch as the last sync found it */

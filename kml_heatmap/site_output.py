@@ -132,7 +132,7 @@ def _is_day_mtime(mtime: int) -> bool:
     return mtime % 86400 < _DAY_MTIME_STEPS
 
 
-def day_mtime(staged: Path, target: Path, day_start: int) -> int:
+def day_mtime(staged: Path, target: Path, day_start: int, keep: bool = True) -> int:
     """The modification time a published file gets without content times.
 
     Not the time of the build, which a server sends as Last-Modified and
@@ -145,12 +145,18 @@ def day_mtime(staged: Path, target: Path, day_start: int) -> int:
     browser's) never hands out the old file for it. A time that is no such
     day, as an older build or another tool left it, is replaced however
     the file changed: it may hold the time of day of a build.
+
+    ``keep`` false is for a file the flights decide (a year file, the page
+    of a flight, a flag): one dated to an earlier day gets the build day
+    even when it did not change, or it would keep the day of the build that
+    first published it, the day after its flight, for as long as the site
+    exists.
     """
     try:
         previous = int(target.stat().st_mtime)
     except OSError:
         return day_start
-    if not _is_day_mtime(previous):
+    if not _is_day_mtime(previous) or (not keep and previous < day_start):
         return day_start
     if target.stat().st_size == staged.stat().st_size and filecmp.cmp(
         staged, target, shallow=False
@@ -287,6 +293,7 @@ class SiteOutput:
         site_patterns: Iterable[str] = (),
         stable_mtimes: bool = False,
         build_day: int | None = None,
+        code_files: Iterable[str] = (),
     ) -> None:
         """Prepare the output of a site.
 
@@ -300,7 +307,10 @@ class SiteOutput:
         published file a modification time derived from its content (see
         ``content_mtime``); without it a file is dated to the build day,
         ``build_day`` (the Unix time of its midnight in UTC, today's by
-        default), see ``day_mtime``.
+        default), see ``day_mtime``. Only ``code_files``, paths in
+        ``output_dir`` as ``site_files`` names them that no flight decides
+        (bundles, stylesheets, icons), keep an earlier day when they did not
+        change; every other file gets the build day.
         """
         self.output_dir = Path(output_dir).resolve()
         self.data_dir = Path(data_dir).resolve()
@@ -316,6 +326,7 @@ class SiteOutput:
         self.site_patterns = tuple(site_patterns)
         self.stable_mtimes = stable_mtimes
         self.build_day = build_day
+        self.code_files = frozenset(code_files)
         self._cleanup = contextlib.ExitStack()
 
     def __enter__(self) -> Self:
@@ -367,7 +378,13 @@ class SiteOutput:
             mtime = (
                 content_mtime(stage / relative)
                 if self.stable_mtimes
-                else day_mtime(stage / relative, destination / relative, midnight)
+                else day_mtime(
+                    stage / relative,
+                    destination / relative,
+                    midnight,
+                    keep=stage == self.site_stage
+                    and relative.as_posix() in self.code_files,
+                )
             )
             os.utime(stage / relative, (mtime, mtime))
         for stage, destination, relative in moves:

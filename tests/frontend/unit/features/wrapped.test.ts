@@ -12,7 +12,6 @@ import {
 } from "../../../../kml_heatmap/frontend/features/wrapped";
 import * as countries from "../../../../kml_heatmap/frontend/features/countries";
 import { calculateFilteredStatistics } from "../../../../kml_heatmap/frontend/calculations/panelStats";
-import { filterPaths } from "../../../../kml_heatmap/frontend/calculations/statistics";
 import type {
   FunFact,
   PathInfo,
@@ -144,9 +143,7 @@ describe("wrapped feature", () => {
       ...(preFiltered && { preFiltered }),
     }),
   ) {
-    const paths =
-      preFiltered?.paths ?? filterPaths(pathInfo ?? [], String(year), aircraft);
-    return yearStatsOf(paths, models, filtered);
+    return yearStatsOf(models, filtered);
   }
 
   describe("calculateYearStats", () => {
@@ -689,9 +686,26 @@ describe("wrapped feature", () => {
 
       const facts = generateFunFacts(stats);
 
+      // One flight is no loyalty: "all 1 flight" read wrong
       expect(facts.find((f) => f.category === "aircraft")?.text.html).toBe(
-        "Loyal to <strong>D-&lt;b&gt;</strong>, all 1 flight in this C172 &amp; co!",
+        "<strong>D-&lt;b&gt;</strong> took you on 1 flight in this C172 &amp; co.",
       );
+    });
+
+    it("repeats no distance of a single flight", () => {
+      // Its average and its longest journey are the distance on the card
+      const stats: YearStats = { ...yearStats, total_flights: 1 };
+      const filtered = {
+        cruise_speed_knots: 110,
+        longest_flight_nm: yearStats.total_distance_nm,
+      };
+
+      const facts = generateFunFacts(stats, filtered);
+
+      const texts = facts.map((f) => f.text.html);
+      expect(texts).toContain("Cruising at <strong>110 kt</strong>.");
+      expect(texts.some((t) => t.includes("per trip"))).toBe(false);
+      expect(texts.some((t) => t.includes("longest journey"))).toBe(false);
     });
 
     it("generates country fact for 3+ countries", () => {

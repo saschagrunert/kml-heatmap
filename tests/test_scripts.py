@@ -309,7 +309,7 @@ class TestCheckSiteFiles:
             check_site_files.main(["site", "--package"])
 
     def test_lists_every_bundle_stylesheet_and_vendored_file(self):
-        # The list is written out for the container job, whose Python has
+        # The list is written out for the builds of the image, whose Python has
         # no package to import it from
         expected = {
             *(bundle.name for bundle in site_assets.BUNDLE_FILES),

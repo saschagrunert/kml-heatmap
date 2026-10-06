@@ -246,7 +246,7 @@ describe("the replay of all flights' layer", () => {
       gl.ONE,
       gl.ONE_MINUS_SRC_ALPHA,
     );
-    expect(gl.depthMask).toHaveBeenNthCalledWith(1, false);
+    expect(gl.depthMask).toHaveBeenCalledExactlyOnceWith(false);
     expect(layer.frames).toBe(1);
     expect(layer.time).toBe(42);
   });

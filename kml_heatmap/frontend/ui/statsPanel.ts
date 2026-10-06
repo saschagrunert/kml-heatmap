@@ -21,8 +21,11 @@ import { isPageEscape } from "../utils/mapHelpers";
 /** Panel element the statistics are rendered into */
 export const STATS_PANEL_ID = "stats-panel";
 
-/** What the panel shows while its code is on the way */
-const LOADING_HTML =
+/**
+ * What the panel shows while its code is on the way, and while the stats
+ * manager works out the statistics of a large filter
+ */
+export const LOADING_HTML =
   '<p class="kh-stats-loading" role="status">Loading statistics…</p>';
 
 /**
@@ -62,9 +65,9 @@ export function followStatsPanel(app: MapApp): void {
     void app
       .loadStats()
       .then((manager) => {
-        panel?.removeAttribute("aria-busy");
-        // The manager renders itself once it is there
+        // The manager renders itself once it is there, which ends the wait
         if (manager) return;
+        panel?.removeAttribute("aria-busy");
         panel?.replaceChildren();
         app.statsPanelVisible = false;
       })

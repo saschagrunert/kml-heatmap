@@ -63,6 +63,7 @@ __all__ = [
     "standardize_airport_names",
     "standardize_route",
     "use_airport_database",
+    "use_runway_database",
 ]
 
 # OurAirports database URL
@@ -514,8 +515,9 @@ class AirportDatabases:
     """The airport and runway databases of this process, loaded once.
 
     ``load`` and ``load_runways`` read them from the cache (downloading
-    them when needed) the first time and keep them; ``use`` takes a
-    database another process loaded (see ``workers.init_worker``), and
+    them when needed) the first time and keep them; ``use`` and
+    ``use_runways`` take those another process loaded (see
+    ``workers.init_worker``), and
     ``reset`` forgets both, so the next lookup loads them again. One holder
     per process (``databases``), shared by every thread under its lock.
     """
@@ -534,6 +536,10 @@ class AirportDatabases:
     def use(self, airports: dict[str, AirportRecord]) -> None:
         """Use a database another process loaded instead of loading it here."""
         self.airports = airports
+
+    def use_runways(self, runways: dict[str, tuple[RunwayEnd, ...]]) -> None:
+        """Use runways another process loaded instead of loading them here."""
+        self.runways = runways
 
     def reset(self) -> None:
         """Forget what was loaded; the next lookup reads the cache again."""
@@ -585,7 +591,13 @@ class AirportDatabases:
                     "The OurAirports database could not be loaded from "
                     f"{CACHE_FILE}, and {REQUIRE_DATABASE_ENV}=1 requires it"
                 )
-            logger.warning("Airport database unavailable - airport lookups will fail")
+            # The run goes on: what is lost is the names and positions the
+            # database gives the codes, nothing else
+            logger.warning(
+                "Airport database unavailable: the airports keep the names the "
+                "files give them (set %s=1 to stop instead)",
+                REQUIRE_DATABASE_ENV,
+            )
             self.airports = {}
             return self.airports
 
@@ -685,6 +697,11 @@ def load_runway_database() -> dict[str, tuple[RunwayEnd, ...]]:
 def use_airport_database(airports: dict[str, AirportRecord]) -> None:
     """Use a database another process loaded instead of loading it here."""
     databases.use(airports)
+
+
+def use_runway_database(runways: dict[str, tuple[RunwayEnd, ...]]) -> None:
+    """Use runways another process loaded instead of loading them here."""
+    databases.use_runways(runways)
 
 
 def database_fingerprint() -> str:

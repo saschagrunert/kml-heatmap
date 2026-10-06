@@ -279,12 +279,17 @@ export class ChaseCamera {
     this.onChange?.();
   };
 
+  /**
+   * `saved` is the camera to give back in the end, when it is not the
+   * map's: one a chase before is still easing back to
+   */
   constructor(
     private readonly map: MapLibreMap,
     private readonly onChange?: () => void,
+    saved?: SavedCamera,
   ) {
     const center = map.getCenter();
-    this.saved = {
+    this.saved = saved ?? {
       center: { lng: center.lng, lat: center.lat },
       zoom: map.getZoom(),
       bearing: map.getBearing(),

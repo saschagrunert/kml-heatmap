@@ -134,6 +134,7 @@ describe("flight profile", () => {
     lifetime = new AbortController();
     localStorage.clear();
     document.body.className = "";
+    document.body.removeAttribute("style");
     document.body.innerHTML = `
       <div id="selection-chip">
         <span id="selection-chip-count"></span>
@@ -302,7 +303,7 @@ describe("flight profile", () => {
       expect(followTime).toHaveBeenCalledWith(expect.any(Function));
     });
 
-    it("measures the replay panel again as it grows", () => {
+    it("leaves the replay panel's height to the panel", () => {
       let measure: () => void = () => {};
       vi.stubGlobal(
         "ResizeObserver",
@@ -318,12 +319,15 @@ describe("flight profile", () => {
       app.replayManager.toggleReplay();
       const panel = document.getElementById("replay-controls")!;
 
+      // The panel follows its own height, the strip in it included (see
+      // followPanelHeight): measured here as well, it forced a layout on
+      // every change of the selection
       Object.defineProperty(panel, "offsetHeight", { value: 150 });
       measure();
 
       expect(
         document.body.style.getPropertyValue(REPLAY_PANEL_HEIGHT_VAR),
-      ).toBe("150px");
+      ).toBe("");
     });
   });
 
@@ -480,9 +484,6 @@ describe("flight profile", () => {
           .classList.contains("has-profile"),
       ).toBe(true);
       expect(document.body.classList.contains("profile-open")).toBe(false);
-      expect(
-        document.body.style.getPropertyValue(REPLAY_PANEL_HEIGHT_VAR),
-      ).toBe("0px");
       expect(followTime).toHaveBeenCalledWith(expect.any(Function));
 
       // Dragging seeks on; the airplane marks the place, not a dot

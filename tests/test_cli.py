@@ -8,6 +8,7 @@ import subprocess
 import sys
 import zipfile
 from pathlib import Path
+from typing import TYPE_CHECKING, cast
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -15,15 +16,19 @@ import pytest
 from kml_heatmap import workers
 from kml_heatmap.aircraft import merge_aircraft_data
 from kml_heatmap.cli import format_listing, main
+from kml_heatmap.data_exporter import ExportSelection
 from kml_heatmap.exceptions import (
     ExportError,
     InvalidInputError,
     KMLHeatmapError,
     OutputRefusedError,
 )
-from kml_heatmap.listing import FlightListing
+from kml_heatmap.listing import FlightListing, _skip_reason
 from kml_heatmap.logger import logger, set_info_stream, set_log_level
 from kml_heatmap.terrain import TerrariumTiles
+
+if TYPE_CHECKING:
+    from kml_heatmap.types import PathMetadata
 
 MINIMAL_KML = "<?xml version='1.0'?><kml></kml>"
 
@@ -764,6 +769,13 @@ class TestList:
         tiles.assert_not_called()
         assert not (tmp_path / "docs").exists()
         assert sorted(path.name for path in flights.iterdir()) == before
+
+    def test_a_copy_in_another_year_is_an_exact_copy(self):
+        """drop_duplicate_paths compares the copies across the years."""
+        selection = ExportSelection({2025: [0]}, {0: b"same", 1: b"same"})
+        metadata = cast("PathMetadata", {"year": 2026})
+        reason = _skip_reason(1, True, selection, {0}, metadata)
+        assert reason == "an exact copy of another file's flight"
 
     def test_names_the_airports_without_a_code(self):
         text = format_listing([FlightListing("a.kml", 2025)], ["Anna", "Bob Smith"])

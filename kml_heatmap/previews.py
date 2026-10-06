@@ -51,7 +51,7 @@ from .png import PNG_SIGNATURE, chunk
 from .workers import WorkerPool, default_worker_count
 
 if TYPE_CHECKING:
-    from collections.abc import Collection, Iterable, Mapping, Sequence
+    from collections.abc import Iterable, Mapping, Sequence
 
     from .types import FlightPath, FlightPathGroup, PathInfo, PathMetadata
 
@@ -757,7 +757,7 @@ def write_previews(
     all_path_groups: FlightPathGroup,
     all_path_metadata: Sequence[PathMetadata],
     path_ids: Mapping[int, int],
-    airport_names: Collection[str] | None,
+    airport_names: frozenset[str] | None,
     site_url: str | None,
 ) -> None:
     """Write the pages of every year and flight, and their images.

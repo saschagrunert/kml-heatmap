@@ -3,9 +3,9 @@
 
 The packaging job of .github/workflows/test.yml installs the wheel and runs
 this twice: with --package against the package it installed, and against the
-site that package generates. The container job runs it against the sites the
-image generates. A file the wheel or the image leaves out fails all of them
-at once, from the one list below, rather than from one copy of it per job.
+site that package generates, and then against the sites the image generates.
+A file the wheel or the image leaves out fails all of them at once, from the
+one list below, rather than from one copy of it per build.
 
 --package has to run with the Python of the environment the wheel went into,
 outside the checkout: run as a script, only scripts/ is put in front of the
@@ -21,8 +21,8 @@ from pathlib import Path
 # page imports, by their paths in the package's static/ and in a generated
 # site alike: BUNDLE_FILES, CSS_FILES and VENDOR_FILES of
 # kml_heatmap/site_assets.py, which tests/test_scripts.py holds this list
-# to. Written out rather than imported, since the container job runs this
-# with a Python that does not have the package.
+# to. Written out rather than imported, since the builds of the image run
+# this with a Python that does not have the package.
 ASSETS = (
     "mapApp.bundle.js",
     "features.bundle.js",

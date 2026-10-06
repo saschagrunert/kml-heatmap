@@ -570,10 +570,16 @@ class FakeConnection:
 
 @pytest.fixture
 def connections(monkeypatch):
-    """A ``FakeConnection`` in place of the real one, counters reset."""
+    """A ``FakeConnection`` in place of the real one, counters reset.
+
+    Tests replace ``answer`` on the class; set here, monkeypatch puts the
+    default back afterwards, or the next test would get the last one's
+    answer and pass whatever the code does with a sound tile.
+    """
     FakeConnection.connections = 0
     FakeConnection.closed = 0
     FakeConnection.requests = []
+    monkeypatch.setattr(FakeConnection, "answer", FakeConnection.__dict__["answer"])
     monkeypatch.setattr(fetch_module, "HTTPSConnection", FakeConnection)
     return FakeConnection
 
@@ -1030,9 +1036,12 @@ class TestTerrariumTiles:
         assert list(tmp_path.iterdir()) == []
 
     def test_refuses_an_oversized_body(self, tmp_path, monkeypatch, connections):
+        """The default answer is a sound tile, refused only for its size."""
         monkeypatch.setattr(fetch_module, "MAX_TILE_BYTES", 10)
 
         assert TerrariumTiles(tmp_path).pixels({TileKey(10, 1, 1): [0]}) == {}
+        assert list(tmp_path.iterdir()) == []
+        assert len(connections.requests) == 1
 
     def test_an_oversized_body_leaves_the_next_tile_a_fresh_connection(
         self, tmp_path, monkeypatch, connections
@@ -1083,10 +1092,13 @@ class TestTerrariumTiles:
     def test_a_tile_that_cannot_be_stored_is_missing(
         self, tmp_path, monkeypatch, connections
     ):
-        monkeypatch.setattr(os, "replace", MagicMock(side_effect=OSError("full")))
+        replace = MagicMock(side_effect=OSError("full"))
+        monkeypatch.setattr(os, "replace", replace)
 
         assert TerrariumTiles(tmp_path).pixels({TileKey(10, 1, 1): [0]}) == {}
         assert list(tmp_path.iterdir()) == []
+        # The sound tile got as far as being stored
+        replace.assert_called_once()
 
     def test_kept_pixels_of_an_older_version_are_decoded_again(self, tmp_path):
         """Version 1 kept them with zlib; the header tells them apart."""

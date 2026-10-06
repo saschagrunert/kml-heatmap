@@ -11,12 +11,14 @@ import contextlib
 import gc
 import os
 import pickle
+import shlex
 import time
 from concurrent.futures import as_completed
 from concurrent.futures.process import BrokenProcessPool
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
+from urllib.parse import quote
 
 from .aircraft import merge_aircraft_data
 from .airport_lookup import load_airport_database, load_runway_database
@@ -46,6 +48,7 @@ from .parser_cache import prune_stale_cache_entries
 from .path_content import is_exportable_path
 from .previews import SITE_URL_ENV, normalize_site_url, write_previews
 from .site_assets import (
+    CODE_FILES,
     SITE_FILE_PATTERNS,
     SITE_FILES,
     available_country_flags,
@@ -197,6 +200,26 @@ def _file_bytes(kml_files: list[str]) -> int:
     return sum(parse_size(kml_file) for kml_file in kml_files)
 
 
+def _serve_hint(output_file: str | Path) -> str:
+    """How to view a site: it only works over HTTP, not opened from disk.
+
+    The command serves the site's directory, as usage.md has it: a plain
+    ``python -m http.server`` would serve the directory it runs in.
+    """
+    site = Path(output_file)
+    page = "" if site.name == "index.html" else quote(site.name)
+    return (
+        "View it over HTTP: python -m http.server 8000 --bind 127.0.0.1 -d "
+        f"{shlex.quote(str(site.parent))}, then open http://127.0.0.1:8000/{page}"
+    )
+
+
+def _some_names(files: Sequence[str]) -> str:
+    """The names of the first files of a list, and how many more there are."""
+    shown = ", ".join(Path(kml_file).name for kml_file in files[:3])
+    return f"{shown} and {len(files) - 3} more" if len(files) > 3 else shown
+
+
 def _parse_in_pool(
     uncached: Sequence[tuple[str, Path | None]],
     record: Callable[[ParsedFile], None],
@@ -208,19 +231,24 @@ def _parse_in_pool(
     ``uncached`` pairs each file with its parse cache entry (see
     ``_parse_with_error_handling``); ``parse`` is what a worker runs for
     each, ``_load_or_parse`` to look the cache up there. The workers get the
-    airport database the parent loaded (see ``workers.init_worker``).
+    airport and runway databases the parent loaded (see
+    ``workers.init_worker``).
     """
     kml_files = [kml_file for kml_file, _ in uncached]
     cache_paths = dict(uncached)
     level = logger.getEffectiveLevel()
     database = pickle.dumps(airports, protocol=pickle.HIGHEST_PROTOCOL)
+    # Loaded already, as the cache keys cover them (see _parse_kml_files)
+    runways = pickle.dumps(load_runway_database(), protocol=pickle.HIGHEST_PROTOCOL)
     done: set[str] = set()
     pool_broken = False
     # The files a worker ran out of memory on, parsed again one at a time
     out_of_memory: list[str] = []
     # A pool that cannot start parses here (see WorkerPool)
     with WorkerPool(
-        parse_worker_count(kml_files), "parsing the KML files", (level, database)
+        parse_worker_count(kml_files),
+        "parsing the KML files",
+        (level, database, runways),
     ) as executor:
         future_to_file = {
             executor.submit(parse, f, cache_paths[f]): f for f in kml_files
@@ -262,7 +290,7 @@ def _parse_in_pool(
         # Still in a worker: a file that is too large to parse must not take
         # the main process down with it, and one at a time names the file
         with WorkerPool(
-            1, "parsing the KML files one at a time", (level, database)
+            1, "parsing the KML files one at a time", (level, database, runways)
         ) as executor:
             for kml_file in remaining:
                 try:
@@ -421,24 +449,28 @@ def _parse_kml_files(
         parse_time / len(valid_files),
     )
 
-    if total_points == 0:
-        raise InvalidInputError("No coordinates found in any KML files!")
-    failed_count = sum(1 for parsed in results if parsed.point_count == 0)
-    if failed_count > 0:
+    # Every file failing is no case of its own: the line says how many, and
+    # names them, as for one of many ("No coordinates found in any KML
+    # files" read as if the files had parsed)
+    # A file without a result at all failed as well
+    points = {parsed.kml_file: parsed.point_count for parsed in results}
+    failed = [kml_file for kml_file in valid_files if not points.get(kml_file)]
+    if failed:
         raise InvalidInputError(
-            f"{failed_count} of {len(valid_files)} file(s) failed to parse "
-            "(see above); fix or remove them"
+            f"{len(failed)} of {len(valid_files)} file(s) failed to parse "
+            f"({_some_names(failed)}, see above); fix or remove them"
         )
-    without_flight = 0
+    without_flight = []
     for parsed in results:
         reason = no_flight_reason(parsed)
         if reason is not None:
             logger.error("%s: %s", parsed.kml_file, reason)
-            without_flight += 1
-    if without_flight > 0:
+            without_flight.append(parsed.kml_file)
+    if without_flight:
         raise InvalidInputError(
-            f"{without_flight} of {len(valid_files)} file(s) hold no flight to "
-            "export (see above); fix or remove them"
+            f"{len(without_flight)} of {len(valid_files)} file(s) hold no flight "
+            f"to export ({_some_names(without_flight)}, see above); fix or "
+            "remove them"
         )
 
     logger.info("\nTotal points: %d", total_points)
@@ -599,6 +631,7 @@ def _export_site(
         SITE_FILE_PATTERNS,
         stable_mtimes=os.environ.get(STABLE_MTIMES_ENV) == "1",
         build_day=day_start(built_at),
+        code_files=CODE_FILES,
     ) as site:
         result = export_all_data(
             all_path_groups,
@@ -753,13 +786,17 @@ def create_progressive_heatmap(
         else:
             valid_files.append(kml_file)
 
+    if len(valid_files) < len(kml_files):
+        valid = set(valid_files)
+        invalid = [kml_file for kml_file in kml_files if kml_file not in valid]
+        raise InvalidInputError(
+            f"{len(invalid)} of {len(kml_files)} input file(s) are not valid "
+            f"KML files ({_some_names(invalid)}, see above); fix or remove them"
+        )
+
+    # No input at all (a caller of the library; the CLI refuses it first)
     if not valid_files:
         raise InvalidInputError("No valid KML files to process!")
-    if len(valid_files) < len(kml_files):
-        raise InvalidInputError(
-            f"{len(kml_files) - len(valid_files)} of {len(kml_files)} input "
-            "file(s) are not valid KML files (see above); fix or remove them"
-        )
 
     logger.info("Parsing %d KML file(s)...", len(valid_files))
 
@@ -788,9 +825,7 @@ def create_progressive_heatmap(
         except (ValueError, RuntimeError, OSError, KMLHeatmapError) as e:
             raise ExportError(f"Export failed: {e}") from e
 
-        logger.info(
-            "  Serve %s over HTTP to view it (e.g. python -m http.server)", output_file
-        )
+        logger.info("  %s", _serve_hint(output_file))
         return result
     finally:
         # The parsed flights go back to the collector (see _collector_paused)

@@ -304,7 +304,7 @@ def _ids(paths_by_year, paths):
 
 def _drop(paths_by_year, paths, metadata):
     return drop_duplicate_paths(
-        paths_by_year, _contents(paths_by_year, paths), metadata
+        paths_by_year, _contents(paths_by_year, paths), metadata, paths
     )
 
 
@@ -472,6 +472,21 @@ class TestDropDuplicatePaths:
         paths = [_two_point_path(0), _two_point_path(0)]
         kept = _drop({2026: [0], 2025: [1]}, paths, [{}, {}])
         assert kept == {2026: [0]}
+
+    def test_the_copy_that_names_the_aircraft_is_kept(self):
+        """Not the first: "track.kml" and "100_DEFGH_C172.kml" of one flight."""
+        paths = [_two_point_path(0), _two_point_path(0)]
+        metadata = [{}, {"aircraft_registration": "D-EFGH"}]
+        assert _drop({2025: [0, 1]}, paths, metadata) == {2025: [1]}
+
+    def test_the_copy_with_timestamps_is_kept(self):
+        """A LineString holds the points of a track, but not their times."""
+        timed = _path(
+            (50.0, 8.0, 100.0, "2025-03-15T10:00:00Z"),
+            (50.1, 8.1, 200.0, "2025-03-15T10:01:00Z"),
+        )
+        paths = [_two_point_path(0), timed]
+        assert _drop({2025: [0, 1]}, paths, [{}, {}]) == {2025: [1]}
 
     def test_paths_that_are_not_exported_are_left_alone(self):
         paths = [_path((52.0, 10.0, 1.0)), _path((52.0, 10.0, 1.0)), _two_point_path(0)]
@@ -984,13 +999,13 @@ class TestSiteOutput:
     def test_files_are_dated_to_the_build_day_by_default(self, tmp_path):
         """Not to the time of the build, which Last-Modified would publish."""
         out = tmp_path / "out"
-        before = time.time()
+        # Either day of a build that runs across midnight UTC
+        days = {day_start()}
         _publish_site(out)
-        midnight = day_start()
-        assert midnight <= before < midnight + 86400
-        assert {path.stat().st_mtime for path in out.rglob("*") if path.is_file()} == {
-            midnight
-        }
+        days.add(day_start())
+        mtimes = {path.stat().st_mtime for path in out.rglob("*") if path.is_file()}
+        assert len(mtimes) == 1
+        assert mtimes <= days
 
     def test_a_given_build_day(self, tmp_path):
         out = tmp_path / "out"
@@ -1032,6 +1047,32 @@ class TestSiteOutput:
             (site.site_stage / "index.html").write_text("three")
             site.publish([2025])
         assert (out / "index.html").stat().st_mtime == 1735776000
+
+    def test_only_code_keeps_an_earlier_day(self, tmp_path):
+        """A file the flights decide gets the build day, changed or not.
+
+        Kept, a flight's page would carry the day of the build that first
+        published it, the day after the flight, for as long as it exists.
+        """
+        out = tmp_path / "out"
+
+        def publish(day):
+            with SiteOutput(
+                out, out / "data", ("app.js",), build_day=day, code_files=("app.js",)
+            ) as site:
+                _stage_site(site, version="same")
+                (site.site_stage / "app.js").write_text("code")
+                site.publish([2025])
+            return {
+                path.relative_to(out).as_posix(): path.stat().st_mtime
+                for path in out.rglob("*")
+                if path.is_file()
+            }
+
+        publish(1735689600)
+        later = publish(1735776000)
+        assert later.pop("app.js") == 1735689600
+        assert set(later.values()) == {1735776000}
 
     def test_a_time_of_day_left_by_an_older_build_goes(self, tmp_path):
         """Even for a file the build did not change: it may date a flight."""

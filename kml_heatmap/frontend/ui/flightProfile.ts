@@ -52,7 +52,6 @@ import type { Coordinate } from "../utils/geometry";
 import { setControlIcon } from "../utils/icons";
 import { toLngLat } from "../utils/mapHelpers";
 import { showToast } from "../utils/toast";
-import { REPLAY_PANEL_HEIGHT_VAR } from "./replayManager";
 import { crossSectionOpen, followCrossSection } from "./crossSection";
 import { heldReason } from "./heldControls";
 import { element, shape } from "./crossSectionElements";
@@ -336,14 +335,10 @@ export function followFlightProfile(app: MapApp): HTMLElement {
     toggle.setAttribute("aria-expanded", String(!collapsed));
     toggle.title = `${collapsed ? "Show" : "Hide"} the altitude profile`;
     document.body.classList.toggle("profile-open", shown && !replay);
-    const panel = domCache.get("replay-controls");
-    if (panel && replay) {
-      panel.classList.toggle("has-profile", shown);
-      // The panel measured itself as it opened, before the strip moved in
-      document.body.style.setProperty(
-        REPLAY_PANEL_HEIGHT_VAR,
-        `${panel.offsetHeight}px`,
-      );
+    // The panel follows its own height, the strip's in it included (see
+    // followPanelHeight)
+    if (replay) {
+      domCache.get("replay-controls")?.classList.toggle("has-profile", shown);
     }
     if (!shown) leave();
   };
@@ -533,9 +528,6 @@ export function followFlightProfile(app: MapApp): HTMLElement {
               `${height}px`,
             );
           }
-          // In the replay panel the readout and a narrower window change
-          // the panel's height with the strip's
-          if (replaying()) sync();
         });
   resized?.observe(root);
 

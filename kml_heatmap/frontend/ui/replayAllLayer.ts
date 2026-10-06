@@ -292,8 +292,6 @@ export class ReplayAllLayer implements CustomLayerInterface {
         gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, flights.count - 1);
       }
     }
-    gl.bindVertexArray(null);
-    gl.depthMask(true);
     this.frames++;
     this.time = style.time;
   }

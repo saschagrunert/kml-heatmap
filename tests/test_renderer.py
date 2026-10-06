@@ -42,6 +42,7 @@ from kml_heatmap.renderer import (
     _map_extent,
     _parse_kml_files,
     _parse_with_error_handling,
+    _serve_hint,
     create_progressive_heatmap,
 )
 from kml_heatmap.site_output import STABLE_MTIMES_ENV, STAGING_PREFIX
@@ -368,7 +369,7 @@ class TestParseWithoutAPool:
                 "kml_heatmap.renderer._parse_with_error_handling",
                 side_effect=RuntimeError("unexpected"),
             ),
-            pytest.raises(KMLHeatmapError, match="No coordinates"),
+            pytest.raises(KMLHeatmapError, match=r"1 of 1 file\(s\) failed to parse"),
         ):
             _parse_kml_files([kml_file])
         assert "Unexpected error processing" in capsys.readouterr().err
@@ -488,7 +489,7 @@ class TestParseKmlFiles:
     def test_no_coordinates_raises(self, tmp_path):
         empty = tmp_path / "empty.kml"
         empty.write_text("<kml><Document/></kml>")
-        with pytest.raises(KMLHeatmapError, match="No coordinates"):
+        with pytest.raises(KMLHeatmapError, match=r"1 of 1 file\(s\) failed to parse"):
             _parse_kml_files([str(empty)])
 
     def test_a_file_without_a_flight_fails_the_run(self, tmp_path, capsys):
@@ -608,7 +609,7 @@ class TestParseKmlFiles:
                 "kml_heatmap.workers.ProcessPoolExecutor",
                 _FakeExecutor(RuntimeError("unexpected")),
             ),
-            pytest.raises(KMLHeatmapError, match="No coordinates"),
+            pytest.raises(KMLHeatmapError, match=r"1 of 1 file\(s\) failed to parse"),
         ):
             _parse_kml_files([kml_file])
         assert "Unexpected error processing" in capsys.readouterr().err
@@ -1099,16 +1100,50 @@ class TestCreateProgressiveHeatmap:
 
     @pytest.mark.usefixtures("bundle")
     def test_no_coordinates(self, tmp_path):
+        """The line usage.md documents, naming the file, as for one of many."""
         input_dir = tmp_path / "input"
         input_dir.mkdir()
         (input_dir / "empty.kml").write_text("<kml><Document/></kml>")
         out = tmp_path / "out"
-        with pytest.raises(KMLHeatmapError):
+        with pytest.raises(KMLHeatmapError) as failure:
             create_progressive_heatmap(
                 [str(input_dir / "empty.kml")],
                 str(out / "index.html"),
                 str(out / "data"),
             )
+        assert str(failure.value) == (
+            "1 of 1 file(s) failed to parse (empty.kml, see above); fix or remove them"
+        )
+
+    @pytest.mark.usefixtures("bundle")
+    def test_no_input_at_all(self, tmp_path, monkeypatch):
+        """A caller of the library with no files: refused before any parse."""
+        monkeypatch.setattr(
+            renderer_module,
+            "_parse_kml_files",
+            lambda *args, **kwargs: pytest.fail("parsed nothing"),
+        )
+        with pytest.raises(InvalidInputError, match="No valid KML files"):
+            create_progressive_heatmap(
+                [], str(tmp_path / "o" / "index.html"), str(tmp_path / "o" / "data")
+            )
+
+    @pytest.mark.usefixtures("bundle")
+    def test_every_file_invalid(self, tmp_path):
+        """Not "No valid KML files to process!", which usage.md never named."""
+        files = []
+        for index in range(5):
+            empty = tmp_path / f"{index}.kml"
+            empty.write_text("")
+            files.append(str(empty))
+        with pytest.raises(InvalidInputError) as failure:
+            create_progressive_heatmap(
+                files, str(tmp_path / "o" / "index.html"), str(tmp_path / "o" / "data")
+            )
+        assert str(failure.value) == (
+            "5 of 5 input file(s) are not valid KML files (0.kml, 1.kml, 2.kml "
+            "and 2 more, see above); fix or remove them"
+        )
 
     @pytest.mark.usefixtures("bundle")
     def test_no_path_with_a_year_is_an_error(self, tmp_path, capsys):
@@ -1631,6 +1666,21 @@ class TestLinkPreviews:
         assert not out.exists()
 
 
+class TestServeHint:
+    def test_serves_the_directory_of_the_site(self):
+        """Not the directory it runs in, as python -m http.server alone does."""
+        assert _serve_hint("docs/index.html") == (
+            "View it over HTTP: python -m http.server 8000 --bind 127.0.0.1 -d "
+            "docs, then open http://127.0.0.1:8000/"
+        )
+
+    def test_another_page_and_a_directory_with_a_space(self):
+        assert _serve_hint("my site/map.html") == (
+            "View it over HTTP: python -m http.server 8000 --bind 127.0.0.1 -d "
+            "'my site', then open http://127.0.0.1:8000/map.html"
+        )
+
+
 class TestListFlights:
     def test_every_reason_a_flight_is_left_out(self, tmp_path):
         files = [
@@ -1713,7 +1763,12 @@ class TestListFlights:
     def test_a_second_recording_of_a_flight(self, tmp_path, monkeypatch):
         files = [
             _write_kml(tmp_path / "1_DEAGJ_DA20.kml"),
-            _write_kml(tmp_path / "2_DEAGJ_DA20.kml", year=2026),
+            # Not an exact copy, which the list names as one
+            _write_kml(
+                tmp_path / "2_DEAGJ_DA20.kml",
+                year=2026,
+                template=TRACK_KML.replace("12.5 51.4", "12.6 51.4"),
+            ),
         ]
         # Found by where it was when; here the second is taken for one
         monkeypatch.setattr(

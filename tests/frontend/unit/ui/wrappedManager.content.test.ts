@@ -157,18 +157,38 @@ describe("WrappedManager content", () => {
   it("names the airspace new in a year once the page holds the years before", () => {
     siteData.metadata = { available_years: [2023, 2024] } as Metadata;
     wrappedManager.showWrapped();
+    vi.runOnlyPendingTimers();
     // Not known: the page has not loaded 2023
     expect(el("wrapped-fun-facts").textContent).not.toContain("new airspace");
     expect(mockApp.dataManager.cachedData).toHaveBeenCalledWith("2023");
     wrappedManager.closeWrapped();
 
-    // 2023 flew nowhere, so all of 2024 is new
+    // 2023 flew nowhere, so all of 2024 is new. Counted once the dialog is
+    // open: the first count is longer than the statistics it waits for.
     mockApp.dataManager.cachedData.mockReturnValue(createDataset([], []));
     wrappedManager.showWrapped();
+    expect(el("wrapped-fun-facts").textContent).not.toContain("new airspace");
+    vi.runOnlyPendingTimers();
+    const fact = /[\d,]+ km² of new airspace in 2024/;
+    expect(el("wrapped-fun-facts").textContent).toMatch(fact);
+    wrappedManager.closeWrapped();
 
-    expect(el("wrapped-fun-facts").textContent).toMatch(
-      /[\d,]+ km² of new airspace in 2024/,
-    );
+    // Counted once: a reopening has it at once
+    mockApp.dataManager.cachedData.mockClear();
+    wrappedManager.showWrapped();
+    expect(el("wrapped-fun-facts").textContent).toMatch(fact);
+    expect(mockApp.dataManager.cachedData).not.toHaveBeenCalled();
+  });
+
+  it("adds no new airspace to cards it was not counted for", () => {
+    siteData.metadata = { available_years: [2023, 2024] } as Metadata;
+    mockApp.dataManager.cachedData.mockReturnValue(createDataset([], []));
+    wrappedManager.showWrapped();
+    wrappedManager.closeWrapped();
+
+    vi.runOnlyPendingTimers();
+
+    expect(mockApp.dataManager.cachedData).not.toHaveBeenCalled();
   });
 
   it("lists the fleet busiest first with the model from the metadata", () => {

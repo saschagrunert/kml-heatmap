@@ -112,11 +112,11 @@ def main() -> int:
         print(f"Error: {DATA_DIR} does not exist. Are you running inside Docker?")
         return 1
     os.chdir(DATA_DIR)
-    print(f"Starting HTTP server on {BIND_HOST}:{PORT}...")
-    print(f"Serving files from: {os.getcwd()}")
-    print(f"Open {OPEN_URL} in your browser", flush=True)
-
     with Server((BIND_HOST, PORT), CORSHTTPRequestHandler) as httpd:
+        # The port bound, which PORT=0 leaves to the system (the tests)
+        print(f"Starting HTTP server on {BIND_HOST}:{httpd.server_port}...")
+        print(f"Serving files from: {os.getcwd()}")
+        print(f"Open {OPEN_URL} in your browser", flush=True)
         try:
             httpd.serve_forever()
         except KeyboardInterrupt:

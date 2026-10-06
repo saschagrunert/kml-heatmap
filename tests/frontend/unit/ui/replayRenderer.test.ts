@@ -225,6 +225,18 @@ describe("trail runs", () => {
     expect(state.lastDrawnIndex).toBe(-1);
   });
 
+  it("empties the trail on a seek back to the start", () => {
+    // The first segment starts at 0 s: kept, it was drawn whole ahead of
+    // the airplane, which a replay at 0 s does not draw at all
+    const state = stateWith(makeChain([0, 10000]));
+    for (let i = 0; i < 2; i++) appendTrailSegment(state, i, false);
+
+    truncateTrail(state, 0);
+
+    expect(state.trailRuns).toEqual([]);
+    expect(state.lastDrawnIndex).toBe(-1);
+  });
+
   it("leaves a trail that needs no cutting clean", () => {
     const state = stateWith(makeChain([0, 0]));
     for (let i = 0; i < 2; i++) appendTrailSegment(state, i, false);
@@ -1714,7 +1726,7 @@ describe("ReplayRenderer", () => {
         callUpdateDisplay();
         expect(map.listenerCount("move")).toBe(1);
 
-        renderer.stopWatchingMap();
+        renderer.camera.stopWatchingMap();
 
         expect(map.listenerCount("move")).toBe(0);
         map.jumpTo({ bearing: 45 });
@@ -1818,6 +1830,25 @@ describe("ReplayRenderer", () => {
 
       // No frame has run: the trail went to the map along with the airplane
       expect(trailSource().setData).toHaveBeenCalledTimes(1);
+      runFrame();
+      expect(trailSource().setData).toHaveBeenCalledTimes(1);
+    });
+
+    it("writes the trail once a frame while the slider is dragged during play", () => {
+      const state = mockReplayManager.state;
+      state.layerActive = true;
+      state.playing = true;
+      state.airplaneMarker = makeAirplane();
+      state.segments = makeChain([0, 0, 0]);
+      state.smoothed = replayFeature.replayCurve(state.segments, () => 0);
+
+      // Input events of a drag, faster than frames: each wrote the whole
+      // trail, and the frame wrote it again
+      for (const time of [5, 12, 18]) {
+        state.currentTime = time;
+        callUpdateDisplay(true);
+      }
+      expect(trailSource().setData).not.toHaveBeenCalled();
       runFrame();
       expect(trailSource().setData).toHaveBeenCalledTimes(1);
     });
@@ -1977,6 +2008,26 @@ describe("ReplayRenderer", () => {
         expect(lifted).toHaveBeenCalledTimes(5);
       });
 
+      it("does not read a drag during a pause as the airplane's speed", () => {
+        flyEast();
+        const state = mockReplayManager.state;
+        play(120, 100);
+        // Paused, the map is dragged 300 px east of the airplane
+        state.playing = false;
+        vi.advanceTimersByTime(3000);
+        const { lng } = map.getCenter();
+        map.jumpTo({ center: [lng - 0.27, 50] });
+        const before = map.getCenter().lng;
+
+        state.playing = true;
+        state.currentTime += 0.016 * 100;
+        callUpdateDisplay();
+
+        // The follow starts from rest: the frame before the pause is gone
+        const flown = 0.016 * 100 * 0.004;
+        expect(map.getCenter().lng - before).toBeLessThan(2.2 * flown);
+      });
+
       it("speeds up and slows down without jumps", () => {
         flyEast();
         const seen = play(90, 100);
@@ -2117,7 +2168,7 @@ describe("ReplayRenderer", () => {
         mockReplayManager.state.currentTime = 5;
         mockReplayManager.state.segments = [makeSegment({ time: 0 })];
         // What the manager does as a replay opens
-        renderer.watchUser();
+        renderer.camera.watchUser();
       });
 
       function expectCameraLeftAlone(): void {
@@ -2277,12 +2328,12 @@ describe("ReplayRenderer", () => {
           "pitchstart",
           "moveend",
         ];
-        renderer.watchUser();
+        renderer.camera.watchUser();
         for (const type of types) {
           expect(map.listenerCount(type)).toBe(1);
         }
 
-        renderer.stopWatchingMap();
+        renderer.camera.stopWatchingMap();
 
         for (const type of types) {
           expect(map.listenerCount(type)).toBe(0);
@@ -2422,11 +2473,11 @@ describe("ReplayRenderer", () => {
       mockReplayManager.state.segments = [makeSegment({ time: 0 })];
 
       callUpdateDisplay(true);
-      renderer.stopWatchingMap();
+      renderer.camera.stopWatchingMap();
 
       expect(map.fire.mock.calls.map(([type]) => type)).toEqual(["moveend"]);
       // Once
-      renderer.stopWatchingMap();
+      renderer.camera.stopWatchingMap();
       runFrame();
       expect(map.fire).toHaveBeenCalledOnce();
     });

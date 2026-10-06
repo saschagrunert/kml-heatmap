@@ -1610,6 +1610,26 @@ describe("DataLoader", () => {
       expect(result).toBeNull();
     });
 
+    it("says once that it arrived, whoever asked for it", async () => {
+      const onMetadata = vi.fn();
+      const told = new DataLoader({
+        dataDir: "test-data",
+        fetchJson: mockFetchJson,
+        onMetadata,
+      });
+      files["test-data/metadata.json"] = { available_years: [2025] };
+      mockFetchJson.mockRejectedValueOnce(new Error("Failed"));
+      await told.loadMetadata();
+      expect(onMetadata).not.toHaveBeenCalled();
+
+      // Two callers that share the request, as the first load and a load
+      // of all years can
+      await Promise.all([told.loadMetadata(), told.loadMetadata()]);
+      await told.loadMetadata();
+
+      expect(onMetadata).toHaveBeenCalledExactlyOnceWith(siteData.metadata);
+    });
+
     it.each([null, [], { available_years: "2025" }])(
       "refuses metadata.json without the list of years: %j",
       async (json) => {

@@ -23,7 +23,6 @@ from .parser_common import (
     NON_MSL_ALTITUDE_MODES,
     altitude_mode,
     extract_placemark_metadata,
-    find_xml_element,
     find_xml_elements,
     local_name,
 )
@@ -81,16 +80,21 @@ def _is_macos_metadata(name: str) -> bool:
     return name.startswith("__MACOSX/") or name.rpartition("/")[2].startswith("._")
 
 
-def _kmz_document(members: list[zipfile.ZipInfo]) -> zipfile.ZipInfo | None:
-    """The KML document among the members: doc.kml at the root when there
-    is one, the first other ``.kml`` otherwise."""
-    documents = [
+def _kmz_documents(members: list[zipfile.ZipInfo]) -> list[zipfile.ZipInfo]:
+    """The members of a KMZ archive that are KML documents."""
+    return [
         info
         for info in members
         if info.filename.lower().endswith(".kml")
         and not info.is_dir()
         and not _is_macos_metadata(info.filename)
     ]
+
+
+def _kmz_document(members: list[zipfile.ZipInfo]) -> zipfile.ZipInfo | None:
+    """The KML document among the members: doc.kml at the root when there
+    is one, the first other ``.kml`` otherwise."""
+    documents = _kmz_documents(members)
     return next(
         (info for info in documents if info.filename.lower() == _KMZ_DOCUMENT),
         documents[0] if documents else None,
@@ -133,7 +137,8 @@ def _read_kmz(kmz_file: str) -> bytes:
     """The KML document of a KMZ archive (see ``_kmz_document``).
 
     Google Earth writes the document as doc.kml, usually first; other
-    members are images and models the track does not need. The member is
+    members are images and models the track does not need. Any other KML
+    document in it is not read, with a warning. The member is
     read only up to ``MAX_KML_FILE_SIZE``, whatever the archive claims,
     and an archive inside the archive is refused rather than unpacked.
     """
@@ -155,6 +160,17 @@ def _read_kmz(kmz_file: str) -> bytes:
             if document is None:
                 raise KMLParseError(
                     "KMZ archive holds no .kml file", file_path=kmz_file
+                )
+            others = len(_kmz_documents(members)) - 1
+            if others:
+                # Only one is read: the flights of the others would be
+                # missing without a word
+                logger.warning(
+                    "%s: the KMZ archive holds %d more KML file(s) than %s, "
+                    "which are not read; unzip it and pass them as files",
+                    Path(kmz_file).name,
+                    others,
+                    document.filename,
                 )
             if document.file_size > MAX_KML_FILE_SIZE:
                 raise KMLParseError(
@@ -232,7 +248,10 @@ def _parse_kml_tree(kml_file: str) -> etree._Element:
         if kml_file.lower().endswith(".kmz"):
             tree = etree.fromstring(_read_kmz(kml_file), parser).getroottree()
         else:
-            tree = etree.parse(kml_file, parser)
+            # As bytes: libxml2 wants the name in UTF-8, and one that is not
+            # (unzipped from a Windows archive, copied off an old FAT drive)
+            # holds surrogates Python cannot encode
+            tree = etree.parse(os.fsencode(kml_file), parser)
     except etree.ParseError as e:
         raise KMLParseError(
             f"XML parsing error: {e}", file_path=kml_file, line_number=e.lineno
@@ -316,17 +335,23 @@ def _extract_kml_elements(
 
 
 def _build_coord_metadata_map(
-    placemarks: list[etree._Element], namespaces: dict[str, str]
+    placemarks: list[etree._Element],
+    namespaces: dict[str, str],
+    tracks: list[etree._Element],
 ) -> tuple[dict[int, PlacemarkMetadata], set[int]]:
     """Map coordinate elements to their placemark metadata.
 
     Also returns the ids of the LineString coordinates to skip: a placemark
-    holding both a gx:Track and a LineString (a MultiGeometry) is one
-    feature, and the LineString is the fallback geometry for viewers without
-    gx support. Parsing both would count the flight twice.
+    holding both a track and a LineString (a MultiGeometry) is one feature,
+    and the LineString is the fallback geometry for viewers without gx
+    support. Parsing both would count the flight twice. Only the tracks
+    that are parsed (``tracks``) count, in whichever namespace: the <Track>
+    of KML 2.3 is in that of OGC, and one the parser leaves out leaves its
+    flight to the LineString.
     """
     coord_to_metadata: dict[int, PlacemarkMetadata] = {}
     track_fallback_lines: set[int] = set()
+    parsed_tracks = {id(track) for track in tracks}
     for placemark in placemarks:
         placemark_coords = find_xml_elements(
             placemark, ".//kml:coordinates", ".//coordinates", namespaces
@@ -334,8 +359,7 @@ def _build_coord_metadata_map(
         if not placemark_coords:
             continue
 
-        track = find_xml_element(placemark, ".//gx:Track", ".//Track", namespaces)
-        if track is not None:
+        if any(id(track) in parsed_tracks for track in placemark.iter("{*}Track")):
             for coord_elem in placemark_coords:
                 parent = coord_elem.getparent()
                 if parent is not None and local_name(parent.tag) == "LineString":
@@ -481,7 +505,7 @@ def _parse_kml(kml_file: str) -> ParseResult:
         root, namespaces, kml_file
     )
     coord_to_metadata, track_fallback_lines = _build_coord_metadata_map(
-        placemarks, namespaces
+        placemarks, namespaces, tracks
     )
     if track_fallback_lines:
         coord_elements = [

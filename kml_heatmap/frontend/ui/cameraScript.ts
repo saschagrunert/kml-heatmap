@@ -81,22 +81,36 @@ export function restCamera(map: MapLibreMap): void {
 const TAKEOVER_EVENTS = ["pointerdown", "wheel", "keydown"] as const;
 
 /**
+ * Keys pressed on the map that do not take it over: Escape has a meaning
+ * of its own, and Tab moves on through the page, with Shift and the other
+ * modifiers on their own
+ */
+const KEYS_NOT_TAKING_OVER = new Set([
+  "Escape",
+  "Tab",
+  "Shift",
+  "Control",
+  "Alt",
+  "Meta",
+]);
+
+/**
  * Call `onTakeover` as the user takes the map over by a press, a wheel or
- * a key on it, until `signal` aborts; the map stops the camera for them.
- * `ignore` leaves out an event that is not one, such as a key the script
- * gives a meaning of its own.
+ * a key on it (KEYS_NOT_TAKING_OVER aside), until `signal` aborts; the map
+ * stops the camera for them.
  */
 export function followTakeover(
   map: MapLibreMap,
   onTakeover: () => void,
   signal: AbortSignal,
-  ignore: (event: Event) => boolean = () => false,
 ): void {
   for (const type of TAKEOVER_EVENTS) {
     map.getContainer().addEventListener(
       type,
       (event) => {
-        if (!ignore(event)) onTakeover();
+        if (!KEYS_NOT_TAKING_OVER.has((event as KeyboardEvent).key)) {
+          onTakeover();
+        }
       },
       { passive: true, signal },
     );

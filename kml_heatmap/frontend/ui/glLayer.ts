@@ -8,7 +8,11 @@
  * was lost. The programs that compiled outlast the layer's time off the
  * map, as long as their context does.
  */
-import type { CustomRenderMethodInput, Map as MapLibreMap } from "maplibre-gl";
+import type {
+  CustomLayerInterface,
+  CustomRenderMethodInput,
+  Map as MapLibreMap,
+} from "maplibre-gl";
 import { focalLengthPx } from "../utils/geometry";
 import { mercatorX } from "../utils/mercator";
 
@@ -389,16 +393,38 @@ export function setDepth(
 
 /**
  * The state both layers draw in, with a blend function of their own:
- * blended, behind what is nearer of the map without hiding it, and
- * neither culled nor stencilled. The layer turns the depth mask back on
- * when it is done.
+ * behind what is nearer of the map without hiding it. MapLibre sets the
+ * rest before it hands a 3D custom layer the context, and marks it all to
+ * be set again after (see drawCustom in its src/webgl/draw/draw_custom.ts):
+ * no vertex array bound, blended, the depth test on, neither culled nor
+ * stencilled, and the depth mask on, which is the one to take off.
  */
 export function drawing(gl: WebGL2RenderingContext): void {
-  gl.enable(gl.BLEND);
-  gl.enable(gl.DEPTH_TEST);
   gl.depthMask(false);
-  gl.disable(gl.CULL_FACE);
-  gl.disable(gl.STENCIL_TEST);
+}
+
+/**
+ * Put `layer` on the map right below the first of `below` it has, or on
+ * top without any, or move it back there when it is `on` the map already:
+ * a new base style keeps the layer, which is none it knows of, but not
+ * necessarily where it was
+ */
+export function placeBelow(
+  map: MapLibreMap,
+  layer: CustomLayerInterface,
+  on: boolean,
+  below: readonly string[],
+): void {
+  const before = below.find((id) => map.getLayer(id));
+  if (!on) {
+    map.addLayer(layer, before);
+    return;
+  }
+  if (!before) return;
+  const order = map.getLayersOrder();
+  if (order.indexOf(layer.id) !== order.indexOf(before) - 1) {
+    map.moveLayer(layer.id, before);
+  }
 }
 
 /** Metres a Mercator unit spans at the latitude `lat` on MapLibre's sphere */

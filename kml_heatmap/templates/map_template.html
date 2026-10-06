@@ -711,6 +711,15 @@
           hidden
         ></div>
       </div>
+
+      <!-- Shown by the stylesheet when no map was ever made, a few seconds
+           in: a browser runs no module script of a page opened as a file,
+           and the page was an empty map whose controls did nothing -->
+      <p id="serve-hint">
+        The map did not start. Opened as a file? Serve its folder over HTTP, for
+        example with
+        <code>python3 -m http.server -d &lt;folder&gt;</code>.
+      </p>
     </main>
 
     <!-- Toast announcements. Present from the start, so screen readers track

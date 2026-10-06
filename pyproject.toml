@@ -32,6 +32,7 @@ test = [
     "pytest>=9.1.1",
     "pytest-cov>=7.1.0",
     "pytest-xdist>=3.8.0",
+    "pytest-randomly>=5.0.0",
     "coverage[toml]>=7.16.2",
     "hypothesis>=6.168.3",
     "lxml-stubs>=0.5.1",
@@ -84,6 +85,11 @@ python_functions = "test_*"
 addopts = [
     "--tb=short",
     "--strict-markers",
+]
+markers = [
+    # A copy of the repository with flights of its own skips them with
+    # KML_HEATMAP_OWN_FLIGHTS=1 (see tests/conftest.py and doc/hosting.md)
+    "repo_data: reads named flights of this repository's data/",
 ]
 # A deprecation in lxml or the next Python release fails the suite instead
 # of scrolling past. Hypothesis warns about its own generator when it sets

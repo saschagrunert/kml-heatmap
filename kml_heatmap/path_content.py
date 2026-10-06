@@ -4,9 +4,9 @@ A path is exported when it moves at the exported precision
 (``is_exportable_path``). Its content is its coordinates, rounded the way
 they are exported, and its altitudes (``exported_contents``): two paths of
 the same content are the same recording under two file names, of which
-``drop_duplicate_paths`` keeps the first, and a hash of it is the id the
-path keeps from one export to the next (``assign_path_ids``). The ids end
-up in shared links and in the saved state of the frontend.
+``drop_duplicate_paths`` keeps the one that says the most, and a hash of it
+is the id the path keeps from one export to the next (``assign_path_ids``).
+The ids end up in shared links and in the saved state of the frontend.
 """
 
 import hashlib
@@ -24,6 +24,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "PATH_ID_BITS",
+    "aircraft_known",
     "assign_path_ids",
     "drop_duplicate_paths",
     "exported_contents",
@@ -102,33 +103,60 @@ def exported_contents(
     }
 
 
+def aircraft_known(metadata: PathMetadata) -> tuple[bool, bool]:
+    """What a recording lacks of its aircraft, as a key to sort by.
+
+    The one with the registration sorts first, then the one with the type:
+    a 1 Hz phone log has more points than the file of the panel GPS, but
+    only the file says which aircraft flew, which the aircraft filter and
+    the statistics go by.
+    """
+    return (
+        not metadata.get("aircraft_registration"),
+        not metadata.get("aircraft_type"),
+    )
+
+
 def drop_duplicate_paths(
     paths_by_year: Mapping[int, list[int]],
     contents: Mapping[int, bytes],
     all_path_metadata: Sequence[PathMetadata],
+    all_path_groups: FlightPathGroup,
 ) -> dict[int, list[int]]:
-    """Leave out every exported path that repeats an earlier one exactly.
+    """Leave out every exported path that repeats another one exactly.
 
     ``contents`` are those of the exported paths (see ``exported_contents``).
     The same recording under two file names (a copy, a renamed export)
     would otherwise count twice in every statistic. Paths are compared by
     their exported content itself, not by its hash, so two different
-    flights that share a hash both stay. The first one in input order is
-    kept and a warning names both files. A year left without an exported
+    flights that share a hash both stay. Of the copies the one that names
+    the aircraft stays (``aircraft_known``), then the one with more
+    timestamps (a LineString holds the points of a track without them),
+    then the first in input order, as ``duplicates.drop_overlapping_paths``
+    chooses; a warning names both files. A year left without an exported
     path is left out.
     """
-    first_by_content: dict[bytes, int] = {}
-    duplicates: set[int] = set()
+    copies_by_content: dict[bytes, list[int]] = {}
     for index in sorted(contents):
-        first = first_by_content.setdefault(contents[index], index)
-        if first != index:
-            duplicates.add(index)
-            logger.warning(
-                "Skipping a flight in %s: the same flight as in %s",
-                all_path_metadata[index].get("filename") or f"path {index}",
-                all_path_metadata[first].get("filename") or f"path {first}",
-            )
-    return without_paths(paths_by_year, duplicates, contents)
+        copies_by_content.setdefault(contents[index], []).append(index)
+    kept_for: dict[int, int] = {}
+    for copies in copies_by_content.values():
+        keep = min(
+            copies,
+            key=lambda index: (
+                aircraft_known(all_path_metadata[index]),
+                -sum(point.ts is not None for point in all_path_groups[index]),
+                index,
+            ),
+        )
+        kept_for.update((index, keep) for index in copies if index != keep)
+    for index, keep in sorted(kept_for.items()):
+        logger.warning(
+            "Skipping a flight in %s: the same flight as in %s",
+            all_path_metadata[index].get("filename") or f"path {index}",
+            all_path_metadata[keep].get("filename") or f"path {keep}",
+        )
+    return without_paths(paths_by_year, kept_for, contents)
 
 
 def without_paths(

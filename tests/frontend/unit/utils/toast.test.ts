@@ -374,8 +374,11 @@ describe("showToast and announceStatus", () => {
     vi.useFakeTimers();
   });
 
+  // The toast it leaves would answer the queries of the tests above when
+  // the order is shuffled
   afterEach(() => {
     vi.useRealTimers();
+    document.body.innerHTML = "";
   });
 
   it("keeps the toast that a status right after it would silence", () => {

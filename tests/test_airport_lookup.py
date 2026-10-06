@@ -643,6 +643,19 @@ class TestLoadAirportDatabase:
         ):
             assert load_airport_database() == {}
 
+    def test_the_warning_says_what_happens(self, tmp_path, caplog):
+        """The run goes on with the names of the files: nothing fails."""
+        with (
+            patch.object(lookup_module, "CACHE_FILE", tmp_path / "missing.csv"),
+            patch.object(lookup_module, "urlopen", side_effect=OSError("offline")),
+            caplog.at_level(logging.WARNING, logger="kml_heatmap"),
+        ):
+            assert load_airport_database() == {}
+        assert (
+            "Airport database unavailable: the airports keep the names the files "
+            f"give them (set {REQUIRE_DATABASE_ENV}=1 to stop instead)"
+        ) in caplog.text
+
     def test_lock_release_failure_is_handled(self):
         original_flock = fcntl.flock
 

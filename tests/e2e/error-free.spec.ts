@@ -56,7 +56,7 @@ test.describe("Error-Free Interactions", () => {
   });
 
   test.describe("Console Error-Free", () => {
-    test("no errors during layer toggling", async ({ page }) => {
+    test("no errors during layer toggling @keys", async ({ page }) => {
       const layers: LayerName[] = [
         "heatmap",
         "altitude",

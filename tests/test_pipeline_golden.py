@@ -33,6 +33,7 @@ from kml_heatmap.terrain import TILE_SIZE
 from tests.conftest import parse_data as _load_js
 
 DATA_DIR = Path(__file__).parent.parent / "data"
+pytestmark = pytest.mark.repo_data
 # Row: [lat, lon, altitude_ft, groundspeed_knots] plus an optional time
 SEGMENT_MIN_COLUMNS = 4
 SEGMENT_MAX_COLUMNS = 5

@@ -55,9 +55,9 @@ __all__ = [
 ]
 
 # Bump whenever the serialized structure or its encoding changes (6: zstd,
-# 7: the landings of the paths).
+# 7: the landings of the paths, 8: no circuits in them).
 # Entries of any other version are pruned (see prune_stale_cache_entries).
-CACHE_FORMAT_VERSION = 7
+CACHE_FORMAT_VERSION = 8
 # The name an entry ends in, and how hard it is compressed: level 3 is
 # zstd's default, most of the saving at a fraction of the time of the
 # higher ones
@@ -115,7 +115,8 @@ def parser_fingerprint() -> str:
 
 def _content_digest(kml_path: Path) -> str | None:
     """Hash the file name and content of a KML file (None when unreadable)."""
-    digest = hashlib.blake2b(kml_path.name.encode() + b"\0", digest_size=16)
+    # fsencode: a name that is not valid UTF-8 holds surrogates
+    digest = hashlib.blake2b(os.fsencode(kml_path.name) + b"\0", digest_size=16)
     try:
         with open(kml_path, "rb") as f:
             while chunk := f.read(_HASH_CHUNK_BYTES):

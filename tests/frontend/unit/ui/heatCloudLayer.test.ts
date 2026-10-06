@@ -393,10 +393,11 @@ describe("the heat cloud's layer", () => {
     expect(gl.blendColor).toHaveBeenCalledWith(1, 1, 1, 1);
     // The glow is added up, after the shadow's brightest is kept
     expect(gl.blendEquation).toHaveBeenLastCalledWith(gl.FUNC_ADD);
-    expect(gl.enable).toHaveBeenCalledWith(gl.DEPTH_TEST);
+    // Against the depth without writing it. The rest of the state, and
+    // putting it back after, is MapLibre's (see drawing)
     expect(gl.depthMask).toHaveBeenCalledWith(false);
-    // Its vertex array is not left bound for MapLibre's next draw
-    expect(gl.bindVertexArray).toHaveBeenLastCalledWith(null);
+    expect(gl.depthMask).not.toHaveBeenCalledWith(true);
+    expect(gl.enable).not.toHaveBeenCalled();
     expect(layer.frames).toBe(1);
     expect(layer.drawn).toBe(cloud.count - 1);
   });

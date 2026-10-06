@@ -399,6 +399,26 @@ describe("WrappedManager dialog", () => {
       expect(el("wrapped-year").textContent).toBe("2024");
     });
 
+    it("fits the map to the data that finished loading while it is open", () => {
+      openWrapped();
+      const fitBounds = mockApp.map!.fitBounds;
+      const opened = fitBounds.mock.calls.at(-1)![0];
+      fitBounds.mockClear();
+
+      // The flights of before kept the map: hovering off a destination flew
+      // back to their bounds as well
+      const history = createFlightHistory();
+      history.path_info = history.path_info.filter((path) => path.id === 1);
+      history.path_segments = history.path_segments.filter(
+        (segment) => segment.path_id === 1,
+      );
+      mockApp.currentData = history;
+
+      expect(fitBounds).toHaveBeenCalledTimes(1);
+      const refitted = fitBounds.mock.calls[0]![0];
+      expect(refitted).not.toEqual(opened);
+    });
+
     it("refreshes the cards when the aircraft changes without new data", () => {
       openWrapped();
       el("wrapped-year").textContent = "stale";

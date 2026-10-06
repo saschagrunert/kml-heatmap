@@ -173,7 +173,7 @@ updates:
           - "*"
 
   # Docker base images: covers Dockerfile in the root directory. It carries a
-  # tag and a digest, which Dependabot bumps together. The container job
+  # tag and a digest, which Dependabot bumps together. The packaging job
   # builds and runs the image on every pull request, so a bump that breaks
   # it turns red.
   - package-ecosystem: "docker"

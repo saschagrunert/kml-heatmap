@@ -39,9 +39,9 @@ import {
 import { replayPoint, type ReplayPoint } from "../features/replay";
 import { prefersReducedMotion } from "../utils/motion";
 import { ReplayCamera } from "./replayCamera";
-import type { SavedCamera } from "./chaseCamera";
 import {
   appendTrailSegment,
+  speedColouredTrail,
   truncateTrail,
   trailFeatureCollection,
 } from "./replayTrail";
@@ -294,8 +294,10 @@ export class ReplayRenderer {
   /**
    * What follows the airplane: the camera, the turn of its icon and its
    * lift. A trail whose ribbons are cut for another zoom is written again.
+   * The replay manager hands it the user's hand on the map and the chase
+   * view (see ReplayCamera.watchUser and endChase).
    */
-  private readonly camera: ReplayCamera;
+  readonly camera: ReplayCamera;
   /**
    * Told the replay's time on every display, a seek's and a frame's: the
    * flight profile's cursor follows it (ui/flightProfile.ts)
@@ -499,30 +501,6 @@ export class ReplayRenderer {
   }
 
   /**
-   * Start following the user's hand on the map. Called as a replay opens
-   * and not on the first frame that pans: a press that began before that
-   * frame would never be seen.
-   */
-  watchUser(): void {
-    this.camera.watchUser();
-  }
-
-  /** Stop listening to the map and to the user's hand on it; the replay is closing */
-  stopWatchingMap(): void {
-    this.camera.stopWatchingMap();
-  }
-
-  /** Give the camera back from the chase view (see ReplayCamera.endChase) */
-  endChase(restore?: "all" | "view"): SavedCamera | null {
-    return this.camera.endChase(restore);
-  }
-
-  /** The camera from before the chase view, while one has the map */
-  chaseView(): SavedCamera | null {
-    return this.camera.chaseView();
-  }
-
-  /**
    * Show the replay at its current time: the transport row, the trail up
    * to it, and the airplane where it is, turned along its track, with the
    * camera after it
@@ -568,8 +546,10 @@ export class ReplayRenderer {
     this.followAirplane(state, marker, position, bearing, isManualSeek);
 
     // While it plays, the trail is written in the frame the airplane moved
-    // in, not a frame behind it: one frame at 100x is a hundred metres
-    if (state.playing && state.trailDirty) {
+    // in, not a frame behind it: one frame at 100x is a hundred metres. Not
+    // for a drag of the slider, whose events come faster than frames: the
+    // frame writes it once.
+    if (state.playing && state.trailDirty && !isManualSeek) {
       this.trailFrame.cancel();
       this.flushTrail(state);
     }
@@ -733,8 +713,7 @@ export class ReplayRenderer {
 
     // Nothing is drawn at time 0 (stopped/reset state)
     if (state.currentTime > 0) {
-      const useAirspeedColors =
-        this.app.airspeedVisible && !this.app.altitudeVisible;
+      const useAirspeedColors = speedColouredTrail(this.app);
 
       const segments = state.segments;
       for (let i = state.lastDrawnIndex + 1; i < segments.length; i++) {

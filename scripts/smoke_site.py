@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Set up and check the smoke builds of the packaging and container jobs.
+"""Set up and check the smoke builds of the packaging job.
 
-Both jobs of .github/workflows/test.yml generate a small site the way a
-user would, from the installed wheel or from the image, and need the same
-three directories for it:
+The packaging job of .github/workflows/test.yml generates small sites the
+way a user would, from the installed wheel and from the image, and each
+needs the same three directories:
 
     <dir>/input  the first three flights of data/ and its subdirectories
     <dir>/cache  the airport and runway fixtures in place of the OurAirports
@@ -14,8 +14,8 @@ three directories for it:
 own user, which exists only inside the image), and `check <dir>` checks
 the site with check_site_files.py and that the fixtures in the cache are
 still the fixtures, so the build fetched nothing. Standard library only:
-the container job runs it with the runner's Python, which does not have
-the package.
+the builds of the image run it with the runner's Python, which does not
+have the package.
 """
 
 import argparse

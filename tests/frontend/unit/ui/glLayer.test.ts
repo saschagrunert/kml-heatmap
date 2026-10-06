@@ -3,17 +3,24 @@
  * mocked: the buffers and the vertex array made once per context, the
  * points uploaded when they are new, a program per projection built on
  * MapLibre's prelude, what a shader that does not compile or a program
- * that does not link leaves behind, a lost context, and letting go.
+ * that does not link leaves behind, a lost context, letting go, and where
+ * a layer goes among the map's.
  */
 import { describe, it, expect, beforeEach, vi, type Mock } from "vitest";
-import type { CustomRenderMethodInput, Map as MapLibreMap } from "maplibre-gl";
+import type {
+  CustomLayerInterface,
+  CustomRenderMethodInput,
+  Map as MapLibreMap,
+} from "maplibre-gl";
 import {
   cloudMatrix,
   LayerGl,
+  placeBelow,
   setProjection,
   worldCopies,
   type LayerShaders,
 } from "../../../../kml_heatmap/frontend/ui/glLayer";
+import { Map as MockMap } from "../../../mocks/maplibre-gl";
 
 /** A WebGL2 context that records what is asked of it */
 function mockGl() {
@@ -631,5 +638,44 @@ describe("worldCopies", () => {
 
   it("is world 0 on the globe, which is one world", () => {
     expect(worldCopies(view(100, 110), frame(true), xs(10, 12))).toEqual([0]);
+  });
+});
+
+describe("placeBelow", () => {
+  /** A map whose layers are in the order of `ids` */
+  function mapOf(...ids: string[]): MockMap {
+    const map = new MockMap({ container: "map", style: { layers: [] } });
+    map.finishStyleLoad();
+    for (const id of ids) map.addLayer({ id, type: "background" });
+    return map;
+  }
+  const asMap = (map: MockMap): MapLibreMap => map as unknown as MapLibreMap;
+  const layer = { id: "mine", type: "custom" } as CustomLayerInterface;
+
+  it("adds the layer below the first of the layers named the map has", () => {
+    const map = mapOf("a", "labels", "top");
+
+    placeBelow(asMap(map), layer, false, ["missing", "labels", "top"]);
+
+    expect(map.getLayersOrder()).toEqual(["a", "mine", "labels", "top"]);
+  });
+
+  it("adds it on top without any of them", () => {
+    const map = mapOf("a");
+
+    placeBelow(asMap(map), layer, false, ["missing"]);
+
+    expect(map.getLayersOrder()).toEqual(["a", "mine"]);
+  });
+
+  it("moves it back below them after a new style, and leaves it in place", () => {
+    const map = mapOf("mine", "a", "labels");
+
+    placeBelow(asMap(map), layer, true, ["labels"]);
+    expect(map.getLayersOrder()).toEqual(["a", "mine", "labels"]);
+
+    map.moveLayer.mockClear();
+    placeBelow(asMap(map), layer, true, ["labels"]);
+    expect(map.moveLayer).not.toHaveBeenCalled();
   });
 });

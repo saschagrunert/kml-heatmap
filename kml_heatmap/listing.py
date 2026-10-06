@@ -100,12 +100,11 @@ def _skip_reason(
         return "stays on one spot"
     if index in exported:
         return ""
-    # Copies are only looked for within a year (see drop_duplicate_paths)
+    # Copies are looked for across the years (see drop_duplicate_paths)
     content = selection.contents.get(index)
-    same_year = selection.paths_by_year.get(metadata.get("year") or 0, [])
     if content is not None and any(
-        other in exported and selection.contents.get(other) == content
-        for other in same_year
+        other in exported and other_content == content
+        for other, other_content in selection.contents.items()
     ):
         return "an exact copy of another file's flight"
     return "the same flight as another recording"

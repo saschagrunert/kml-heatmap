@@ -169,9 +169,26 @@ FLIGHT_GAP = timedelta(hours=12)
 # even across New Year
 CONTINUOUS_GAP = timedelta(hours=2)
 
-# Coordinate lists: most of a track's text, and numbers only
+# Coordinate lists: most of a track's text, and numbers only, with the
+# indent before each, which the catch-all scan skips as well. The indent
+# starts where the blank run does, or a long run that leads to no such tag
+# would be scanned again from each of its characters.
 COORDINATES_PATTERN = re.compile(
-    r"<(" + _PREFIX + r"(?:coordinates|coord))\b[^>]*>[^<]*</\1\s*>"
+    r"(?<!\s)\s*<(" + _PREFIX + r"(?:coordinates|coord))\b[^>]*>[^<]*</\1\s*>"
+)
+
+# A timestamp in the form the rewrite writes, on one of the days a flight
+# moved to January 1st runs into: nothing in it fails the catch-all scan
+# for dates (it passes those days) or for times of day (which leaves the
+# timestamps out), and a track is little else once its coordinates are out,
+# so the scan skips them, with the indent before each. _timestamp_violations
+# checks them all. The indent from the start of its run, as above.
+CANONICAL_TIMESTAMP_PATTERN = re.compile(
+    r"(?<!\s)\s*<("
+    + _PREFIX
+    + r"(?:when|begin|end))>\d{4}-01-0[1-"
+    + str(1 + MAX_DAYS_AFTER_JAN_1)
+    + r"]T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d{1,9})?Z</\1>"
 )
 
 PLACEMARK_PATTERN = re.compile(r"<(" + _PREFIX + r"Placemark)\b.*?</\1\s*>", re.DOTALL)
@@ -1195,7 +1212,9 @@ def check_kml_obfuscated(filepath: Path) -> list[str]:
     # different exporter may have put anywhere.
     # Coordinates cannot hold a date the parser would accept, and skipping
     # them saves most of the time the patterns take on a track
-    without_coordinates = _with_markup_dropped(COORDINATES_PATTERN.sub("", content))
+    without_coordinates = _with_markup_dropped(
+        CANONICAL_TIMESTAMP_PATTERN.sub("", COORDINATES_PATTERN.sub("", content))
+    )
     unescaped = _with_unescaped(without_coordinates)
     epochs = _find_stray_epochs(unescaped)
     stray_dates = _stray_dates_of(unescaped, epochs)

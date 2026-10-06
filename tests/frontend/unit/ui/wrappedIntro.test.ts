@@ -13,6 +13,7 @@ import {
   INTRO_SETTLE_MS,
   INTRO_TURN_MS,
   INTRO_WAIT_MS,
+  overviewBounds,
   prepareWrappedIntro,
 } from "../../../../kml_heatmap/frontend/ui/wrappedIntro";
 import * as cameraScript from "../../../../kml_heatmap/frontend/ui/cameraScript";
@@ -307,6 +308,30 @@ describe("Wrapped's intro", () => {
   });
 
   describe("skipped", () => {
+    it("by new data, and comes to rest on the overview of that", async () => {
+      await openWithIntro();
+      await vi.advanceTimersByTimeAsync(INTRO_FLY_MS / 2);
+      const opened = overviewBounds(asMapApp(mockApp));
+
+      // A year that finished loading: the intro played the flights of
+      // before, and settled on their overview
+      const history = mockApp.currentData!;
+      mockApp.currentData = {
+        ...history,
+        path_info: history.path_info.slice(0, 1),
+        path_segments: history.path_segments.filter(
+          (segment) => segment.path_id === history.path_info[0]!.id,
+        ),
+      };
+
+      expect(skipButton().hidden).toBe(true);
+      expect(mockApp.store.get("globeVisible")).toBe(false);
+      expect(map().fitBounds).toHaveBeenCalledTimes(1);
+      const refitted = lastMove("fitBounds")![0];
+      expect(refitted).toEqual(overviewBounds(asMapApp(mockApp)));
+      expect(refitted).not.toEqual(opened);
+    });
+
     /** Wrapped as it opens without the intro */
     function expectWrappedAsToday(): void {
       expect(modal().classList.contains("is-intro")).toBe(false);
@@ -358,6 +383,18 @@ describe("Wrapped's intro", () => {
       const fits = map().fitBounds.mock.calls.length;
       map().getContainer().dispatchEvent(new Event("pointerdown"));
       expect(map().fitBounds.mock.calls.length).toBe(fits);
+    });
+
+    it("not by Tab or Shift, which move on through the dialog", async () => {
+      await openWithIntro();
+      for (const key of ["Tab", "Shift"]) {
+        map()
+          .getContainer()
+          .dispatchEvent(new KeyboardEvent("keydown", { key }));
+      }
+
+      expect(modal().classList.contains("is-intro")).toBe(true);
+      expect(skipButton().hidden).toBe(false);
     });
 
     it("when the heat cloud's code does not come in time", async () => {

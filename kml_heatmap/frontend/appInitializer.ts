@@ -10,15 +10,16 @@ import {
 } from "./features/airports";
 import { setUnavailable, setUnavailableFor } from "./utils/buttonState";
 import { domCache } from "./utils/domCache";
-import { applyMetricColors, pluralFlights } from "./utils/htmlGenerators";
+import { applyMetricColors } from "./utils/htmlGenerators";
 import { createActivationFilter, toLngLat } from "./utils/mapHelpers";
-import { announceStatus, showToast } from "./utils/toast";
+import { announceStatus, dismissToast, showToast } from "./utils/toast";
 import { setAirportLabelHover } from "./ui/airportLabels";
 import { NO_DATA_MESSAGE, NO_TIMING_MESSAGE } from "./ui/actions";
-import { datasetIndex } from "./calculations/datasetIndex";
-import { calculateAirspeedRange } from "./features/layers";
 import type { MapApp } from "./mapApp";
-import type { Airport, AirportMarker, KMLDataset } from "./types";
+import type { Airport, AirportMarker, Metadata } from "./types";
+
+/** Said when the first load goes without the list of years */
+const NO_YEARS_MESSAGE = "The list of years is unavailable, showing all years";
 
 /**
  * Populate the year dropdown and make sure the selected year exists.
@@ -26,7 +27,9 @@ import type { Airport, AirportMarker, KMLDataset } from "./types";
  * (with a toast) so the select never ends up blank. The page ships with
  * the latest year as an option, and a restored one may have one of its own
  * (see restoreState in ui/stateRestore.ts), which the list replaces: the
- * dropdown named the year it opens on from the start.
+ * dropdown named the year it opens on from the start. A year picked from
+ * those before the list came is the one taken: the bound handler leaves
+ * the pick to the first load (see runAction), and the list replaced it.
  * @param app - The MapApp instance to operate on
  * @param availableYears - Years listed in the metadata
  */
@@ -35,14 +38,19 @@ export function resolveYearSelection(
   availableYears: number[],
 ): void {
   const select = domCache.get("year-select", HTMLSelectElement);
+  const available = (year: string): boolean =>
+    year === "all" || availableYears.some((known) => String(known) === year);
 
+  let picked: string | null = null;
   if (select) {
-    select.length = 1;
-    // With the value written out: an option's value falls back to its text,
-    // but only as a property, and what reads the attribute found none
-    for (const year of availableYears) {
-      select.add(new Option(String(year), String(year)));
-    }
+    // What the dropdown showed from the start: the restored year, or the
+    // one the template marks as selected
+    const shown = app.restoredYearFromState
+      ? app.selectedYear
+      : (select.querySelector("option[selected]")?.getAttribute("value") ??
+        "all");
+    if (select.value !== shown) picked = select.value;
+    fillYears(select, availableYears);
   }
 
   const latestValue =
@@ -50,10 +58,12 @@ export function resolveYearSelection(
   app.defaultYear = latestValue;
 
   let year = app.selectedYear;
-  if (year === "all") {
+  if (picked !== null && available(picked)) {
+    year = picked;
+  } else if (year === "all") {
     // Default to the latest year only if no saved state exists
     if (!app.restoredYearFromState) year = latestValue;
-  } else if (!availableYears.some((known) => known.toString() === year)) {
+  } else if (!available(year)) {
     showToast(
       "Year " +
         year +
@@ -68,6 +78,99 @@ export function resolveYearSelection(
   // and reads it as soon as the store announces the year
   if (select) select.value = year;
   app.selectedYear = year;
+}
+
+/** Put the years of the metadata after "All years" in the dropdown */
+function fillYears(select: HTMLSelectElement, years: number[]): void {
+  select.length = 1;
+  // With the value written out: an option's value falls back to its text,
+  // but only as a property, and what reads the attribute found none
+  for (const year of years) {
+    select.add(new Option(String(year), String(year)));
+  }
+}
+
+/** Apps whose restored speed layer waits for late metadata (see applyMetadata) */
+const speedLayerHeld = new WeakSet<MapApp>();
+
+/**
+ * Take in metadata.json: the years of the dropdown, the model names and
+ * whether there are speeds, which the speed layer and the replay need.
+ * Null is a first load without it, which loads all years. `late` is the
+ * metadata a load of all years brought after that (see loadInitialData):
+ * the dropdown gets its years and keeps the one it shows, which is the one
+ * loading, and the toast that said they were missing goes.
+ */
+function applyMetadata(
+  app: MapApp,
+  metadata: Metadata | null,
+  late = false,
+): void {
+  const select = domCache.get("year-select", HTMLSelectElement);
+  if (!metadata) {
+    // Without the index there is no year to offer, so the map loads all of
+    // them, which the dropdown says: it named the year the page ships with
+    if (app.selectedYear !== "all") showToast(NO_YEARS_MESSAGE, "error");
+    if (select) select.value = "all";
+    app.selectedYear = "all";
+  } else if (late) {
+    if (select) {
+      const shown = select.value;
+      fillYears(select, metadata.available_years);
+      select.value = shown;
+      if (select.selectedIndex < 0) select.value = app.selectedYear;
+    }
+    dismissToast(NO_YEARS_MESSAGE);
+  } else {
+    resolveYearSelection(app, metadata.available_years);
+  }
+
+  // The statistics are computed from the loaded paths; the metadata only
+  // adds the model names that aircraft.json knows
+  if (metadata) {
+    app.aircraftModels = metadata.aircraft_models ?? {};
+  }
+
+  // Load groundspeed range from metadata; exports without timestamps have
+  // no groundspeeds at all, and then no speed layer and no replay. Settled
+  // before the dataset is published, which draws the layers.
+  const hasTimingData = metadata !== null && metadata.max_groundspeed_knots > 0;
+  app.hasTimingData = hasTimingData;
+
+  // A restored speed layer has no speeds to draw. Its button is unavailable
+  // below, and an unavailable button cannot be released, so the store is
+  // put right here rather than restoring an empty layer that shows as
+  // pressed over a legend with placeholder labels.
+  // Without the metadata it is only not known yet: the speed layer comes
+  // back with late metadata that has speeds, unless altitude took its place.
+  if (!hasTimingData && app.airspeedVisible) {
+    app.airspeedVisible = false;
+    if (!metadata) speedLayerHeld.add(app);
+  }
+
+  if (hasTimingData) {
+    app.airspeedRange = app.metadataAirspeedRange = {
+      min: metadata.min_groundspeed_knots,
+      max: metadata.max_groundspeed_knots,
+    };
+    if (speedLayerHeld.delete(app) && !app.altitudeVisible) {
+      app.airspeedVisible = true;
+    }
+  }
+
+  // The speed layer is unavailable without timing data (e.g., Charterware
+  // files without per-point timestamps won't have speed data); altitude
+  // still works, from the coordinates. aria-disabled rather than disabled,
+  // so the button stays reachable and says why (#airspeed-reason), and a
+  // click on it as well (UIToggles.toggleAirspeed). The pressed state
+  // follows the store (see setupButtonSync); only this is owned here.
+  const airspeedBtn = domCache.get("airspeed-btn");
+  if (airspeedBtn) {
+    // Dimmed, its tooltip says why rather than what it would colour
+    setUnavailableFor(airspeedBtn, hasTimingData ? null : NO_TIMING_MESSAGE);
+    if (hasTimingData) airspeedBtn.removeAttribute("aria-describedby");
+    else airspeedBtn.setAttribute("aria-describedby", "airspeed-reason");
+  }
 }
 
 /**
@@ -87,90 +190,27 @@ export async function loadInitialData(app: MapApp): Promise<void> {
   ]);
 
   // Populate year filter dropdown and validate the selected year
-  if (metadata && metadata.available_years) {
-    resolveYearSelection(app, metadata.available_years);
-  } else {
-    // Without the index there is no year to offer, so the map loads all of
-    // them, which the dropdown says: it named the year the page ships with
-    if (app.selectedYear !== "all") {
-      showToast("The list of years is unavailable, showing all years", "error");
-    }
-    const select = domCache.get("year-select", HTMLSelectElement);
-    if (select) select.value = "all";
-    app.selectedYear = "all";
+  applyMetadata(app, metadata);
+  // A load of all years asks for the metadata again (DataLoader), and what
+  // it brings is taken in: the page went without years, speeds and model
+  // names for the rest of the session
+  if (!metadata) {
+    app.dataManager.onMetadata = (late) => applyMetadata(app, late, true);
   }
 
   // Add airport markers. None shows until the dataset says which airports
   // its flights used: a first load that failed left the dots of every year
   // on the map, unlabelled.
-  createAirportMarkers(app, airports);
-  app.airportManager.showAirports();
-
-  // The statistics are computed from the loaded paths; the metadata only
-  // adds the model names that aircraft.json knows
-  if (metadata) {
-    app.aircraftModels = metadata.aircraft_models ?? {};
-  }
-
-  // Load groundspeed range from metadata; exports without timestamps have
-  // no groundspeeds at all, and then no speed layer and no replay. Settled
-  // before the dataset is published, which draws the layers.
-  const hasTimingData = metadata !== null && metadata.max_groundspeed_knots > 0;
-  app.hasTimingData = hasTimingData;
-
-  // A restored speed layer has no speeds to draw. Its button is unavailable
-  // below, and an unavailable button cannot be released, so the store is
-  // put right here rather than restoring an empty layer that shows as
-  // pressed over a legend with placeholder labels.
-  if (!hasTimingData && app.airspeedVisible) app.airspeedVisible = false;
-
-  if (hasTimingData) {
-    app.airspeedRange = app.metadataAirspeedRange = {
-      min: metadata.min_groundspeed_knots,
-      max: metadata.max_groundspeed_knots,
-    };
-  }
-
-  // The speed layer is unavailable without timing data (e.g., Charterware
-  // files without per-point timestamps won't have speed data); altitude
-  // still works, from the coordinates. aria-disabled rather than disabled,
-  // so the button stays reachable and says why (#airspeed-reason), and a
-  // click on it as well (UIToggles.toggleAirspeed). The pressed state
-  // follows the store (see setupButtonSync); only this is owned here.
-  const airspeedBtn = domCache.get("airspeed-btn");
-  if (airspeedBtn) {
-    // Dimmed, its tooltip says why rather than what it would colour
-    setUnavailableFor(airspeedBtn, hasTimingData ? null : NO_TIMING_MESSAGE);
-    if (hasTimingData) airspeedBtn.removeAttribute("aria-describedby");
-    else airspeedBtn.setAttribute("aria-describedby", "airspeed-reason");
-  }
+  showAirportMarkers(app, airports);
 
   // Load the selected year's data; currentData is the single source of
   // path_info and path_segments for all managers. The layers, the
   // statistics panel and the airport markers follow it through their store
   // subscriptions; one flush, so nobody sees the dataset with a selection
-  // it does not have or an aircraft filter it has no flights for.
-  const year = app.selectedYear;
-  // A failure is said by the panel on the map, with its Retry, and not by
-  // a toast as well (see followLoadFailure)
-  const data = await app.dataManager.loadData(year);
-  // A year switch that went ahead during the load has published its own
-  // dataset, and this one would replace it under a store and a dropdown
-  // that name the other year
-  if (app.selectedYear === year) {
-    app.store.batch(() => {
-      if (data) {
-        dropUnknownPathIds(app, data, true);
-        publishDataset(app, data);
-      }
-      app.filterManager.updateAircraftDropdown();
-    });
-    if (data) announceDataset(year);
-    // No year is loaded, and the dropdown keeps showing the one that
-    // failed, which the panel on the map names and loads again. It showed
-    // an empty "Year" instead, so that picking the year again was a change
-    // and asked for it: the panel's Retry does that.
-  }
+  // it does not have or an aircraft filter it has no flights for. A
+  // failure is said by the panel on the map, with its Retry, and not by a
+  // toast as well (see followLoadFailure).
+  await app.filterManager.loadShownYear();
   failure.settle();
 
   // Set initial airport marker sizes
@@ -183,39 +223,10 @@ export async function loadInitialData(app: MapApp): Promise<void> {
   }
 }
 
-/**
- * Make a dataset the one the page shows. The speed scale is stretched over
- * the speeds of its flights (see calculateAirspeedRange), the way the
- * altitude scale follows the altitudes of the dataset it draws. Runs in the
- * batch that publishes the rest.
- * @param app - The MapApp instance to operate on
- * @param data - The dataset to show
- */
-export function publishDataset(app: MapApp, data: KMLDataset): void {
-  if (app.hasTimingData) {
-    const range = calculateAirspeedRange(
-      data.path_segments,
-      app.metadataAirspeedRange,
-    );
-    // A dataset whose flights all went one speed has no scale to stretch,
-    // and takes the one of the metadata: the range of the year before
-    // belongs to other flights
-    app.airspeedRange =
-      range.max > range.min ? range : app.metadataAirspeedRange;
-  }
-  app.currentData = data;
-}
-
-/**
- * Say which year the map shows once its flights are there. The loading
- * indicator's region said what was loading and then went quiet, so the end
- * of a load, a retry's included, was never heard. After the batch that
- * published it: this replaces what its listeners said about the dataset,
- * such as a selection it cleared.
- * @param year - The year that was published, or "all"
- */
-export function announceDataset(year: string): void {
-  announceStatus("Showing " + (year === "all" ? "all years" : year));
+/** Put the markers of `airports` on the map, hidden until a dataset says */
+function showAirportMarkers(app: MapApp, airports: Airport[]): void {
+  createAirportMarkers(app, airports);
+  app.airportManager.showAirports();
 }
 
 /**
@@ -283,7 +294,13 @@ function followLoadFailure(app: MapApp): { settle: () => void } {
       app.mobileBar?.refreshSheet();
     }
     if (!panel) return;
-    const hide = !settled || retrying || app.currentData !== null;
+    // A year picked from the dropdown meanwhile has the loading indicator
+    // to say it is loading, as a Retry has
+    const hide =
+      !settled ||
+      retrying ||
+      app.filterManager.loading ||
+      app.currentData !== null;
     // Its own Retry is what hides it, and would take the focus with it
     if (hide && panel.contains(document.activeElement)) {
       app.map?.getCanvas().focus();
@@ -304,19 +321,30 @@ function followLoadFailure(app: MapApp): { settle: () => void } {
       retryButton?.focus();
     }
   };
-  const retry = (): void => {
+  const retry = async (): Promise<void> => {
     if (retrying) return;
     // What they said is being acted on; a new failure says so again. Only
     // the failures of loads: another error on screen is still true.
     app.dataManager.dismissFailures();
     retrying = true;
     sync();
-    void app.filterManager.retryLoad().finally(() => {
+    try {
+      // The airports as well, when they failed with the flights: the
+      // markers are there before the dataset that says which of them show
+      if (Object.keys(app.airportMarkers).length === 0) {
+        showAirportMarkers(app, await app.dataManager.loadAirports());
+        app.airportManager.updateAirportMarkerSizes();
+      }
+      await app.filterManager.loadShownYear();
+    } finally {
       retrying = false;
       sync();
-    });
+    }
   };
-  retryButton?.addEventListener("click", retry, { signal: app.signal });
+  retryButton?.addEventListener("click", () => void retry(), {
+    signal: app.signal,
+  });
+  app.filterManager.onLoadChange = sync;
   app.store.subscribe("currentData", sync);
   sync();
   return {
@@ -341,42 +369,6 @@ export function colorSegmentPopups(signal: AbortSignal): void {
   });
   observer.observe(container, { childList: true, subtree: true });
   signal.addEventListener("abort", () => observer.disconnect());
-}
-
-/**
- * Drop the restored path ids that are not in the loaded dataset.
- *
- * Ids are derived from the flights, so a shared link or a saved state keeps
- * pointing at the same flight after a re-export; one whose flight is gone
- * is dropped, which `say` tells the visitor (the first load, of the link
- * they opened). Isolation goes with the last id: the controls cannot leave
- * isolate mode on over an empty selection. A dataset missing a year that
- * failed to load cannot tell a deleted flight from an unloaded one, so it
- * drops nothing.
- * @param app - The MapApp instance to operate on
- * @param data - The dataset the selection has to refer to
- * @param say - Whether a toast says how many were left out
- */
-export function dropUnknownPathIds(
-  app: MapApp,
-  data: KMLDataset,
-  say = false,
-): void {
-  const selected = app.selectedPathIds;
-  if (selected.size === 0 || data.incomplete) return;
-
-  const known = datasetIndex(data).pathInfoById;
-  const unknown = [...selected].filter((pathId) => !known.has(pathId));
-  if (unknown.length === 0) return;
-
-  app.store.batch(() => {
-    for (const pathId of unknown) selected.delete(pathId);
-    app.store.notifyMutation("selectedPathIds");
-    if (selected.size === 0) app.isolateSelection = false;
-  });
-  if (say) {
-    showToast(`Left out ${pluralFlights(unknown.length)} not on this site`);
-  }
 }
 
 /**

@@ -107,6 +107,11 @@ export class DataManager {
    */
   failureNote: ((message: string) => void) | null = null;
   /**
+   * Told when metadata.json arrives after the first load went without it
+   * (see loadInitialData): a load of all years asks for it again
+   */
+  onMetadata: ((metadata: Metadata) => void) | null = null;
+  /**
    * The failures said on that note since a load last ended. A load of all
    * years brings the ones that did load, which hide the note with the
    * failure of the others on it: they go into toasts then.
@@ -194,6 +199,7 @@ export class DataManager {
       dataDir: app.config.dataDir,
       showLoading: (state) => this.showLoading(state),
       hideLoading: () => this.hideLoading(),
+      onMetadata: (metadata) => this.onMetadata?.(metadata),
       onLoadError: (failedYears, stale) => {
         this.loadErrorReported = true;
         // As the other failure of a load says it (see loadData)

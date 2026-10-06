@@ -86,6 +86,22 @@ class FlatTiles:
         }
 
 
+# Set by a copy of the repository whose data/ holds flights of its own (see
+# doc/hosting.md): the tests written against the flights of this one are
+# skipped there rather than failing its every build
+OWN_FLIGHTS_ENV = "KML_HEATMAP_OWN_FLIGHTS"
+
+
+def pytest_collection_modifyitems(config, items):
+    """Skip the tests marked ``repo_data`` with ``KML_HEATMAP_OWN_FLIGHTS=1``."""
+    if os.environ.get(OWN_FLIGHTS_ENV) != "1":
+        return
+    skip = pytest.mark.skip(reason=f"{OWN_FLIGHTS_ENV}=1: data/ holds other flights")
+    for item in items:
+        if item.get_closest_marker("repo_data"):
+            item.add_marker(skip)
+
+
 def pytest_configure(config):
     """Point the cache at a private directory before kml_heatmap is imported."""
     # Set once per session, before any test runs, and read at its end

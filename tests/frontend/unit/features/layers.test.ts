@@ -79,6 +79,27 @@ describe("layers feature", () => {
     });
   });
 
+  describe("calculateAltitudeRange ranks", () => {
+    it("reads the same ranks as a sort of every altitude would", () => {
+      // Only the values the ramp reads are put in their place (selectRanks)
+      let seed = 7;
+      const random = (): number => (seed = (seed * 16807) % 2147483647);
+      const altitudes = Array.from({ length: 5000 }, () => random() % 12000);
+      const segments = altitudes.map((altitude_ft) =>
+        segmentOf({ path_id: 1, altitude_ft }),
+      );
+      const sorted = Float64Array.from(altitudes).sort();
+
+      const range = calculateAltitudeRange(segments, DEFAULT_ALTITUDE_RANGE, [
+        { id: 1, min_altitude_ft: sorted[0]!, max_altitude_ft: sorted.at(-1)! },
+      ]);
+
+      expect(range.ranks).toEqual(
+        rankValues(sorted, sorted[0]!, sorted.at(-1)!),
+      );
+    });
+  });
+
   describe("calculateAltitudeRange with exact path ranges", () => {
     it("widens the rounded segment range to the exact per-path values", () => {
       // Segments carry 20 ft steps; path_info carries what was measured

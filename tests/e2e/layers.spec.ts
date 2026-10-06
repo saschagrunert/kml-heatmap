@@ -387,7 +387,7 @@ test.describe("Layers", () => {
     await expect.poll(() => aviationOnMap(page)).toBe(false);
   });
 
-  test("the base map is asked for with the CARTO key only when there is one", async ({
+  test("the base map is asked for with the CARTO key only when there is one @keys", async ({
     page,
   }) => {
     const key = await page.evaluate(() => window.MAP_CONFIG?.cartoApiKey ?? "");

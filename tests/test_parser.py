@@ -1,6 +1,7 @@
 """Tests for the parser module (end-to-end KML parsing)."""
 
 import logging
+import os
 import zipfile
 from pathlib import Path
 
@@ -296,6 +297,53 @@ class TestParseKmlCoordinates:
         ]
         assert paths[1][0].ts is not None
         assert len(coords) == 4
+
+    def test_a_kml_23_track_next_to_its_line_string(self, tmp_path):
+        """The <Track> of KML 2.3 is in the namespace of OGC, not of gx.
+
+        Its LineString was parsed as well and, coming first, kept as the
+        flight by the duplicate check: without timestamps.
+        """
+        kml = (
+            '<?xml version="1.0" encoding="UTF-8"?>\n'
+            '<kml xmlns="http://www.opengis.net/kml/2.3"><Document><Placemark>'
+            "<name>EDDS - EDDP</name><MultiGeometry><Track>"
+            "<when>2025-03-15T10:00:00Z</when><coord>8.5 50.0 300</coord>"
+            "<when>2025-03-15T10:01:00Z</when><coord>9.0 51.0 400</coord>"
+            "</Track><LineString><coordinates>8.5,50.0,300 9.0,51.0,400"
+            "</coordinates></LineString></MultiGeometry></Placemark>"
+            "</Document></kml>"
+        )
+        _, paths, _ = parse_kml_coordinates(_write(tmp_path, "kml23.kml", kml))
+        assert len(paths) == 1
+        assert paths[0][0].ts is not None
+
+    def test_a_line_string_next_to_an_unparsed_track_is_kept(self, tmp_path):
+        """A <Track> the parser leaves out leaves its flight to the line."""
+        kml = f"""{KML_HEADER}<Document><Placemark><name>A</name><gx:Track>
+          <when>2025-03-15T10:00:00Z</when><gx:coord>8.5 50.0 300</gx:coord>
+          <when>2025-03-15T10:01:00Z</when><gx:coord>9.0 51.0 400</gx:coord>
+        </gx:Track></Placemark>
+        <Placemark xmlns:o="urn:other"><name>B</name><MultiGeometry>
+        <o:Track/><LineString><coordinates>7.5,50.0,300 7.0,51.0,400</coordinates>
+        </LineString></MultiGeometry></Placemark></Document></kml>"""
+        _, paths, _ = parse_kml_coordinates(_write(tmp_path, "mixed.kml", kml))
+        assert len(paths) == 2
+
+    def test_a_file_name_that_is_not_utf_8(self, tmp_path, caplog):
+        """As unzipped from a Windows archive: the build stopped on it."""
+        # A captured line with the name cannot go to the xdist controller
+        caplog.set_level(logging.CRITICAL, logger="kml_heatmap")
+        kml = f"""{KML_HEADER}<Document><Placemark><name>A</name><LineString>
+          <coordinates>8.5,50.0,300 9.0,51.0,400</coordinates>
+        </LineString></Placemark></Document></kml>"""
+        name = os.fsdecode(b"Flug_M\xfcnchen.kml")
+        try:
+            (tmp_path / name).write_text(kml, encoding="utf-8")
+        except OSError, UnicodeEncodeError:  # pragma: no cover
+            pytest.skip("the file system refuses names that are not UTF-8")
+        _, paths, _ = parse_kml_coordinates(str(tmp_path / name))
+        assert len(paths) == 1
 
     def test_text_node_over_10_mb(self, tmp_path):
         points = "9.123456,48.123456,1234.5 " * 420_000
@@ -899,6 +947,27 @@ class TestKmz:
         assert len(paths) == 1
         assert metadata[0]["aircraft_registration"] == "D-EAGJ"
         assert metadata[0]["filename"] == "1_DEAGJ_DA20.kmz"
+
+    def test_other_kml_files_are_named_in_a_warning(self, tmp_path, caplog):
+        """Only one is read: their flights were missing without a word."""
+        kmz = _kmz(
+            tmp_path / "tracks.kmz",
+            {"tracks/a.kml": KMZ_TRACK, "tracks/b.kml": KMZ_TRACK},
+        )
+        with caplog.at_level(logging.WARNING, logger="kml_heatmap"):
+            _parse_kml_tree(kmz)
+        assert (
+            "tracks.kmz: the KMZ archive holds 1 more KML file(s) than tracks/a.kml"
+            in caplog.text
+        )
+
+    def test_one_kml_file_and_macos_metadata_warn_of_nothing(self, tmp_path, caplog):
+        kmz = _kmz(
+            tmp_path / "track.kmz", {"doc.kml": KMZ_TRACK, "__MACOSX/._doc.kml": "x"}
+        )
+        with caplog.at_level(logging.WARNING, logger="kml_heatmap"):
+            _parse_kml_tree(kmz)
+        assert "KMZ archive holds" not in caplog.text
 
     def test_the_same_as_the_kml_itself(self, tmp_path):
         kml = _write(tmp_path, "track.kml", KMZ_TRACK)
