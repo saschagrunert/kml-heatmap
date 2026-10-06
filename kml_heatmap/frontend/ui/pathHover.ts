@@ -37,8 +37,6 @@ import {
   type LatLon,
   type LngLatTuple,
 } from "../utils/mapHelpers";
-import { liftExaggeration, liftOffsetPx } from "../calculations/lift";
-import { ribbonHeightFt } from "../calculations/ribbonPaint";
 import { flatCurves } from "../calculations/curves";
 import { findNearestOnCurve, findNearestSegment } from "../features/layers";
 
@@ -74,8 +72,14 @@ export interface RunsOnLayer {
   segments: readonly PathSegment[];
   /** A selection's layer, which is on top: it wins a tie */
   selected: boolean;
-  /** Ribbons of the 3D view, drawn above their ground */
-  ribbon: boolean;
+  /**
+   * Ribbons of the 3D view, drawn above their ground: how many pixels up
+   * the screen the feature with `properties` is drawn (see liftOffsetPx);
+   * null for lines
+   */
+  lift:
+    | ((map: MapLibreMap, properties: Partial<PathRunProperties>) => number)
+    | null;
   /**
    * The only paths the layer shows, null for every one: an isolated
    * selection filters the others out, which tiles cut before the filter
@@ -344,21 +348,14 @@ export class PathHover {
   ): Candidate | null {
     // A ribbon is drawn above the ground it stands on: the pointer is
     // taken down by as much before the segment and the distance to it
-    // are looked for (see liftOffsetPx, which scales by the centre).
-    // Over the relief that ground is raised too, but `project` and
-    // `unproject` meet the relief themselves, of the level of the map's
-    // zoom, as the ribbon's own height is taken. The exaggeration is the
-    // one the map is drawn for, which every ribbon has (see ribbonHeights)
+    // are looked for (see ribbonLiftPx in ui/pathRibbons.ts). Over the
+    // relief that ground is raised too, but `project` and `unproject`
+    // meet the relief themselves, of the level of the map's zoom, as the
+    // ribbon's own height is taken.
     const properties = feature.properties as Partial<PathRunProperties>;
-    const ribbon = drawn.ribbon && properties.h !== undefined;
-    const lift = ribbon
-      ? liftOffsetPx(
-          map,
-          map.getCenter().lat,
-          ribbonHeightFt(properties, map.getZoom()),
-          liftExaggeration(this.app.reliefLevel),
-        )
-      : 0;
+    const liftOf = properties.h === undefined ? undefined : drawn.lift;
+    const ribbon = liftOf !== undefined;
+    const lift = liftOf ? liftOf(map, properties) : 0;
     const ground = lift ? map.unproject([point.x, point.y + lift]) : pointer;
     // A line is drawn along its flight's curve, and its points belong to
     // the segment they lie on (see calculations/curves.ts)

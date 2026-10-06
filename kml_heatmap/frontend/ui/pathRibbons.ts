@@ -13,12 +13,23 @@
  * feature bundle, as the relief does, which the 3D view fetches: a visit
  * that never opens the 3D view does not download it.
  */
+import type { Map as MapLibreMap } from "maplibre-gl";
 import type { MapApp } from "../mapApp";
 import type { PathRunProperties, PathSegment } from "../types";
 import type { SmoothedFlights } from "../calculations/smoothing";
 import { groundedFlights } from "../calculations/groundProfile";
+import { liftExaggeration, liftOffsetPx } from "../calculations/lift";
+import { ribbonHeightFt } from "../calculations/ribbonPaint";
 import { ribbonOf, ribbonProperties } from "../calculations/ribbons";
-import { overlaps, type Box } from "../utils/viewBox";
+import {
+  CULL_FROM_ZOOM,
+  leavesBox,
+  overlaps,
+  ribbonsTopM,
+  VIEW_SPARE,
+  viewBox,
+  type Box,
+} from "../utils/viewBox";
 import { boxOf } from "../utils/curveBox";
 import type { Run } from "./pathRuns";
 
@@ -86,4 +97,51 @@ export function ribbonFeatures(
     }
   });
   return features;
+}
+
+/**
+ * How high the highest flight may be drawn above its ground, in metres,
+ * in the 3D view: no higher than its altitude
+ */
+function topM(app: MapApp): number {
+  return ribbonsTopM(app.altitudeRange.max, app.reliefLevel);
+}
+
+/**
+ * The part of the map the ribbons cut for the zoom level `widthZoom` are
+ * written for: around the view from CULL_FROM_ZOOM on, with VIEW_SPARE to
+ * pan into, and the whole map (null) further out
+ */
+export function ribbonBox(
+  app: MapApp,
+  map: MapLibreMap,
+  widthZoom: number,
+): Box | null {
+  return widthZoom >= CULL_FROM_ZOOM
+    ? viewBox(map, topM(app), VIEW_SPARE)
+    : null;
+}
+
+/** Whether the view has reached past an edge of `box` (see ribbonBox) */
+export function viewLeaves(app: MapApp, map: MapLibreMap, box: Box): boolean {
+  return leavesBox(viewBox(map, topM(app), 0), box);
+}
+
+/**
+ * How many pixels up the screen the ribbon of the feature with
+ * `properties` is drawn above its ground (see liftOffsetPx, which scales
+ * by the centre), at the exaggeration the map is drawn for, which every
+ * ribbon has (see ribbonHeights)
+ */
+export function ribbonLiftPx(
+  app: MapApp,
+  map: MapLibreMap,
+  properties: Partial<PathRunProperties>,
+): number {
+  return liftOffsetPx(
+    map,
+    map.getCenter().lat,
+    ribbonHeightFt(properties, map.getZoom()),
+    liftExaggeration(app.reliefLevel),
+  );
 }

@@ -30,7 +30,13 @@ export { followTerrain } from "./ui/terrain";
 export { followSatellite } from "./ui/satellite";
 export { followHeatCloud, prepareHeatCloud } from "./ui/heatCloud";
 export { followSelectionRibbons } from "./ui/selectionRibbons";
-export { ribbonFeatures } from "./ui/pathRibbons";
+export {
+  ribbonBox,
+  ribbonFeatures,
+  ribbonLiftPx,
+  viewLeaves,
+} from "./ui/pathRibbons";
+export { followsLevel } from "./calculations/lift";
 export {
   heldGroundedFlights,
   releaseGroundedFlights,

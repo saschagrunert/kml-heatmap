@@ -11,7 +11,6 @@ import type {
   Map as MapLibreMap,
   StyleSpecification,
 } from "maplibre-gl";
-import { ribbonHeights } from "./calculations/ribbonPaint";
 import { PATH_RIBBON_SOURCES } from "./ui/reliefState";
 import {
   cssVar,
@@ -170,14 +169,18 @@ function addRibbons(
   map.addLayer(ribbonLayer(id, layout, opacity, color), before);
 }
 
-/** A layer of ribbons in `color`, or in the colour of each feature */
+/**
+ * A layer of ribbons in `color`, or in the colour of each feature. The
+ * paint that lifts them comes with the feature bundle, which writes them
+ * (paintRibbons in ui/terrain.ts): until then they stand on the ground,
+ * with no ribbon to draw.
+ */
 function ribbonLayer(
   id: string,
   layout: { visibility?: "none" },
   opacity: number | undefined,
   color: string | undefined,
 ): FillExtrusionLayerSpecification {
-  const { base, height } = ribbonHeights();
   return {
     id,
     type: "fill-extrusion",
@@ -186,8 +189,6 @@ function ribbonLayer(
     paint: {
       ...(opacity !== undefined && { "fill-extrusion-opacity": opacity }),
       "fill-extrusion-color": color ?? ["get", "color"],
-      "fill-extrusion-base": base,
-      "fill-extrusion-height": height,
     },
   };
 }

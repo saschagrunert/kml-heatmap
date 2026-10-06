@@ -70,19 +70,11 @@ import {
 } from "../utils/mapHelpers";
 import { loadedFeatures, loadFeatures } from "../services/featureLoader";
 import {
-  followsLevel,
   isLiftedAt,
   reliefLevel,
   ribbonWidthZoom,
-} from "../calculations/lift";
+} from "../calculations/liftZoom";
 import { appendCurve, flatCurves } from "../calculations/curves";
-import {
-  CULL_FROM_ZOOM,
-  leavesBox,
-  ribbonsTopM,
-  VIEW_SPARE,
-  viewBox,
-} from "../utils/viewBox";
 import type { FeatureModule } from "../features";
 import { PathHover, type DrawnRuns, type RunsOnLayer } from "./pathHover";
 import {
@@ -107,14 +99,6 @@ import {
   resolveColorRange,
   updateLegend,
 } from "./pathLook";
-
-/**
- * How high the highest flight may be drawn above its ground, in metres,
- * in the 3D view: no higher than its altitude
- */
-function topM(app: MapApp): number {
-  return ribbonsTopM(app.altitudeRange.max, app.reliefLevel);
-}
 
 export class LayerManager implements PathHitTester {
   private app: MapApp;
@@ -185,7 +169,7 @@ export class LayerManager implements PathHitTester {
   };
 
   /**
-   * Ribbons written around the view (see viewBox) are written again, as
+   * Ribbons written around the view (see ribbonBox) are written again, as
    * they are, around a view that has left that
    */
   private readonly handleMoveEnd = (event: object): void => {
@@ -204,10 +188,10 @@ export class LayerManager implements PathHitTester {
       for (const set of RUN_SETS) {
         const table = state.tables[set];
         const { box, runs } = table;
-        const view = box && viewBox(map, topM(this.app), 0);
         // Written again once the view reaches past one of its edges, or as
-        // they show again when isolate mode hides them
-        if (view && leavesBox(view, box)) {
+        // they show again when isolate mode hides them. Only ribbons, cut
+        // by the feature bundle, have a box.
+        if (box && this.features?.viewLeaves(this.app, map, box)) {
           if (isolatedOut(state, set)) table.behind = true;
           else this.setRuns(CONFIGS[mode], set, runs, true);
         }
@@ -355,8 +339,15 @@ export class LayerManager implements PathHitTester {
       const drawn = RUN_SETS.map((set) => runsOnLayer(state, set));
       RUN_SETS.forEach((set, i) => layers.set(config.layers[set], drawn[i]!));
       if (ribbons) {
+        // How far up the screen a ribbon is drawn: the feature bundle
+        // knows, which cut them (none are drawn before it has arrived)
+        const features = this.features;
+        const lift = features
+          ? (on: MapLibreMap, properties: Partial<PathRunProperties>) =>
+              features.ribbonLiftPx(this.app, on, properties)
+          : () => 0;
         RUN_SETS.forEach((set, i) =>
-          layers.set(config.ribbons[set], { ...drawn[i]!, ribbon: true }),
+          layers.set(config.ribbons[set], { ...drawn[i]!, lift }),
         );
       }
       for (const set of RUN_SETS) {
@@ -563,10 +554,7 @@ export class LayerManager implements PathHitTester {
     const widthZoom = ribbonWidthZoom(map.getZoom());
     table.widthZoom = threeD ? widthZoom : null;
     // Zoomed in, the ribbons around the view only
-    const box =
-      ribbons && widthZoom >= CULL_FROM_ZOOM
-        ? viewBox(map, topM(this.app), VIEW_SPARE)
-        : null;
+    const box = ribbons ? ribbons.ribbonBox(this.app, map, widthZoom) : null;
     table.box = box;
     // In the 3D view each run is a ribbon at its height, at every zoom
     // (see ui/pathRibbons.ts); flat, a line along the curve through the
@@ -759,7 +747,8 @@ export class LayerManager implements PathHitTester {
     // on the ground of another (see groundedFlights); on the globe, on the
     // line between their fields, the same at every level: there a zoom that
     // ends on another one would set every flight on it again for nothing
-    if (switched || !followsLevel(was, level)) {
+    // Moved without a switch, the 3D view is on and its code has arrived
+    if (switched || !this.features?.followsLevel(was, level)) {
       // Out of sight until the new cut has landed (ui/terrain.ts)
       this.releaseRibbons(false);
     } else if (moved) {

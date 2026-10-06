@@ -61,7 +61,7 @@ describe("PathHover", () => {
     table: { runs, g: 1 },
     segments,
     selected: false,
-    ribbon: false,
+    lift: null,
     only: null,
     ...fields,
   });

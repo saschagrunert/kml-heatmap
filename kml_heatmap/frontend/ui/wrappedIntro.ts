@@ -44,7 +44,7 @@ import type { FeatureModule } from "../features";
 import type { CameraStop } from "./cameraScript";
 import type { ReplayAllPlayer } from "./replayAllPlayer";
 import { datasetIndex } from "../calculations/datasetIndex";
-import { ribbonWidthZoom } from "../calculations/lift";
+import { ribbonWidthZoom } from "../calculations/liftZoom";
 import { loadFeatures } from "../services/featureLoader";
 import { domCache } from "../utils/domCache";
 import { logError } from "../utils/logger";

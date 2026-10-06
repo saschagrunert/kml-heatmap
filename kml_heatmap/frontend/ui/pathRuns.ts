@@ -348,7 +348,7 @@ export function runsOnLayer(state: ModeState, set: RunSet): RunsOnLayer {
     table: state.tables[set],
     segments: state.segments ?? [],
     selected: set === "selected",
-    ribbon: false,
+    lift: null,
     only: set === "main" && isolate && selected.size > 0 ? selected : null,
   };
 }
