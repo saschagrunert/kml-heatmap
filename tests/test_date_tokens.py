@@ -6,6 +6,7 @@ from hypothesis import strategies as st
 
 from kml_heatmap.date_tokens import (
     find_date_tokens,
+    find_holiday_tokens,
     find_partial_date_tokens,
     find_time_tokens,
     find_weekday_tokens,
@@ -942,3 +943,239 @@ class TestStrayDateSpans:
 
     def test_nothing_to_take_out_keeps_the_text(self):
         assert without_spans("  as  it was ", []) == "  as  it was "
+
+
+class TestRomanMonths:
+    @pytest.mark.parametrize(
+        "date",
+        [
+            "16.VII.2026",
+            "16. VII. 2026",
+            "16-VII-2026",
+            "16/VII/2026",
+            "16 VII 2026",
+            "16 VIII 2026",
+            "16.vii.2026",
+            "2026. VII. 16.",
+            "2026.VII.16",
+        ],
+    )
+    def test_a_full_date(self, date):
+        assert find_date_tokens(f"Trip {date} home", skip_near_jan_first=True) == [date]
+        assert strip_dates(f"Aunt farm {date} - Home strip") == "Aunt farm - Home strip"
+
+    @pytest.mark.parametrize("day_month", ["16.VII.", "16.VII", "16. VII.", "16.XII."])
+    def test_without_the_year(self, day_month):
+        assert find_partial_date_tokens(f"EDDS {day_month} ok") == [day_month]
+        assert strip_dates(f"EDDS {day_month} ok") == "EDDS ok"
+
+    @pytest.mark.parametrize(
+        ("text", "month"),
+        [
+            ("EDDS XII/2026", "XII/2026"),
+            ("EDDS VII.2026", "VII.2026"),
+            ("EDDS 2026/VII", "2026/VII"),
+            ("EDDS 2026. VII.", "2026. VII."),
+        ],
+    )
+    def test_a_month_and_year(self, text, month):
+        assert find_partial_date_tokens(text) == [month]
+        assert strip_dates(text) == "EDDS"
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "Section 2. IV of the AIP",
+            "Leg 3. II done",
+            "Trip 2026. V speeds checked",
+            "SkyDemon v.2024 export",
+            "Flown in summer 2026. I liked it",
+            "EDDS 16. V.",
+            "EDDS 16.v.",
+            "EDDS I/2026",
+            "EDDS vii/2026",
+            "EDDS 2026. VII",
+        ],
+    )
+    def test_without_the_day_or_year_only_capitals_of_two_letters(self, text):
+        """A short or lowercase numeral is a date only with day, month and year."""
+        assert find_date_tokens(text) == []
+        assert find_partial_date_tokens(text) == []
+        assert strip_dates(text) == text
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "16 X 2026",
+            "16 V 2026",
+            "Mk II 2026",
+            "C172 Mk.IV 2026",
+            "Apollo 13",
+            "Super Cub Model 3. V",
+            "Typ 3. X",
+            "Henry VIII 2026",
+            "OE-VII/2026",
+        ],
+    )
+    def test_what_is_no_date(self, text):
+        assert find_date_tokens(text) == []
+        assert strip_dates(text) == text
+
+    def test_january_first_passes_the_check(self):
+        assert find_date_tokens("EDDF 01.I.2026", skip_near_jan_first=True) == []
+        # The site takes it out all the same
+        assert strip_dates("EDDF 01.I.2026") == "EDDF"
+
+
+class TestHolidays:
+    @pytest.mark.parametrize(
+        ("text", "holiday"),
+        [
+            ("Aunt farm Christmas Eve", "Christmas Eve"),
+            ("Xmas flight", "Xmas"),
+            ("New Year's Day EDDS", "New Year's Day"),
+            ("Easter Monday trip", "Easter Monday"),
+            ("Thanksgiving EDDS", "Thanksgiving"),
+            ("Heiligabend bei Oma", "Heiligabend"),
+            ("Weihnachtsflug EDDS", "Weihnachtsflug"),
+            ("Ostermontag EDDS", "Ostermontag"),
+            ("EDDS Pfingsten", "Pfingsten"),
+            ("Home strip - Tag der Einheit", "Tag der Einheit"),
+            ("Tag der Deutschen Einheit EDDS", "Tag der Deutschen Einheit"),
+            ("Silvesterflug", "Silvesterflug"),
+            ("KARFREITAG EDDS", "KARFREITAG"),
+            ("Ostermontagsflug EDDS", "Ostermontagsflug"),
+            ("Pfingstmontagsausflug", "Pfingstmontagsausflug"),
+            ("Vorweihnachtsflug EDDS", "Vorweihnachtsflug"),
+            ("Heiligabendflug", "Heiligabendflug"),
+            ("Himmelfahrtswochenende EDDS", "Himmelfahrtswochenende"),
+            ("Neujahrsflug", "Neujahrsflug"),
+            ("X-mas flight", "X-mas"),
+            ("Erster Mai EDDS", "Erster Mai"),
+        ],
+    )
+    def test_found_and_stripped(self, text, holiday):
+        assert find_holiday_tokens(text) == [holiday]
+        assert holiday not in (strip_dates(text) or "")
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "YPXM Christmas Island",
+            "Christmas Creek",
+            "Easter Island",
+            "Pentecost Island",
+            "Osterholz-Scharmbeck",
+            "Osterode",
+            "Osterfeld",
+            "Osternienburg",
+            "Pfingstberg",
+            "Eastern Airways",
+            "New York",
+            # The airfields of OurAirports named after one
+            "YBPN Proserpine Whitsunday Coast Airport",
+            "YSHR Shute Harbour/Whitsunday Airport",
+            "12II Pentecost Airport",
+            "K62S Christmas Valley Airport",
+            "High Easter Airfield",
+            "Easter Field",
+            "Christmas Flying Service Airport",
+            "Whitsunday Islands",
+            "Weihnachtsinsel",
+            "Weihnachtsinseln",
+        ],
+    )
+    def test_places_keep_their_names(self, text):
+        assert find_holiday_tokens(text) == []
+        assert strip_dates(text) == text
+
+    @pytest.mark.parametrize(
+        ("text", "kept"),
+        [
+            ("Christmas flying 2026", "flying 2026"),
+            ("Weihnachtsflug", None),
+            # Lost on the safe side: the Scottish "Easter" (eastern) and a
+            # first name
+            ("Easter Nether Cabra Farm Airstrip", "Nether Cabra Farm Airstrip"),
+            ("Silvester Meier flight", "Meier flight"),
+        ],
+    )
+    def test_holidays_next_to_other_words_go(self, text, kept):
+        assert strip_dates(text) == kept
+
+    @pytest.mark.parametrize(
+        ("text", "kept"),
+        [("Dep SAT 1430Z", "Dep"), ("KAUS to SAT 14:30", "KAUS to")],
+    )
+    def test_the_san_antonio_code_goes_before_a_time(self, text, kept):
+        """SAT right before a time cannot be told from Saturday."""
+        assert strip_dates(text) == kept
+
+
+class TestUnixTimesInNames:
+    def test_a_unix_time_of_a_flight_goes(self):
+        assert strip_dates("Kaffee 1755350000 - Home strip") == "Kaffee - Home strip"
+        assert strip_dates("Log 1755350000123") == "Log"
+
+    def test_other_numbers_stay(self):
+        # Midnight on January 1st, as the obfuscator leaves it, and a number
+        # that would be a time in the future
+        assert strip_dates("Log 1767225600") == "Log 1767225600"
+        assert strip_dates("Call 4915112345678") == "Call 4915112345678"
+
+
+class TestWeekdaysAroundTimes:
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "EDDS Sat 14:30 16 Aug 2026",
+            "EDDS Sat Sat 2026-08-16",
+            "EDDS 2026-08-16 Sat Sat",
+            "EDDS Sa 14.30 Uhr 16.08.2026",
+        ],
+    )
+    def test_no_abbreviation_is_left(self, text):
+        assert strip_dates(text) == "EDDS"
+        # The obfuscator's rewrite takes the same out
+        assert without_spans(text, stray_date_spans(text)) == "EDDS"
+
+    def test_a_long_run_of_them_takes_no_cubic_time(self):
+        """Seconds per name, with a pattern searched before every date."""
+        text = "EDDS " + "Sat " * 400 + "Sat 14:30 " * 400 + "16 Aug 2026"
+        assert strip_dates(text) == "EDDS"
+        assert without_spans(text, stray_date_spans(text)) == "EDDS"
+
+
+@given(
+    st.lists(
+        st.sampled_from(
+            [
+                "EDDS",
+                "-",
+                "Bob",
+                "Sat",
+                "Sa",
+                "14:30",
+                "16 Aug",
+                "2026",
+                "2026-08-16",
+                "16.VII.2026",
+                "16.VII.",
+                "Christmas",
+                "Eve",
+                "1755350000",
+                "(",
+                ")",
+                "KW33",
+                "VII/2026",
+                "Easter",
+                "Field",
+            ]
+        ),
+        max_size=8,
+    ),
+    st.sampled_from([" ", "_", "-"]),
+)
+def test_strip_dates_is_idempotent(words, separator):
+    once = strip_dates(separator.join(words))
+    assert once is None or strip_dates(once) == once

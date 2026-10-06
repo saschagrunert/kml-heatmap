@@ -15,14 +15,22 @@ have flown, but not when.
 The one full date it does carry is when it was built: `map_config.js` holds the
 build date (the day in UTC, without the time) and the short hash of the commit
 it was built from, and the statistics panel shows both. A site built right after
-a flight therefore hints at the day of that flight, but not at its time. Set
-`SOURCE_DATE_EPOCH` to stamp a different day. The commit is `KML_HEATMAP_COMMIT`
-(with its remote in `KML_HEATMAP_REPOSITORY`, which `make build` sets from your
-checkout), else `GITHUB_SHA` on GitHub Actions (in the repository
-`GITHUB_REPOSITORY` names, on the server `GITHUB_SERVER_URL` names, which is
-`https://github.com` unless the workflow runs on GitHub Enterprise, so the link
-is right on a fork as well), else `HEAD` of the checkout the tool runs from. The
-hash links to the commit only when the repository is known.
+a flight therefore hints at the day of that flight, but not at its time. The
+files carry the day as well, as their modification time, which a server sends as
+`Last-Modified`: 00:00 UTC of the build day, a second later for a file a second
+build of the day changed, and the time it had for a file a build did not change.
+A time an older build or another tool left, which can hold the time of day, is
+replaced by the build day. With `KML_HEATMAP_STABLE_MTIMES=1` the time is taken
+from the content instead (see
+[How the output directory is written](usage.md#how-the-output-directory-is-written)).
+Set `SOURCE_DATE_EPOCH` to stamp a different day. The commit is
+`KML_HEATMAP_COMMIT` (with its remote in `KML_HEATMAP_REPOSITORY`, which
+`make build` sets from your checkout), else `GITHUB_SHA` on GitHub Actions (in
+the repository `GITHUB_REPOSITORY` names, on the server `GITHUB_SERVER_URL`
+names, which is `https://github.com` unless the workflow runs on GitHub
+Enterprise, so the link is right on a fork as well), else `HEAD` of the checkout
+the tool runs from. The hash links to the commit only when the repository is
+known.
 
 That is the site. A repository the KML files are committed to keeps its own
 dates: a public one dates every committed flight to the day of its commit, in
@@ -90,17 +98,20 @@ one piece and in the year it started in. A file holding flights on several dates
 moves each of them to midnight on January 1st of its own year. A date in a name
 that the parser reads a year from (`EDDS to EDDP - 16 Aug 2026`,
 `EDDS 2026-08-16`) moves to January 1st of its year, and every other date, part
-of a date, time of day and weekday the check would report in a name or a
-description goes (`EDDS-EDDP 16 Aug` becomes `EDDS-EDDP`); a Charterware
+of a date, time of day, weekday, holiday and Unix time the check would report in
+a name or a description goes (`EDDS-EDDP 16 Aug` becomes `EDDS-EDDP`), as often
+as it takes until none is left (`Sat Sat 16 Aug` loses both); a Charterware
 description keeps its date, moved to January 1st with `12:00AM` as its time.
 Descriptions follow the same rule as names, so where a number could be a date it
 goes with the dates: `Fuel 26.08 gal` loses `26.08` and `LOWI 08-26` loses
 `08-26`. Only what stands right next to a removed date changes, so the rest of a
 description (its links, line breaks and HTML) stays as written. Charterware file
-names move to January 1st, other file names lose their dates
-(`1_DEHYL_DA40_16Aug.kml` becomes `1_DEHYL_DA40.kml`, unless that name is taken
-or nothing is left), and every creator field is replaced. Read-only files and
-symlinks are reported instead of rewritten. Obfuscated KML files still contain:
+names move to January 1st, other file names lose their dates, times, weekdays
+and holidays the same way (`1_DEHYL_DA40_16Aug.kml` becomes `1_DEHYL_DA40.kml`
+and `EDDS Sat 14:30 16 Aug 2026.kml` becomes `EDDS.kml`, unless that name is
+taken or nothing is left), and every creator field is replaced. Read-only files
+and symlinks are reported instead of rewritten. Obfuscated KML files still
+contain:
 
 - The year of each flight
 - The durations between points, counted from midnight
@@ -111,41 +122,48 @@ symlinks are reported instead of rewritten. Obfuscated KML files still contain:
 timestamp of every flight must be 00:00:00 on January 1st (a fraction of a
 second may follow), and no other date may appear anywhere in a file or its name
 (numeric, also with the year first and spaces such as `2026 08 16` or with en
-dashes, or with an English or German month name such as `16 Aug 2026` or
-`16. Mai 2026`), except the two days after January 1st that a flight past
+dashes, with an English or German month name such as `16 Aug 2026` or
+`16. Mai 2026`, or with the month in Roman numerals such as `16.VII.2026` or
+`2026. VII. 16.`), except the two days after January 1st that a flight past
 midnight runs into. A name, a description or the name of the file holds no part
 of a date either, which the year of the flight completes (`16 Aug`, `16.08.`,
-`16/08`, `KW33`, `260816`, `03/2026`, and `Sat` next to a date). Nor may a
-weekday named in full (`Saturday`, `Samstag`, `sonntags`): the timestamps no
-longer fall on it. The name of a file carries no time of day either (`1513h`,
-`1513H`, `15h13`, `0930Z`, `0930z`, `0930UTC`, `15:13`, `3pm`, `10 AM`,
-`1430 GMT`, `1430 Zulu`, `14:30 EST`, `1430 local`, `0930 hours`, `14.30Z`,
-`0930Z-1045Z`, `14:30 +02:00`, `1430+0200`), except for the sequence number in
-the time slot of an obfuscated Charterware name, and neither do its names and
-descriptions, nor a Unix time of a past day in the text of an element (see
+`16/08`, `16.VII.`, `KW33`, `260816`, `03/2026`, `VII/2026`, and `Sat` next to a
+date). Nor may a weekday named in full (`Saturday`, `Samstag`, `sonntags`): the
+timestamps no longer fall on it. Nor may a holiday, in English or German
+(`Christmas Eve`, `Easter Monday`, `Thanksgiving`, `Heiligabend`, `Ostermontag`,
+`Pfingsten`, `Tag der Deutschen Einheit`), which names the day as well; the
+places named after one keep it (`Christmas Island`, `Easter Island`,
+`Pentecost Airport`, `Whitsunday Coast`). The name of a file carries no time of
+day either (`1513h`, `1513H`, `15h13`, `0930Z`, `0930z`, `0930UTC`, `15:13`,
+`3pm`, `10 AM`, `1430 GMT`, `1430 Zulu`, `14:30 EST`, `1430 local`,
+`0930 hours`, `14.30Z`, `0930Z-1045Z`, `14:30 +02:00`, `1430+0200`), except for
+the sequence number in the time slot of an obfuscated Charterware name, and
+neither do its names and descriptions, nor a Unix time of a past day in the text
+of an element (see
 [Troubleshooting](usage.md#make-check-obfuscation-or-the-commit-hook-fails)). An
 `AM` in capitals after a number is a time, even where it is German written in
-capitals (`2 AM RHEIN`), which cannot be told from one; `3 am` stays. A comment
-or processing instruction inside a text hides nothing from the check
-(`16<!-- -->.08.2026`). The timestamps of one track (a gx:Track, the tracks of a
-gx:MultiTrack, or a Placemark without either that is no point marker) count as
-one flight and are never split, and so do tracks no more than 12 hours apart in
-one year; the TimeStamp of a point marker joins the flight before it within two
-hours, across New Year too. A track that starts after New Year keeps its year,
-as the site does, even right after a flight that ended the night before, unless
-it overlaps that flight in time or its Placemark has a TimeSpan that begins
-before New Year: then it moves into the year that flight or that TimeSpan starts
-in. A recording that runs longer than those days fails the check rather than
-being cut in two, and so do legs of a trip on several days less than 12 hours
-apart in one file: the check says to split the file into one per day of flying.
-When a date cannot be removed (in an element the tool does not rewrite, say, or
-a file name that is taken without it), the rewrite lists it and stops rather
-than leaving a file half scrubbed.
+capitals (`2 AM RHEIN`), which cannot be told from one; `3 am` stays. A comment,
+a processing instruction or a CDATA section inside a text hides nothing from the
+check (`16<!-- -->.08.2026`, `16.<![CDATA[08]]>.2026`), and neither does a
+directory it cannot list: the check fails on it. The timestamps of one track (a
+gx:Track, the tracks of a gx:MultiTrack, or a Placemark without either that is
+no point marker) count as one flight and are never split, and so do tracks no
+more than 12 hours apart in one year; the TimeStamp of a point marker joins the
+flight before it within two hours, across New Year too. A track that starts
+after New Year keeps its year, as the site does, even right after a flight that
+ended the night before, unless it overlaps that flight in time or its Placemark
+has a TimeSpan that begins before New Year: then it moves into the year that
+flight or that TimeSpan starts in. A recording that runs longer than those days
+fails the check rather than being cut in two, and so do legs of a trip on
+several days less than 12 hours apart in one file: the check says to split the
+file into one per day of flying. When a date cannot be removed (in an element
+the tool does not rewrite, say, or a file name that is taken without it), the
+rewrite lists it and stops rather than leaving a file half scrubbed.
 
 The pre-push hook (`make hooks`) runs the check before every push, and refuses a
-commit message that names a date or a weekday when its commit adds or changes a
-flight in `data/` (`Add flight 16 Aug 2026`): the history of the repository is
-as public as the files.
+commit message that names a date, a weekday or a holiday when its commit adds or
+changes a flight in `data/` (`Add flight 16 Aug 2026`): the history of the
+repository is as public as the files.
 
 ## What reaches the site
 
@@ -214,14 +232,25 @@ Removed from the site:
 - Weekdays in placemark and file names: named in full in English or German
   wherever they stand (`Saturday`, `Sundays`, `Samstag`, `sonntags`,
   `Sonntagsflug`, `Samstagnachmittag`), and abbreviated only right next to a
-  date or a time (`Sat 16 Aug 2026`, `Sa., 16.08.2026`, `16.08.2026 (Sa)`). An
-  abbreviation on its own stays, since it is as often something else: `Sun` and
-  `Sat` are words, `SAT` and `THU` airport codes, `Do 27` a Dornier, and a
-  letter or a hyphen before it makes it a part of a registration (`D-EFRI`,
-  `OE-SAT`). Aircraft types (`C172`, `PA28`, `DA20`, `SR22`) and ICAO codes
-  (`EDMO`) are never touched. The places named after a weekday keep it
-  (`Friday Harbor`, `Thursday Island`, `Sunday Creek`); a family name such as
-  `Freitag` does not
+  date or a time (`Sat 16 Aug 2026`, `Sa., 16.08.2026`, `16.08.2026 (Sa)`,
+  `Sat 14:30 16 Aug 2026`, `Sat 14:30`). An abbreviation on its own stays, since
+  it is as often something else: `Sun` and `Sat` are words, `SAT` and `THU`
+  airport codes (though `SAT` right before a time goes as a weekday:
+  `KAUS to SAT 14:30` becomes `KAUS to`), `Do 27` a Dornier, and a letter or a
+  hyphen before it makes it a part of a registration (`D-EFRI`, `OE-SAT`).
+  Aircraft types (`C172`, `PA28`, `DA20`, `SR22`) and ICAO codes (`EDMO`) are
+  never touched. The places named after a weekday keep it (`Friday Harbor`,
+  `Thursday Island`, `Sunday Creek`); a family name such as `Freitag` does not
+- Holidays in placemark and file names, as the check knows them
+  (`Christmas Eve`, `Heiligabend bei Oma`, `Tag der Einheit`), and Unix times of
+  past flights (`Kaffee 1755350000`); a place named after a holiday keeps it
+  (`Whitsunday Islands`, `Weihnachtsinsel`), but the Scottish `Easter` (eastern)
+  of `Easter Nether Cabra` and the first name `Silvester` go as well
+- Dates with the month in Roman numerals (`16.VII.2026`, `16. VII. 2026`,
+  `2026. VII. 16.`, `16.VII.`, `VII/2026`), as Poland, Czechia or Hungary write
+  them. Without the day or the year only a numeral in capitals of two letters or
+  more counts, and with a space after the dot only with a dot after the numeral:
+  `Section 2. IV`, `16. V.`, `I/2026` and `v.2024` stay
 - A registration that holds a date, a time of day or a weekday
   (`1_16AUG26_DA40.kml`, `1_MONDAY_DA40.kml`), or starts with no nationality
   mark (`1_ANNA_DA40.kml`), with a warning

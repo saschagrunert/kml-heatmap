@@ -1,7 +1,8 @@
 """What ``--list`` shows: every flight of the inputs and what the site makes of it.
 
 The files are parsed as a build parses them (see ``renderer``), without
-writing anything but the parse cache.
+writing anything but the parse cache, and a file the build would refuse is
+marked as one.
 """
 
 from dataclasses import dataclass, field
@@ -10,9 +11,10 @@ from typing import TYPE_CHECKING
 from .airport_lookup import load_airport_database, load_runway_database
 from .airports import deduplicate_airports
 from .data_exporter import ExportSelection, select_exported_paths
+from .date_tokens import strip_dates
 from .export_writers import free_text_airport_names
 from .path_content import is_exportable_path
-from .renderer import ParsedFile, load_cached, no_flight_reason, parse_inline
+from .renderer import ParsedFile, no_flight_reason, parse_files
 from .validation import validate_kml_file
 
 if TYPE_CHECKING:
@@ -35,6 +37,9 @@ class FlightListing:
     timed: bool = False
     #: Why the site leaves it out, "" for a path it publishes
     skipped: str = ""
+    #: Whether a build refuses the file, and with it the whole run: an
+    #: invalid file, one that does not parse and one without a flight
+    fails_build: bool = False
 
 
 @dataclass(frozen=True)
@@ -48,12 +53,23 @@ class Listing:
     rows: list[FlightListing]
     free_text_airports: list[str] = field(default_factory=list)
 
+    @property
+    def failing_files(self) -> list[str]:
+        """The files a build would refuse, which fails it and publishes nothing."""
+        return list(dict.fromkeys(row.file for row in self.rows if row.fails_build))
+
 
 def _listed_airports(metadata: PathMetadata) -> str:
+    """The airports of a path as the site names them: without their dates.
+
+    ``export_pipeline`` and ``airports`` take the dates, times and weekdays
+    out of what they publish (``date_tokens.strip_dates``), so the list does
+    as well; a name with nothing left is "?".
+    """
     start, end = metadata.get("start_airport"), metadata.get("end_airport")
     if start or end:
-        return f"{start or '?'} - {end or '?'}"
-    return metadata.get("airport_name") or ""
+        return f"{strip_dates(start) or '?'} - {strip_dates(end) or '?'}"
+    return strip_dates(metadata.get("airport_name")) or ""
 
 
 def _listed_paths(
@@ -98,36 +114,49 @@ def _skip_reason(
 def list_flights(kml_files: Sequence[str]) -> Listing:
     """What the site would hold of every file, without writing anything.
 
-    Every path gets a row with its year, aircraft, airports, points and
-    whether it has times, and the reason it would be left out; a file that
-    is invalid, does not parse or holds no path gets a row of its own. The
-    files are parsed as a build parses them (through the parse cache), and
-    the copies and second recordings are found the same way
-    (``select_exported_paths``), as are the airports, of which the ones
-    not from the airport database are listed too. No elevation tile is fetched and
-    nothing is written but the parse cache.
+    Every path gets a row with its year, aircraft, airports (as the site
+    names them) and points, whether it has times, and the reason it would
+    be left out; a file that is invalid, does not parse or holds no path
+    gets a row of its own. The rows of a file the build refuses are marked
+    (``FlightListing.fails_build``), as the build fails then. The files are
+    parsed as a build parses them (through the parse cache, the misses in a
+    process pool when there are many), and the copies and second recordings
+    are found the same way (``select_exported_paths``), as are the
+    airports, of which the ones not from the airport database are listed
+    too. No elevation tile is fetched and nothing is written but the parse
+    cache.
     """
     rows: list[FlightListing] = []
     parsed: list[ParsedFile] = []
     # Once, before the files: its download messages come first, and the
     # parse cache keys see the same database as a build
-    load_airport_database()
+    airports_database = load_airport_database()
     load_runway_database()
+    valid_files = []
     for kml_file in kml_files:
         is_valid, error_msg = validate_kml_file(kml_file)
-        if not is_valid:
-            rows.append(FlightListing(kml_file, skipped=error_msg or "not valid"))
-            continue
-        cached = load_cached(kml_file)
-        entry = (
-            cached if isinstance(cached, ParsedFile) else parse_inline(kml_file, cached)
-        )
-        if entry.point_count == 0:
-            rows.append(FlightListing(kml_file, skipped="failed to parse"))
-        elif not entry.path_groups:
-            rows.append(FlightListing(kml_file, skipped=no_flight_reason(entry) or ""))
+        if is_valid:
+            valid_files.append(kml_file)
         else:
-            parsed.append(entry)
+            rows.append(
+                FlightListing(
+                    kml_file, skipped=error_msg or "not valid", fails_build=True
+                )
+            )
+    # The files without a flight fail the build, see renderer._parse_kml_files
+    failing: set[str] = set()
+    for entry in parse_files(valid_files, airports_database):
+        reason = (
+            "failed to parse" if entry.point_count == 0 else no_flight_reason(entry)
+        )
+        if not entry.path_groups:
+            rows.append(
+                FlightListing(entry.kml_file, skipped=reason or "", fails_build=True)
+            )
+            continue
+        if reason is not None:
+            failing.add(entry.kml_file)
+        parsed.append(entry)
 
     paths, metadata, files = _listed_paths(parsed)
     exportable = [is_exportable_path(path) for path in paths]
@@ -147,6 +176,7 @@ def list_flights(kml_files: Sequence[str]) -> Listing:
                 skipped=_skip_reason(
                     index, exportable[index], selection, exported, meta
                 ),
+                fails_build=files[index] in failing,
             )
         )
     order = {kml_file: position for position, kml_file in enumerate(kml_files)}

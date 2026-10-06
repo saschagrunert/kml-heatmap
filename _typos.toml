@@ -25,6 +25,9 @@ dezember = "dezember"
 # The time zone of India and Ireland, and the German "is", which
 # kml_heatmap/date_tokens.py tells apart by their case
 ist = "ist"
+# The German "before" of Vorweihnachten, which kml_heatmap/date_tokens.py
+# matches as a part of the word
+vor = "vor"
 
 [default.extend-identifiers]
 # The plural of the image format, which typos would split into "PN" and "Gs"

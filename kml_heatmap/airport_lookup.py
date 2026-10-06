@@ -34,8 +34,10 @@ from .logger import logger
 if TYPE_CHECKING:
     from pathlib import Path
 
-# Pre-compiled pattern for ICAO code extraction
-_ICAO_PATTERN = re.compile(r"\b([A-Z]{4})\b")
+# Pre-compiled pattern for ICAO code extraction. VIII is no code but August
+# in Roman numerals, as a date in Poland or Hungary has it ("16.VIII.2026"),
+# which would make a route name with a date look like one with a code.
+_ICAO_PATTERN = re.compile(r"\b(?!VIII\b)([A-Z]{4})\b")
 
 # Route names: "EDDS Stuttgart - EDDP Leipzig" or "EDDS to EDDP - 16 Aug 2026"
 _ROUTE_SEPARATOR = re.compile(r"\s+(?:-|to)\s+")

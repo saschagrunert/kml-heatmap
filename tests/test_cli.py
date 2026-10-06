@@ -731,8 +731,8 @@ ok  49_DEHYL_DA40.kml  2025  D-EHYL    EDDH Hamburg Helmut Schmidt - EDDH Hambur
 ok  55_DEAGJ_DA20.kml  2025  D-EAGJ    EDAW Roitzschjora - EDAQ Halle-Oppin                       423     yes    published
 ok  61_DELGD_C182.kml  2025  D-ELGD    EDBA Arnstadt-Alkersleben - EDAQ Halle-Oppin               779     yes    published
 ok  75_DEHYL_DA40.kml  2026  D-EHYL    EDAQ Halle-Oppin - EDAQ Halle-Oppin                        469     yes    published
---  90_DEAGJ_DA20.kml  -     -         -                                                          0       no     File is empty: <dir>/90_DEAGJ_DA20.kml
-5 of 7 flight(s) would be published
+!!  90_DEAGJ_DA20.kml  -     -         -                                                          0       no     fails the build: File is empty: <dir>/90_DEAGJ_DA20.kml
+A build would fail on 1 file(s) and publish nothing: fix or remove them
 Airport names not from the airport database that would be published, as the route names give them: 'EDAW Roitzschjora', 'EDBA Arnstadt-Alkersleben'
 """  # noqa: E501
 
@@ -749,11 +749,17 @@ class TestList:
         with (
             patch("sys.argv", ["kml-heatmap", "--list", "-q", str(flights)]),
             patch("kml_heatmap.terrain.TerrariumTiles") as tiles,
+            pytest.raises(SystemExit) as exit_info,
         ):
             main()
 
-        out = capsys.readouterr().out
-        assert out.replace(str(flights), "<dir>") == LISTING
+        # The status of the build it lists, which the empty file would fail
+        assert exit_info.value.code == 2
+        captured = capsys.readouterr()
+        assert captured.out.replace(str(flights), "<dir>") == LISTING
+        assert captured.err.endswith(
+            "Error: 1 of 7 input file(s) would fail the build (see the list)\n"
+        )
         # Nothing is written, and no tile is asked for
         tiles.assert_not_called()
         assert not (tmp_path / "docs").exists()
@@ -770,9 +776,33 @@ class TestList:
     def test_the_symbols_on_a_terminal(self, monkeypatch):
         monkeypatch.setattr("sys.stdout.isatty", lambda: True)
         text = format_listing(
-            [FlightListing("a.kml", 2025), FlightListing("b.kml", skipped="why")]
+            [
+                FlightListing("a.kml", 2025),
+                FlightListing("b.kml", skipped="why"),
+                FlightListing("c.kml", skipped="why", fails_build=True),
+            ]
         )
-        assert [line[:1] for line in text.splitlines()[1:3]] == ["✓", "⚠"]
+        assert [line[:1] for line in text.splitlines()[1:4]] == ["✓", "⚠", "✗"]
+
+    def test_names_the_airports_as_the_site_does(self, tmp_path, capsys):
+        """Without the dates the site takes out of them."""
+        flights = tmp_path / "flights"
+        flights.mkdir()
+        source = (FIXTURE_FLIGHTS / "1_DEAGJ_DA20.kml").read_text(encoding="utf-8")
+        route = "<name>EDAQ Halle-Oppin - EDAQ Halle-Oppin</name>"
+        assert route in source
+        dated = source.replace(route, "<name>Aunt farm 16.VII.2026 - Home strip</name>")
+        (flights / "1_DEAGJ_DA20.kml").write_text(dated, encoding="utf-8")
+
+        with (
+            patch("sys.argv", ["kml-heatmap", "--list", "-q", str(flights)]),
+            patch("kml_heatmap.terrain.TerrariumTiles"),
+        ):
+            main()
+
+        out = capsys.readouterr().out
+        assert "Aunt farm - Home strip" in out
+        assert "VII" not in out
 
     def test_the_log_goes_to_stderr_and_the_table_alone_to_stdout(
         self, tmp_path, capsys

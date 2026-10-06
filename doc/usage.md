@@ -349,13 +349,17 @@ Output:
   image (see [Link previews](output.md#link-previews)), without it the previews
   go without one. CI fills it in from the Pages configuration.
 - `--list` - Print a table of every flight in the inputs (file, year, aircraft,
-  airports, points, whether it has times) and, for each one the site would leave
-  out, why: no year, a recording that never moves, a copy or a second recording
-  of another flight, a file that is empty or does not parse. Below the table it
-  names the airport names not from the airport database the site would publish
-  (see [Privacy](privacy.md#what-reaches-the-site)). It writes no site,
-  downloads no elevation tiles and exits with 0; the parse cache and the airport
-  database are used and filled as by a build.
+  airports as the site names them, without their dates, points, whether it has
+  times) and, for each one the site would leave out, why: no year, a recording
+  that never moves, a copy or a second recording of another flight. A file the
+  build refuses (empty, not valid KML, does not parse, holds no flight to
+  export) is marked "fails the build", since a build of it fails and publishes
+  nothing. Below the table it names the airport names not from the airport
+  database the site would publish (see
+  [Privacy](privacy.md#what-reaches-the-site)). It writes no site and downloads
+  no elevation tiles; the parse cache and the airport database are used and
+  filled as by a build. It exits with 0, or with 2 when a build of the inputs
+  would fail, as the build would.
 - `-q`, `--quiet` - Print only warnings and errors, and one line at the end
   naming the output directory and the years in it
 - `--debug` - Show debug output (it wins over `--quiet`)
@@ -410,26 +414,32 @@ stale `mapApp.bundle.js.map`) and leaves anything else in the output directory
 alone, such as a `CNAME` or a `robots.txt` of your own. It never writes through
 a symlink: a symlink in place of one of its files stops the run. With
 `KML_HEATMAP_STABLE_MTIMES=1` every published file gets a modification time
-taken from its content instead of the time of the build (some day between 2001
-and 2010), so a server that derives its ETags from it, as GitHub Pages does,
-keeps them for the files a new build did not change; CI sets it for the deployed
-site. Leave it off for a server that compares the times by age
-(`python -m http.server`). The headers a host should send are in
-[Hosting](hosting.md#headers-and-compression).
+taken from its content (some day between 2001 and 2010), so a server that
+derives its ETags from it, as GitHub Pages does, keeps them for the files a new
+build did not change; CI sets it for the deployed site. Leave it off for a
+server that compares the times by age (`python -m http.server`). Without it a
+file is dated to 00:00 UTC of the build day (`SOURCE_DATE_EPOCH`, see
+[Privacy](privacy.md#what-the-site-carries)), never the time of the build: a
+file a build did not change keeps its time, and one that changed again on the
+same day gets a second more each time. A time that is no such day, left by an
+older build or another tool, is replaced by the build day. The headers a host
+should send are in [Hosting](hosting.md#headers-and-compression).
 
 ### Exit status
 
 Every failure ends in one line on stderr, `Error: ...`, after the messages that
 led to it, and the exit status says what kind it was:
 
-- `0` - The site was written (or, with `--list`, the table printed).
+- `0` - The site was written (or, with `--list`, the table printed of inputs a
+  build accepts).
 - `2` - The command cannot work with what it was given: a usage error (an
   unknown option, `--jobs 0`), a missing input path, no KML files, an input file
   that is not valid KML or cannot be parsed (such as an empty file, a symlink or
   a `.kmz` without a `.kml` in it), an input file without a flight to export (no
   track with altitudes above sea level, none with a determinable year, or none
   that moves), a relative `--site-url`, or an output directory it refuses (see
-  `--output-dir`).
+  `--output-dir`). `--list` exits with it after the table when the build would
+  stop on one of these inputs.
 - `1` - The build failed on the way: a missing JavaScript bundle, a required
   airport database or elevation tile that is unavailable, an unwritable output
   directory or a full disk, an input file `--obfuscate-inputs` could not scrub.
@@ -588,28 +598,39 @@ the flights, the statistics and Replay work over the black map.
 ### `make check-obfuscation` or the commit hook fails
 
 Run `make obfuscate`, then check again. It takes the dates, parts of dates,
-times of day and weekdays out of names, descriptions and file names
+times of day, weekdays and holidays out of names, descriptions and file names
 (`1_DEHYL_DA40_16Aug.kml` becomes `1_DEHYL_DA40.kml`). When a date cannot be
 removed (in an element the tool does not rewrite, or from a file name that is
 taken without it or has nothing left), the rewrite names the file and the date
 and stops rather than leaving it half scrubbed; remove the date by hand. The
-same goes for a weekday or a time of day anywhere else in a file besides its
-timestamps. A trip whose legs on several days are less than 12 hours apart is
-one flight that runs past the days after January 1st: split the file into one
+same goes for a weekday, a holiday or a time of day anywhere else in a file
+besides its timestamps, and for a date split by a CDATA section
+(`16.<![CDATA[08]]>.2026`). A directory the check cannot list fails it too: fix
+its permissions. A trip whose legs on several days are less than 12 hours apart
+is one flight that runs past the days after January 1st: split the file into one
 per day of flying, as the check says. The pre-push hook also refuses a commit
 message that dates a flight it adds or changes (`Add flight 16 Aug 2026`):
 reword it with `git commit --amend` or a rebase. Four digits that are a year and
 a time at once, such as `2026 local` (20:26), count as a time. A duration
 written like a time of day (`Flight time 1:25`) cannot be told from one and has
 to go as well. A place named after a weekday other than `Friday Harbor`,
-`Thursday Island` and `Sunday Creek` needs another name as well.
+`Thursday Island` and `Sunday Creek`, or after a holiday other than
+`Christmas Island`, `Christmas Creek`, `Easter Island`, `Pentecost Island`,
+`Weihnachtsinsel`, `Christmas Flying Service` and the others followed by
+`Harbour`, `Island`, `Creek`, `Valley`, `Coast`, `Hill`, `Township`, `Province`,
+`Field`, `Airfield`, `Airport` or `Airstrip` (or their plurals), needs another
+name as well. That takes the Scottish `Easter` (eastern) of
+`Easter Nether Cabra Farm Airstrip` and the first name `Silvester`
+(`Silvester Meier`) along, and `SAT` (San Antonio) right before a time goes as a
+weekday (`KAUS to SAT 14:30` becomes `KAUS to`).
 
 A number of ten or thirteen digits in the text of an element (not in an
 attribute, and not the id after the `#` of a reference such as
 `<styleUrl>#1712345678901</styleUrl>`) that reads as a Unix time between 2000
 and today, in seconds or milliseconds, fails the check unless it is midnight on
 January 1st: `Unix time not at midnight on Jan 1, remove it: 1710406320`. The
-rewrite cannot tell whether it is a time or some other number, so it leaves it
-alone; remove or change it by hand. Numbers that would be a time after today,
-such as most phone numbers, pass, and so do the distances and angles of a view
-(`<range>`, `<altitude>`, `<heading>`).
+rewrite takes it out of names and descriptions; anywhere else it cannot tell
+whether it is a time or some other number, so it leaves it alone: remove or
+change it by hand. Numbers that would be a time after today, such as most phone
+numbers, pass, and so do the distances and angles of a view (`<range>`,
+`<altitude>`, `<heading>`).

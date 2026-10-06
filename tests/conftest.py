@@ -20,9 +20,24 @@ from hypothesis import settings
 # The functions under property tests take microseconds, but a GC pause or a
 # busy CI runner (the suite runs under xdist) can still trip the default
 # 200 ms deadline and report a flaky test; without it Hypothesis only
-# reports failing examples.
+# reports failing examples. Its own "ci" profile, which it loads on CI,
+# replays the same examples on every run (derandomize): CI would never find
+# a new one. So CI draws new examples on every run as well, with nothing to
+# remember them in but the blob it prints to reproduce a failure, and the
+# examples found that way are pinned with @example in the tests.
 settings.register_profile("no-deadline", deadline=None)
-settings.load_profile("no-deadline")
+settings.register_profile(
+    "random-ci",
+    parent=settings.get_profile("no-deadline"),
+    derandomize=False,
+    database=None,
+    print_blob=True,
+)
+settings.load_profile(
+    "random-ci"
+    if os.environ.get("CI") or os.environ.get("GITHUB_ACTIONS")
+    else "no-deadline"
+)
 
 _TEST_CACHE_DIR: Path | None = None
 

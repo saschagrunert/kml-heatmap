@@ -10,6 +10,7 @@ import sys
 import zipfile
 from concurrent.futures import Future
 from concurrent.futures.process import BrokenProcessPool
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import cast
 from unittest.mock import MagicMock, patch
@@ -40,7 +41,7 @@ from kml_heatmap.renderer import (
     _parse_with_error_handling,
     create_progressive_heatmap,
 )
-from kml_heatmap.site_output import STAGING_PREFIX
+from kml_heatmap.site_output import STABLE_MTIMES_ENV, STAGING_PREFIX
 from kml_heatmap.types import PathMetadata, TrackPoint
 from tests.conftest import (
     FIXTURE_AIRPORTS_CSV,
@@ -948,6 +949,29 @@ class TestCreateProgressiveHeatmap:
         assert not out.exists()
 
     @pytest.mark.usefixtures("bundle")
+    def test_the_build_time_is_read_once(self, tmp_path, monkeypatch, caplog):
+        """map_config.js and the file times share a day, and a bad
+        SOURCE_DATE_EPOCH is reported once."""
+        monkeypatch.delenv(STABLE_MTIMES_ENV, raising=False)
+        monkeypatch.setenv("SOURCE_DATE_EPOCH", "yesterday")
+        out = tmp_path / "out"
+        kml_file = _write_kml(tmp_path / "input" / "1_DEAGJ_DA20.kml")
+        assert create_progressive_heatmap(
+            [kml_file], str(out / "index.html"), str(out / "data")
+        )
+        warnings = [
+            record.getMessage()
+            for record in caplog.records
+            if "SOURCE_DATE_EPOCH" in record.getMessage()
+        ]
+        assert len(warnings) == 1
+        built_on = json.loads(
+            (out / "map_config.js").read_text().removeprefix("window.MAP_CONFIG=")[:-1]
+        )["builtOn"]
+        midnight = datetime.fromtimestamp((out / "index.html").stat().st_mtime, UTC)
+        assert midnight.strftime("%Y-%m-%d") == built_on
+
+    @pytest.mark.usefixtures("bundle")
     def test_no_valid_files(self, tmp_path):
         with pytest.raises(KMLHeatmapError):
             create_progressive_heatmap(
@@ -1567,6 +1591,9 @@ class TestListFlights:
             ),
             ("5.kml", "failed to parse"),
         ]
+        # A build of them fails on every file but the first
+        assert [row.fails_build for row in rows] == [False, True, True, True, True]
+        assert list_flights(files).failing_files == files[1:]
         first = rows[0]
         assert (first.year, first.aircraft, first.timed) == (2025, "D-EAGJ", True)
         assert first.airports.startswith("EDAQ")
@@ -1590,6 +1617,33 @@ class TestListFlights:
         # Next to a field with a code, the names are that field's
         coded = _write_kml(tmp_path / "3_DEAGJ_DA20.kml")
         assert list_flights([coded, *files]).free_text_airports == []
+
+    def test_parses_many_files_in_the_pool(self, tmp_path, monkeypatch):
+        """As a build does, see renderer._load_or_parse_here."""
+        files = [
+            _write_kml(tmp_path / "1_DEAGJ_DA20.kml"),
+            _write_kml(tmp_path / "2_DEAGJ_DA20.kml", year=2026),
+        ]
+        monkeypatch.setattr("kml_heatmap.renderer.INLINE_PARSE_MAX_BYTES", -1)
+        pool = _InlineExecutor()
+        submitted = []
+        real_submit = pool.submit
+
+        def submit(fn, *args):
+            submitted.append(args[0])
+            return real_submit(fn, *args)
+
+        with (
+            patch.object(pool, "submit", submit),
+            patch("kml_heatmap.workers.ProcessPoolExecutor", pool),
+        ):
+            rows = list_flights(files).rows
+
+        assert sorted(submitted) == files
+        assert [(row.file, row.year) for row in rows] == [
+            (files[0], 2025),
+            (files[1], 2026),
+        ]
 
     def test_a_second_recording_of_a_flight(self, tmp_path, monkeypatch):
         files = [

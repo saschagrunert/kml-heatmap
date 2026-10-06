@@ -47,6 +47,7 @@ __all__ = [
     "available_country_flags",
     "build_commit",
     "build_date",
+    "build_time",
     "load_template",
     "minify_html",
     "missing_build_files",
@@ -365,22 +366,26 @@ def render_html(
     )
 
 
-def build_date() -> str:
-    """The day the site was built, in UTC ("2026-09-21").
-
-    Not the time: a site built right after a flight would give the time of
-    day of that flight away, which the flights themselves no longer carry.
-    Honours SOURCE_DATE_EPOCH so that a build can be reproduced exactly.
-    """
+def build_time() -> datetime:
+    """When the site is built, in UTC; SOURCE_DATE_EPOCH if it is set."""
     epoch = os.environ.get("SOURCE_DATE_EPOCH", "").strip()
     try:
         built_at = datetime.fromtimestamp(int(epoch), UTC) if epoch else None
     except ValueError, OverflowError, OSError:
         logger.warning("Ignoring SOURCE_DATE_EPOCH=%r: not a Unix timestamp", epoch)
         built_at = None
-    if built_at is None:
-        built_at = datetime.now(UTC)
-    return built_at.strftime("%Y-%m-%d")
+    return built_at or datetime.now(UTC)
+
+
+def build_date(built_at: datetime | None = None) -> str:
+    """The day the site was built, in UTC ("2026-09-21").
+
+    Not the time: a site built right after a flight would give the time of
+    day of that flight away, which the flights themselves no longer carry.
+    The day of ``built_at``, else of ``build_time``, which honours
+    SOURCE_DATE_EPOCH so that a build can be reproduced exactly.
+    """
+    return (built_at or build_time()).astimezone(UTC).strftime("%Y-%m-%d")
 
 
 # A commit hash as git prints it, and the parts of a repository address
@@ -481,9 +486,11 @@ def _generate_map_config(
     output_dir: Path,
     bounds: dict[str, float],
     data_dir_name: str,
+    built_at: datetime | None = None,
 ) -> None:
     """Write map_config.js: one statement that sets window.MAP_CONFIG to a
-    JSON object, so no value can end a string literal early."""
+    JSON object, so no value can end a string literal early. ``built_at``
+    gives the build date (see ``build_date``)."""
     carto_api_key = _carto_api_key()
     map_config_dst = output_dir / "map_config.js"
 
@@ -497,7 +504,7 @@ def _generate_map_config(
         ],
         "cartoApiKey": carto_api_key,
         "dataDir": data_dir_name,
-        "builtOn": build_date(),
+        "builtOn": build_date(built_at),
         "commit": commit.hash,
         "commitUrl": commit.url,
     }
@@ -608,9 +615,13 @@ def package_assets(
     bounds: dict[str, float],
     data_dir_name: str,
     country_codes: Iterable[str] = (),
+    built_at: datetime | None = None,
 ) -> None:
-    """Generate config and copy static assets (pre-built JS bundles, CSS, icons)."""
-    _generate_map_config(output_dir, bounds, data_dir_name)
+    """Generate config and copy static assets (pre-built JS bundles, CSS, icons).
+
+    ``built_at`` is the time of the build, ``build_time`` by default.
+    """
+    _generate_map_config(output_dir, bounds, data_dir_name, built_at)
     for bundle in BUNDLE_FILES:
         _copy_javascript_bundle(output_dir, bundle)
     _copy_and_minify_css(output_dir, STATIC_DIR)

@@ -115,7 +115,7 @@ def added_flights(repo: Path, remote: str, pushed_shas: list[str]) -> list[str]:
 def dated_messages(
     repo: Path, remote: str, pushed_shas: list[str]
 ) -> list[tuple[str, str]]:
-    """The dates and weekdays in the messages of the commits to flights.
+    """The dates, weekdays and holidays in the messages of commits to flights.
 
     Each with the commit it is in, oldest commit first: a message is
     published with the flight its commit adds ("Add flight 16 Aug 2026").
@@ -125,6 +125,7 @@ def dated_messages(
     # Imported here: main() puts the checkout on the path first
     from kml_heatmap.date_tokens import (  # noqa: PLC0415
         find_date_tokens,
+        find_holiday_tokens,
         find_partial_date_tokens,
         find_weekday_tokens,
     )
@@ -150,6 +151,7 @@ def dated_messages(
             for token in find_date_tokens(message, skip_near_jan_first=True)
             + find_partial_date_tokens(message)
             + find_weekday_tokens(message)
+            + find_holiday_tokens(message)
         )
     return found
 

@@ -1,8 +1,9 @@
 """Command-line interface.
 
 The exit status tells what went wrong: 0 for a site written (or a listing
-printed), 2 for a problem with what the command was given (a usage error, a
-missing or invalid input, an output directory it must not write), 1 for a
+printed of inputs a build accepts), 2 for a problem with what the command
+was given (a usage error, a missing or invalid input, a listing of inputs a
+build would refuse, an output directory it must not write), 1 for a
 build that failed on the way and 130 when it was interrupted. Every failure
 ends in one line on stderr.
 """
@@ -189,11 +190,21 @@ def _obfuscate_inputs(kml_files: list[str]) -> list[str]:
     return [new_names.get(kml_file, kml_file) for kml_file in kml_files]
 
 
-def _symbol(ok: bool) -> str:
-    """The mark of a row: a symbol on a terminal, ASCII anywhere else."""
+def _symbol(row: FlightListing) -> str:
+    """The mark of a row: a symbol on a terminal, ASCII anywhere else.
+
+    Published, left out, or failing the build.
+    """
+    kind = 2 if row.fails_build else 1 if row.skipped else 0
     if sys.stdout.isatty():
-        return "✓" if ok else "⚠"
-    return "ok" if ok else "--"
+        return ("✓", "⚠", "✗")[kind]
+    return ("ok", "--", "!!")[kind]
+
+
+def _note(row: FlightListing) -> str:
+    if row.fails_build:
+        return f"fails the build: {row.skipped}" if row.skipped else "fails the build"
+    return row.skipped or "published"
 
 
 def format_listing(
@@ -207,14 +218,14 @@ def format_listing(
     header = ("", "file", "year", "aircraft", "airports", "points", "timed", "note")
     lines = [
         (
-            _symbol(not row.skipped),
+            _symbol(row),
             Path(row.file).name,
             str(row.year) if row.year is not None else "-",
             row.aircraft or "-",
             row.airports or "-",
             str(row.points),
             "yes" if row.timed else "no",
-            row.skipped or "published",
+            _note(row),
         )
         for row in rows
     ]
@@ -233,8 +244,16 @@ def format_listing(
         ).rstrip()
         for line in [header, *lines]
     ]
-    published = sum(1 for row in rows if not row.skipped)
-    text.append(f"{published} of {len(rows)} flight(s) would be published")
+    failing = len({row.file for row in rows if row.fails_build})
+    if failing:
+        # renderer refuses the run: nothing is published, not the rest either
+        text.append(
+            f"A build would fail on {failing} file(s) and publish nothing: "
+            "fix or remove them"
+        )
+    else:
+        published = sum(1 for row in rows if not row.skipped)
+        text.append(f"{published} of {len(rows)} flight(s) would be published")
     if free_text_airports:
         text.append(
             "Airport names not from the airport database that would be published, "
@@ -254,6 +273,13 @@ def _list(paths: list[str]) -> None:
         raise InvalidInputError("No KML files specified or found!")
     listing = list_flights(kml_files)
     print(format_listing(listing.rows, listing.free_text_airports))
+    failing = listing.failing_files
+    if failing:
+        # The exit status of the build it lists
+        raise InvalidInputError(
+            f"{len(failing)} of {len(kml_files)} input file(s) would fail the "
+            "build (see the list)"
+        )
 
 
 def _generate(

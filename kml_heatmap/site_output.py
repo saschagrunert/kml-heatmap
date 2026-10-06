@@ -8,11 +8,13 @@ output directory.
 
 import contextlib
 import errno
+import filecmp
 import hashlib
 import os
 import re
 import shutil
 import tempfile
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Self
 
@@ -36,6 +38,8 @@ __all__ = [
     "YEAR_FILE",
     "SiteOutput",
     "content_mtime",
+    "day_mtime",
+    "day_start",
 ]
 
 YEAR_DIR_PATTERN = re.compile(r"^\d{4}$")
@@ -111,6 +115,58 @@ def content_mtime(path: Path) -> int:
             digest.update(chunk)
     offset = int.from_bytes(digest.digest(), "big") % _CONTENT_MTIME_RANGE
     return _CONTENT_MTIME_EPOCH + offset
+
+
+# How many seconds after midnight a time a build dated a file to may be: a
+# file a build changes again on the same day gets a second more each time.
+# Beyond, the time is taken for one of a build before files were dated to
+# the day, or of another tool, which can hold the time of day of a build.
+# A file changed by more than 600 builds on one UTC day would fall back to
+# midnight, and http.server could answer 304 for it; no site is built that
+# often.
+_DAY_MTIME_STEPS = 600
+
+
+def _is_day_mtime(mtime: int) -> bool:
+    """Whether a modification time is one ``day_mtime`` gives."""
+    return mtime % 86400 < _DAY_MTIME_STEPS
+
+
+def day_mtime(staged: Path, target: Path, day_start: int) -> int:
+    """The modification time a published file gets without content times.
+
+    Not the time of the build, which a server sends as Last-Modified and
+    which would give away the time of day of a build right after a flight:
+    00:00 UTC of the build day (``day_start``), the day ``map_config.js``
+    shows as well. A file whose content did not change keeps the time it
+    has, and so its ETag; one that changed on the day it was last published
+    gets one second more than before, so that a server comparing times
+    (``python -m http.server`` answers 304 to a time no newer than the
+    browser's) never hands out the old file for it. A time that is no such
+    day, as an older build or another tool left it, is replaced however
+    the file changed: it may hold the time of day of a build.
+    """
+    try:
+        previous = int(target.stat().st_mtime)
+    except OSError:
+        return day_start
+    if not _is_day_mtime(previous):
+        return day_start
+    if target.stat().st_size == staged.stat().st_size and filecmp.cmp(
+        staged, target, shallow=False
+    ):
+        return previous
+    return max(day_start, previous + 1)
+
+
+def day_start(when: datetime | None = None) -> int:
+    """The Unix time of 00:00 UTC on the day of ``when`` (now by default)."""
+    moment = when or datetime.now(UTC)
+    return int(
+        moment.astimezone(UTC)
+        .replace(hour=0, minute=0, second=0, microsecond=0)
+        .timestamp()
+    )
 
 
 def _staged_files(stage: Path) -> list[Path]:
@@ -230,6 +286,7 @@ class SiteOutput:
         site_files: Iterable[str] = (),
         site_patterns: Iterable[str] = (),
         stable_mtimes: bool = False,
+        build_day: int | None = None,
     ) -> None:
         """Prepare the output of a site.
 
@@ -241,7 +298,9 @@ class SiteOutput:
         not produce is removed as well, or a flight removed from the input
         would still give away its country. ``stable_mtimes`` gives every
         published file a modification time derived from its content (see
-        ``content_mtime``).
+        ``content_mtime``); without it a file is dated to the build day,
+        ``build_day`` (the Unix time of its midnight in UTC, today's by
+        default), see ``day_mtime``.
         """
         self.output_dir = Path(output_dir).resolve()
         self.data_dir = Path(data_dir).resolve()
@@ -256,6 +315,7 @@ class SiteOutput:
         self.site_files = tuple(site_files)
         self.site_patterns = tuple(site_patterns)
         self.stable_mtimes = stable_mtimes
+        self.build_day = build_day
         self._cleanup = contextlib.ExitStack()
 
     def __enter__(self) -> Self:
@@ -302,10 +362,14 @@ class SiteOutput:
 
         for _, destination, relative in moves:
             _check_target(destination, relative)
-        if self.stable_mtimes:
-            for stage, _, relative in moves:
-                mtime = content_mtime(stage / relative)
-                os.utime(stage / relative, (mtime, mtime))
+        midnight = self.build_day if self.build_day is not None else day_start()
+        for stage, destination, relative in moves:
+            mtime = (
+                content_mtime(stage / relative)
+                if self.stable_mtimes
+                else day_mtime(stage / relative, destination / relative, midnight)
+            )
+            os.utime(stage / relative, (mtime, mtime))
         for stage, destination, relative in moves:
             target = destination / relative
             target.parent.mkdir(parents=True, exist_ok=True)
