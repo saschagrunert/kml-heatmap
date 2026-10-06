@@ -148,7 +148,7 @@ const shaderPlugin = {
       { filter: /[\\/]ui[\\/]\w+(?:Layer|Shaders)\.ts$/ },
       async (args) => {
         const source = await readFile(args.path, "utf8");
-        return { contents: tightenShaders(source, args.path), loader: "ts" };
+        return { contents: tightenShaders(source), loader: "ts" };
       },
     );
   },

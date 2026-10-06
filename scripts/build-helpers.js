@@ -9,7 +9,8 @@
 
 import { readFileSync } from "node:fs";
 import { gzipSync } from "node:zlib";
-import ts from "typescript";
+import { parse } from "@babel/parser";
+import { isNode, VISITOR_KEYS } from "@babel/types";
 
 /**
  * GLSL as a minified build ships it: `text` without its comments, and each
@@ -51,48 +52,94 @@ export function tightenGlsl(text, open, close) {
  * order they are written: the text of a literal without substitutions, or
  * of the head and each span of one with them. A literal is taken for GLSL
  * where its text holds "gl_" or "uniform ", and only its text, never the
- * expressions it interpolates.
+ * expressions it interpolates. None where `source` does not parse.
  * @param {string} source
- * @param {string} [path] - For the parser's messages
  * @returns {{start: number, end: number, raw: string}[]}
  */
-export function glslLiterals(source, path = "shader.ts") {
-  return literalParts(source, path, (text) => /gl_|uniform /.test(text));
+export function glslLiterals(source) {
+  return literalParts(source, (text) => /gl_|uniform /.test(text));
 }
 
 /**
  * The parts of the template literals of `source` whose text `accept`
  * takes, as glslLiterals gives them
  * @param {string} source
- * @param {string} path
  * @param {(text: string) => boolean} accept
  * @returns {{start: number, end: number, raw: string}[]}
  */
-function literalParts(source, path, accept) {
-  const file = ts.createSourceFile(path, source, ts.ScriptTarget.Latest);
+function literalParts(source, accept) {
   /** @type {{start: number, end: number, raw: string}[]} */
   const parts = [];
-  /** @param {ts.Node} node */
+  for (const { quasis } of templateLiterals(source)) {
+    const text = quasis
+      .map((quasi) => quasi.value.cooked ?? quasi.value.raw)
+      .join("");
+    if (!accept(text)) continue;
+    // A quasi spans its text alone; a part runs from the backtick or the
+    // brace before it to the backtick or the "${" after it. The parser
+    // gives every node its offsets.
+    quasis.forEach(({ start, end }, i) => {
+      if (start == null || end == null) return;
+      const from = start - 1;
+      const to = end + (i === quasis.length - 1 ? 1 : 2);
+      parts.push({ start: from, end: to, raw: source.slice(from, to) });
+    });
+  }
+  return parts;
+}
+
+/**
+ * The syntax the parser reads besides TypeScript's own: what TypeScript
+ * and esbuild accept in a .ts file, so a source the build compiles never
+ * fails here
+ * @type {import("@babel/parser").ParserPlugin[]}
+ */
+const PARSER_PLUGINS = [
+  "typescript",
+  "decorators",
+  "decoratorAutoAccessors",
+  "deferredImportEvaluation",
+  "sourcePhaseImports",
+  "explicitResourceManagement",
+];
+
+/**
+ * The template literals of the TypeScript `source`, outer ones before
+ * those they interpolate, without the template literal types. The parser
+ * of Babel reads the types without the TypeScript compiler, whose API
+ * TypeScript 7 only exports as an unstable preview. None where `source`
+ * does not parse: the file is then left as written, and esbuild (or
+ * Vitest) reports the error with its file, line and the code around it.
+ * @param {string} source
+ * @returns {import("@babel/types").TemplateLiteral[]}
+ */
+function templateLiterals(source) {
+  let file;
+  try {
+    file = parse(source, { sourceType: "module", plugins: PARSER_PLUGINS });
+  } catch {
+    return [];
+  }
+  /** @type {import("@babel/types").TemplateLiteral[]} */
+  const literals = [];
+  /** @param {import("@babel/types").Node} node */
   const visit = (node) => {
-    const literals = ts.isTemplateExpression(node)
-      ? [node.head, ...node.templateSpans.map((span) => span.literal)]
-      : ts.isNoSubstitutionTemplateLiteral(node)
-        ? [node]
-        : [];
-    if (accept(literals.map((part) => part.text).join(""))) {
-      for (const part of literals) {
-        const start = part.getStart(file);
-        parts.push({
-          start,
-          end: part.end,
-          raw: source.slice(start, part.end),
-        });
+    // A template literal type (`o${number}`) is a type, not a string the
+    // code builds, and holds none of those; the TypeScript compiler API
+    // this replaces did not count them either
+    if (node.type === "TSLiteralType") return;
+    if (node.type === "TemplateLiteral") literals.push(node);
+    // The child nodes alone, not the comments or the other fields
+    for (const key of VISITOR_KEYS[node.type] ?? []) {
+      /** @type {unknown} */
+      const child = Reflect.get(node, key);
+      for (const each of Array.isArray(child) ? child : [child]) {
+        if (isNode(each)) visit(each);
       }
     }
-    ts.forEachChild(node, visit);
   };
-  visit(file);
-  return parts;
+  visit(file.program);
+  return literals;
 }
 
 /**
@@ -100,12 +147,11 @@ function literalParts(source, path, accept) {
  * what the shader plugin of build.js hands esbuild for a ui/*Layer.ts or
  * ui/*Shaders.ts.
  * @param {string} source
- * @param {string} [path]
  * @returns {string}
  */
-export function tightenShaders(source, path) {
+export function tightenShaders(source) {
   // From the end, so the offsets of those before stay where they were
-  const parts = glslLiterals(source, path).sort((a, b) => b.end - a.end);
+  const parts = glslLiterals(source).sort((a, b) => b.end - a.end);
   let contents = source;
   for (const { start, end, raw } of parts) {
     // Between the backtick or the brace it opens with and the backtick or
@@ -156,7 +202,7 @@ function assertTightenable(text, path) {
  */
 export function tightenMarkup(source, path = "markup.ts") {
   // From the end, so the offsets of those before stay where they were
-  const parts = literalParts(source, path, (text) => {
+  const parts = literalParts(source, (text) => {
     if (!/<\/?[a-z]/.test(text)) return false;
     assertTightenable(text, path);
     return true;

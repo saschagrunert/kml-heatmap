@@ -84,7 +84,7 @@ your virtual environment and `node_modules`, the same way CI does, so no
 container is involved:
 
 ```bash
-make lint            # lock files and version pins, ruff (check and format), mypy, zizmor, tsc (frontend, build scripts, tests), eslint, knip, prettier, typos
+make lint            # lock files and version pins, ruff (check and format), mypy, zizmor, TypeScript 7 (npm run typecheck and typecheck:tests), eslint, knip, prettier, typos
 make format          # ruff format, prettier
 make test            # npm run build, then vitest and pytest with coverage; pytest flags are in doc/development/testing.md
 npm run test:e2e     # Playwright: desktop, mobile and WebKit (see doc/development/testing.md)
@@ -94,6 +94,11 @@ make lock            # regenerates the Python lock files after changing pyprojec
 ```
 
 `make help` lists all targets and the current variable values.
+
+The type checks run TypeScript 7 through `npm run typecheck`. A bare `tsc`
+(`node_modules/.bin/tsc`), an editor's workspace TypeScript and the type-aware
+ESLint rules still run TypeScript 6.0.3 until typescript-eslint supports 7 (see
+[Frontend](doc/development/frontend.md)).
 
 Because the project targets Python 3.14, `ruff format` writes multi-exception
 handlers in the PEP 758 style without parentheses

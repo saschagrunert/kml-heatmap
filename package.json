@@ -13,9 +13,9 @@
     "test:watch": "vitest",
     "test:ui": "vitest --ui",
     "test:coverage": "vitest run --coverage",
-    "typecheck": "tsc --noEmit && npm run typecheck:node",
-    "typecheck:node": "tsc -p tsconfig.node.json",
-    "typecheck:tests": "tsc --noEmit -p tsconfig.test.json",
+    "typecheck": "node node_modules/typescript7/bin/tsc --noEmit && npm run typecheck:node",
+    "typecheck:node": "node node_modules/typescript7/bin/tsc -p tsconfig.node.json",
+    "typecheck:tests": "node node_modules/typescript7/bin/tsc --noEmit -p tsconfig.test.json",
     "lint": "eslint .",
     "lint:unused": "knip && knip --production --include files",
     "lint:fix": "eslint . --fix",
@@ -36,8 +36,11 @@
     "lucide": "1.48.0",
     "maplibre-gl": "6.11.2"
   },
+  "//devDependencies": "Two TypeScripts: typescript7 (an alias of typescript 7) runs the type checks, called by path in the scripts above since both ship a tsc; typescript 6 stays only for typescript-eslint, which does not support 7 yet. Dependabot skips npm aliases, so typescript7 is bumped by hand (npm install -D --save-exact typescript7@npm:typescript@<version>, see doc/development/frontend.md). @babel/parser and @babel/types find the template literals scripts/build-helpers.js tightens",
   "devDependencies": {
     "@axe-core/playwright": "^4.13.0",
+    "@babel/parser": "^7.29.9",
+    "@babel/types": "^7.29.8",
     "@eslint/js": "^10.0.1",
     "@maplibre/maplibre-gl-style-spec": "26.4.4",
     "@playwright/test": "^1.63.0",
@@ -53,6 +56,7 @@
     "prettier": "^3.9.9",
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.71.0",
+    "typescript7": "npm:typescript@7.0.2",
     "vitest": "^5.0.0"
   },
   "overrides": {
