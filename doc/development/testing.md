@@ -51,6 +51,16 @@ their own. A run with `--cov` fails below the `fail_under` floor there, which is
 kept one to three points below what the suite reaches. Property-based tests use
 [Hypothesis](https://hypothesis.readthedocs.io/).
 
+The tests run in another order every time (pytest-randomly), so a test that only
+passes after another one fails sooner or later rather than never. The header of
+a run names its seed; `pytest --randomly-seed=<seed>` repeats that order, and
+`-p no:randomly` turns the shuffling off. CI runs the Vitest suite shuffled as
+well (`--sequence.shuffle`; repeat an order with `--sequence.seed=<seed>`).
+
+A test that reads named flights of `data/` is marked `repo_data`, and
+`KML_HEATMAP_OWN_FLIGHTS=1` skips it, for a copy of the repository with flights
+of its own (see [Hosting](../hosting.md#your-own-site-on-github-pages)).
+
 No test touches the network: `tests/conftest.py` fails any download of a tile
 loudly, the pipeline tests pass a tile source of their own
 (`create_progressive_heatmap(..., terrain=...)`, see `TileSource`), such as the
@@ -72,11 +82,11 @@ The `desktop` project runs every spec but `mobile.spec.ts` and `visual.spec.ts`
 in Chromium. The `mobile` project runs `mobile.spec.ts` and the viewport
 independent specs (`core`, `layers`, `state`) on a phone viewport. The `webkit`
 project runs the same specs as `mobile` on an emulated iPhone, and
-`webkit-desktop` runs `error-free`, `orientation` and `replay`, which drive the
-desktop controls, in a desktop Safari viewport. The `visual` project compares
-screenshots of a fixture site and only exists inside the Playwright image (or
-with `VISUAL_SNAPSHOTS=1`), so a plain run leaves it out (see
-[Visual snapshots](../../CONTRIBUTING.md#visual-snapshots)). Every page is
+`webkit-desktop` runs `3d-relief`, `error-free`, `orientation` and `replay`,
+which drive the desktop controls, in a desktop Safari viewport. The `visual`
+project compares screenshots of a fixture site and only exists inside the
+Playwright image (or with `VISUAL_SNAPSHOTS=1`), so a plain run leaves it out
+(see [Visual snapshots](../../CONTRIBUTING.md#visual-snapshots)). Every page is
 scanned for accessibility violations with axe.
 
 ### No network
@@ -94,22 +104,26 @@ higher than MapLibre's own (see `ZOOM_OFFSET` in `utils/constants.ts`).
 ### In CI
 
 A few specs depend on whether the site was built with `CARTO_API_KEY` (any value
-works) and skip otherwise; CI tests a site with a dummy key and, for the specs
-about the base map requests (`base-style`, `error-free`, `layers`) on the
-desktop, one without. It builds both once, in the `e2e-sites` job, and runs
-every e2e job in the Playwright image the visual job uses, with a browser per
-core of the runner. The `desktop` and `mobile` projects are split into three
-shards each (`--shard`) and the `webkit` project into two; Playwright splits by
-the number of tests, not their time, so more shards even out the slow ones. The
-specs without a key run in a `desktop` job of their own. The tests tagged
-`@heavy` (`HEAVY` in `tests/e2e/fixtures.ts`: the 3D view with its relief, heat
-cloud or chase view, and the globe turned with the flights loaded) of the
-`desktop` and `webkit-desktop` projects run in a job of their own per engine
-with two browsers (`--grep @heavy --workers=2`), since software WebGL takes
-seconds per frame of them; the other jobs of those projects leave them out
+works) and skip otherwise; CI tests a site with a dummy key and, for the tests
+about the base map requests (tagged `@keys` at the end of their titles; tag a
+new one that depends on the key the same way) on the desktop, one without. It
+builds both once, in the `e2e-sites` job, and runs every e2e job in the
+Playwright image the visual job uses, with a browser per core of the runner. The
+`desktop` and `mobile` projects are split into three shards each (`--shard`) and
+the `webkit` project into two; Playwright splits by the number of tests, not
+their time, so more shards even out the slow ones, and the `desktop` shards are
+weighted (`PWTEST_SHARD_WEIGHTS` in the workflow), since the slow specs sort
+last. The tests without a key run in a `desktop` job of their own. The tests
+tagged `@heavy` (`HEAVY` in `tests/e2e/fixtures.ts`: the 3D view with its
+relief, heat cloud or chase view, and the globe turned with the flights loaded)
+of the `desktop` and `webkit-desktop` projects run in a job of their own per
+engine with two browsers (`--grep @heavy --workers=2`), since software WebGL
+takes seconds per frame of them; the other jobs of those projects leave them out
 (`--grep-invert @heavy`). Tag a new spec that waits on frames of either, a
 describe with `HEAVY` and a single test with `@heavy` at the end of its title.
-In CI a failed test of the `desktop` project is retried once, which only tells a
+The relief tests run one after the other in one browser and take the longest, so
+they are in `3d-relief.spec.ts`, which sorts first and starts them at once. In
+CI a failed test of the `desktop` project is retried once, which only tells a
 flaky failure from a steady one: `failOnFlakyTests` fails the run either way.
 The `mobile`, `visual`, `webkit` and `webkit-desktop` projects do not retry, and
 neither do the heavy tests, where one attempt takes minutes.

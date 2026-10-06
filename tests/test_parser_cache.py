@@ -523,7 +523,6 @@ class TestSaveAndLoad:
                 landings=2,
                 touch_and_goes=1,
                 touchdowns=[("EDAQ", "09"), ("EDAQ", None)],
-                circuits=1,
             )
         ]
         save_to_cache(cache_path, COORDS, PATHS, METADATA, landings=landings)

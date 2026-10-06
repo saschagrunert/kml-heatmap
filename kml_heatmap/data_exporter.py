@@ -192,7 +192,9 @@ def select_exported_paths(
     """
     paths_by_year = _group_paths_by_year(all_path_metadata, exportable)
     contents = exported_contents(paths_by_year, all_path_groups, exportable)
-    paths_by_year = drop_duplicate_paths(paths_by_year, contents, all_path_metadata)
+    paths_by_year = drop_duplicate_paths(
+        paths_by_year, contents, all_path_metadata, all_path_groups
+    )
     # The same flight in two recordings of their own, see duplicates
     paths_by_year = drop_overlapping_paths(
         paths_by_year, all_path_groups, all_path_metadata, contents

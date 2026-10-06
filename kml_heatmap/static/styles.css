@@ -1084,7 +1084,8 @@ body.stats-open #left-buttons {
 /* ==========================================================================
    Loading indicator (centered in the map)
    ========================================================================== */
-#loading {
+#loading,
+#serve-hint {
   position: fixed;
   top: 50%;
   left: 50%;
@@ -1137,12 +1138,25 @@ body.stats-open #left-buttons {
     )
     no-repeat rgba(var(--color-accent-blue-rgb), 0.2);
   background-size: calc(var(--loading-progress, 0) * 100%) 100%;
-  animation: loading-progress-in 0s 150ms both;
+  animation: shown-late 0s 150ms both;
 }
-@keyframes loading-progress-in {
+@keyframes shown-late {
   from {
     visibility: hidden;
   }
+}
+/* No map was ever made (MapLibre gives its container the class), and the
+   start did not fail with a notice of its own (failStart): the scripts did
+   not run, as they do not from a file. Ten seconds late, so that it does
+   not show while the bundles and MapLibre (300 KB) load on a slow line. */
+#serve-hint {
+  white-space: normal;
+  width: max-content;
+  max-width: min(30em, calc(100vw - 2 * var(--space-base)));
+}
+body:not([data-start-failure]) #map:not(.maplibregl-map) ~ #serve-hint {
+  display: block;
+  animation: shown-late 0s 10s both;
 }
 @keyframes spin {
   to {

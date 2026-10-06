@@ -40,7 +40,7 @@ import { segmentBounds } from "../utils/geometry";
 import { segmentsForPathIds } from "../calculations/statistics";
 
 import { AirplaneMarker, ReplayRenderer } from "./replayRenderer";
-import { appendTrailSegment } from "./replayTrail";
+import { appendTrailSegment, speedColouredTrail } from "./replayTrail";
 import { restingPitch, type ReplayState } from "./replayState";
 import type { SavedCamera } from "./chaseCamera";
 import type { PathSegment } from "../types";
@@ -287,7 +287,7 @@ export class ReplayManager {
     this.unfollowPanel = null;
     this.unwatchLegends();
     this.renderer.cancelTrailFlush();
-    this.renderer.stopWatchingMap();
+    this.renderer.camera.stopWatchingMap();
     if (this.state.animationFrameId) {
       cancelAnimationFrame(this.state.animationFrameId);
       this.state.animationFrameId = null;
@@ -347,7 +347,7 @@ export class ReplayManager {
     // takes the bottom edge: the mobile bar steps aside instead of stacking
     // under it (see ui/layerVisibility.ts, MobileBar)
     this.app.replayActive = true;
-    this.renderer.watchUser();
+    this.renderer.camera.watchUser();
     // Starting from the More sheet leaves focus on a tab the line above has
     // just removed from the document, so move it into the panel
     exit.focus();
@@ -434,11 +434,8 @@ export class ReplayManager {
     };
   }
 
-  /** The trail is coloured by altitude unless the speed layer is the one on */
   private trailMode(): "altitude" | "airspeed" {
-    return this.app.airspeedVisible && !this.app.altitudeVisible
-      ? "airspeed"
-      : "altitude";
+    return speedColouredTrail(this.app) ? "airspeed" : "altitude";
   }
 
   /**
@@ -506,7 +503,7 @@ export class ReplayManager {
     document.body.classList.remove("replay-active");
 
     // The view from before the chase comes back with the map it chased on
-    this.renderer.endChase("all");
+    this.renderer.camera.endChase("all");
 
     // Remove airplane marker when closing replay completely
     this.state.airplaneMarker?.remove();
@@ -514,7 +511,7 @@ export class ReplayManager {
 
     this.clearReplayLayer();
     // No camera follows the airplane any more
-    this.renderer.stopWatchingMap();
+    this.renderer.camera.stopWatchingMap();
 
     // The layers come back the way the user left them, and the mobile bar
     // returns (see ui/layerVisibility.ts, MobileBar)
@@ -818,24 +815,18 @@ export class ReplayManager {
     if (this.state.playing) return;
 
     if (this.state.currentTime >= this.state.maxTime) {
+      // Back to the start: the first frame puts the airplane there
       this.state.resetDrawState();
       this.renderer.scheduleTrailFlush(this.state);
 
-      if (this.state.airplaneMarker && this.state.segments.length > 0) {
-        const firstSeg = this.state.segments[0];
-        const startCoords = firstSeg?.coords[0];
-        if (startCoords) {
-          this.state.airplaneMarker.setLatLng([startCoords[0], startCoords[1]]);
-
-          if (this.state.autoZoom) {
-            this.app.map.easeTo({
-              center: toLngLat(startCoords),
-              zoom: AUTO_ZOOM_FOLLOW,
-              duration: RESTART_PAN_MS,
-              animate: !prefersReducedMotion(),
-            });
-          }
-        }
+      const startCoords = this.state.segments[0]?.coords[0];
+      if (startCoords && this.state.autoZoom) {
+        this.app.map.easeTo({
+          center: toLngLat(startCoords),
+          zoom: AUTO_ZOOM_FOLLOW,
+          duration: RESTART_PAN_MS,
+          animate: !prefersReducedMotion(),
+        });
       }
     }
 
@@ -881,7 +872,7 @@ export class ReplayManager {
     const bounds = segmentBounds(this.state.segments);
     // The flight is over, and with it the chase: the overview is seen the
     // way the map was before it
-    const saved = this.renderer.endChase();
+    const saved = this.renderer.camera.endChase();
     if (!bounds) return;
     this.app.map.fitBounds(toBounds(bounds), {
       // A fit turns the map north up unless it is told the bearing, and
@@ -921,13 +912,7 @@ export class ReplayManager {
       this.renderer.updateTransport(this.state);
       return;
     }
-    if (this.state.airplaneMarker && this.state.segments.length > 0) {
-      const firstSeg = this.state.segments[0];
-      const startCoords = firstSeg?.coords[0];
-      if (startCoords) {
-        this.state.airplaneMarker.setLatLng([startCoords[0], startCoords[1]]);
-      }
-    }
+    // Which puts the airplane back at the start
     this.updateReplayDisplay();
     if (this.app.replayActive && announce) this.announce("Replay stopped");
   }
@@ -985,7 +970,7 @@ export class ReplayManager {
         this.changeReplaySpeed();
       }
       this.speedBeforeChase = null;
-      this.renderer.endChase("view");
+      this.renderer.camera.endChase("view");
     }
     this.announce(message);
   }
@@ -996,7 +981,7 @@ export class ReplayManager {
    * flight
    */
   userMapView(): SavedCamera | null {
-    return this.renderer.chaseView();
+    return this.renderer.camera.chaseView();
   }
 
   toggleAutoZoom(): void {

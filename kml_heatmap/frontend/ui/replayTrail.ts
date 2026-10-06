@@ -9,6 +9,7 @@ import type {
   LineString,
   MultiPolygon,
 } from "geojson";
+import type { MapApp } from "../mapApp";
 import type { ReplayState, TrailTip } from "./replayState";
 import type { PathSegment } from "../types";
 import { toLngLat, toLngLatAfter, unwrapLng } from "../utils/mapHelpers";
@@ -22,6 +23,13 @@ import {
   type RibbonProperties,
 } from "../calculations/ribbons";
 import { appendCurve } from "../calculations/curves";
+
+/** The trail is coloured by altitude unless the speed layer is the one on */
+export function speedColouredTrail(
+  app: Pick<MapApp, "airspeedVisible" | "altitudeVisible">,
+): boolean {
+  return app.airspeedVisible && !app.altitudeVisible;
+}
 
 /**
  * Colour of one replay segment. Segments without a groundspeed fall back to
@@ -116,13 +124,14 @@ export function appendTrailSegment(
 /**
  * Cut the trail back to the segments flown at `time`. Seeking backwards
  * this way drops whole runs and shortens one, instead of colouring the
- * flight again from its start.
+ * flight again from its start. At time 0 nothing is drawn, as a replay
+ * starts (see ReplayRenderer.drawNewSegments).
  */
 export function truncateTrail(state: ReplayState, time: number): void {
   const before = state.lastDrawnIndex;
   while (state.lastDrawnIndex >= 0) {
     const seg = state.segments[state.lastDrawnIndex];
-    if (seg && (seg.time ?? 0) <= time) break;
+    if (seg && time > 0 && (seg.time ?? 0) <= time) break;
     state.lastDrawnIndex--;
   }
   if (state.lastDrawnIndex === before) return;

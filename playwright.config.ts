@@ -55,7 +55,7 @@ export default defineConfig<object, SiteOptions>({
   // webkit-desktop projects (below) do not retry, and neither do the heavy
   // tests in CI (HEAVY in tests/e2e/fixtures.ts), where one attempt takes
   // minutes: their job passes --retries=0, and the describe of the relief
-  // tests in orientation.spec.ts turns retries off in every project.
+  // tests in 3d-relief.spec.ts turns retries off in every project.
   // failOnFlakyTests is what holds that: a run with a test that passed only
   // on its retry fails all the same, and the retry just labels it flaky.
   retries: isCI ? 1 : 0,
@@ -168,11 +168,11 @@ export default defineConfig<object, SiteOptions>({
     },
     {
       name: "webkit-desktop",
-      // Turning, tilting, the globe, the replay and the interactions that
-      // must not log an error in Safari's engine. Their specs drive the
-      // desktop controls, which is why they run in a desktop viewport rather
-      // than in the webkit project above.
-      testMatch: /(error-free|orientation|replay)\.spec\.ts$/,
+      // Turning, tilting, the globe, the relief, the replay and the
+      // interactions that must not log an error in Safari's engine. Their
+      // specs drive the desktop controls, which is why they run in a desktop
+      // viewport rather than in the webkit project above.
+      testMatch: /(3d-relief|error-free|orientation|replay)\.spec\.ts$/,
       // Like the phone projects: a retry would not turn the run green
       // (failOnFlakyTests), and an attempt in Safari's engine drawing WebGL
       // in software is slow

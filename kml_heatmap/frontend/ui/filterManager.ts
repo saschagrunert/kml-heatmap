@@ -2,14 +2,22 @@
  * Filter Manager - Handles year/aircraft filtering
  */
 import type { MapApp } from "../mapApp";
+import type { KMLDataset } from "../types";
 import { aggregateAircraft, filterPaths } from "../calculations/statistics";
-import {
-  announceDataset,
-  dropUnknownPathIds,
-  publishDataset,
-} from "../appInitializer";
+import { datasetIndex } from "../calculations/datasetIndex";
+import { calculateAirspeedRange } from "../features/layers";
 import { domCache } from "../utils/domCache";
-import { showToast } from "../utils/toast";
+import { pluralFlights } from "../utils/htmlGenerators";
+import { logError } from "../utils/logger";
+import { announceStatus, showToast } from "../utils/toast";
+
+/**
+ * How long a pick in the year dropdown waits for the next one. The arrow
+ * keys on a closed dropdown change it at every step, and each step loaded
+ * its year: from 2026 down to 2020 six year files downloaded and decoded,
+ * and stayed in memory, for the one that was wanted.
+ */
+export const YEAR_PICK_DELAY_MS = 250;
 
 export class FilterManager {
   private app: MapApp;
@@ -27,6 +35,13 @@ export class FilterManager {
    * (see filterByAircraft). Null when there is none.
    */
   private pendingAircraft: string | null = null;
+  /** The pick of the year dropdown that waits (see pickYear) */
+  private yearPick: ReturnType<typeof setTimeout> | undefined;
+  /**
+   * Told when a year switch begins or ends; the note on an empty map
+   * stays out of the way of one (see followLoadFailure)
+   */
+  onLoadChange: (() => void) | null = null;
 
   constructor(app: MapApp) {
     this.app = app;
@@ -45,6 +60,7 @@ export class FilterManager {
    */
   cancelPending(): void {
     ++this.requestId;
+    this.dropYearPick();
     this.yearLoad?.abort();
     this.yearLoad = null;
     this.pendingAircraft = null;
@@ -52,12 +68,35 @@ export class FilterManager {
     if (yearSelect) this.showLoadedYear(yearSelect);
     const aircraftSelect = domCache.get("aircraft-select", HTMLSelectElement);
     if (aircraftSelect) aircraftSelect.value = this.app.selectedAircraft;
+    this.onLoadChange?.();
+  }
+
+  /** Whether a year switch is loading */
+  get loading(): boolean {
+    return this.yearLoad !== null;
+  }
+
+  /**
+   * Switch to the year the dropdown shows once it has stopped changing
+   * (see YEAR_PICK_DELAY_MS). Any other switch replaces a pick that waits.
+   */
+  pickYear(): void {
+    this.dropYearPick();
+    this.yearPick = setTimeout(() => {
+      this.yearPick = undefined;
+      if (!this.app.signal.aborted) this.filterByYear().catch(logError);
+    }, YEAR_PICK_DELAY_MS);
+  }
+
+  private dropYearPick(): void {
+    clearTimeout(this.yearPick);
+    this.yearPick = undefined;
   }
 
   /**
    * Show the year whose data is loaded. With none loaded, the dropdown
    * keeps the year that failed, which the note on the empty map names and
-   * offers to load again (see retryLoad): it showed an empty "Year"
+   * offers to load again (see loadShownYear): it showed an empty "Year"
    * instead, so that picking the year it showed again was a change.
    */
   private showLoadedYear(select: HTMLSelectElement): void {
@@ -65,13 +104,14 @@ export class FilterManager {
   }
 
   /**
-   * Load the year of the dropdown once more, after its load failed while
-   * the map had no flights: the one the page opened on, or one picked
-   * since that failed as well, which the dropdown keeps showing. Unlike a
-   * switch it keeps the selection, which is the one the page was opened
-   * with and has not been checked against any dataset yet.
+   * Load the year of the dropdown while the map has no flights: the first
+   * load of the page, and the Retry of the note on the map after it failed
+   * (the year the page opened on, or one picked since that failed as well,
+   * which the dropdown keeps showing). Unlike a switch it keeps the
+   * selection, which is the one the page was opened with and has not been
+   * checked against any dataset yet.
    */
-  retryLoad(): Promise<boolean> {
+  loadShownYear(): Promise<boolean> {
     return this.filterByYear(undefined, undefined, true);
   }
 
@@ -138,7 +178,7 @@ export class FilterManager {
    * store in the same batch, before the aircraft list is rebuilt (see
    * MapApp.resetView). Resolves to whether the year was applied: false
    * when it failed to load or a newer filter change replaced it, and then
-   * `also` has not run either. `keepSelection` is for a retry (retryLoad).
+   * `also` has not run either. `keepSelection` is for loadShownYear.
    */
   async filterByYear(
     year?: string,
@@ -155,10 +195,12 @@ export class FilterManager {
     const requestedYear = yearSelect.value;
     const requestId = ++this.requestId;
     this.yearRequestId = requestId;
+    this.dropYearPick();
 
     this.yearLoad?.abort();
     const yearLoad = new AbortController();
     this.yearLoad = yearLoad;
+    this.onLoadChange?.();
     // Reset view puts the aircraft back to all; one picked before it is
     // overruled, one picked while it loads is applied after it
     if (also) this.pendingAircraft = null;
@@ -213,6 +255,7 @@ export class FilterManager {
       this.app.mobileBar?.sheet.refresh();
       // An aircraft picked meanwhile was one of the year still shown
       if (aircraft !== null) this.applyAircraft(aircraft);
+      this.onLoadChange?.();
       return false;
     }
 
@@ -243,9 +286,10 @@ export class FilterManager {
     const aircraftSelect = domCache.get("aircraft-select", HTMLSelectElement);
     if (!aircraftSelect) return;
 
-    // A year switch that is loading is not thrown away: that silently
-    // lost the year someone had just picked. The aircraft goes in with it.
-    if (this.yearLoad) {
+    // A year switch that is loading, or waiting to (pickYear), is not
+    // thrown away: that silently lost the year someone had just picked.
+    // The aircraft goes in with it.
+    if (this.yearLoad || this.yearPick !== undefined) {
       this.pendingAircraft = aircraftSelect.value;
       return;
     }
@@ -270,5 +314,76 @@ export class FilterManager {
     this.app.selectedPathIds.clear();
     this.app.store.notifyMutation("selectedPathIds");
     this.app.isolateSelection = false;
+  }
+}
+
+/**
+ * Make a dataset the one the page shows. The speed scale is stretched over
+ * the speeds of its flights (see calculateAirspeedRange), the way the
+ * altitude scale follows the altitudes of the dataset it draws. Runs in the
+ * batch that publishes the rest.
+ * @param app - The MapApp instance to operate on
+ * @param data - The dataset to show
+ */
+export function publishDataset(app: MapApp, data: KMLDataset): void {
+  if (app.hasTimingData) {
+    const range = calculateAirspeedRange(
+      data.path_segments,
+      app.metadataAirspeedRange,
+    );
+    // A dataset whose flights all went one speed has no scale to stretch,
+    // and takes the one of the metadata: the range of the year before
+    // belongs to other flights
+    app.airspeedRange =
+      range.max > range.min ? range : app.metadataAirspeedRange;
+  }
+  app.currentData = data;
+}
+
+/**
+ * Say which year the map shows once its flights are there. The loading
+ * indicator's region said what was loading and then went quiet, so the end
+ * of a load, a retry's included, was never heard. After the batch that
+ * published it: this replaces what its listeners said about the dataset,
+ * such as a selection it cleared.
+ * @param year - The year that was published, or "all"
+ */
+function announceDataset(year: string): void {
+  announceStatus("Showing " + (year === "all" ? "all years" : year));
+}
+
+/**
+ * Drop the restored path ids that are not in the loaded dataset.
+ *
+ * Ids are derived from the flights, so a shared link or a saved state keeps
+ * pointing at the same flight after a re-export; one whose flight is gone
+ * is dropped, which `say` tells the visitor (the first load, of the link
+ * they opened). Isolation goes with the last id: the controls cannot leave
+ * isolate mode on over an empty selection. A dataset missing a year that
+ * failed to load cannot tell a deleted flight from an unloaded one, so it
+ * drops nothing.
+ * @param app - The MapApp instance to operate on
+ * @param data - The dataset the selection has to refer to
+ * @param say - Whether a toast says how many were left out
+ */
+export function dropUnknownPathIds(
+  app: MapApp,
+  data: KMLDataset,
+  say = false,
+): void {
+  const selected = app.selectedPathIds;
+  if (selected.size === 0 || data.incomplete) return;
+
+  const known = datasetIndex(data).pathInfoById;
+  const unknown = [...selected].filter((pathId) => !known.has(pathId));
+  if (unknown.length === 0) return;
+
+  app.store.batch(() => {
+    for (const pathId of unknown) selected.delete(pathId);
+    app.store.notifyMutation("selectedPathIds");
+    if (selected.size === 0) app.isolateSelection = false;
+  });
+  if (say) {
+    showToast(`Left out ${pluralFlights(unknown.length)} not on this site`);
   }
 }

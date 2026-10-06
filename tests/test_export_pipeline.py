@@ -128,6 +128,25 @@ class TestBuildPathInfo:
         assert info.get("start_airport") == expected
         assert "end_airport" not in info
 
+    def test_an_end_with_the_code_of_a_marker_is_that_marker(self):
+        """One code under two names makes one marker, under the first name.
+
+        "EDZZ local flight" and then "EDZZ - EDDF", with EDZZ unknown to the
+        airport database: the second flight lost its start.
+        """
+        metadata = _metadata({"airport_name": "EDZZ - EDDF Frankfurt Main"})
+        markers = frozenset({"EDZZ local flight", "EDDF Frankfurt Main"})
+        info = build_path_info(_make_path(), metadata, 0, 2025, markers)
+        assert info.get("start_airport") == "EDZZ local flight"
+        assert info.get("end_airport") == "EDDF Frankfurt Main"
+
+    def test_an_end_without_a_marker_of_its_code_has_none(self):
+        metadata = _metadata({"airport_name": "EDZZ - EDDF Frankfurt Main"})
+        info = build_path_info(
+            _make_path(), metadata, 0, 2025, frozenset({"EDDF Frankfurt Main"})
+        )
+        assert "start_airport" not in info
+
     def test_three_part_name_not_split(self):
         metadata = _metadata({"airport_name": "EDDF - EDDM - EDDT"})
         info = build_path_info(_make_path(), metadata, 0, 2025)

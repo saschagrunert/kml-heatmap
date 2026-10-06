@@ -11,8 +11,9 @@ import type { FilteredStatistics, PathInfo, PathSegment } from "../types";
 import { segmentsForPathIds } from "../calculations/statistics";
 import {
   calculateFilteredStatistics,
-  filterStatistics,
+  filterStatisticsInSlices,
 } from "../calculations/panelStats";
+import { logError } from "../utils/logger";
 import { airportCode } from "../features/airports";
 import {
   countryDisplayName,
@@ -32,7 +33,11 @@ import { domCache } from "../utils/domCache";
 import { countryHeading } from "../utils/wrappedHtml";
 import { datasetIndex } from "../calculations/datasetIndex";
 import { watchScrollEnd, type ScrollEndWatcher } from "../utils/scrollFade";
-import { setStatsTitle, STATS_PANEL_ID as PANEL_ID } from "./statsPanel";
+import {
+  LOADING_HTML,
+  setStatsTitle,
+  STATS_PANEL_ID as PANEL_ID,
+} from "./statsPanel";
 import { FlightList } from "./flightList";
 
 /** Store keys the rendered statistics depend on */
@@ -464,6 +469,8 @@ export class StatsManager {
   private scrollWatcher: ScrollEndWatcher | null = null;
   /** What the last statistics were computed from; identical inputs skip it */
   private lastInputs: StatsInputs | null = null;
+  /** Stops the statistics the panel waits for, null when it waits for none */
+  private statsAbort: AbortController | null = null;
   /** Stops following the store (see destroy) */
   private readonly unsubscribe: (() => void)[];
   /** The Flights tab of the same rail */
@@ -515,6 +522,7 @@ export class StatsManager {
    * as long as it is not stopped. What the panel shows stays.
    */
   destroy(): void {
+    this.statsAbort?.abort();
     for (const stop of this.unsubscribe) stop();
     this.unsubscribe.length = 0;
     this.scrollWatcher?.stop();
@@ -561,20 +569,52 @@ export class StatsManager {
       return;
     }
     this.lastInputs = inputs;
+    this.statsAbort?.abort();
+    this.statsAbort = null;
 
     const { pathInfo, segments } = inputs;
     const selected = this.app.selectedPathIds;
+    const data = this.app.currentData;
 
-    if (selected.size === 0) {
+    if (selected.size === 0 && data) {
       // Clearing a selection comes back to the filter's statistics, which
-      // are kept with the dataset instead of computed again every time
-      const data = this.app.currentData;
-      const statsToShow = data
-        ? filterStatistics(
-            datasetIndex(data).filter(inputs.year, inputs.aircraft),
-          )
-        : calculateFilteredStatistics({ pathInfo, segments });
-      this.updateStatsPanel(statsToShow, false);
+      // are kept with the dataset instead of computed again every time.
+      // Worked out in slices, as Wrapped's (see filterStatisticsInSlices):
+      // all the years took a third of a second on a phone in one task.
+      const controller = new AbortController();
+      const stats = filterStatisticsInSlices(
+        datasetIndex(data).filter(inputs.year, inputs.aircraft),
+        controller.signal,
+      );
+      if (!(stats instanceof Promise)) {
+        this.updateStatsPanel(stats, false);
+        return;
+      }
+      this.statsAbort = controller;
+      const panel = domCache.get(PANEL_ID);
+      if (panel) {
+        setStatsTitle(false);
+        panel.innerHTML = LOADING_HTML;
+        panel.setAttribute("aria-busy", "true");
+        this.lastHtml = null;
+      }
+      stats.then(
+        (filtered) => {
+          if (controller.signal.aborted) return;
+          this.statsAbort = null;
+          this.updateStatsPanel(filtered, false);
+        },
+        (error: unknown) => {
+          if (!controller.signal.aborted) logError(error);
+        },
+      );
+      return;
+    }
+    if (selected.size === 0) {
+      this.updateStatsPanel(
+        calculateFilteredStatistics({ pathInfo, segments }),
+        false,
+      );
       return;
     }
 
@@ -597,6 +637,8 @@ export class StatsManager {
   updateStatsPanel(stats: FilteredStatistics, isSelection: boolean): void {
     const panel = domCache.get(PANEL_ID);
     if (!panel) return;
+    // The wait for the statistics, or for this code, is over
+    panel.removeAttribute("aria-busy");
 
     setStatsTitle(isSelection);
 

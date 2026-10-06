@@ -1,5 +1,7 @@
 """Tests for date_tokens module."""
 
+import time
+
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
@@ -989,7 +991,7 @@ class TestRomanMonths:
             "Leg 3. II done",
             "Trip 2026. V speeds checked",
             "SkyDemon v.2024 export",
-            "Flown in summer 2026. I liked it",
+            "Flown in 2026. I liked it",
             "EDDS 16. V.",
             "EDDS 16.v.",
             "EDDS I/2026",
@@ -1052,6 +1054,29 @@ class TestHolidays:
             ("Neujahrsflug", "Neujahrsflug"),
             ("X-mas flight", "X-mas"),
             ("Erster Mai EDDS", "Erster Mai"),
+            ("Home strip Columbus Day", "Columbus Day"),
+            ("Remembrance Day trip", "Remembrance Day"),
+            ("Presidents Day EDDS", "Presidents Day"),
+            ("Presidents' Day EDDS", "Presidents' Day"),
+            ("MLK Day EDDS", "MLK Day"),
+            ("Martin Luther King Jr. Day EDDS", "Martin Luther King Jr. Day"),
+            ("Reformation Day EDDS", "Reformation Day"),
+            ("All Saints' Day EDDS", "All Saints' Day"),
+            ("All Souls Day EDDS", "All Souls Day"),
+            ("May Day fly-in", "May Day"),
+            ("Epiphany Day EDDS", "Epiphany Day"),
+            ("Feast of the Epiphany EDDS", "Feast of the Epiphany"),
+            ("Three Kings' Day EDDS", "Three Kings' Day"),
+            ("German Unity Day EDDS", "German Unity Day"),
+            ("Corpus Christi Day EDDS", "Corpus Christi Day"),
+            ("Valentinstag EDDS", "Valentinstag"),
+            ("Heilige Drei Könige EDDS", "Heilige Drei Könige"),
+            ("Dreikoenigstag EDDS", "Dreikoenigstag"),
+            ("Nikolaustag EDDS", "Nikolaustag"),
+            ("Buß- und Bettag EDDS", "Buß- und Bettag"),
+            ("Buss- und Bettag EDDS", "Buss- und Bettag"),
+            ("Erntedankfest EDDS", "Erntedankfest"),
+            ("Unabhängigkeitstag EDDS", "Unabhängigkeitstag"),
         ],
     )
     def test_found_and_stripped(self, text, holiday):
@@ -1083,6 +1108,15 @@ class TestHolidays:
             "Whitsunday Islands",
             "Weihnachtsinsel",
             "Weihnachtsinseln",
+            # Churches, colleges and schools, VFR reporting points as often
+            "All Saints Church",
+            "All Saints",
+            "All Souls College",
+            "Epiphany Lutheran",
+            "Epiphany",
+            "May Day Airfield",
+            "Easter Chapel",
+            "Christmas Hill School",
         ],
     )
     def test_places_keep_their_names(self, text):
@@ -1146,6 +1180,145 @@ class TestWeekdaysAroundTimes:
         assert without_spans(text, stray_date_spans(text)) == "EDDS"
 
 
+class TestMoreDateShapes:
+    """Shapes that published a month, a week or an hour until 2026-10."""
+
+    @pytest.mark.parametrize(
+        ("text", "kept"),
+        [
+            ("Aunt farm 08-2026", "Aunt farm"),
+            ("EDDS_08_2026", "EDDS"),
+            ("EDDS 2026.08", "EDDS"),
+            ("EDDS 2026_08", "EDDS"),
+            ("EDDS Aug '26", "EDDS"),
+            ("EDDS Aug \u201926", "EDDS"),
+            ("Mai '26 EDDS", "EDDS"),
+            ("Lake strip Jul/Aug 2026", "Lake strip"),
+            ("July-August 2026 trip", "trip"),
+            ("Juli/August 2026 EDDS", "EDDS"),
+            ("Jan - Mar 2026 EDDS", "EDDS"),
+            ("EDDS 16-18 Aug 2026", "EDDS"),
+            ("EDDS 16./17. Mai 2026", "EDDS"),
+            ("EDDS Aug 16-18, 2026", "EDDS"),
+            ("EDDS 2026-08-16T10Z", "EDDS"),
+            ("EDDS 20260816T10Z", "EDDS"),
+            ("EDDS CW33", "EDDS"),
+            ("EDDS Wk 33", "EDDS"),
+            ("EDDS 2026/W33", "EDDS"),
+            ("EDDS CW 33 2026", "EDDS"),
+            ("Q3 2026 trip", "trip"),
+            ("EDDS 2026-Q3", "EDDS"),
+            ("EDDS H2 2026", "EDDS"),
+            ("Summer 2026 EDDS", "EDDS"),
+            ("EDDS summer of 2026", "EDDS"),
+            ("Sommer 2026 EDDS", "EDDS"),
+            ("Frühjahr 2026 EDDS", "EDDS"),
+            ("Winter 2025/26 EDDS", "EDDS"),
+        ],
+    )
+    def test_stripped(self, text, kept):
+        assert strip_dates(text) == kept
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "Aunt farm 08-2026",
+            "EDDS 2026.08",
+            "EDDS 2026_08",
+            "EDDS CW33",
+            "EDDS Wk 33",
+            "Q3 2026",
+            "Summer 2026",
+            "Sommer 2026",
+        ],
+    )
+    def test_the_check_reports_the_parts(self, text):
+        assert find_partial_date_tokens(text)
+
+    @pytest.mark.parametrize(
+        ("text", "date"),
+        [
+            ("EDDS Aug '26", "Aug '26"),
+            ("EDDS Jul/Aug 2026", "Jul/Aug 2026"),
+            ("EDDS 16-18 Aug 2026", "16-18 Aug 2026"),
+            ("EDDS 2026/W33", "2026/W33"),
+            # A range passes only when all of it is near January 1st
+            ("EDDS Dec/Jan 2026", "Dec/Jan 2026"),
+            ("EDDS Nov-Jan 2026", "Nov-Jan 2026"),
+            ("EDDS Dezember/Januar 2026", "Dezember/Januar 2026"),
+            ("EDDS Jan 1-20, 2026", "Jan 1-20, 2026"),
+            ("EDDS Jan 1 and 20 2026", "Jan 1 and 20 2026"),
+            ("EDDS 1-20 Jan 2026", "1-20 Jan 2026"),
+        ],
+    )
+    def test_the_check_reports_the_dates_whole(self, text, date):
+        """A range whole, as the rewrite takes it out."""
+        assert find_date_tokens(text, skip_near_jan_first=True) == [date]
+
+    @pytest.mark.parametrize("text", ["1-3 Jan 2026", "Jan 1-3, 2026"])
+    def test_a_range_near_january_first_passes_the_check(self, text):
+        assert find_date_tokens(text, skip_near_jan_first=True) == []
+
+    @pytest.mark.parametrize(
+        ("text", "kept"),
+        [
+            ("PA-28-16 Aug 2026", "PA-28"),
+            ("Do-28-16 Aug 2026", "Do-28"),
+            ("F-16-16 Aug", "F-16"),
+            ("Ju 52-16 Aug 2026", "Ju 52"),
+            ("C172 16-18 Aug 2026", "C172"),
+            ("EDDS Dec '80s", "EDDS Dec '80s"),
+        ],
+    )
+    def test_numbers_before_a_date_that_are_no_range_stay(self, text, kept):
+        assert strip_dates(text) == kept
+
+    def test_a_month_and_a_year_of_the_last_century_go(self):
+        """Not told from a flight's year: "Aug '98" could be one."""
+        assert strip_dates("May '68 Memorial") == "Memorial"
+
+    @pytest.mark.parametrize("unit", ["1-", "Jan/", "Mar-", "08-", "1st-", "1 to "])
+    def test_a_long_run_of_range_joins_takes_no_quadratic_time(self, unit):
+        text = unit * (40_000 // len(unit))
+        started = time.perf_counter()
+        strip_dates(text)
+        find_date_tokens(text)
+        # About 0.2 s; quadratic, 20 KB of "1-" alone took 10 s
+        assert time.perf_counter() - started < 5
+
+    def test_the_check_reports_an_hour_after_a_date(self):
+        assert find_time_tokens("EDDS 2026-08-16T10Z") == ["T10Z"]
+
+    @pytest.mark.parametrize(
+        "text",
+        ["Winter 2026", "Q1 2026", "H1 2026", "01-2026", "Jan '26"],
+    )
+    def test_january_passes_the_check(self, text):
+        assert find_partial_date_tokens(text) == []
+        assert find_date_tokens(text, skip_near_jan_first=True) == []
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "ForeFlight 2026.03",
+            "firmware 2024.10",
+            "Summer camp EDDS",
+            "free fall EDDS",
+            "Q3 code EDDS",
+            "Part 2 II",
+            "Gate 12 VI",
+            "Part 12 II",
+            "Mk 12 IV",
+            "EDDS 16 VIII",
+            "Leg 2 - EDDS",
+            "Circuits 3-2026",
+            "Mayday EDDS",
+        ],
+    )
+    def test_what_stays(self, text):
+        assert strip_dates(text) == text
+
+
 @given(
     st.lists(
         st.sampled_from(
@@ -1170,6 +1343,13 @@ class TestWeekdaysAroundTimes:
                 "VII/2026",
                 "Easter",
                 "Field",
+                "Jul/Aug",
+                "08-2026",
+                "CW33",
+                "Summer",
+                "Q3",
+                "T10Z",
+                "16-18",
             ]
         ),
         max_size=8,

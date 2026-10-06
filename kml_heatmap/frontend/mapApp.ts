@@ -966,7 +966,9 @@ export class MapApp {
    * Open or close replay, fetching the feature bundle on first use. Clicks
    * that land while the bundle is still on its way are dropped: each one
    * queued a toggle of its own, and two quick ones opened replay and closed
-   * it again the moment the bundle arrived.
+   * it again the moment the bundle arrived. What opened meanwhile, Replay
+   * all or Wrapped waiting on the same bundle, is not closed by the late
+   * click, nor covered by a replay.
    */
   toggleReplay(): void {
     if (this.replayManager) {
@@ -976,7 +978,8 @@ export class MapApp {
     this.pendingReplayToggle ??= this.loadReplay()
       .then((manager) => {
         this.pendingReplayToggle = null;
-        if (!this.destroyed) manager?.toggleReplay();
+        if (this.destroyed || this.replayActive || this.wrappedVisible) return;
+        manager?.toggleReplay();
       })
       .catch((error) => {
         this.pendingReplayToggle = null;

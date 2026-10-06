@@ -414,7 +414,8 @@ examples:
 The input KML files are read and left alone. The generated site never carries
 a flight date finer than the year in the first place: a flight keeps its year
 and the intervals between its points, and every absolute timestamp is dropped
-on export. The only full date in it is the day the site was built.
+on export. The only full date that depends on the flights is the day the
+site was built.
 
 --obfuscate-inputs additionally rewrites the input files THEMSELVES, IN PLACE
 and IRREVERSIBLY, so that the files on disk carry no real dates either (useful

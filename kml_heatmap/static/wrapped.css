@@ -402,7 +402,10 @@ body:has(#wrapped-modal:not([hidden]))
 
 /* Shared card styles */
 /* The card's own accent, the one its figures are drawn in. The title used
-   to carry a third gradient family (pink, red, gold) of its own. */
+   to carry a third gradient family (pink, red, gold) of its own. It and the
+   year no longer shimmer: an endless move of the gradient behind clipped,
+   glowing text was painted again in every frame, under the intro's flight
+   too. They keep the half of the gradient it started on. */
 .wrapped-square-card h1,
 #wrapped-intro-heading {
   font-size: var(--wrapped-title);
@@ -417,7 +420,6 @@ body:has(#wrapped-modal:not([hidden]))
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
-  animation: shimmer 4s ease-in-out infinite;
 }
 /* Section titles generated as headings keep the styling of their class */
 .wrapped-square-card h2 {
@@ -440,7 +442,6 @@ body:has(#wrapped-modal:not([hidden]))
   background-clip: text;
   letter-spacing: var(--space-sm);
   text-shadow: 0 0 30px rgba(var(--color-accent-blue-rgb), 0.5);
-  animation: shimmer 3s ease-in-out infinite;
   position: relative;
 }
 .wrapped-square-card .year::before,
@@ -1249,28 +1250,16 @@ body:has(#wrapped-modal:not([hidden]))
    Reduced motion
    ========================================================================== */
 @media (prefers-reduced-motion: reduce) {
+  /* No animation, so the delays the cards, the facts and the country
+     groups are staggered by (some inline) do nothing */
   .wrapped-square-card,
-  .wrapped-square-card:nth-child(1),
-  .wrapped-square-card:nth-child(2),
-  .wrapped-square-card:nth-child(3),
-  .wrapped-square-card:nth-child(4),
-  .wrapped-square-card h1,
-  .wrapped-square-card .year,
   .wrapped-square-card .stat-value,
   .wrapped-square-card .fun-fact,
-  .wrapped-square-card .fun-fact:nth-child(2),
-  .wrapped-square-card .fun-fact:nth-child(3),
-  .wrapped-square-card .fun-fact:nth-child(4),
-  .wrapped-square-card .fun-fact:nth-child(5),
-  .wrapped-square-card .fun-fact:nth-child(6),
-  .wrapped-square-card .fun-fact:nth-child(7),
   .wrapped-square-card .country-group,
   .wrapped-square-card .destination,
   #wrapped-map-container,
   #wrapped-map-container.is-awaiting-map::after {
     animation: none;
-    /* Also neutralises the inline animation-delay on each country group */
-    animation-delay: 0s;
     opacity: 1;
   }
   .wrapped-square-card .year::before,
@@ -1351,15 +1340,6 @@ body:has(#wrapped-modal:not([hidden]))
   100% {
     opacity: 0;
     transform: translate(10px, 10px) scale(0);
-  }
-}
-@keyframes shimmer {
-  0%,
-  100% {
-    background-position: 0% 50%;
-  }
-  50% {
-    background-position: 100% 50%;
   }
 }
 @keyframes wrapped-intro-leave {

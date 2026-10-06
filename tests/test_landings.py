@@ -10,6 +10,8 @@ import os
 from pathlib import Path
 
 import pytest
+from hypothesis import given, settings
+from hypothesis import strategies as st
 
 import kml_heatmap.airport_lookup as lookup_module
 import kml_heatmap.landings as landings_module
@@ -22,6 +24,7 @@ from kml_heatmap.airport_lookup import (
 from kml_heatmap.constants import FEET_TO_METERS
 from kml_heatmap.data_exporter import export_all_data
 from kml_heatmap.exceptions import AirportDatabaseError
+from kml_heatmap.geometry import planar_km
 from kml_heatmap.landings import (
     FIELD_RADIUS_KM,
     Field,
@@ -120,7 +123,7 @@ class TestTheRules:
         flight = Flight().takeoff().circuit().final().stop()
 
         assert _detect(flight) == FlightLandings(
-            takeoffs=1, landings=1, touchdowns=[("EXMP", "27")], circuits=1
+            takeoffs=1, landings=1, touchdowns=[("EXMP", "27")]
         )
 
     def test_a_touch_and_go_climbs_away_without_stopping(self):
@@ -131,7 +134,6 @@ class TestTheRules:
 
         assert (found.landings, found.touch_and_goes, found.go_arounds) == (1, 1, 0)
         assert found.touchdowns == [("EXMP", "27"), ("EXMP", "27")]
-        assert found.circuits == 2
 
     def test_a_touch_and_go_slower_than_the_contact_speed_is_a_go_around(self):
         """Between STOP_KNOTS and CONTACT_KNOTS no contact is recorded.
@@ -325,7 +327,7 @@ class TestTheRules:
         assert min(point.lon for point in points) < 0 < max(p.lon for p in points)
 
         assert _detect(points, FieldIndex([field])) == FlightLandings(
-            takeoffs=1, landings=1, touchdowns=[("ANTI", "27")], circuits=1
+            takeoffs=1, landings=1, touchdowns=[("ANTI", "27")]
         )
 
     def test_the_first_fixes_of_a_receiver_share_a_time(self):
@@ -372,6 +374,44 @@ class TestFieldIndex:
         assert near[1] == pytest.approx(0.0143, abs=1e-4)
         assert _nearest(index, 50.0, 180.0).ident == "EAST"
 
+    @settings(max_examples=200, deadline=None)
+    @given(
+        st.lists(
+            st.tuples(
+                st.floats(-85.0, 85.0), st.floats(-180.0, 179.999), st.booleans()
+            ),
+            min_size=1,
+            max_size=20,
+        ),
+        st.floats(-85.0, 85.0),
+        st.floats(-180.0, 179.999),
+        st.floats(-0.05, 0.05),
+        st.floats(-0.2, 0.2),
+    )
+    def test_the_same_as_looking_at_every_field(self, places, lat, lon, d_lat, d_lon):
+        """The cells kept per cell miss none, wherever in it the fix is."""
+        fields = [
+            # Some right next to the fix, wherever the others are
+            Field(
+                f"F{i}",
+                lat + d_lat if close else p_lat,
+                lon + d_lon if close else p_lon,
+                0.0,
+            )
+            for i, (p_lat, p_lon, close) in enumerate(places)
+        ]
+        index = FieldIndex(fields)
+        # A first fix in the cell keeps its fields for the second one
+        index.nearest(math.floor(lat * 10) / 10 + 0.0001, lon)
+        found = index.nearest(lat, lon)
+        distances = [planar_km(lat, lon, f.lat, f.lon) for f in fields]
+        within = [d for d in distances if d <= FIELD_RADIUS_KM]
+        if not within:
+            assert found is None
+        else:
+            assert found is not None
+            assert found[1] == min(within)
+
     def test_only_airports_with_runways_are_fields(self):
         airports = {
             "EDAQ": AirportRecord(51.55, 12.05, "Halle-Oppin", "DE", 106.0),
@@ -396,6 +436,7 @@ class TestFieldIndex:
         assert _nearest(index, 51.0, 12.0).elevation_ft is None
 
 
+@pytest.mark.repo_data
 class TestSampleFlights:
     """The fixture databases hold EDAQ and its runways 11/29."""
 

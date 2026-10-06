@@ -480,11 +480,16 @@ function* statisticsSteps(
 
 /** Statistics by filter view, dropped with the view (and so the dataset) */
 const viewStatistics = new WeakMap<FilterView, FilteredStatistics>();
-/** Statistics of a view being worked out in slices */
-const pendingStatistics = new WeakMap<
-  FilterView,
-  Promise<FilteredStatistics>
->();
+/**
+ * Statistics of a view being worked out in slices, with how many callers
+ * still wait for them: the run stops once none does
+ */
+interface PendingStatistics {
+  promise: Promise<FilteredStatistics>;
+  waiters: number;
+  stop: AbortController;
+}
+const pendingStatistics = new WeakMap<FilterView, PendingStatistics>();
 
 /**
  * How long a slice of the statistics runs before the page gets a turn. A
@@ -530,17 +535,19 @@ export function filterStatistics(view: FilterView): FilteredStatistics {
  * phone, in one task. The work runs in slices of up to SLICE_MS, with a
  * task of the page's own between two of them. What is done within the
  * first slice (a view whose statistics are kept, or a small one) is
- * returned as it is; anything longer as a promise. A run that `signal`
- * aborts stops at its next slice, and its promise rejects with the
- * signal's reason: the one who asked has gone (Wrapped closed while it
- * loaded), and the next to ask starts a run of their own.
+ * returned as it is; anything longer as a promise. A caller whose `signal`
+ * aborts gets a rejection with the signal's reason (Wrapped closed while it
+ * loaded); the run goes on for the others that asked for the same view
+ * (the statistics rail), and stops at its next slice once none is left.
  */
 export function filterStatisticsInSlices(
   view: FilterView,
   signal?: AbortSignal,
 ): FilteredStatistics | Promise<FilteredStatistics> {
-  const kept = viewStatistics.get(view) ?? pendingStatistics.get(view);
+  const kept = viewStatistics.get(view);
   if (kept) return kept;
+  const running = pendingStatistics.get(view);
+  if (running) return follow(running, signal);
   const steps = statisticsSteps(viewOptions(view));
   const slice = (): FilteredStatistics | null => {
     const end = performance.now() + SLICE_MS;
@@ -552,11 +559,12 @@ export function filterStatisticsInSlices(
   };
   const done = slice();
   if (done) return done;
+  const stop = new AbortController();
   const run = async (): Promise<FilteredStatistics> => {
     try {
       for (;;) {
         await new Promise((resolve) => setTimeout(resolve, 0));
-        signal?.throwIfAborted();
+        stop.signal.throwIfAborted();
         const stats = slice();
         if (stats) return stats;
       }
@@ -566,11 +574,11 @@ export function filterStatisticsInSlices(
       }
     }
   };
-  const pending = run();
+  const pending: PendingStatistics = { promise: run(), waiters: 0, stop };
   pendingStatistics.set(view, pending);
-  // Let go of the run at once, not at its next slice: a caller in between
-  // (Wrapped opened again right after a close) would get its rejection
-  signal?.addEventListener(
+  // Let go of a stopped run at once, not at its next slice: a caller in
+  // between (Wrapped opened again right after a close) starts its own
+  stop.signal.addEventListener(
     "abort",
     () => {
       if (pendingStatistics.get(view) === pending) {
@@ -579,5 +587,27 @@ export function filterStatisticsInSlices(
     },
     { once: true },
   );
-  return pending;
+  return follow(pending, signal);
+}
+
+/** A caller's share of a run: rejected when its own signal aborts */
+function follow(
+  pending: PendingStatistics,
+  signal?: AbortSignal,
+): Promise<FilteredStatistics> {
+  // Without a signal the caller waits to the end, and so does the run
+  if (!signal) {
+    pending.waiters = Infinity;
+    return pending.promise;
+  }
+  return new Promise((resolve, reject) => {
+    const leave = () => {
+      reject(signal.reason as Error);
+      if (--pending.waiters === 0) pending.stop.abort(signal.reason);
+    };
+    pending.waiters++;
+    if (signal.aborted) leave();
+    signal.addEventListener("abort", leave, { once: true });
+    pending.promise.then(resolve, reject);
+  });
 }

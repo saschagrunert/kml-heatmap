@@ -33,6 +33,10 @@ export const mockFilterManagerInstance = {
   updateAircraftDropdown: vi.fn(),
   filterByYear: vi.fn(),
   filterByAircraft: vi.fn(),
+  pickYear: vi.fn(),
+  loadShownYear: vi.fn(),
+  loading: false,
+  onLoadChange: null as (() => void) | null,
 };
 
 export const mockStatsManagerInstance = {
@@ -271,6 +275,24 @@ export async function initializeApp(
   if (!filterByYear.getMockImplementation()) {
     filterByYear.mockResolvedValue(true);
   }
+  // The first load as FilterManager does it, reduced to what MapApp sees:
+  // the year of the dropdown, published with its aircraft list in one
+  // update (see FilterManager.loadShownYear)
+  mockFilterManagerInstance.loadShownYear.mockImplementation(async () => {
+    const select = document.getElementById("year-select");
+    const year =
+      select instanceof HTMLSelectElement ? select.value : app.selectedYear;
+    const loaded = (await mockDataManagerInstance.loadData(
+      year,
+    )) as KMLDataset | null;
+    if (!loaded) return false;
+    app.store.batch(() => {
+      app.selectedYear = year;
+      app.currentData = loaded;
+      mockFilterManagerInstance.updateAircraftDropdown();
+    });
+    return true;
+  });
 
   await app.initialize();
 }

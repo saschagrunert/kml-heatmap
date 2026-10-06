@@ -726,7 +726,7 @@ describe("StatsManager", () => {
     });
 
     it("leaves a closed panel alone", () => {
-      const spy = vi.spyOn(panelStats, "filterStatistics");
+      const spy = vi.spyOn(panelStats, "filterStatisticsInSlices");
 
       new StatsManager(asMapApp(mockApp));
 
@@ -837,7 +837,7 @@ describe("StatsManager", () => {
   describe("closed panel", () => {
     it("computes nothing while the panel is closed (regression)", () => {
       const spy = vi.spyOn(panelStats, "calculateFilteredStatistics");
-      const filterSpy = vi.spyOn(panelStats, "filterStatistics");
+      const filterSpy = vi.spyOn(panelStats, "filterStatisticsInSlices");
 
       mockApp.selectedYear = "2025";
       mockApp.selectedPathIds.add(1);
@@ -853,7 +853,7 @@ describe("StatsManager", () => {
     });
 
     it("computes nothing behind the Flights tab, and catches up after", () => {
-      const spy = vi.spyOn(panelStats, "filterStatistics");
+      const spy = vi.spyOn(panelStats, "filterStatisticsInSlices");
       mockApp.flightListVisible = true;
       mockApp.store.set("statsPanelVisible", true);
       mockApp.selectedYear = "2025";
@@ -899,7 +899,7 @@ describe("StatsManager", () => {
     it("computes the statistics once for unchanged inputs", () => {
       statsManager.updateStatsForSelection();
       const spy = vi.spyOn(panelStats, "calculateFilteredStatistics");
-      const filterSpy = vi.spyOn(panelStats, "filterStatistics");
+      const filterSpy = vi.spyOn(panelStats, "filterStatisticsInSlices");
 
       statsManager.updateStatsForSelection();
       // A mutation notification without an actual change is also a no-op
@@ -932,7 +932,7 @@ describe("StatsManager", () => {
 
     it("keeps the filter's statistics for the next time a selection is cleared (regression)", () => {
       const spy = vi.spyOn(panelStats, "calculateFilteredStatistics");
-      const filterSpy = vi.spyOn(panelStats, "filterStatistics");
+      const filterSpy = vi.spyOn(panelStats, "filterStatisticsInSlices");
 
       for (let i = 0; i < 3; i++) {
         mockApp.selectedPathIds.add(1);
@@ -966,8 +966,61 @@ describe("StatsManager", () => {
       spy.mockRestore();
     });
 
+    it("says it is loading while a large filter's statistics are worked out", async () => {
+      // All the years of flights: longer than a slice
+      let finish: (stats: FilteredStatistics) => void = () => {};
+      const slices = vi
+        .spyOn(panelStats, "filterStatisticsInSlices")
+        .mockImplementationOnce(
+          () => new Promise<FilteredStatistics>((done) => (finish = done)),
+        );
+
+      mockApp.selectedYear = "2025";
+
+      expect(statsPanel.querySelector(".kh-stats-loading")).not.toBeNull();
+      expect(statsPanel.getAttribute("aria-busy")).toBe("true");
+      finish({
+        ...panelStats.calculateFilteredStatistics({
+          pathInfo: [],
+          segments: [],
+        }),
+        num_paths: 7,
+      });
+      await Promise.resolve();
+      expect(statsPanel.hasAttribute("aria-busy")).toBe(false);
+      expect(leadValue(statsPanel, "Flights")).toBe("7");
+      slices.mockRestore();
+    });
+
+    it("drops statistics a newer filter has overtaken", async () => {
+      let finish: (stats: FilteredStatistics) => void = () => {};
+      let signal: AbortSignal | undefined;
+      const slices = vi
+        .spyOn(panelStats, "filterStatisticsInSlices")
+        .mockImplementationOnce((_view, aborted) => {
+          signal = aborted;
+          return new Promise<FilteredStatistics>((done) => (finish = done));
+        });
+      mockApp.selectedYear = "2025";
+
+      mockApp.selectedYear = "all";
+      expect(signal?.aborted).toBe(true);
+      const shown = leadValue(statsPanel, "Flights");
+      finish({
+        ...panelStats.calculateFilteredStatistics({
+          pathInfo: [],
+          segments: [],
+        }),
+        num_paths: 7,
+      });
+      await Promise.resolve();
+
+      expect(leadValue(statsPanel, "Flights")).toBe(shown);
+      slices.mockRestore();
+    });
+
     it("recomputes for a replaced dataset of the same shape", () => {
-      const spy = vi.spyOn(panelStats, "filterStatistics");
+      const spy = vi.spyOn(panelStats, "filterStatisticsInSlices");
 
       // The loader always builds new arrays for a new dataset
       mockApp.currentData = createDataset(

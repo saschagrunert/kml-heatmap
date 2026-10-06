@@ -1,5 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { FilterManager } from "../../../../kml_heatmap/frontend/ui/filterManager";
+import {
+  FilterManager,
+  YEAR_PICK_DELAY_MS,
+  dropUnknownPathIds,
+} from "../../../../kml_heatmap/frontend/ui/filterManager";
 import type { KMLDataset } from "../../../../kml_heatmap/frontend/types";
 import {
   createMockApp,
@@ -15,6 +19,8 @@ const toastMock = vi.hoisted(() => ({
   dismissToast: vi.fn(),
 }));
 vi.mock("../../../../kml_heatmap/frontend/utils/toast", () => toastMock);
+const loggerMock = vi.hoisted(() => ({ logError: vi.fn(), logDebug: vi.fn() }));
+vi.mock("../../../../kml_heatmap/frontend/utils/logger", () => loggerMock);
 
 describe("FilterManager", () => {
   let filterManager: FilterManager;
@@ -517,7 +523,7 @@ describe("FilterManager", () => {
 
     it("keeps showing the year that failed when a switch fails with nothing loaded", async () => {
       // The first load failed, and so did the next year picked: the note
-      // on the map names it and loads it again (see retryLoad). The
+      // on the map names it and loads it again (see loadShownYear). The
       // dropdown showed an empty "Year" instead.
       mockApp.currentData = null;
       mockApp.selectedYear = "2025";
@@ -551,7 +557,7 @@ describe("FilterManager", () => {
       yearSelect.value = "2024";
       mockApp.dataManager.loadData.mockResolvedValue(year2024Data());
 
-      expect(await filterManager.retryLoad()).toBe(true);
+      expect(await filterManager.loadShownYear()).toBe(true);
 
       expect(mockApp.dataManager.loadData.mock.calls[0]![0]).toBe("2024");
       expect(mockApp.selectedYear).toBe("2024");
@@ -568,7 +574,7 @@ describe("FilterManager", () => {
       mockApp.selectedPathIds.add(99);
       mockApp.dataManager.loadData.mockResolvedValue(year2024Data());
 
-      expect(await filterManager.retryLoad()).toBe(true);
+      expect(await filterManager.loadShownYear()).toBe(true);
 
       expect(mockApp.dataManager.loadData.mock.calls[0]![0]).toBe("2024");
       // The panel on the map offers the retry, so its toast does not
@@ -857,6 +863,227 @@ describe("FilterManager", () => {
       filterManager.filterByAircraft();
 
       expect(redraws).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("pickYear", () => {
+    function yearSelect(): HTMLSelectElement {
+      return document.getElementById("year-select") as HTMLSelectElement;
+    }
+
+    beforeEach(() => {
+      vi.useFakeTimers();
+      for (const year of ["2026", "2025", "2024"]) addYearOption(year);
+      loggerMock.logError.mockClear();
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("loads the year the dropdown stops at, not every one it passed", async () => {
+      // The arrow keys on a closed dropdown change it at every step
+      for (const year of ["2026", "2025", "2024"]) {
+        yearSelect().value = year;
+        filterManager.pickYear();
+        await vi.advanceTimersByTimeAsync(YEAR_PICK_DELAY_MS / 2);
+      }
+      expect(mockApp.dataManager.loadData).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(YEAR_PICK_DELAY_MS);
+
+      expect(mockApp.dataManager.loadData).toHaveBeenCalledExactlyOnceWith(
+        "2024",
+        expect.any(AbortSignal),
+        expect.anything(),
+      );
+    });
+
+    it("gives way to a switch that does not wait", async () => {
+      yearSelect().value = "2026";
+      filterManager.pickYear();
+
+      await filterManager.filterByYear("2025");
+      await vi.advanceTimersByTimeAsync(YEAR_PICK_DELAY_MS);
+
+      expect(mockApp.dataManager.loadData).toHaveBeenCalledTimes(1);
+      expect(mockApp.selectedYear).toBe("2025");
+    });
+
+    it("is dropped with what a replay cancels", async () => {
+      yearSelect().value = "2026";
+      filterManager.pickYear();
+
+      filterManager.cancelPending();
+      await vi.advanceTimersByTimeAsync(YEAR_PICK_DELAY_MS);
+
+      expect(mockApp.dataManager.loadData).not.toHaveBeenCalled();
+      expect(yearSelect().value).toBe("all");
+    });
+
+    it("takes an aircraft picked while it waits along with the year", async () => {
+      yearSelect().value = "2024";
+      filterManager.pickYear();
+      aircraftSelect().add(new Option("D-ABCD", "D-ABCD"));
+      aircraftSelect().value = "D-ABCD";
+      filterManager.filterByAircraft();
+      expect(mockApp.selectedAircraft).toBe("all");
+      mockApp.dataManager.loadData.mockResolvedValue(year2024Data());
+
+      await vi.advanceTimersByTimeAsync(YEAR_PICK_DELAY_MS);
+
+      expect(mockApp.selectedYear).toBe("2024");
+      expect(mockApp.selectedAircraft).toBe("D-ABCD");
+    });
+
+    it("does nothing once the app is gone", async () => {
+      const lifetime = new AbortController();
+      mockApp = createMockApp({ signal: lifetime.signal });
+      filterManager = new FilterManager(asMapApp(mockApp));
+      yearSelect().value = "2026";
+      filterManager.pickYear();
+
+      lifetime.abort();
+      await vi.advanceTimersByTimeAsync(YEAR_PICK_DELAY_MS);
+
+      expect(mockApp.dataManager.loadData).not.toHaveBeenCalled();
+    });
+
+    it("logs a switch that failed instead of throwing", async () => {
+      const error = new Error("filter failed");
+      mockApp.dataManager.loadData.mockRejectedValueOnce(error);
+      yearSelect().value = "2026";
+      filterManager.pickYear();
+
+      await vi.advanceTimersByTimeAsync(YEAR_PICK_DELAY_MS);
+
+      expect(loggerMock.logError).toHaveBeenCalledWith(error);
+    });
+  });
+
+  describe("loading", () => {
+    it("says a switch is loading, and tells when it begins and fails", async () => {
+      addYearOption("2024");
+      let resolve!: (data: KMLDataset | null) => void;
+      mockApp.dataManager.loadData.mockReturnValue(
+        new Promise((done) => (resolve = done)),
+      );
+      const seen: boolean[] = [];
+      filterManager.onLoadChange = () => seen.push(filterManager.loading);
+
+      const switching = filterManager.filterByYear("2024");
+      expect(filterManager.loading).toBe(true);
+      resolve(null);
+      await switching;
+
+      expect(filterManager.loading).toBe(false);
+      expect(seen).toEqual([true, false]);
+    });
+
+    it("is over when the dataset that ends it is published", async () => {
+      addYearOption("2024");
+      mockApp.dataManager.loadData.mockResolvedValue(year2024Data());
+      const seen: boolean[] = [];
+      mockApp.store.subscribe("currentData", () =>
+        seen.push(filterManager.loading),
+      );
+
+      await filterManager.filterByYear("2024");
+
+      expect(seen).toEqual([false]);
+    });
+
+    it("tells when a replay cancels the switch", () => {
+      const onLoadChange = vi.fn();
+      filterManager.onLoadChange = onLoadChange;
+
+      filterManager.cancelPending();
+
+      expect(onLoadChange).toHaveBeenCalledTimes(1);
+      expect(filterManager.loading).toBe(false);
+    });
+  });
+
+  describe("dropUnknownPathIds", () => {
+    const data = createDataset([
+      { id: 840108108563, year: 2025 },
+      { id: 7, year: 2025 },
+    ]);
+
+    it("keeps a selection the dataset knows untouched", () => {
+      const selected = new Set([7, 840108108563]);
+      mockApp.selectedPathIds = selected;
+      mockApp.isolateSelection = true;
+      const listener = vi.fn();
+      mockApp.store.subscribe("selectedPathIds", listener);
+
+      dropUnknownPathIds(asMapApp(mockApp), data);
+
+      expect(mockApp.selectedPathIds).toBe(selected);
+      expect([...selected]).toEqual([7, 840108108563]);
+      expect(mockApp.isolateSelection).toBe(true);
+      expect(listener).not.toHaveBeenCalled();
+    });
+
+    it("drops unknown ids and keeps isolating the rest", () => {
+      mockApp.selectedPathIds = new Set([3, 7, 12]);
+      mockApp.isolateSelection = true;
+      const listener = vi.fn();
+      mockApp.store.subscribe("selectedPathIds", listener);
+
+      dropUnknownPathIds(asMapApp(mockApp), data);
+
+      expect([...mockApp.selectedPathIds]).toEqual([7]);
+      expect(mockApp.isolateSelection).toBe(true);
+      expect(listener).toHaveBeenCalledTimes(1);
+      // Quietly, unless asked: a year switch leaves out the others' flights
+      expect(toastMock.showToast).not.toHaveBeenCalled();
+    });
+
+    it("says how many flights of a link it left out, when asked", () => {
+      mockApp.selectedPathIds = new Set([3, 7, 12]);
+
+      dropUnknownPathIds(asMapApp(mockApp), data, true);
+
+      expect(toastMock.showToast).toHaveBeenCalledExactlyOnceWith(
+        "Left out 2 flights not on this site",
+      );
+    });
+
+    it("turns isolation off when no selected id is left", () => {
+      mockApp.selectedPathIds = new Set([3]);
+      mockApp.isolateSelection = true;
+      const seen: [number, boolean][] = [];
+      mockApp.store.subscribe("selectedPathIds", () => {
+        seen.push([mockApp.selectedPathIds.size, mockApp.isolateSelection]);
+      });
+
+      dropUnknownPathIds(asMapApp(mockApp), data);
+
+      expect(mockApp.selectedPathIds.size).toBe(0);
+      expect(mockApp.isolateSelection).toBe(false);
+      // Both changes arrive together: never an empty isolated selection
+      expect(seen).toEqual([[0, false]]);
+    });
+
+    it("keeps the ids when a year of the dataset failed to load", () => {
+      mockApp.selectedPathIds = new Set([7, 99]);
+      mockApp.isolateSelection = true;
+
+      dropUnknownPathIds(asMapApp(mockApp), { ...data, incomplete: true });
+
+      expect([...mockApp.selectedPathIds]).toEqual([7, 99]);
+      expect(mockApp.isolateSelection).toBe(true);
+    });
+
+    it("does nothing without a selection", () => {
+      mockApp.isolateSelection = false;
+      const listener = vi.fn();
+      mockApp.store.subscribe("selectedPathIds", listener);
+
+      dropUnknownPathIds(asMapApp(mockApp), data);
+
+      expect(listener).not.toHaveBeenCalled();
     });
   });
 });

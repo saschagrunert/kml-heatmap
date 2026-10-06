@@ -162,7 +162,7 @@ say), while the flights of the summary play underneath at 300x, as in Replay all
 heatmap, back on the map's own projection, and it settles on the overview as the
 cards come in one after another and the map draws back into its panel beside
 them (below 1024 px wide, where the cards are stacked, it fades from over them
-instead); Skip, or a press, wheel or key on the map, goes straight to the
+instead); Skip intro, or a press, wheel or key on the map, goes straight to the
 summary, and the flight does not play while the system asks for reduced motion.
 
 Beside the map the cards scroll in a column of their own, each as tall as its

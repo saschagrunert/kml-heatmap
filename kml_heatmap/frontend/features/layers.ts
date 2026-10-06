@@ -43,6 +43,13 @@ function rankIndex(i: number, last: number, from: number, to: number): number {
   return Math.round((from + ((to - from) * i) / RANK_STEPS) * last);
 }
 
+/** The indices rankValues reads, ascending (see rankIndex) */
+function rankIndices(last: number, from = 0, to = 1): number[] {
+  return Array.from({ length: RANK_STEPS + 1 }, (_, i) =>
+    rankIndex(i, last, from, to),
+  );
+}
+
 /**
  * Put the values a sort would put at the indices `ks` (ascending) there,
  * and every smaller value before each, every larger one after it: a
@@ -136,7 +143,11 @@ export function calculateAltitudeRange(
   const max = Math.max(range.max, 0);
   const altitudes = new Float64Array(segments.length);
   segments.forEach((segment, i) => (altitudes[i] = segment.altitude_ft));
-  return { min, max, ranks: rankValues(altitudes.sort(), min, max) };
+  // Only the values the ramp reads are put in their place: a sort of all of
+  // them took 10 ms for every year on a desktop at each change of the
+  // dataset or the filter, with the altitude layer off as well
+  selectRanks(altitudes, rankIndices(segments.length - 1));
+  return { min, max, ranks: rankValues(altitudes, min, max) };
 }
 
 /** Share of the speeds that falls below and above the ends of the scale */
@@ -174,13 +185,7 @@ export function calculateAirspeedRange(
   const tail = [AIRSPEED_RANGE_TAIL, 1 - AIRSPEED_RANGE_TAIL] as const;
   selectRanks(
     sorted,
-    [
-      low,
-      high,
-      ...Array.from({ length: RANK_STEPS + 1 }, (_, i) =>
-        rankIndex(i, last, ...tail),
-      ),
-    ].sort((a, b) => a - b),
+    [low, high, ...rankIndices(last, ...tail)].sort((a, b) => a - b),
   );
   const min = sorted[low]!;
   const max = sorted[high]!;

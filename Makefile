@@ -75,6 +75,7 @@ require-runtime:
 	  echo "error: no container runtime found; install podman or docker, or set CONTAINER_RUNTIME"; \
 	  exit 1; }
 
+# INPUT_DIR is mounted read-only: a build never writes its inputs
 build: require-runtime ## Build the image and generate OUTPUT_DIR from INPUT_DIR (leaves the input KML files alone)
 	@test -d "$(INPUT_DIR)" || { \
 	  echo "error: input directory '$(INPUT_DIR)' not found; put your KML files there or run 'make build INPUT_DIR=path'"; \
@@ -95,7 +96,7 @@ build: require-runtime ## Build the image and generate OUTPUT_DIR from INPUT_DIR
 	  -e KML_HEATMAP_COMMIT -e KML_HEATMAP_REPOSITORY -e SOURCE_DATE_EPOCH \
 	  -e KML_HEATMAP_STABLE_MTIMES -e KML_HEATMAP_REQUIRE_AIRPORT_DB \
 	  -e KML_HEATMAP_REQUIRE_TERRAIN \
-	  -v "$(abspath $(INPUT_DIR)):$(INPUT_MOUNT)" \
+	  -v "$(abspath $(INPUT_DIR)):$(INPUT_MOUNT):ro" \
 	  -v "$(abspath $(OUTPUT_DIR)):$(OUTPUT_MOUNT)" \
 	  -v "$(CACHE_DIR):/cache" \
 	  $(IMAGE_NAME) "$(INPUT_MOUNT)" --output-dir "$(OUTPUT_MOUNT)"
@@ -160,6 +161,8 @@ lint: ## Run the linters, formatters (check only), type checkers and typos of th
 	npm run lint:unused
 	npm run format:check
 	zizmor --min-severity medium .github
+	python -m kml_heatmap.obfuscate data --check
+	python -m kml_heatmap.obfuscate tests/fixtures/visual --check
 	@if command -v typos >/dev/null 2>&1; then typos; else \
 	  echo "warning: typos is not installed, skipping the spell check (CI runs it; see CONTRIBUTING.md)" >&2; fi
 

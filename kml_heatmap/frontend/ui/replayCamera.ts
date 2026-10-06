@@ -47,6 +47,9 @@ export const RECENTER_PAN_DURATION_MS = 500;
  */
 const FOLLOW_TIME_S = 0.6;
 
+/** How long after its last frame a follow counts as over (ms), see follow */
+const FOLLOW_STALE_MS = 1000;
+
 /** Time the view takes back to where it was before a chase (ms) */
 const CHASE_RESTORE_MS = 800;
 
@@ -397,6 +400,11 @@ export class ReplayCamera {
   } | null = null;
   /** The chase view while it has the camera (see chaseAirplane) */
   private chase: ChaseCamera | null = null;
+  /**
+   * The camera an ended chase eases back to, and until when: a chase that
+   * starts meanwhile gives that one back, not the view half way there
+   */
+  private restoring: { camera: SavedCamera; until: number } | null = null;
   /** Whether the user's hand held the chase on the frame before */
   private chaseHeld = false;
   /** The frame a paused chase settles in, while one is pending */
@@ -645,8 +653,14 @@ export class ReplayCamera {
       return true;
     }
     if (!this.chase) {
-      this.chase = new ChaseCamera(map, () =>
-        this.chaseAgain(this.heading?.state.playing ?? true),
+      const restoring = this.restoring;
+      this.restoring = null;
+      this.chase = new ChaseCamera(
+        map,
+        () => this.chaseAgain(this.heading?.state.playing ?? true),
+        restoring && performance.now() < restoring.until
+          ? restoring.camera
+          : undefined,
       );
     } else if (this.chaseHeld) this.chase.resume();
     this.chaseHeld = false;
@@ -697,14 +711,19 @@ export class ReplayCamera {
     const saved = chase.saved;
     const position = this.heading?.position;
     if (restore && !hasLostContext(map)) {
+      const camera =
+        restore === "view" && position
+          ? { ...saved, center: { lng: position[1], lat: position[0] } }
+          : saved;
       map.easeTo({
-        ...saved,
-        ...(restore === "view" && position
-          ? { center: toLngLat(position) }
-          : {}),
+        ...camera,
         duration: CHASE_RESTORE_MS,
         animate: !prefersReducedMotion(),
       });
+      this.restoring = {
+        camera,
+        until: performance.now() + CHASE_RESTORE_MS,
+      };
     }
     this.turnIcon();
     return saved;
@@ -741,10 +760,18 @@ export class ReplayCamera {
       return;
     }
 
+    // A follow from before a pause is over: the map may have been dragged
+    // since, and the next frame read the drag as the airplane's speed. A
+    // second, not a frame or two: below 5 frames a second (3D in software
+    // WebGL) every frame would start from rest and the follow lose its
+    // smoothing.
+    const now = Date.now();
+    if (this.following && now - this.following.at > FOLLOW_STALE_MS) {
+      this.following = null;
+    }
     const view = this.airplaneOnScreen(map, state, currentPos);
     if (!view.nearEdge && !this.following) return;
 
-    const now = Date.now();
     if (isManualSeek) {
       this.following = null;
       if (view.nearEdge) this.jumpOnSeek(map, state, view, currentPos, now);

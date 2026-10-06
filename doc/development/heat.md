@@ -717,9 +717,9 @@ for its ribbons anyway, and 72 and 131 ms with the heatmap alone, which smooths
 them for the cloud; holding the smoothed flights then is 4 MB of the page's heap
 for 2026 and 12 MB for all years. A level kept takes none of that. The upload
 took under a millisecond. In software WebGL (SwiftShader) it took 28 ms of a
-frame of 170 to 250 ms. The e2e test (`orientation.spec.ts`, "on the relief")
-checks that the layer is on the map and drew stretches (`drawn`, which the layer
-counts per frame), not what the pixels look like.
+frame of 170 to 250 ms. The e2e test (`3d-relief.spec.ts`) checks that the layer
+is on the map and drew stretches (`drawn`, which the layer counts per frame),
+not what the pixels look like.
 
 ## The replay of all flights
 

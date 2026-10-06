@@ -39,7 +39,7 @@ test("the first data files are preloaded and fetched once", async ({
   );
 });
 
-test("CARTO's style and tile index are preloaded as the page asks for them", async ({
+test("CARTO's style and tile index are preloaded as the page asks for them @keys", async ({
   page,
 }) => {
   const styles: string[] = [];

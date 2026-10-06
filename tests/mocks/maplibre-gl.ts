@@ -12,12 +12,21 @@
  * slipped through fails loudly whenever its second number cannot be a
  * latitude.
  *
+ * What the app sets on a layer after it was added (paint, layout, filter) is
+ * checked against the style specification, as MapLibre would, also where the
+ * app passes `validate: false`: a property it refuses would otherwise only
+ * show as a map that draws nothing.
+ *
  * Every method a mock offers is named against the MapLibre type it stands in
  * for (see `MockOf`), so `npm run typecheck:tests` fails when a mock grows a
  * method MapLibre does not have or MapLibre drops one the mocks still offer.
  * The fields outside `MockOf` are test conveniences the real objects lack.
  */
 import type * as maplibregl from "maplibre-gl";
+import {
+  validateStyleMin,
+  type StyleSpecification,
+} from "@maplibre/maplibre-gl-style-spec";
 import { vi, type Mock } from "vitest";
 
 /**
@@ -495,7 +504,15 @@ export class Map
 
   getSource = vi.fn((id: string) => this.sources[id]);
 
+  // MapLibre throws for both
   removeSource = vi.fn((id: string) => {
+    if (!this.sources[id]) throw new Error("There is no source with this ID");
+    const user = this.layers.find((l) => l.source === id);
+    if (user) {
+      throw new Error(
+        `Source "${id}" cannot be removed while layer "${user.id}" is using it.`,
+      );
+    }
     delete this.sources[id];
     return this;
   });
@@ -510,38 +527,54 @@ export class Map
     if (typeof source === "string" && !this.sources[source]) {
       throw new Error(`Source "${source}" not found.`);
     }
-    const index = beforeId
-      ? this.layers.findIndex((l) => l.id === beforeId)
-      : -1;
-    this.layers.splice(
-      index < 0 ? this.layers.length : index,
-      0,
-      toMockLayer(layer),
-    );
+    const index = this.beforeIndex(beforeId, `add layer "${id}"`);
+    this.layers.splice(index, 0, toMockLayer(layer));
     return this;
   });
+
+  /**
+   * Where a layer goes before `beforeId`, the end without one. MapLibre
+   * fires an error and leaves the layer out (or, moving it, out of the
+   * order) for an id it does not have, which the fake throws for instead,
+   * as for every other id it does not know: a test would not see the event.
+   */
+  private beforeIndex(beforeId: string | undefined, action: string): number {
+    if (!beforeId) return this.layers.length;
+    const index = this.layers.findIndex((l) => l.id === beforeId);
+    if (index < 0) {
+      throw new Error(
+        `Cannot ${action} before non-existing layer "${beforeId}".`,
+      );
+    }
+    return index;
+  }
 
   getLayer = vi.fn((id: string) => this.layers.find((l) => l.id === id));
 
   removeLayer = vi.fn((id: string) => {
-    this.layers = this.layers.filter((l) => l.id !== id);
+    const layer = this.layer(id);
+    this.layers = this.layers.filter((l) => l !== layer);
     return this;
   });
 
   moveLayer = vi.fn((id: string, beforeId?: string) => {
     const layer = this.layer(id);
+    if (id === beforeId) return this;
     this.layers = this.layers.filter((l) => l !== layer);
-    const index = beforeId
-      ? this.layers.findIndex((l) => l.id === beforeId)
-      : -1;
-    this.layers.splice(index < 0 ? this.layers.length : index, 0, layer);
+    this.layers.splice(
+      this.beforeIndex(beforeId, `move layer "${id}"`),
+      0,
+      layer,
+    );
     return this;
   });
 
   getLayersOrder = vi.fn(() => this.layers.map((l) => l.id));
 
   setLayoutProperty = vi.fn((id: string, name: string, value: unknown) => {
-    this.layer(id).layout[name] = value;
+    const layer = this.layer(id);
+    layer.layout[name] = value;
+    this.checkLayer(layer);
     return this;
   });
 
@@ -557,7 +590,9 @@ export class Map
   });
 
   setPaintProperty = vi.fn((id: string, name: string, value: unknown) => {
-    this.layer(id).paint[name] = value;
+    const layer = this.layer(id);
+    layer.paint[name] = value;
+    this.checkLayer(layer);
     return this;
   });
 
@@ -566,9 +601,46 @@ export class Map
   );
 
   setFilter = vi.fn((id: string, filter: unknown) => {
-    this.layer(id).filter = filter;
+    const layer = this.layer(id);
+    layer.filter = filter;
+    this.checkLayer(layer);
     return this;
   });
+
+  /**
+   * Throw for a layer the style specification refuses, checked on its own
+   * in a style of its source (a GeoJSON one where the fake has none). A
+   * custom layer has nothing the specification describes. A null filter or
+   * property is one taken off, as MapLibre takes it.
+   */
+  private checkLayer(layer: MockLayer): void {
+    if (layer.type === "custom") return;
+    const { sourceLayer, ...spec } = layer;
+    const source = typeof spec.source === "string" ? spec.source : undefined;
+    const style = JSON.parse(
+      JSON.stringify({
+        version: 8,
+        sources: source
+          ? {
+              [source]: this.sources[source]?.spec ?? {
+                type: "geojson",
+                data: { type: "FeatureCollection", features: [] },
+              },
+            }
+          : {},
+        layers: [
+          { ...spec, ...(sourceLayer && { "source-layer": sourceLayer }) },
+        ],
+      }),
+      function (this: unknown, _key: string, value: unknown) {
+        return value === null && !Array.isArray(this) ? undefined : value;
+      },
+    ) as StyleSpecification;
+    const errors = validateStyleMin(style);
+    if (errors.length > 0) {
+      throw new Error(errors.map((error) => error.message).join("; "));
+    }
+  }
 
   getFilter = vi.fn((id: string) => this.layer(id).filter);
 

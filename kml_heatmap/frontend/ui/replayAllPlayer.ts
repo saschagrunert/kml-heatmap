@@ -25,6 +25,7 @@ import {
 } from "../utils/mapHelpers";
 import { prefersReducedMotion } from "../utils/motion";
 import { followHeatCloud, heatCloudLevel } from "./heatCloud";
+import { placeBelow } from "./glLayer";
 import {
   REPLAY_ALL_LAYER,
   ReplayAllLayer,
@@ -512,20 +513,10 @@ export class ReplayAllPlayer {
     const map = this.app.map;
     if (!map || !this.active || this.app.signal.aborted) return;
     if (hasLostContext(map)) return;
-    const before = map.getLayer(REPLAY_ALL_BEFORE)
-      ? REPLAY_ALL_BEFORE
-      : undefined;
-    if (!map.getLayer(REPLAY_ALL_LAYER)) {
-      map.addLayer(this.layer, before);
-      return;
-    }
-    // A new base style keeps the layer, which is none it knows of, but not
-    // necessarily where it was. The heat cloud puts itself right below it.
-    if (!before) return;
-    const order = map.getLayersOrder();
-    if (order.indexOf(REPLAY_ALL_LAYER) !== order.indexOf(before) - 1) {
-      map.moveLayer(REPLAY_ALL_LAYER, before);
-    }
+    // The heat cloud puts itself right below it
+    placeBelow(map, this.layer, !!map.getLayer(REPLAY_ALL_LAYER), [
+      REPLAY_ALL_BEFORE,
+    ]);
   }
 }
 

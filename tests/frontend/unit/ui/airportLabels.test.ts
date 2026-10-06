@@ -319,6 +319,12 @@ describe("airport labels", () => {
 
     it("does nothing before the map has the source", () => {
       const map = createMapLibreMock();
+      // MapLibre refuses to remove a source a layer still uses
+      for (const layer of map.layers.filter(
+        (l) => l.source === MAP_SOURCES.airportLabels,
+      )) {
+        map.removeLayer(layer.id);
+      }
       map.removeSource(MAP_SOURCES.airportLabels);
 
       setAirportLabelHover(map as unknown as MapLibreMap, "EDDF", true);

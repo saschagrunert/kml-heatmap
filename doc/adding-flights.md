@@ -77,9 +77,10 @@ other file name loses its dates (`1_DEHYL_DA40_16Aug.kml` becomes
 `1_DEHYL_DA40.kml`). Files that are already obfuscated are left as they are;
 files obfuscated by an earlier version, which kept the time of day, fail the
 check until `make obfuscate` has moved them to midnight. Keep a copy of the
-original export if you want the real dates. It runs locally and needs the Python
-environment from [CONTRIBUTING.md](../CONTRIBUTING.md); `--obfuscate-inputs`
-does the same as part of a build. See [Privacy](privacy.md) for what is kept.
+original export if you want the real dates. It runs locally, on the host rather
+than in the container, and needs Python 3.14 but nothing beyond its standard
+library; `--obfuscate-inputs` does the same as part of a build. See
+[Privacy](privacy.md) for what is kept.
 
 ## 5. Build and preview the site
 

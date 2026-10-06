@@ -7,14 +7,12 @@ import { KM_TO_NAUTICAL_MILES } from "../utils/constants";
 import { formatNumber } from "../utils/formatters";
 import { formatFlightTime } from "../utils/statsFormat";
 import { markup } from "../utils/markup";
-import { collectAirports } from "../calculations/panelStats";
 import { countCountries } from "./countries";
 import { calculateDistance, type Coordinate } from "../utils/geometry";
 import type {
   AircraftModels,
   FilteredStatistics,
   FunFact,
-  PathInfo,
   YearStats,
 } from "../types";
 
@@ -114,30 +112,14 @@ export function findClosestReferenceDistance(
 
 /**
  * The figures of Wrapped's title card, of the paths the year and aircraft
- * filter keeps. They take the distance, the flight time and the aircraft
- * from `filtered`, the statistics of the same filter, rather than walk
- * every segment again for them.
+ * filter keeps. They take the flights, the airports, the distance, the
+ * flight time and the aircraft from `filtered`, the statistics of the same
+ * filter, rather than walk the paths or every segment again for them.
  */
 export function calculateYearStats(
-  filteredPaths: PathInfo[],
   aircraftModels: AircraftModels,
   filtered: FilteredStatistics,
 ): YearStats {
-  if (filteredPaths.length === 0) {
-    return {
-      total_flights: 0,
-      total_distance_nm: 0,
-      num_airports: 0,
-      airport_names: [],
-      flight_time: "0h 0m",
-      aircraft_list: [],
-    };
-  }
-
-  // Collect airports
-  const airports = collectAirports(filteredPaths);
-  const airportNames = Array.from(airports);
-
   const totalDistanceNm = filtered.total_distance_km * KM_TO_NAUTICAL_MILES;
   const flightTime = formatFlightTime(filtered.total_flight_time_seconds ?? 0);
   // Copies: the model is added below, and the statistics are kept
@@ -153,10 +135,10 @@ export function calculateYearStats(
   }
 
   return {
-    total_flights: filteredPaths.length,
+    total_flights: filtered.num_paths,
     total_distance_nm: totalDistanceNm,
-    num_airports: airports.size,
-    airport_names: airportNames,
+    num_airports: filtered.num_airports,
+    airport_names: filtered.airport_names,
     flight_time: flightTime,
     aircraft_list: aircraftList,
   };
@@ -222,7 +204,8 @@ export function generateFunFacts(
     const registration = onlyAircraft.registration;
     const flights = onlyAircraft.flights;
     const plural = flights !== 1 ? "s" : "";
-    if (flights === yearStats.total_flights) {
+    // "All 1 flight" for a year of one
+    if (flights > 1 && flights === yearStats.total_flights) {
       facts.push({
         icon: "aircraft",
         text: markup`Loyal to <strong>${registration}</strong>, all ${flights} flight${plural} in this ${model}!`,
@@ -273,33 +256,38 @@ export function generateFunFacts(
     });
   }
 
-  // Average distance per flight
-  if (yearStats.total_flights > 0 && distanceNm > 0) {
-    const avgDistanceNm = distanceNm / yearStats.total_flights;
-    if (avgDistanceNm > 0) {
-      // Only show cruise speed if timing data is available
-      if (filteredStats?.cruise_speed_knots) {
-        facts.push({
-          icon: "speed",
-          text: markup`Cruising at <strong>${formatNumber(filteredStats.cruise_speed_knots)} kt</strong>, averaging <strong>${formatNumber(avgDistanceNm, 1)} nm</strong> per trip.`,
-          category: "distance",
-          priority: 8,
-        });
-      } else {
-        // Show distance-only fact when speed data unavailable
-        facts.push({
-          icon: "ruler",
-          text: markup`Averaging <strong>${formatNumber(avgDistanceNm, 1)} nm</strong> per trip.`,
-          category: "distance",
-          priority: 8,
-        });
-      }
-    }
+  // Average distance per flight. Of a single flight it is the distance on
+  // the card above, and so is its longest journey.
+  const several = yearStats.total_flights > 1;
+  const average =
+    several && distanceNm > 0
+      ? markup`<strong>${formatNumber(distanceNm / yearStats.total_flights, 1)} nm</strong>`
+      : null;
+  // The cruise speed only with timing data
+  const cruise = filteredStats?.cruise_speed_knots;
+  if (cruise) {
+    const speed = markup`Cruising at <strong>${formatNumber(cruise)} kt</strong>`;
+    facts.push({
+      icon: "speed",
+      text: average
+        ? markup`${speed}, averaging ${average} per trip.`
+        : markup`${speed}.`,
+      category: "distance",
+      priority: 8,
+    });
+  } else if (average) {
+    facts.push({
+      icon: "ruler",
+      text: markup`Averaging ${average} per trip.`,
+      category: "distance",
+      priority: 8,
+    });
   }
 
   if (filteredStats) {
     // Longest journey fact
     if (
+      several &&
       filteredStats.longest_flight_nm &&
       filteredStats.longest_flight_nm > 0
     ) {

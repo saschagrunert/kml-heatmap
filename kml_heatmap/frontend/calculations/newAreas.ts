@@ -100,6 +100,21 @@ export function newAreaKm2(
 }
 
 /**
+ * The new area of the segments of a year's view, once worked out: the
+ * views and the years they are compared with are the same objects for the
+ * session (see datasetCells), and a reopening of Wrapped took 12 ms on a
+ * desktop for all of a year's flights again
+ */
+const newAreaOf = new WeakMap<readonly PathSegment[], number>();
+
+/** The new area of `segments` if yearNewAreaKm2 has worked it out already */
+export function knownNewAreaKm2(
+  segments: readonly PathSegment[],
+): number | undefined {
+  return newAreaOf.get(segments);
+}
+
+/**
  * The area in square kilometres that `segments` of `year` pass over and no
  * flight of an earlier one of `years` did. Worked out from the earlier
  * years `cached` holds already, without loading any: null for a year with
@@ -114,13 +129,18 @@ export function yearNewAreaKm2(
   years: readonly number[],
   cached: (year: string) => KMLDataset | undefined,
 ): number | null {
+  const known = newAreaOf.get(segments);
+  if (known !== undefined) return known;
   const earlier: Set<number>[] = [];
-  for (const known of years) {
+  for (const before of years) {
     // None is before "all"
-    if (!(known < Number(year))) continue;
-    const data = cached(String(known));
+    if (!(before < Number(year))) continue;
+    const data = cached(String(before));
     if (!data) return null;
     earlier.push(datasetCells(data));
   }
-  return earlier.length > 0 ? newAreaKm2(segments, earlier) : null;
+  if (earlier.length === 0) return null;
+  const area = newAreaKm2(segments, earlier);
+  newAreaOf.set(segments, area);
+  return area;
 }

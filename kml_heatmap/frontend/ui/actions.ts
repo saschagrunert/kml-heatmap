@@ -149,9 +149,8 @@ function actionHandlers(app: MapApp) {
     toggleReplayAll: () => app.toggleReplayAll(),
     toggleCrossSection: () => app.toggleCrossSection(),
     toggleHotspotTour: () => app.toggleHotspotTour(),
-    filterByYear: () => {
-      app.filterManager.filterByYear().catch(logError);
-    },
+    // Once the dropdown stops changing, see FilterManager.pickYear
+    filterByYear: () => app.filterManager.pickYear(),
     filterByAircraft: () => app.filterManager.filterByAircraft(),
     exportMap: () => app.uiToggles.exportMap(),
     shareLink: () => {

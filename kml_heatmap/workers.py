@@ -16,7 +16,7 @@ from concurrent.futures import Executor, Future, ProcessPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
 from typing import TYPE_CHECKING, Any
 
-from .airport_lookup import use_airport_database
+from .airport_lookup import use_airport_database, use_runway_database
 from .logger import logger, set_log_level
 from .parser import parse_size
 
@@ -80,23 +80,33 @@ def default_worker_count() -> int:
     return workers
 
 
-def init_worker(log_level: int, airport_database: bytes | None = None) -> None:
-    """Configure a worker process (log level, airport database).
+def init_worker(
+    log_level: int,
+    airport_database: bytes | None = None,
+    runway_database: bytes | None = None,
+) -> None:
+    """Configure a worker process (log level, airport and runway databases).
 
     ``log_level`` is the parent's (``logger.getEffectiveLevel()``).
 
-    ``airport_database`` is the parent's database, pickled once by the
-    parent: handing the pool the dictionary itself would pickle it again
-    for every worker, in the parent, one after the other.
+    ``airport_database`` and ``runway_database`` are the parent's, pickled
+    once by the parent: handing the pool the dictionaries themselves would
+    pickle them again for every worker, in the parent, one after the other.
+    Each worker read the runway CSV again otherwise, and might have read
+    one that changed after the parent computed the cache keys.
 
     Any failure here would terminate the worker and break the whole pool,
-    so nothing may escape: without the database the worker loads it itself.
+    so nothing may escape: without a database the worker loads it itself.
     """
     set_log_level(log_level)
     if airport_database is not None:
         with contextlib.suppress(Exception):
             database = pickle.loads(airport_database)  # noqa: S301
             use_airport_database(database)
+    if runway_database is not None:
+        with contextlib.suppress(Exception):
+            runways = pickle.loads(runway_database)  # noqa: S301
+            use_runway_database(runways)
 
 
 # What starting a process pool raises where it cannot start one: a sandbox

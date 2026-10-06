@@ -261,9 +261,7 @@ describe("MapApp.initialize", () => {
       await initializeApp(app, defaultAirports, defaultMetadata, null);
 
       expect(app.currentData).toBeNull();
-      expect(
-        mockFilterManagerInstance.updateAircraftDropdown,
-      ).toHaveBeenCalled();
+      expect(app.isInitializing).toBe(false);
     });
 
     it("publishes the dataset with its aircraft list, in one update", async () => {
@@ -1000,30 +998,8 @@ describe("MapApp.initialize", () => {
       ).not.toHaveBeenCalled();
     });
 
-    it("drops restored paths the loaded data does not have", async () => {
-      // Ids are content hashes: a link can outlive the flight it names
-      mockStateManagerInstance.loadState.mockReturnValue({
-        selectedPathIds: [1, 840108108563],
-        isolateSelection: true,
-      });
-
-      await initializeApp(app);
-
-      expect([...app.selectedPathIds]).toEqual([1]);
-      expect(app.isolateSelection).toBe(true);
-    });
-
-    it("drops the isolate flag with the last restored path that is gone", async () => {
-      mockStateManagerInstance.loadState.mockReturnValue({
-        selectedPathIds: [840108108563],
-        isolateSelection: true,
-      });
-
-      await initializeApp(app);
-
-      expect(app.selectedPathIds.size).toBe(0);
-      expect(app.isolateSelection).toBe(false);
-    });
+    // What the first load keeps of a restored selection is FilterManager's
+    // (see loadShownYear), and tested with it in appInitializer.test.ts
 
     it("drops a restored isolate flag without a selection (regression)", async () => {
       // A link written before path ids were versioned loses its paths but

@@ -80,12 +80,13 @@ make serve
 ```
 
 The page loads its code as ES modules and its data with `fetch()`, so it has to
-be served over HTTP; opening `docs/index.html` from disk shows an empty map. The
-map is drawn with WebGL 2, which every current browser has; where it is missing
-or switched off, the page says so in place of the map. `make serve` only serves
-the existing `docs/` directory; run `make build` (or `make serve-build`) to
-regenerate it first. `docs/` is a local build output and is not committed: the
-published site is built from the sources in CI once all tests pass (see
+be served over HTTP; opening `docs/index.html` from disk shows an empty map and,
+after a few seconds, a note that says how to serve it. The map is drawn with
+WebGL 2, which every current browser has; where it is missing or switched off,
+the page says so in place of the map. `make serve` only serves the existing
+`docs/` directory; run `make build` (or `make serve-build`) to regenerate it
+first. `docs/` is a local build output and is not committed: the published site
+is built from the sources in CI once all tests pass (see
 [Your own site on GitHub Pages](doc/hosting.md#your-own-site-on-github-pages)).
 
 Your KML files are read and left alone, and nothing has to be stripped from them

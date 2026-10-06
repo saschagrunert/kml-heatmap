@@ -196,6 +196,8 @@ export interface DataLoaderOptions {
    * next to newer data, which a reload of the page cures.
    */
   onLoadError?: (failedYears: string[], stale?: boolean) => void;
+  /** Invoked once, when metadata.json has arrived, whoever asked for it */
+  onMetadata?: (metadata: Metadata) => void;
 }
 
 /** One year file of the loading operation, see DataLoader */
@@ -316,6 +318,7 @@ export class DataLoader {
   private showLoading: (state: LoadingState) => void;
   private hideLoading: () => void;
   private onLoadError: NonNullable<DataLoaderOptions["onLoadError"]>;
+  private onMetadata: DataLoaderOptions["onMetadata"];
 
   constructor(options: DataLoaderOptions = {}) {
     this.dataDir = options.dataDir || "data";
@@ -332,6 +335,7 @@ export class DataLoader {
     this.showLoading = options.showLoading || (() => {});
     this.hideLoading = options.hideLoading || (() => {});
     this.onLoadError = options.onLoadError || (() => {});
+    this.onMetadata = options.onMetadata;
   }
 
   /**
@@ -792,7 +796,12 @@ export class DataLoader {
         this.metadataRequest ??= this.fetchJson(
           this.dataDir + "/metadata.json",
         ).then((json) => checked(json, isMetadata, "metadata.json"));
-        siteData.metadata = await this.indexing(this.metadataRequest);
+        const metadata = await this.indexing(this.metadataRequest);
+        // Callers that shared the request are told once
+        if (!siteData.metadata) {
+          siteData.metadata = metadata;
+          this.onMetadata?.(metadata);
+        }
       }
       return siteData.metadata;
     } catch (error) {

@@ -37,6 +37,7 @@ if TYPE_CHECKING:
 __all__ = [
     "BUNDLE_FILE",
     "BUNDLE_FILES",
+    "CODE_FILES",
     "FEATURES_BUNDLE_FILE",
     "FLAGS_DIR_NAME",
     "SHARED_BUNDLE_FILE",
@@ -153,6 +154,16 @@ SITE_FILES = (
     *FAVICON_FILES,
     *(f"vendor/{name}" for name in VENDOR_FILES),
     *PREVIEW_FILES,
+)
+# The owned files no flight decides, which keep the day they were first
+# published while they do not change (see SiteOutput): not the page, the
+# config or the previews, whose day would date a flight.
+CODE_FILES = (
+    *CSS_FILES,
+    *(bundle.name for bundle in BUNDLE_FILES),
+    *(f"{bundle.name}.map" for bundle in BUNDLE_FILES),
+    *FAVICON_FILES,
+    *(f"vendor/{name}" for name in VENDOR_FILES),
 )
 # Owned files whose names depend on the flights: the flag of every country
 # the export visited, and the link preview of every year and flight (see

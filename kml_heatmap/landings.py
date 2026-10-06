@@ -113,10 +113,6 @@ APPROACH_SECONDS = 30.0
 APPROACH_MIN_METRES = 200.0
 # A runway end further off the track than this is not the one it used
 RUNWAY_MAX_OFF_DEGREES = 30.0
-# A circuit: a takeoff or touch-and-go and the next touchdown at the same
-# field, never further from it than this and within this time
-CIRCUIT_MAX_KM = 8.0
-CIRCUIT_MAX_SECONDS = 20 * 60
 # Fewer timed fixes than this say nothing about landings
 MIN_TIMED_FIXES = 10
 # Speeds are measured over this long on either side of a fix (see
@@ -165,6 +161,8 @@ class FieldIndex:
         self._cells: dict[tuple[int, int], list[Field]] = {}
         for entry in fields:
             self._cells.setdefault(self._cell(entry.lat, entry.lon), []).append(entry)
+        # The fields around a cell, by cell and radius (see _around)
+        self._nearby: dict[tuple[int, int, float], list[Field]] = {}
 
     def __len__(self) -> int:
         """The number of fields."""
@@ -179,31 +177,45 @@ class FieldIndex:
             math.floor(lon / _CELL_DEGREES) % _COLUMNS,
         )
 
+    def _around(self, row: int, column: int, radius_km: float) -> list[Field]:
+        """The fields of the cells the radius reaches from anywhere in a cell.
+
+        One cell on either side where a cell is wider than the radius, as it
+        is up to 60 degrees of latitude, more further north and south, where
+        the cells narrow. Kept per cell: a track has thousands of fixes in
+        each, and gathering the cells again for every fix was half of the
+        time the landings took.
+        """
+        key = (row, column, radius_km)
+        found = self._nearby.get(key)
+        if found is None:
+            rows = math.ceil(radius_km / _CELL_KM)
+            # Where the rows reach furthest from the equator, from the edge
+            # of the cell nearest the pole, their cells are the narrowest
+            edge = max(abs(row), abs(row + 1)) * _CELL_DEGREES
+            furthest_lat = min(89.9, edge + rows * _CELL_DEGREES)
+            narrowest_km = _CELL_KM * math.cos(math.radians(furthest_lat))
+            columns = math.ceil(radius_km / narrowest_km)
+            found = [
+                candidate
+                for d_row in range(-rows, rows + 1)
+                for d_column in range(-columns, columns + 1)
+                for candidate in self._cells.get(
+                    (row + d_row, (column + d_column) % _COLUMNS), ()
+                )
+            ]
+            self._nearby[key] = found
+        return found
+
     def nearest(
         self, lat: float, lon: float, radius_km: float = FIELD_RADIUS_KM
     ) -> tuple[Field, float] | None:
-        """The nearest field within ``radius_km`` and its distance, or None.
-
-        The cells around the fix that the radius reaches are searched: one on
-        either side where a cell is wider than the radius, as it is up to 60
-        degrees of latitude, more further north and south, where the cells
-        narrow.
-        """
-        row, column = self._cell(lat, lon)
-        rows = math.ceil(radius_km / _CELL_KM)
-        # Where the rows reach furthest from the equator, their cells are
-        # the narrowest
-        furthest_lat = min(89.9, abs(lat) + rows * _CELL_DEGREES)
-        narrowest_km = _CELL_KM * math.cos(math.radians(furthest_lat))
-        columns = math.ceil(radius_km / narrowest_km)
+        """The nearest field within ``radius_km`` and its distance, or None."""
         best: tuple[Field, float] | None = None
-        for d_row in range(-rows, rows + 1):
-            for d_column in range(-columns, columns + 1):
-                cell = (row + d_row, (column + d_column) % _COLUMNS)
-                for candidate in self._cells.get(cell, ()):
-                    distance = planar_km(lat, lon, candidate.lat, candidate.lon)
-                    if distance <= radius_km and (best is None or distance < best[1]):
-                        best = (candidate, distance)
+        for candidate in self._around(*self._cell(lat, lon), radius_km):
+            distance = planar_km(lat, lon, candidate.lat, candidate.lon)
+            if distance <= radius_km and (best is None or distance < best[1]):
+                best = (candidate, distance)
         return best
 
 
@@ -242,6 +254,8 @@ def _feet(metres: float | None) -> float | None:
 class FlightLandings:
     """What a flight did at the fields it came to."""
 
+    # The site carries none; they check the detector against what a log
+    # shows, and cost nothing
     takeoffs: int = 0
     landings: int = 0
     touch_and_goes: int = 0
@@ -249,11 +263,6 @@ class FlightLandings:
     # Every touchdown in the order flown: the field and the runway, None
     # where the runway could not be told
     touchdowns: list[tuple[str, str | None]] = field(default_factory=list)
-    # A takeoff or touch-and-go and the next touchdown at the same field,
-    # within CIRCUIT_MAX_KM and CIRCUIT_MAX_SECONDS. The takeoffs and the
-    # circuits check the detector against what a log shows; the site
-    # carries neither.
-    circuits: int = 0
 
 
 class _Fix(NamedTuple):
@@ -443,10 +452,6 @@ class _Detector:
         # from the field again: the climb away passes through the approach
         # band, and read as a new approach there it would climb away twice
         self.climbing_away = False
-        # The field and time of the last takeoff or touch-and-go, the
-        # distance flown away from it since, for the circuits
-        self.circuit_from: tuple[Field, float] | None = None
-        self.circuit_km = 0.0
 
     def ground_ft(self, at: Field) -> float | None:
         """The ground of a field: its elevation plus the logger's offset."""
@@ -459,19 +464,6 @@ class _Detector:
         self.result.touchdowns.append(
             (at.ident, _runway(self.fixes, self.times, index, at))
         )
-        if (
-            self.circuit_from is not None
-            and self.circuit_from[0] is at
-            and self.fixes[index].t - self.circuit_from[1] <= CIRCUIT_MAX_SECONDS
-            and self.circuit_km <= CIRCUIT_MAX_KM
-        ):
-            self.result.circuits += 1
-        self.circuit_from = None
-
-    def start_circuit(self, index: int, at: Field | None) -> None:
-        """A takeoff or touch-and-go at ``at``, which a circuit starts from."""
-        self.circuit_from = (at, self.fixes[index].t) if at is not None else None
-        self.circuit_km = 0.0
 
     def step(self, index: int, fix: _Fix) -> None:
         """Read one fix."""
@@ -479,13 +471,6 @@ class _Detector:
         near = self.nearest[index]
         at = near[0] if near is not None else None
         ground = self.ground_ft(at) if at is not None else None
-        if self.circuit_from is not None:
-            self.circuit_km = max(
-                self.circuit_km,
-                planar_km(
-                    self.circuit_from[0].lat, self.circuit_from[0].lon, fix.lat, fix.lon
-                ),
-            )
         if speed is None:
             return
         if index and abs(fix.alt_ft - self.fixes[index - 1].alt_ft) > (
@@ -494,9 +479,9 @@ class _Detector:
             self.approach = None
             return
         if self.on_ground:
-            self._rolling(index, fix, speed, at, ground)
+            self._rolling(fix, speed, ground)
         elif self.contact is not None and self.contact_at is not None:
-            self._after_contact(index, fix, speed, self.contact, self.contact_at)
+            self._after_contact(fix, speed, self.contact, self.contact_at)
         elif not self.armed:
             self.armed = fix.alt_ft - self.base_ft >= ARMED_CLIMB_FT
         elif at is None or ground is None:
@@ -505,14 +490,7 @@ class _Detector:
         else:
             self._near_field(index, speed, at, fix.alt_ft - ground)
 
-    def _rolling(
-        self,
-        index: int,
-        fix: _Fix,
-        speed: float,
-        at: Field | None,
-        ground: float | None,
-    ) -> None:
+    def _rolling(self, fix: _Fix, speed: float, ground: float | None) -> None:
         """On the ground: a takeoff once it is fast and climbs after."""
         if speed < TAKEOFF_KNOTS:
             return
@@ -526,10 +504,9 @@ class _Detector:
             self.base_ft = reference
             self.approach = None
             self.result.takeoffs += 1
-            self.start_circuit(index, at)
 
     def _after_contact(
-        self, index: int, fix: _Fix, speed: float, contact: int, contact_at: Field
+        self, fix: _Fix, speed: float, contact: int, contact_at: Field
     ) -> None:
         """After a touchdown: a full stop, or a climb that is a touch-and-go."""
         contact_ground = self.ground_ft(contact_at)
@@ -545,7 +522,6 @@ class _Detector:
         elif fix.alt_ft - self.fixes[contact].alt_ft >= CLIMB_AWAY_FT:
             self.result.touch_and_goes += 1
             self.touch_down(contact, contact_at)
-            self.start_circuit(index, contact_at)
             self.base_ft = self.fixes[contact].alt_ft
             self.armed = False
             self.contact = self.contact_at = None

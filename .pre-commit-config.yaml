@@ -54,8 +54,9 @@ repos:
 
       # typos is not part of either lock file, so it is whatever is installed.
       # Like `make lint`, skip it when the binary is missing, but say so: the
-      # CI typos job is the one that has to pass, and a skip nobody sees
-      # reads as a clean spell check. verbose shows the note on a pass too.
+      # spell check of the CI lint job is the one that has to pass, and a
+      # skip nobody sees reads as a clean spell check. verbose shows the
+      # note on a pass too.
       - id: typos
         name: typos
         entry: sh -c 'if ! command -v typos >/dev/null 2>&1; then echo "typos is not installed, skipping the spell check (CI runs it; see CONTRIBUTING.md)" >&2; exit 0; fi; exec typos --force-exclude "$@"' typos
@@ -63,11 +64,12 @@ repos:
         types: [text]
         verbose: true
 
-      # The obfuscation CI job only runs once the dates are already pushed to
-      # the public repository. Needs Python 3.14 as `python`, such as the
-      # project's virtual environment (see CONTRIBUTING.md). The flights of
-      # the visual snapshots are copies of real ones, so they are checked too;
-      # the tool takes one directory at a time.
+      # The obfuscation check of the CI lint job only runs once the dates are
+      # already pushed to the public repository. Needs Python 3.14 as
+      # `python`, such as the project's virtual environment (see
+      # CONTRIBUTING.md). The flights of the visual snapshots are copies of
+      # real ones, so they are checked too; the tool takes one directory at a
+      # time.
       - id: check-obfuscation
         name: check that the KML files are obfuscated
         entry: sh -c 'python -m kml_heatmap.obfuscate data --check && python -m kml_heatmap.obfuscate tests/fixtures/visual --check'

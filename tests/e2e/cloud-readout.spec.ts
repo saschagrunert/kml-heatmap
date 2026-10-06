@@ -23,7 +23,7 @@ import {
 
 /**
  * The 3D view draws a frame in software WebGL in up to seconds on CI, and
- * cuts the flights anew for the relief on the way (see orientation.spec.ts):
+ * cuts the flights anew for the relief on the way (see 3d-relief.spec.ts):
  * a single look into the page took up to 26 s there, so every check after
  * the 3D view comes on waits this long
  */
@@ -148,7 +148,7 @@ test.describe("the readout of the heat cloud", HEAVY, () => {
     );
     // Tilted by now (the specs run with reduced motion), and at rest. Not
     // map.loaded(): in software WebGL the whole map is not loaded for
-    // minutes (see orientation.spec.ts), and the readout needs none of it
+    // minutes (see 3d-relief.spec.ts), and the readout needs none of it
     await reliefExpect
       .poll(() =>
         page.evaluate(() => {

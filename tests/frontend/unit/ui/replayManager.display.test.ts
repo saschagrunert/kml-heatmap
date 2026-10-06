@@ -142,7 +142,7 @@ describe("ReplayManager display", () => {
       replayManager.redrawReplayPath("airspeed");
       expect(replayManager.state.trailRuns).toHaveLength(2);
 
-      replayManager.seekReplay("0");
+      replayManager.seekReplay("30");
 
       expect(replayManager.state.trailRuns).toHaveLength(1);
       expect(replayManager.state.lastDrawnIndex).toBe(0);

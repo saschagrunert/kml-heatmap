@@ -3,6 +3,7 @@
 import logging
 import os
 import re
+import time
 import zipfile
 from datetime import UTC, datetime, timedelta
 from itertools import pairwise
@@ -2216,6 +2217,11 @@ class TestNamesAndDescriptions:
                     "Christmas",
                     "1755350000",
                     "Sa",
+                    "Jul/Aug",
+                    "08-2026",
+                    "CW33",
+                    "Summer",
+                    "T10Z",
                 ]
             ),
             max_size=8,
@@ -2438,6 +2444,59 @@ class TestRenamedNamesAreClean:
             assert found == [], (stem, undated)
 
 
+class TestCheckSkipsCanonicalTimestamps:
+    """The catch-all scan skips the timestamps the rewrite writes (speed)."""
+
+    @pytest.mark.parametrize(
+        "when",
+        [
+            "<when>2026-01-01T00:00:00Z</when>",
+            "<gx:when>2026-01-03T23:59:59.8171100Z</gx:when>",
+            "\n        <begin>2026-01-02T12:00:00Z</begin>",
+        ],
+    )
+    def test_skipped(self, when):
+        assert obfuscate_module.CANONICAL_TIMESTAMP_PATTERN.fullmatch(when)
+
+    @pytest.mark.parametrize(
+        "when",
+        [
+            # A day the catch-all fails, a zone, a comment, another tag
+            "<when>2026-01-04T00:00:00Z</when>",
+            "<when>2026-01-01T00:00:00+02:00</when>",
+            "<when>2026-01-01T00:00<!-- -->:00Z</when>",
+            "<when>2026-01-01T00:00:00Z</begin>",
+        ],
+    )
+    def test_scanned(self, when):
+        assert not obfuscate_module.CANONICAL_TIMESTAMP_PATTERN.fullmatch(when)
+
+    @pytest.mark.parametrize(
+        "pattern",
+        [
+            obfuscate_module.COORDINATES_PATTERN,
+            obfuscate_module.CANONICAL_TIMESTAMP_PATTERN,
+        ],
+    )
+    def test_a_long_blank_run_takes_no_quadratic_time(self, pattern):
+        """The indent is matched from the start of its run, once."""
+        text = " " * 80_000 + "x"
+        started = time.perf_counter()
+        pattern.sub("", text)
+        # Milliseconds; scanned again from each blank, 80 K took 11.7 s
+        assert time.perf_counter() - started < 2
+
+    def test_the_indent_still_goes_with_the_tag(self):
+        text = (
+            "<a>\n    <coordinates>1,2</coordinates>"
+            "\n  <when>2026-01-01T00:00:00Z</when></a>"
+        )
+        stripped = obfuscate_module.CANONICAL_TIMESTAMP_PATTERN.sub(
+            "", obfuscate_module.COORDINATES_PATTERN.sub("", text)
+        )
+        assert stripped == "<a></a>"
+
+
 class TestCheckSeesThroughMarkup:
     def test_a_date_split_by_cdata(self, tmp_path):
         path = tmp_path / "1_DEHYL_DA40.kml"
@@ -2460,6 +2519,28 @@ class TestCheckSeesThroughMarkup:
         assert obfuscate_kml_content(path.read_text(encoding="utf-8")) == _kml(
             "<name>bei Oma</name>"
         )
+
+    @pytest.mark.parametrize(
+        ("name", "kept"),
+        [
+            ("Home strip Columbus Day", "Home strip"),
+            ("Aunt farm CW33", "Aunt farm"),
+            ("Aunt farm 08-2026", "Aunt farm"),
+            ("Lake strip Jul/Aug 2026", "Lake strip"),
+            ("Lake strip Sommer 2026", "Lake strip"),
+            ("Lake strip Q3 2026", "Lake strip"),
+            ("Lake strip 2026-01-01T10Z", "Lake strip 2026-01-01"),
+        ],
+    )
+    def test_the_shapes_of_2026_10_fail_and_go(self, tmp_path, name, kept):
+        """They passed the check and were published until 2026-10."""
+        path = tmp_path / "1_DEHYL_DA40.kml"
+        path.write_text(_kml(f"<name>{name}</name>"), encoding="utf-8")
+        assert check_kml_obfuscated(path)
+        rewritten = obfuscate_kml_content(path.read_text(encoding="utf-8"))
+        assert rewritten == _kml(f"<name>{kept}</name>")
+        path.write_text(rewritten, encoding="utf-8")
+        assert check_kml_obfuscated(path) == []
 
     def test_a_holiday_in_the_file_name(self, tmp_path):
         path = tmp_path / "1_DEHYL_DA40_Christmas.kml"
@@ -2485,7 +2566,7 @@ class TestCheckSeesThroughMarkup:
             "Leg 3. II done",
             "Trip 2026. V speeds checked",
             "SkyDemon v.2024 export",
-            "Flown in summer 2026. I liked it",
+            "Flown in 2026. I liked it",
         ],
     )
     def test_text_that_only_looks_like_a_roman_month(self, tmp_path, text):

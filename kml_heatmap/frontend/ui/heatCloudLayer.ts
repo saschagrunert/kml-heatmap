@@ -372,8 +372,6 @@ export class HeatCloudLayer implements CustomLayerInterface {
         gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, cloud.count - 1);
       }
     }
-    gl.bindVertexArray(null);
-    gl.depthMask(true);
     this.frames++;
     this.drawn = copies.length > 0 ? cloud.count - 1 : 0;
     // The next frame while the pulses run or fade, the exposure moves or

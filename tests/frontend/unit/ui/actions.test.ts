@@ -120,7 +120,7 @@ describe("bindActions", () => {
     elements["filterByYear"]!.dispatchEvent(new Event("change"));
 
     expect(ended.uiToggles.toggleHeatmap).not.toHaveBeenCalled();
-    expect(ended.filterManager.filterByYear).not.toHaveBeenCalled();
+    expect(ended.filterManager.pickYear).not.toHaveBeenCalled();
     // The app bound in beforeEach still lives
     expect(app.uiToggles.toggleHeatmap).toHaveBeenCalledTimes(1);
   });
@@ -241,7 +241,8 @@ describe("bindActions", () => {
     elements["filterByYear"]!.dispatchEvent(new Event("change"));
     elements["filterByAircraft"]!.dispatchEvent(new Event("change"));
 
-    expect(app.filterManager.filterByYear).toHaveBeenCalledTimes(1);
+    // The year once the dropdown stops changing (FilterManager.pickYear)
+    expect(app.filterManager.pickYear).toHaveBeenCalledTimes(1);
     expect(app.filterManager.filterByAircraft).toHaveBeenCalledTimes(1);
   });
 
@@ -314,17 +315,6 @@ describe("bindActions", () => {
     expect(app.uiToggles.toggleHeatmap).toHaveBeenCalledTimes(1);
     expect(app.uiToggles.toggleAltitude).toHaveBeenCalledTimes(1);
     expect(app.store.get("statsPanelVisible")).toBe(true);
-  });
-
-  it("logs rejected filter promises instead of throwing", async () => {
-    const error = new Error("filter failed");
-    app.filterManager.filterByYear.mockRejectedValueOnce(error);
-
-    elements["filterByYear"]!.dispatchEvent(new Event("change"));
-    await Promise.resolve();
-    await Promise.resolve();
-
-    expect(loggerMock.logError).toHaveBeenCalledWith(error);
   });
 });
 

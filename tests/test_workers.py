@@ -47,6 +47,16 @@ class TestInitWorker:
             )
         read_csv.assert_not_called()
 
+    def test_uses_the_runways_of_the_parent(self):
+        """Each parse worker read the runway CSV again (0.2 s)."""
+        lookup_module.databases.reset()
+        runways = {"ZZZZ": ()}
+        init_worker(logging.INFO, None, pickle.dumps(runways))
+        with patch.object(lookup_module, "_read_runway_csv") as read_csv:
+            assert lookup_module.load_runway_database() == runways
+        read_csv.assert_not_called()
+        lookup_module.databases.reset()
+
     def test_a_broken_database_is_loaded_lazily(self, monkeypatch):
         lookup_module.databases.reset()
         init_worker(logging.INFO, b"not a pickle")

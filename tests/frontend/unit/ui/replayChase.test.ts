@@ -305,7 +305,7 @@ describe("ReplayManager chase view", () => {
     const [lat, lon] = replayManager.state.airplaneMarker!.getLatLng();
     expect(map.easeTo).toHaveBeenLastCalledWith(
       expect.objectContaining({
-        center: [lon, lat],
+        center: { lng: lon, lat },
         zoom: 11,
         bearing: 20,
         pitch: 30,
@@ -340,6 +340,33 @@ describe("ReplayManager chase view", () => {
     );
     // The choice stays for the next replay of the session
     expect(replayManager.state.chase).toBe(true);
+  });
+
+  it("gives back the view from before a chase that ended a moment ago", () => {
+    openReplay();
+    replayManager.toggleChase();
+    settle();
+    replayManager.toggleReplay();
+    // Half way back to the view from before the chase
+    mockApp.map!.jumpTo({
+      center: [16.2, 48.2],
+      zoom: 13,
+      bearing: 60,
+      pitch: 50,
+    });
+
+    // Opened again at once, still chasing: it saved the half-restored view
+    // and gave that back
+    replayManager.toggleReplay();
+    replayManager.seekReplay("30");
+    settle(0.1);
+
+    expect(replayManager.userMapView()).toEqual({
+      center: { lng: 16.05, lat: 48.05 },
+      zoom: 11,
+      bearing: 20,
+      pitch: 30,
+    });
   });
 
   it("does not move the camera towards the start as a paused chase closes", () => {

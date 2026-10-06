@@ -6,10 +6,10 @@ directory, and fetches a file, a missing file and a directory from it.
 
 import importlib.util
 import os
-import socket
+import re
+import select
 import subprocess
 import sys
-import time
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -19,47 +19,44 @@ import pytest
 SERVE = Path(__file__).parent.parent / "serve.py"
 
 
-def _free_port() -> int:
-    with socket.socket() as probe:
-        probe.bind(("127.0.0.1", 0))
-        port: int = probe.getsockname()[1]
-        return port
-
-
 @pytest.fixture
 def site(tmp_path):
-    """serve.py serving a small site, with CORS for one origin."""
+    """serve.py serving a small site, with CORS for one origin.
+
+    On a port the system picks (PORT=0), which the script prints once it is
+    bound: a port probed free and closed again could be taken by another
+    test's server before serve.py binds it.
+    """
     (tmp_path / "index.html").write_text("<p>flights</p>", encoding="utf-8")
     (tmp_path / "data").mkdir()
-    port = _free_port()
     env = {
         **os.environ,
         "DATA_DIR": str(tmp_path),
-        "PORT": str(port),
+        "PORT": "0",
         "BIND_HOST": "127.0.0.1",
         "CORS_ORIGIN": "https://example.org",
     }
     server = subprocess.Popen(  # noqa: S603
         [sys.executable, str(SERVE)],
         env=env,
-        stdout=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL,
+        text=True,
     )
-    base = f"http://127.0.0.1:{port}"
+    assert server.stdout is not None
     try:
-        deadline = time.monotonic() + 10
-        while True:
-            try:
-                with socket.create_connection(("127.0.0.1", port), timeout=1):
-                    break
-            except OSError:
-                if server.poll() is not None or time.monotonic() > deadline:
-                    pytest.fail("serve.py did not start listening")
-                time.sleep(0.05)
-        yield base
+        ready, _, _ = select.select([server.stdout], [], [], 10)
+        line = server.stdout.readline() if ready else ""
+        match = re.fullmatch(
+            r"Starting HTTP server on 127\.0\.0\.1:(\d+)\.\.\.\n", line
+        )
+        if match is None:
+            pytest.fail(f"serve.py did not start listening: {line!r}")
+        yield f"http://127.0.0.1:{match[1]}"
     finally:
         server.terminate()
         server.wait(timeout=10)
+        server.stdout.close()
 
 
 def test_serves_a_file_without_caching(site):

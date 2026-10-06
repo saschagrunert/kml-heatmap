@@ -240,8 +240,9 @@ container.
 
 ## Docker usage
 
-If you prefer using Docker directly. Input files are read and left alone (pass
-`--obfuscate-inputs` to rewrite them too). Mount the
+If you prefer using Docker directly. Input files are read and left alone, so
+their directory is mounted read-only (drop the `:ro` to pass
+`--obfuscate-inputs`, which rewrites them too). Mount the
 [cache directory](output.md#cache-directory) so the OurAirports database and the
 elevation tiles are not downloaded on every run, and run as your user id so the
 output is owned by you (add `--userns=keep-id` with rootless podman):
@@ -253,19 +254,19 @@ mkdir -p out ~/.cache/kml-heatmap
 
 # Generate out/ from the KML files in data/
 docker run --rm --user "$(id -u):$(id -g)" \
-  -v "$PWD/data:/data/data" -v "$PWD/out:/data/out" \
+  -v "$PWD/data:/data/data:ro" -v "$PWD/out:/data/out" \
   -v ~/.cache/kml-heatmap:/cache \
   kml-heatmap data --output-dir out
 
 # With the API key (inherited from the environment, its value is not echoed)
 docker run --rm --user "$(id -u):$(id -g)" -e CARTO_API_KEY \
-  -v "$PWD/data:/data/data" -v "$PWD/out:/data/out" \
+  -v "$PWD/data:/data/data:ro" -v "$PWD/out:/data/out" \
   -v ~/.cache/kml-heatmap:/cache \
   kml-heatmap data --output-dir out
 
 # Debug output
 docker run --rm --user "$(id -u):$(id -g)" \
-  -v "$PWD/data:/data/data" -v "$PWD/out:/data/out" \
+  -v "$PWD/data:/data/data:ro" -v "$PWD/out:/data/out" \
   -v ~/.cache/kml-heatmap:/cache \
   kml-heatmap --debug data --output-dir out
 
@@ -420,10 +421,12 @@ build did not change; CI sets it for the deployed site. Leave it off for a
 server that compares the times by age (`python -m http.server`). Without it a
 file is dated to 00:00 UTC of the build day (`SOURCE_DATE_EPOCH`, see
 [Privacy](privacy.md#what-the-site-carries)), never the time of the build: a
-file a build did not change keeps its time, and one that changed again on the
-same day gets a second more each time. A time that is no such day, left by an
-older build or another tool, is replaced by the build day. The headers a host
-should send are in [Hosting](hosting.md#headers-and-compression).
+bundle, stylesheet or icon a build did not change keeps its time, every file the
+flights decide (the data, the page, the flags and previews) gets the build day,
+and one that changed again on the same day gets a second more each time. A time
+that is no such day, left by an older build or another tool, is replaced by the
+build day. The headers a host should send are in
+[Hosting](hosting.md#headers-and-compression).
 
 ### Exit status
 

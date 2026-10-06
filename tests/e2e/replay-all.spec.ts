@@ -97,7 +97,22 @@ test.describe("Replay all flights", () => {
       "Play the replay of all flights",
     );
     const held = await clock.textContent();
-    await page.waitForTimeout(500);
+    // Ten frames and half a second at least: software WebGL may draw no
+    // frame in half a second, and a pause that does not hold would pass
+    await Promise.all([
+      page.waitForTimeout(500),
+      page.evaluate(
+        () =>
+          new Promise<void>((resolve) => {
+            let frames = 0;
+            const step = (): void => {
+              if (++frames >= 10) resolve();
+              else requestAnimationFrame(step);
+            };
+            requestAnimationFrame(step);
+          }),
+      ),
+    ]);
     await expect(clock).toHaveText(held!);
 
     await page.locator("#replay-all-close-btn").click();

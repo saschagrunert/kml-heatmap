@@ -2,11 +2,13 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
   colorSegmentPopups,
   createAirportMarkers,
-  dropUnknownPathIds,
   loadInitialData,
-  publishDataset,
   resolveYearSelection,
 } from "../../../../kml_heatmap/frontend/appInitializer";
+import {
+  FilterManager,
+  publishDataset,
+} from "../../../../kml_heatmap/frontend/ui/filterManager";
 import type {
   Airport,
   KMLDataset,
@@ -157,6 +159,29 @@ describe("appInitializer", () => {
 
       expect(app.selectedYear).toBe("all");
       expect(yearSelect().value).toBe("all");
+    });
+
+    it("takes a year picked before the list came over the one restored", () => {
+      app.selectedYear = "2023";
+      app.restoredYearFromState = true;
+      yearSelect().add(new Option("2023", "2023", true, true));
+      yearSelect().value = "all";
+
+      resolveYearSelection(asMapApp(app), [2024, 2025]);
+
+      expect(app.selectedYear).toBe("all");
+      expect(yearSelect().value).toBe("all");
+      // Nobody is told the restored year is gone: another one was picked
+      expect(toastMock.showToast).not.toHaveBeenCalled();
+    });
+
+    it("does not take a year the list does not have for a pick", () => {
+      yearSelect().add(new Option("2023", "2023"));
+      yearSelect().value = "2023";
+
+      resolveYearSelection(asMapApp(app), [2024, 2025]);
+
+      expect(app.selectedYear).toBe("2025");
     });
 
     it("works without a year select element", () => {
@@ -461,6 +486,7 @@ describe("appInitializer", () => {
   });
 
   describe("loadInitialData", () => {
+    let filterManager: FilterManager;
     const data: KMLDataset = createDataset(
       [{ id: 1, year: 2025, aircraft_registration: "D-ABCD" }],
       [createSegment({ path_id: 1 })],
@@ -471,7 +497,18 @@ describe("appInitializer", () => {
       app.dataManager.loadAirports.mockResolvedValue(airports);
       app.dataManager.loadMetadata.mockResolvedValue(metadata);
       app.dataManager.loadData.mockResolvedValue(data);
+      // The first load is a switch to the year the dropdown shows
+      // (FilterManager.loadShownYear)
+      filterManager = new FilterManager(asMapApp(app));
+      app.filterManager = filterManager as unknown as MockApp["filterManager"];
     });
+
+    /** The first load (or a Retry) asked for `year`, with no Retry action */
+    const loadedFirst = (year: string): unknown[] => [
+      year,
+      expect.any(AbortSignal),
+      undefined,
+    ];
 
     it("loads everything in order and stores the results", async () => {
       const order: string[] = [];
@@ -486,7 +523,7 @@ describe("appInitializer", () => {
           return original ? (original(...args) as unknown) : Promise.resolve();
         });
       }
-      app.filterManager.updateAircraftDropdown.mockImplementation(() =>
+      vi.spyOn(filterManager, "updateAircraftDropdown").mockImplementation(() =>
         order.push("dropdown"),
       );
       app.airportManager.updateAirportMarkerSizes.mockImplementation(() =>
@@ -505,7 +542,9 @@ describe("appInitializer", () => {
       expect(app.aircraftModels).toBe(metadata.aircraft_models);
       expect(app.hasTimingData).toBe(true);
       expect(app.selectedYear).toBe("2025");
-      expect(app.dataManager.loadData).toHaveBeenCalledWith("2025");
+      expect(app.dataManager.loadData).toHaveBeenCalledWith(
+        ...loadedFirst("2025"),
+      );
       expect(app.currentData).toBe(data);
       expect(Object.keys(app.airportMarkers)).toHaveLength(2);
       expect(app.airspeedRange).toEqual({ min: 10, max: 150 });
@@ -532,9 +571,11 @@ describe("appInitializer", () => {
     });
 
     it("publishes the dataset and the aircraft list in one update", async () => {
-      app.filterManager.updateAircraftDropdown.mockImplementation(() => {
-        app.selectedAircraft = "all";
-      });
+      vi.spyOn(filterManager, "updateAircraftDropdown").mockImplementation(
+        () => {
+          app.selectedAircraft = "all";
+        },
+      );
       app.selectedAircraft = "D-GONE";
       const listener = vi.fn();
       app.store.subscribeKeys(["currentData", "selectedAircraft"], listener);
@@ -672,7 +713,9 @@ describe("appInitializer", () => {
       await loadInitialData(asMapApp(app));
 
       // The map loads all of them, and the dropdown said 2025
-      expect(app.dataManager.loadData).toHaveBeenCalledWith("all");
+      expect(app.dataManager.loadData).toHaveBeenCalledWith(
+        ...loadedFirst("all"),
+      );
       expect(yearSelect().value).toBe("all");
       // A first visit asked for no year, so nothing is taken back
       expect(toastMock.showToast).not.toHaveBeenCalled();
@@ -689,11 +732,11 @@ describe("appInitializer", () => {
       expect(app.currentData).toBeNull();
       expect(app.selectedYear).toBe("all");
       // No Retry on the toast: the panel on the map has the one
-      expect(app.dataManager.loadData).toHaveBeenCalledWith("all");
+      expect(app.dataManager.loadData).toHaveBeenCalledWith(
+        ...loadedFirst("all"),
+      );
       const btn = document.getElementById("airspeed-btn") as HTMLButtonElement;
       expect(btn.getAttribute("aria-disabled")).toBe("true");
-      // The aircraft list is still settled
-      expect(app.filterManager.updateAircraftDropdown).toHaveBeenCalled();
     });
 
     it("does not load a year that failed a second time for the layers (regression)", async () => {
@@ -745,18 +788,19 @@ describe("appInitializer", () => {
     });
 
     it("drops its dataset when the year was switched while it loaded", async () => {
-      // A Reset view from the phone's bar went ahead during the first load,
-      // and its year was then covered by this one's dataset
+      // A switch that went ahead during the first load had its year
+      // covered by this one's dataset
       const newer = createDataset([{ id: 2, year: 2024 }]);
+      let loads = 0;
+      let switched: Promise<boolean> | undefined;
       app.dataManager.loadData.mockImplementation(() => {
-        app.store.batch(() => {
-          app.selectedYear = "2024";
-          app.currentData = newer;
-        });
+        if (loads++ > 0) return Promise.resolve(newer);
+        switched = filterManager.filterByYear("2024");
         return Promise.resolve(data);
       });
 
       await loadInitialData(asMapApp(app));
+      await switched;
 
       expect(app.selectedYear).toBe("2024");
       expect(app.currentData).toBe(newer);
@@ -847,19 +891,20 @@ describe("appInitializer", () => {
       it("says so on the map, and loads the year again from there", async () => {
         const panel = document.getElementById("map-empty")!;
         const loaded = createDataset([{ id: 1, year: 2025 }]);
-        app.filterManager.retryLoad.mockImplementation(() => {
-          // Hidden while it loads: the loading indicator takes its place
-          expect(panel.hidden).toBe(true);
-          app.currentData = loaded;
-          return Promise.resolve(true);
-        });
-
         await loadInitialData(asMapApp(app));
         expect(panel.hidden).toBe(false);
+        const retry = vi
+          .spyOn(filterManager, "loadShownYear")
+          .mockImplementation(() => {
+            // Hidden while it loads: the loading indicator takes its place
+            expect(panel.hidden).toBe(true);
+            app.currentData = loaded;
+            return Promise.resolve(true);
+          });
 
         document.getElementById("map-empty-retry")!.click();
 
-        expect(app.filterManager.retryLoad).toHaveBeenCalledTimes(1);
+        expect(retry).toHaveBeenCalledTimes(1);
         // The failures of loads it said are being acted on, and no other
         // error on screen is taken with them (regression)
         expect(app.dataManager.dismissFailures).toHaveBeenCalled();
@@ -872,7 +917,9 @@ describe("appInitializer", () => {
 
         // The panel's Retry is the one; two of them at once, styled apart,
         // were two ways of doing one thing
-        expect(app.dataManager.loadData).toHaveBeenCalledWith("2025");
+        expect(app.dataManager.loadData).toHaveBeenCalledWith(
+          ...loadedFirst("2025"),
+        );
       });
 
       it("takes the keyboard to its Retry as it appears", async () => {
@@ -899,8 +946,8 @@ describe("appInitializer", () => {
 
       it("shows the panel again when the retry fails too", async () => {
         const panel = document.getElementById("map-empty")!;
-        app.filterManager.retryLoad.mockResolvedValue(false);
         await loadInitialData(asMapApp(app));
+        vi.spyOn(filterManager, "loadShownYear").mockResolvedValue(false);
 
         document.getElementById("map-empty-retry")!.click();
 
@@ -910,11 +957,11 @@ describe("appInitializer", () => {
 
       it("shows what is made of the flights unavailable until a Retry brings them", async () => {
         const wrapped = document.getElementById("wrapped-btn")!;
-        app.filterManager.retryLoad.mockImplementation(() => {
+        await loadInitialData(asMapApp(app));
+        vi.spyOn(filterManager, "loadShownYear").mockImplementation(() => {
           app.currentData = createDataset([{ id: 1, year: 2025 }]);
           return Promise.resolve(true);
         });
-        await loadInitialData(asMapApp(app));
 
         expect(wrapped.getAttribute("aria-disabled")).toBe("true");
         expect(wrapped.title).toBe(NO_DATA_MESSAGE);
@@ -925,6 +972,58 @@ describe("appInitializer", () => {
           expect(wrapped.getAttribute("aria-disabled")).toBe("false"),
         );
         expect(wrapped.title).toBe("Wrapped");
+      });
+
+      it("stays out of the way of a year picked from the dropdown", async () => {
+        // It came back next to the loading indicator, saying the old
+        // failure, while the year picked loaded (and once a Retry that
+        // such a pick replaced was over)
+        const panel = document.getElementById("map-empty")!;
+        await loadInitialData(asMapApp(app));
+        expect(panel.hidden).toBe(false);
+        let resolve!: (loaded: KMLDataset | null) => void;
+        app.dataManager.loadData.mockReturnValue(
+          new Promise((done) => (resolve = done)),
+        );
+        const announced = toastMock.announceStatus.mock.calls.length;
+
+        const switching = filterManager.filterByYear("2024");
+
+        expect(panel.hidden).toBe(true);
+        resolve(null);
+        await switching;
+        expect(panel.hidden).toBe(false);
+        // Said again as it comes back with the failure of the year picked
+        expect(toastMock.announceStatus.mock.calls.length).toBe(announced + 1);
+      });
+
+      it("loads the airports again with the flights when they failed too", async () => {
+        app.dataManager.loadAirports.mockResolvedValueOnce([]);
+        await loadInitialData(asMapApp(app));
+        expect(Object.keys(app.airportMarkers)).toHaveLength(0);
+        const markersAtPublish: number[] = [];
+        app.store.subscribe("currentData", () =>
+          markersAtPublish.push(Object.keys(app.airportMarkers).length),
+        );
+        app.dataManager.loadData.mockResolvedValue(data);
+
+        document.getElementById("map-empty-retry")!.click();
+
+        await vi.waitFor(() => expect(app.currentData).toBe(data));
+        // There before the dataset that says which of them show
+        expect(markersAtPublish).toEqual([2]);
+        expect(app.dataManager.loadAirports).toHaveBeenCalledTimes(2);
+      });
+
+      it("leaves airports that are there alone on a Retry", async () => {
+        await loadInitialData(asMapApp(app));
+
+        document.getElementById("map-empty-retry")!.click();
+        await vi.waitFor(() =>
+          expect(app.dataManager.loadData).toHaveBeenCalledTimes(2),
+        );
+
+        expect(app.dataManager.loadAirports).toHaveBeenCalledTimes(1);
       });
 
       it("hands the focus of its Retry to the map as it hides", async () => {
@@ -938,6 +1037,95 @@ describe("appInitializer", () => {
 
         expect(document.activeElement).toBe(app.map!.getCanvas());
       });
+    });
+
+    it("takes in the list of years that a load of all years brings after all", async () => {
+      // metadata.json failed once; the load of all years asks for it again
+      // (DataLoader.loadAllYears), and the page went on without years,
+      // speeds and model names, with the toast saying they were missing
+      app.selectedYear = "2025";
+      yearSelect().add(new Option("2025", "2025", true, true));
+      app.dataManager.loadMetadata.mockResolvedValue(null);
+      const atPublish: unknown[] = [];
+      app.store.subscribe("currentData", () =>
+        atPublish.push(app.hasTimingData, { ...app.metadataAirspeedRange }),
+      );
+      app.dataManager.loadData.mockImplementation(() => {
+        app.dataManager.onMetadata!(metadata);
+        return Promise.resolve(data);
+      });
+
+      await loadInitialData(asMapApp(app));
+
+      expect([...yearSelect().options].map((option) => option.value)).toEqual([
+        "all",
+        "2024",
+        "2025",
+      ]);
+      // The dropdown keeps the year loading, which is the one published
+      expect(yearSelect().value).toBe("all");
+      expect(app.selectedYear).toBe("all");
+      // Taken in before the dataset draws the layers
+      expect(atPublish).toEqual([true, { min: 10, max: 150 }]);
+      expect(app.aircraftModels).toBe(metadata.aircraft_models);
+      const btn = document.getElementById("airspeed-btn") as HTMLButtonElement;
+      expect(btn.getAttribute("aria-disabled")).toBe("false");
+      expect(toastMock.dismissToast).toHaveBeenCalledWith(
+        "The list of years is unavailable, showing all years",
+      );
+    });
+
+    it("brings back a restored speed layer with late metadata that has speeds", async () => {
+      app.airspeedVisible = true;
+      app.dataManager.loadMetadata.mockResolvedValue(null);
+      const atPublish: boolean[] = [];
+      app.store.subscribe("currentData", () =>
+        atPublish.push(app.airspeedVisible),
+      );
+      app.dataManager.loadData.mockImplementation(() => {
+        // Put away while it was not known whether there are speeds
+        expect(app.airspeedVisible).toBe(false);
+        app.dataManager.onMetadata!(metadata);
+        return Promise.resolve(data);
+      });
+
+      await loadInitialData(asMapApp(app));
+
+      expect(atPublish).toEqual([true]);
+    });
+
+    it("waits for no late list of years when the first load had one", async () => {
+      await loadInitialData(asMapApp(app));
+
+      expect(app.dataManager.onMetadata).toBeNull();
+    });
+
+    it("keeps a year picked before the list of years came", async () => {
+      // The template names the latest year; "All years" was picked while
+      // the list loaded, which the bound handler leaves to the first load
+      yearSelect().add(new Option("2025", "2025", true, true));
+      app.dataManager.loadMetadata.mockImplementation(() => {
+        yearSelect().value = "all";
+        return Promise.resolve(metadata);
+      });
+
+      await loadInitialData(asMapApp(app));
+
+      expect(app.selectedYear).toBe("all");
+      expect(yearSelect().value).toBe("all");
+      expect(app.dataManager.loadData).toHaveBeenCalledExactlyOnceWith(
+        ...loadedFirst("all"),
+      );
+    });
+
+    it("drops a restored path whose flight is gone, and isolation with the last", async () => {
+      app.selectedPathIds = new Set([840108108563]);
+      app.isolateSelection = true;
+
+      await loadInitialData(asMapApp(app));
+
+      expect(app.selectedPathIds.size).toBe(0);
+      expect(app.isolateSelection).toBe(false);
     });
 
     it("keeps no restored path the dataset does not have", async () => {
@@ -954,88 +1142,6 @@ describe("appInitializer", () => {
     });
   });
 
-  describe("dropUnknownPathIds", () => {
-    const data = createDataset([
-      { id: 840108108563, year: 2025 },
-      { id: 7, year: 2025 },
-    ]);
-
-    it("keeps a selection the dataset knows untouched", () => {
-      const selected = new Set([7, 840108108563]);
-      app.selectedPathIds = selected;
-      app.isolateSelection = true;
-      const listener = vi.fn();
-      app.store.subscribe("selectedPathIds", listener);
-
-      dropUnknownPathIds(asMapApp(app), data);
-
-      expect(app.selectedPathIds).toBe(selected);
-      expect([...selected]).toEqual([7, 840108108563]);
-      expect(app.isolateSelection).toBe(true);
-      expect(listener).not.toHaveBeenCalled();
-    });
-
-    it("drops unknown ids and keeps isolating the rest", () => {
-      app.selectedPathIds = new Set([3, 7, 12]);
-      app.isolateSelection = true;
-      const listener = vi.fn();
-      app.store.subscribe("selectedPathIds", listener);
-
-      dropUnknownPathIds(asMapApp(app), data);
-
-      expect([...app.selectedPathIds]).toEqual([7]);
-      expect(app.isolateSelection).toBe(true);
-      expect(listener).toHaveBeenCalledTimes(1);
-      // Quietly, unless asked: a year switch leaves out the others' flights
-      expect(toastMock.showToast).not.toHaveBeenCalled();
-    });
-
-    it("says how many flights of a link it left out, when asked", () => {
-      app.selectedPathIds = new Set([3, 7, 12]);
-
-      dropUnknownPathIds(asMapApp(app), data, true);
-
-      expect(toastMock.showToast).toHaveBeenCalledExactlyOnceWith(
-        "Left out 2 flights not on this site",
-      );
-    });
-
-    it("turns isolation off when no selected id is left", () => {
-      app.selectedPathIds = new Set([3]);
-      app.isolateSelection = true;
-      const seen: [number, boolean][] = [];
-      app.store.subscribe("selectedPathIds", () => {
-        seen.push([app.selectedPathIds.size, app.isolateSelection]);
-      });
-
-      dropUnknownPathIds(asMapApp(app), data);
-
-      expect(app.selectedPathIds.size).toBe(0);
-      expect(app.isolateSelection).toBe(false);
-      // Both changes arrive together: never an empty isolated selection
-      expect(seen).toEqual([[0, false]]);
-    });
-
-    it("keeps the ids when a year of the dataset failed to load", () => {
-      app.selectedPathIds = new Set([7, 99]);
-      app.isolateSelection = true;
-
-      dropUnknownPathIds(asMapApp(app), { ...data, incomplete: true });
-
-      expect([...app.selectedPathIds]).toEqual([7, 99]);
-      expect(app.isolateSelection).toBe(true);
-    });
-
-    it("does nothing without a selection", () => {
-      app.isolateSelection = false;
-      const listener = vi.fn();
-      app.store.subscribe("selectedPathIds", listener);
-
-      dropUnknownPathIds(asMapApp(app), data);
-
-      expect(listener).not.toHaveBeenCalled();
-    });
-  });
   describe("colorSegmentPopups", () => {
     it("colours a metric as it is written into a popup", async () => {
       const map = document.createElement("div");

@@ -127,16 +127,6 @@ const HELD_CONTROL_IDS = [
   "cross-section-btn",
 ];
 
-/** Keys pressed on the map that do not take it over */
-const KEYS_NOT_TAKING_OVER = new Set([
-  "Escape",
-  "Tab",
-  "Shift",
-  "Control",
-  "Alt",
-  "Meta",
-]);
-
 /**
  * The view the tour started from, which it goes back to and the state
  * manager saves while it runs: Wrapped's and the heatmap switch
@@ -380,13 +370,7 @@ export function createHotspotTour(app: MapApp): HotspotTour {
       const moved = map.on("moveend", () => {
         moving = false;
       });
-      followTakeover(
-        map,
-        () => end("takeover"),
-        listening.signal,
-        (event) =>
-          event instanceof KeyboardEvent && KEYS_NOT_TAKING_OVER.has(event.key),
-      );
+      followTakeover(map, () => end("takeover"), listening.signal);
       const store = app.store;
       const unsubscribe = [
         // Other flights are not what it was asked to tour

@@ -653,7 +653,7 @@ describe("the heat cloud", () => {
     };
     setBaseStyle(map() as unknown as MapLibreMap, style);
     // Wherever the new style left it, or without it
-    map().removeLayer(HEAT_CLOUD_LAYER);
+    if (map().getLayer(HEAT_CLOUD_LAYER)) map().removeLayer(HEAT_CLOUD_LAYER);
     map().emit("styledata");
     const layers = order();
     expect(layers.indexOf(HEAT_CLOUD_LAYER)).toBe(

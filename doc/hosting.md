@@ -23,20 +23,25 @@ your own flights:
    [Adding flights](adding-flights.md) describes, obfuscated before they are
    committed (`make obfuscate`, and `make hooks` so a push with a real date is
    refused). Your files may sit in subdirectories of `data/`.
-5. Optionally add a CARTO tile API key as the repository secret `CARTO_API_KEY`
-   (Settings > Secrets and variables > Actions). The base map loads without one
-   (see [With an API key](usage.md#with-an-api-key-optional)).
-6. Push to `main`. Once the run is green the site is at
+5. Add the repository variable `KML_HEATMAP_OWN_FLIGHTS` with the value `1`
+   (Settings > Secrets and variables > Actions > Variables), see below.
+6. Optionally add a CARTO tile API key as the repository secret `CARTO_API_KEY`
+   (same page, Secrets). The base map loads without one (see
+   [With an API key](usage.md#with-an-api-key-optional)).
+7. Push to `main`. Once the run is green the site is at
    `https://<owner>.github.io/<repository>/`; the deploy job's summary names the
    address.
 
-The tests are written against the flights of this repository: the golden
+Some tests are written against the flights of this repository: the golden
 pipeline test (`GOLDEN_FILES` in `tests/test_pipeline_golden.py`), the landing
-and segment tests that read named files of `data/`, and the e2e specs, which
-drive a site built from `data/` and expect a few flights in its latest year. A
-fork that replaces the flights fails them, and then nothing is published. Keep
-the files they name, under `tests/fixtures/` with the tests pointed at them, or
-publish a local build to any other host as described below.
+and segment tests that read named files of `data/` (marked `repo_data`), and the
+e2e specs, which drive a site built from `data/` and expect a few flights in its
+latest year. With other flights they fail, and then nothing is published.
+`KML_HEATMAP_OWN_FLIGHTS=1` skips them: pytest leaves out the tests marked
+`repo_data`, and the workflow skips its e2e jobs, which the `checks` job then
+accepts as skipped. Everything else still runs, the build of your site, the unit
+tests and the visual snapshots of the fixture site among them. Set it in the
+environment for a local `make test` as well.
 
 The other repository settings are optional for a site of your own; the ones this
 repository uses are in [Repository rules](../CONTRIBUTING.md#repository-rules).

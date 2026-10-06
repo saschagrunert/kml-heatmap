@@ -35,7 +35,7 @@ from typing import TYPE_CHECKING, NamedTuple
 from .date_tokens import near_jan_first
 from .geometry import KM_PER_DEGREE, haversine_distance
 from .logger import logger
-from .path_content import without_paths
+from .path_content import aircraft_known, without_paths
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -484,20 +484,6 @@ def _one_flight(first: _Timed, second: _Timed) -> bool:
     )
 
 
-def _aircraft_known(metadata: PathMetadata) -> tuple[bool, bool]:
-    """What a recording lacks of its aircraft, as a key to sort by.
-
-    The one with the registration sorts first, then the one with the type:
-    a 1 Hz phone log has more points than the file of the panel GPS, but
-    only the file says which aircraft flew, which the aircraft filter and
-    the statistics go by.
-    """
-    return (
-        not metadata.get("aircraft_registration"),
-        not metadata.get("aircraft_type"),
-    )
-
-
 def _name(metadata: Sequence[PathMetadata], index: int) -> str:
     return metadata[index].get("filename") or f"path {index}"
 
@@ -513,7 +499,7 @@ def drop_overlapping_paths(
     ``exported`` holds the indices of the exported paths (see
     ``path_content.exported_contents``). Of two recordings of one flight
     the one that names the aircraft stays: its registration first, then its
-    type (see ``_aircraft_known``). Of two that name as much, the one with
+    type (see ``aircraft_known``). Of two that name as much, the one with
     more points stays, and of two with as many the first in input order, so
     the choice does not depend on the order they are compared in. Every
     recording of a year is compared with every other one: those on real
@@ -536,7 +522,7 @@ def drop_overlapping_paths(
                 keep, drop = sorted(
                     (other, index),
                     key=lambda i: (
-                        _aircraft_known(all_path_metadata[i]),
+                        aircraft_known(all_path_metadata[i]),
                         -len(timed[i].times),
                         i,
                     ),

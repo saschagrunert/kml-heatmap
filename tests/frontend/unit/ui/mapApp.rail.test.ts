@@ -543,9 +543,9 @@ describe("MapApp controls and map", () => {
       await vi.waitFor(() =>
         expect(app.statsManager).toBe(mockStatsManagerInstance),
       );
-      await vi.waitFor(() =>
-        expect(panel().hasAttribute("aria-busy")).toBe(false),
-      );
+      // The manager ends the wait as it renders: it may still be working
+      // out the statistics of a large filter (see StatsManager)
+      expect(panel().getAttribute("aria-busy")).toBe("true");
       expect(loadWrapped).toHaveBeenCalledTimes(1);
     });
 
@@ -731,6 +731,25 @@ describe("MapApp controls and map", () => {
       app.toggleReplay();
       expect(m.mockReplayManagerInstance.toggleReplay).toHaveBeenCalledTimes(2);
     });
+
+    it.each([["replayActive"], ["wrappedVisible"]] as const)(
+      "leaves what opened during the load alone (%s)",
+      async (key) => {
+        await initializeApp(app);
+        const { deliver } = await holdNextLoad(loadFeatures);
+        m.mockReplayManagerInstance.toggleReplay.mockClear();
+
+        // Replay all, or Wrapped, opened while the click waited for the
+        // bundle: the late toggle closed Replay all, or opened under Wrapped
+        app.toggleReplay();
+        app[key] = true;
+        deliver();
+        await vi.waitFor(() => expect(app.replayManager).toBeDefined());
+        await Promise.resolve();
+
+        expect(m.mockReplayManagerInstance.toggleReplay).not.toHaveBeenCalled();
+      },
+    );
 
     it("says so when the Wrapped bundle cannot be fetched", async () => {
       await initializeApp(app);

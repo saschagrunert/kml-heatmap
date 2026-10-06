@@ -871,6 +871,25 @@ describe("panel statistics", () => {
       expect(filterStatisticsInSlices(view)).toBe(stats);
     });
 
+    it("goes on for a caller that joined a run another one leaves", async () => {
+      const view = datasetIndex(
+        createDataset(mockPathInfo, mockSegments),
+      ).filter("all", "all");
+      slowClock();
+      const wrapped = new AbortController();
+      const rail = new AbortController();
+      const first = filterStatisticsInSlices(view, wrapped.signal);
+      const second = filterStatisticsInSlices(view, rail.signal);
+
+      // Wrapped closes while the statistics rail waits for the same view
+      wrapped.abort();
+
+      await expect(first).rejects.toThrow();
+      const stats = await second;
+      expect(stats).toEqual(filterStatistics(view));
+      expect(filterStatisticsInSlices(view)).toBe(stats);
+    });
+
     it("keeps the figures a synchronous caller worked out in between", async () => {
       const view = datasetIndex(
         createDataset(mockPathInfo, mockSegments),

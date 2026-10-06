@@ -128,10 +128,12 @@ describe("ReplayManager playback", () => {
       replayManager.state.airplaneMarker!.setLatLng([48.3, 16.3]);
 
       replayManager.playReplay();
+      // The first frame of the replay, at its start
+      vi.advanceTimersToNextFrame();
 
-      expect(replayManager.state.airplaneMarker!.getLatLng()).toEqual([
-        48.0, 16.0,
-      ]);
+      const [lat, lng] = replayManager.state.airplaneMarker!.getLatLng();
+      expect(lat).toBeCloseTo(48.0, 3);
+      expect(lng).toBeCloseTo(16.0, 3);
     });
 
     it("resets to initial zoom when restarting with autoZoom enabled", () => {

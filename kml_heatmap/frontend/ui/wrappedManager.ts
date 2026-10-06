@@ -1,7 +1,7 @@
 /**
  * Wrapped Manager - Handles year-in-review/wrapped feature
  */
-import type { FitBoundsOptions, LngLatBoundsLike } from "maplibre-gl";
+import type { FitBoundsOptions } from "maplibre-gl";
 import type { MapApp } from "../mapApp";
 import type { Airport, MapCenter } from "../types";
 import { domCache } from "../utils/domCache";
@@ -31,7 +31,8 @@ import {
 } from "../calculations/panelStats";
 import type { FilteredStatistics } from "../types";
 import { datasetIndex, type FilterView } from "../calculations/datasetIndex";
-import { yearNewAreaKm2 } from "../calculations/newAreas";
+import { knownNewAreaKm2, yearNewAreaKm2 } from "../calculations/newAreas";
+import { whenIdle } from "../utils/whenIdle";
 import { logError } from "../utils/logger";
 import {
   generateStatsHtml,
@@ -47,6 +48,7 @@ import {
   followDestinationHover,
   overviewBounds,
   startWrappedIntro,
+  type IntroOverview,
   type WrappedIntro,
 } from "./wrappedIntro";
 import { restingPitch } from "./replayState";
@@ -147,8 +149,11 @@ export class WrappedManager {
   private opened = 0;
   /** The intro while it plays (see ui/wrappedIntro.ts) */
   private intro: WrappedIntro | null = null;
-  /** Where the dialog fits the map to, while it is open */
-  private overview: LngLatBoundsLike | null = null;
+  /**
+   * Where the dialog fits the map to, while it is open. The intro reads
+   * it as it comes to rest, so a change of the data moves it there too.
+   */
+  private overview: IntroOverview | null = null;
   /** The airports of the destinations card, in the order of its rows */
   private destinations: string[] = [];
   /** Takes the listeners of the dialog's own controls off */
@@ -175,11 +180,19 @@ export class WrappedManager {
     // A year that finishes loading while the dialog is open replaces the
     // cards, which were computed from the data that was there before, and
     // so does a filter that changes without new data (an aircraft held
-    // while a year loaded, applied as that load failed)
+    // while a year loaded, applied as that load failed). The map follows
+    // them to the flights now there; an intro still playing those of before
+    // makes way, and comes to rest on the new overview.
     this.unsubscribeData = app.store.subscribeKeys(
       ["currentData", "selectedYear", "selectedAircraft"],
       () => {
-        if (app.wrappedVisible) this.fillCards();
+        if (!app.wrappedVisible) return;
+        this.fillCards();
+        const overview = this.overview;
+        if (!overview) return;
+        overview.bounds = overviewBounds(app);
+        if (this.intro) this.intro.skip();
+        else app.map?.fitBounds(overview.bounds, overview.options);
       },
     );
 
@@ -217,10 +230,7 @@ export class WrappedManager {
           const name = this.destinations[rows.indexOf(row)];
           return name ? airportCoordinates().get(name) : undefined;
         },
-        () =>
-          this.overview && !this.intro && app.wrappedVisible
-            ? { bounds: this.overview, options: this.fitOptions() }
-            : null,
+        () => (this.intro || !app.wrappedVisible ? null : this.overview),
         signal,
       );
     }
@@ -366,22 +376,19 @@ export class WrappedManager {
         threeDVisible: this.app.threeDVisible,
       };
     }
-    const fitTarget = overviewBounds(this.app);
-    this.overview = fitTarget;
+    const overview = (this.overview = {
+      bounds: overviewBounds(this.app),
+      options: this.fitOptions(),
+    });
     const home = intro && !prefersReducedMotion() ? this.homeBase() : null;
     // The map shows at once in an opening with the intro (wrapped.css)
     domCache.get("wrapped-modal")?.classList.toggle("has-intro", !!home);
     if (home) {
-      this.intro = startWrappedIntro(
-        this.app,
-        home,
-        { bounds: fitTarget, options: this.fitOptions() },
-        () => {
-          this.intro = null;
-        },
-      );
+      this.intro = startWrappedIntro(this.app, home, overview, () => {
+        this.intro = null;
+      });
     } else {
-      this.app.map.fitBounds(fitTarget, this.fitOptions());
+      this.app.map.fitBounds(overview.bounds, overview.options);
     }
 
     // The controls go while the dialog has the map (see hideControls)
@@ -440,7 +447,7 @@ export class WrappedManager {
         this.app.map.resize();
         const intro = this.intro;
         if (!intro) {
-          this.app.map.fitBounds(fitTarget, this.fitOptions());
+          this.app.map.fitBounds(overview.bounds, overview.options);
           this.revealMapWhenPainted(wrappedMapContainer);
           return;
         }
@@ -583,7 +590,6 @@ export class WrappedManager {
     const segments = view?.segments() ?? [];
 
     const yearStats = calculateYearStats(
-      view?.paths ?? [],
       this.app.aircraftModels,
       filteredStats,
     );
@@ -605,25 +611,42 @@ export class WrappedManager {
     const statsEl = domCache.get("wrapped-stats");
     if (statsEl) statsEl.innerHTML = statsHtml;
 
-    // Build fun facts section with dynamic, varied facts. The airspace new
-    // in the year is counted from the earlier years the page holds already
-    // (see yearNewAreaKm2), and left out unless it holds them all
-    const funFacts = generateFunFacts(
-      yearStats,
-      filteredStats,
-      year,
-      yearNewAreaKm2(
-        year,
-        segments,
-        siteData.metadata?.available_years ?? [],
-        (known) => this.app.dataManager.cachedData(known),
-      ),
-    );
-
-    const funFactsHtml = generateFunFactsHtml(funFacts);
-
-    const funFactsEl = domCache.get("wrapped-fun-facts");
-    if (funFactsEl) funFactsEl.innerHTML = funFactsHtml;
+    // Build fun facts section with dynamic, varied facts
+    const renderFacts = (newAreaKm2: number | null): void => {
+      const funFactsEl = domCache.get("wrapped-fun-facts");
+      if (!funFactsEl) return;
+      funFactsEl.innerHTML = generateFunFactsHtml(
+        generateFunFacts(yearStats, filteredStats, year, newAreaKm2),
+      );
+    };
+    // The airspace new in the year is counted from the earlier years the
+    // page holds already (see yearNewAreaKm2), and left out unless it holds
+    // them all. Counted the first time, it took 48 ms with a desktop's
+    // speed, longer than the statistics the cards are sliced for, so then
+    // it is counted once the dialog is open, and its fact added.
+    const known = knownNewAreaKm2(segments);
+    renderFacts(known ?? null);
+    if (known === undefined) {
+      const opened = this.opened;
+      whenIdle(() => {
+        // Still the cards it was counted for
+        if (
+          opened !== this.opened ||
+          !this.app.wrappedVisible ||
+          this.statsAbort ||
+          this.filterView()?.segments() !== segments
+        ) {
+          return;
+        }
+        const area = yearNewAreaKm2(
+          year,
+          segments,
+          siteData.metadata?.available_years ?? [],
+          (before) => this.app.dataManager.cachedData(before),
+        );
+        if (area) renderFacts(area);
+      });
+    }
 
     // The sections below are conditional, so clear them first: a year
     // without aircraft or airports must not show the previous year's content
