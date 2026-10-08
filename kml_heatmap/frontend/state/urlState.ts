@@ -162,6 +162,9 @@ function parsePathIds(urlParams: URLSearchParams): number[] | undefined {
  *       are gone, are ignored like any unknown parameter
  *   x - the line of the cross-section, from its start to its end:
  *       '51.5,12.1,51.6,12.3' (absent: the tool is closed)
+ *   i - '1' on a link Copy link hands on in share mode: it opens with the
+ *       intro of the shared flights, once (see takeShareIntro). Not part
+ *       of the state, and never written back
  * @param params - URLSearchParams object or search string
  * @returns Parsed state or null if no params
  */
@@ -209,6 +212,29 @@ export function parseUrlParams(
   if (isSectionLine(line)) state.crossSectionLine = line;
 
   return state;
+}
+
+/**
+ * The parameter of a link to shared flights that plays their intro as the
+ * link opens (ui/shareIntro.ts): Copy link adds it while share mode is on
+ * (UIToggles.shareLink), and nothing else ever writes it
+ */
+export const SHARE_INTRO_PARAM = "i";
+
+/**
+ * Whether the page was opened from a link with the intro of its shared
+ * flights (SHARE_INTRO_PARAM), which is taken off the address bar there and
+ * then: the intro plays once, whether it plays to the end, is skipped or
+ * cannot play at all, and a reload, a link copied from the address bar and
+ * the saved state never carry it. The saves of the state cannot put it
+ * back either, as encodeStateToUrl writes a link anew from the state.
+ */
+export function takeShareIntro(): boolean {
+  const params = new URLSearchParams(window.location.search);
+  const marked = params.has(SHARE_INTRO_PARAM);
+  params.delete(SHARE_INTRO_PARAM);
+  if (marked) history.replaceState(history.state, "", "?" + params.toString());
+  return marked;
 }
 
 /**

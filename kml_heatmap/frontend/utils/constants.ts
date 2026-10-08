@@ -19,6 +19,19 @@ export const MOBILE_BREAKPOINT_PX = 768;
 export const DAY_MAX_FLIGHTS = 8;
 
 /**
+ * The input of a visitor that the intro of a link to shared flights gives
+ * way to (ui/shareIntro.ts): any key, click, touch, drag or wheel. Before
+ * it starts the app listens for them too, as the view is the visitor's
+ * once they have moved it (MapApp.initialize)
+ */
+export const INPUT_EVENTS = [
+  "pointerdown",
+  "wheel",
+  "keydown",
+  "touchstart",
+] as const;
+
+/**
  * Heights up to this get the phone layout too, whatever the width: a phone
  * held sideways, or a window as short, has no room for the control
  * columns (matches styles.css)

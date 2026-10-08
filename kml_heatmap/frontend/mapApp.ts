@@ -79,6 +79,7 @@ import {
   DAY_MAX_FLIGHTS,
   DEFAULT_ZOOM,
   HEATMAP_LAYER_IDS,
+  INPUT_EVENTS,
   MAP_LAYERS,
   MAP_MAX_PITCH,
   MAP_MAX_ZOOM,
@@ -148,6 +149,7 @@ import {
 } from "./calculations/datasetIndex";
 import type { StoreAccessors } from "./state/store";
 import { TOGGLE_KEYS } from "./state/toggles";
+import { takeShareIntro } from "./state/urlState";
 import type { ReplayManager } from "./ui/replayManager";
 import type { StatsManager } from "./ui/statsManager";
 import type { WrappedManager } from "./ui/wrappedManager";
@@ -502,6 +504,25 @@ export class MapApp {
   }
 
   async initialize(): Promise<void> {
+    // Before the first save of the state writes the link anew without it
+    const intro = takeShareIntro();
+    // Input from the page open on, while the data and the feature bundle
+    // are on their way, makes the view the visitor's, and the intro does
+    // not play over it. The first input ends the listening, as do the
+    // intro starting, it being decided against and the app going
+    const input = new AbortController();
+    if (intro) {
+      for (const type of INPUT_EVENTS) {
+        window.addEventListener(type, () => input.abort(), {
+          capture: true,
+          passive: true,
+          signal: input.signal,
+        });
+      }
+      this.signal.addEventListener("abort", () => input.abort(), {
+        signal: input.signal,
+      });
+    }
     restoreState(this);
     this.setupMap();
     this.initializeManagers();
@@ -553,6 +574,18 @@ export class MapApp {
       if (loaded) this.toggleCrossSection();
       else this.crossSectionLine = "";
     }
+
+    // A link to shared flights draws them in (ui/shareIntro.ts), with the
+    // feature bundle their profile fetches as well; not over a load that
+    // failed, which has no flights to draw, and the bundle is not fetched,
+    // nor once the visitor has moved the view (see above)
+    if (intro && loaded)
+      void loadFeatures().then((f) => {
+        if (input.signal.aborted) return;
+        input.abort();
+        f?.playShareIntro(this);
+      });
+    else input.abort();
 
     // Restore wrapped panel state if it was open
     const state = this.savedState;

@@ -35,6 +35,12 @@ import {
 /** The id of the layer on the map */
 export const REPLAY_ALL_LAYER = "replay-all";
 
+/**
+ * The id of the layer of the intro of a link to shared flights
+ * (ui/shareIntro.ts), the same player's, which a replay may start next to
+ */
+export const SHARE_INTRO_LAYER = "share-intro";
+
 /** Half the width of a trail and the reach of a head's glow, in CSS pixels */
 const TRAIL_HALF_WIDTH_PX = 1.5;
 const HEAD_RADIUS_PX = 7;
@@ -207,7 +213,6 @@ function layout(gl: WebGL2RenderingContext): void {
 }
 
 export class ReplayAllLayer implements CustomLayerInterface {
-  readonly id = REPLAY_ALL_LAYER;
   readonly type = "custom" as const;
   readonly renderingMode = "3d" as const;
   /** Frames the layer has drawn, and the time of the last, for the e2e tests */
@@ -220,11 +225,15 @@ export class ReplayAllLayer implements CustomLayerInterface {
 
   /**
    * `style` is asked on every frame, and draws nothing where it gives null;
-   * `failed` is told when the shaders do not work in the map's context
+   * `failed` is told when the shaders do not work in the map's context.
+   * `id` is the replay's unless another player draws at the same time (the
+   * intro of a link to shared flights, ui/shareIntro.ts, whose trails may
+   * still stand in for the lines as a replay of the map starts).
    */
   constructor(
     private readonly style: () => ReplayAllStyle | null,
     private readonly failed: (error: unknown) => void,
+    readonly id = REPLAY_ALL_LAYER,
   ) {
     this.objects = new LayerGl(
       {

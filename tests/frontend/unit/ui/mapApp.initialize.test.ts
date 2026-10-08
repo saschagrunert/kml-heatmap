@@ -17,8 +17,12 @@ import {
   resetMapLibreMock,
   type Map as MockMap,
 } from "../../../mocks/maplibre-gl";
-import { loadWrapped } from "../../../../kml_heatmap/frontend/services/featureLoader";
+import {
+  loadFeatures,
+  loadWrapped,
+} from "../../../../kml_heatmap/frontend/services/featureLoader";
 import * as motion from "../../../../kml_heatmap/frontend/utils/motion";
+import { INPUT_EVENTS } from "../../../../kml_heatmap/frontend/utils/constants";
 
 // The instances the mocked manager constructors hand out live in the setup
 // module, which is loaded before the mocks are registered
@@ -87,6 +91,7 @@ vi.mock("../../../../kml_heatmap/frontend/ui/wrappedManager", () => ({
     return m.mockWrappedManagerInstance;
   }),
 }));
+const shareIntroMock = vi.hoisted(() => vi.fn());
 vi.mock("../../../../kml_heatmap/frontend/services/featureLoader", () => ({
   loadedFeatures: () => null,
   // Replay and Wrapped come from lazily loaded bundles of their own; here
@@ -100,6 +105,8 @@ vi.mock("../../../../kml_heatmap/frontend/services/featureLoader", () => ({
       followSatellite: vi.fn(),
       // And the selected flights to their profile
       followFlightProfile: vi.fn(),
+      // A link to shared flights plays their intro
+      playShareIntro: shareIntroMock,
     }),
   ),
   loadWrapped: vi.fn(() =>
@@ -233,6 +240,98 @@ describe("MapApp.initialize", () => {
         MAP_STALL_MESSAGE,
         "error",
       );
+    });
+  });
+
+  describe("the intro of a link to shared flights", () => {
+    const original = window.location.pathname + window.location.search;
+    afterEach(() => {
+      window.history.replaceState(null, "", original);
+      shareIntroMock.mockClear();
+      vi.restoreAllMocks();
+    });
+
+    /**
+     * The signals of the listeners for input the app puts on the window
+     * before the intro, from here on: aborted, they are removed
+     */
+    function inputListeners(): () => (AbortSignal | undefined)[] {
+      const add = vi.spyOn(window, "addEventListener");
+      return () =>
+        add.mock.calls
+          .filter(
+            ([type, , options]) =>
+              (INPUT_EVENTS as readonly string[]).includes(type) &&
+              typeof options === "object" &&
+              options.capture === true,
+          )
+          .map(([, , options]) => (options as AddEventListenerOptions).signal);
+    }
+
+    it("plays once the flights are in, the mark taken off the link at once", async () => {
+      window.history.replaceState(null, "", "/?y=2025&p=a5&sv=4&i=1");
+
+      let restoredFrom = "";
+      mockStateManagerInstance.loadState.mockImplementation(() => {
+        restoredFrom = window.location.search;
+        return null;
+      });
+
+      const listeners = inputListeners();
+      await initializeApp(app);
+
+      // Before the state is read, let alone saved 300 ms on
+      expect(restoredFrom).toBe("?y=2025&p=a5&sv=4");
+      expect(window.location.search).toBe("?y=2025&p=a5&sv=4");
+      await vi.waitFor(() => expect(shareIntroMock).toHaveBeenCalledWith(app));
+      // Listened for input until it started, and no longer
+      expect(listeners()).toHaveLength(INPUT_EVENTS.length);
+      expect(listeners().every((signal) => signal?.aborted)).toBe(true);
+    });
+
+    it("does not play once the visitor moved the view before the bundle came", async () => {
+      window.history.replaceState(null, "", "/?y=2025&p=a5&sv=4&i=1");
+      // A wheel over the map as the page opens, the data and the bundle
+      // still on their way
+      mockStateManagerInstance.loadState.mockImplementation(() => {
+        window.dispatchEvent(new WheelEvent("wheel"));
+        return null;
+      });
+
+      const listeners = inputListeners();
+      await initializeApp(app);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(shareIntroMock).not.toHaveBeenCalled();
+      expect(listeners()).toHaveLength(INPUT_EVENTS.length);
+      expect(listeners().every((signal) => signal?.aborted)).toBe(true);
+    });
+
+    it("does not fetch it over a load that failed, the mark gone all the same", async () => {
+      window.history.replaceState(null, "", "/?y=2025&p=a5&sv=4&i=1");
+      vi.mocked(loadFeatures).mockClear();
+
+      const listeners = inputListeners();
+      await initializeApp(app, undefined, undefined, null);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(window.location.search).toBe("?y=2025&p=a5&sv=4");
+      expect(shareIntroMock).not.toHaveBeenCalled();
+      expect(loadFeatures).not.toHaveBeenCalled();
+      // Nor does it listen for input any longer
+      expect(listeners().every((signal) => signal?.aborted)).toBe(true);
+    });
+
+    it("does not play from a link without the mark", async () => {
+      window.history.replaceState(null, "", "/?y=2025&p=a5&sv=4");
+
+      const listeners = inputListeners();
+      await initializeApp(app);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(shareIntroMock).not.toHaveBeenCalled();
+      // Nor listens for input on its account
+      expect(listeners()).toHaveLength(0);
     });
   });
 
