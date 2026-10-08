@@ -10,8 +10,9 @@
  * layer manager fetches as they are first wanted, the satellite imagery,
  * which its switch fetches, the profile of the selected flights, which the
  * app fetches as a few are first selected, the cross-section, which its
- * control fetches, and the hotspot tour with the camera moves it shares
- * with Wrapped's intro.
+ * control fetches, the hotspot tour with the camera moves it shares
+ * with Wrapped's intro, and the intro of a link to shared flights, which
+ * the app fetches as such a link opens.
  * Wrapped has a bundle of its own (wrapped.ts) and fetches this one only
  * for its intro's camera moves and heat cloud.
  *
@@ -54,6 +55,7 @@ export {
   turnTo,
 } from "./ui/cameraScript";
 export { toggleHotspotTour } from "./ui/hotspotTour";
+export { playShareIntro } from "./ui/shareIntro";
 
 /**
  * The build this bundle belongs to, which the app compares with its own

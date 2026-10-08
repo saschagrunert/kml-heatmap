@@ -85,7 +85,7 @@ import {
 import { cloudExposure, cloudLook } from "./heatCloudShaders";
 import { followCloudReadout } from "./cloudReadout";
 import { replayAllTime } from "./replayAll";
-import { REPLAY_ALL_LAYER } from "./replayAllLayer";
+import { REPLAY_ALL_LAYER, SHARE_INTRO_LAYER } from "./replayAllLayer";
 import { placeBelow } from "./glLayer";
 
 /**
@@ -599,7 +599,11 @@ export function followHeatCloud(app: MapApp): void {
       if (on) map.removeLayer(HEAT_CLOUD_LAYER);
       return;
     }
-    placeBelow(map, layer, on, [REPLAY_ALL_LAYER, CLOUD_BEFORE]);
+    placeBelow(map, layer, on, [
+      REPLAY_ALL_LAYER,
+      SHARE_INTRO_LAYER,
+      CLOUD_BEFORE,
+    ]);
   };
 
   /** The 3D switch as the last sync found it */

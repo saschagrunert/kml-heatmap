@@ -27,11 +27,7 @@ import {
 import { prefersReducedMotion } from "../utils/motion";
 import { followHeatCloud, heatCloudLevel } from "./heatCloud";
 import { placeBelow } from "./glLayer";
-import {
-  REPLAY_ALL_LAYER,
-  ReplayAllLayer,
-  type ReplayAllStyle,
-} from "./replayAllLayer";
+import { ReplayAllLayer, type ReplayAllStyle } from "./replayAllLayer";
 
 /** The speed a replay of all flights starts at */
 export const REPLAY_ALL_SPEED = 200;
@@ -98,6 +94,12 @@ export interface ReplayAllRun {
    * them.
    */
   sequence?: boolean;
+  /**
+   * Whether the trails stay as bright as they were drawn to the end of the
+   * run rather than fade: the intro of a link to shared flights
+   * (ui/shareIntro.ts), which hands them over to the lines of the flights
+   */
+  lasting?: boolean;
 }
 
 /**
@@ -106,6 +108,9 @@ export interface ReplayAllRun {
  * bright as the last one's
  */
 const SEQUENCE_FADE_RUNS = 2;
+
+/** The seconds of flight a lasting trail fades over: none it is drawn for */
+const LASTING_FADE_S = 1e9;
 
 /**
  * Plays every flight of a run at once, or one after another, on the map of
@@ -120,6 +125,8 @@ export class ReplayAllPlayer {
   speed: number = REPLAY_ALL_SPEED;
   /** The size the flights are drawn at (ReplayAllRun.scale) */
   private scale = 1;
+  /** Whether the trails stay (ReplayAllRun.lasting) */
+  private lasting = false;
   /** Whether the clock runs */
   playing = false;
   /** Whether the camera turns round the middle of the map while it plays */
@@ -169,19 +176,24 @@ export class ReplayAllPlayer {
   /** Zoom levels further out than the map's the curves are cut for */
   private levelsOut = 0;
 
-  constructor(app: MapApp) {
+  /** `id` is the id of its layer on the map (see ReplayAllLayer) */
+  constructor(app: MapApp, id?: string) {
     this.app = app;
     // The heat that builds up behind the flights is the heat cloud's, on
     // the flat map as well, and the flights are lifted as it is (see
     // level and ui/heatCloud.ts)
     followHeatCloud(app);
-    this.layer = new ReplayAllLayer(this.style, (error) => {
-      if (this.broken) return;
-      this.broken = true;
-      logError("The replay of all flights cannot be drawn:", error);
-      // Out of the frame it failed in
-      setTimeout(() => this.stop(), 0);
-    });
+    this.layer = new ReplayAllLayer(
+      this.style,
+      (error) => {
+        if (this.broken) return;
+        this.broken = true;
+        logError("The replay of all flights cannot be drawn:", error);
+        // Out of the frame it failed in
+        setTimeout(() => this.stop(), 0);
+      },
+      id,
+    );
     // The style that comes back after a lost context has no custom layers,
     // and the shaders are tried again in the new context
     if (app.map) {
@@ -256,6 +268,7 @@ export class ReplayAllPlayer {
       : keepOf(app, data, run.pathIds);
     this.speed = run.speed ?? REPLAY_ALL_SPEED;
     this.scale = run.scale ?? 1;
+    this.lasting = !!run.lasting;
     this.zoomAhead = run.zoom ?? null;
     this.levelsOut = 0;
     this.aheadDrawn = this.nearAhead();
@@ -358,9 +371,8 @@ export class ReplayAllPlayer {
     // for all years are tens of megabytes (see releaseGroundedFlights)
     if (wasActive && !this.app.threeDVisible) releaseGroundedFlights();
     const map = this.app.map;
-    if (map && !hasLostContext(map) && map.getLayer(REPLAY_ALL_LAYER)) {
-      map.removeLayer(REPLAY_ALL_LAYER);
-    }
+    const id = this.layer.id;
+    if (map && !hasLostContext(map) && map.getLayer(id)) map.removeLayer(id);
     this.settle?.(false);
     this.settle = null;
     if (wasActive) this.onChange?.();
@@ -368,6 +380,7 @@ export class ReplayAllPlayer {
 
   /** The seconds of flight a trail fades over at the speed played */
   private fade(): number {
+    if (this.lasting) return LASTING_FADE_S;
     return this.legs
       ? this.duration * SEQUENCE_FADE_RUNS
       : Math.min(TRAIL_FADE_S * this.speed, TRAIL_MOST_S);
@@ -591,7 +604,7 @@ export class ReplayAllPlayer {
     if (!map || !this.active || this.app.signal.aborted) return;
     if (hasLostContext(map)) return;
     // The heat cloud puts itself right below it
-    placeBelow(map, this.layer, !!map.getLayer(REPLAY_ALL_LAYER), [
+    placeBelow(map, this.layer, !!map.getLayer(this.layer.id), [
       REPLAY_ALL_BEFORE,
     ]);
   }

@@ -105,6 +105,8 @@ describe("UIToggles export and share", () => {
     deleteNavigatorProperty("canShare");
     deleteNavigatorProperty("clipboard");
     vi.useRealTimers();
+    // A test that set a link leaves none behind, failed or not
+    window.history.replaceState(null, "", "/");
   });
 
   describe("loadHtmlToImage", () => {
@@ -809,6 +811,36 @@ describe("UIToggles export and share", () => {
 
       expect(writeText).toHaveBeenCalledWith(window.location.href);
       expect(toast()?.textContent).toBe("Link copied");
+    });
+
+    it("marks a link copied in share mode to play the intro of its flights", async () => {
+      window.history.replaceState(null, "", "/?y=2025&p=a5&sv=4");
+      const writeText = vi.fn().mockResolvedValue(undefined);
+      defineNavigatorProperty("clipboard", { writeText });
+
+      await uiToggles.shareLink();
+      app.isolateSelection = true;
+      await uiToggles.shareLink();
+
+      expect(writeText.mock.calls[0]![0]).toBe(window.location.href);
+      expect(writeText.mock.calls[1]![0]).toBe(window.location.href + "&i=1");
+      // The address bar never carries it
+      expect(window.location.search).toBe("?y=2025&p=a5&sv=4");
+    });
+
+    it("marks the link of the share sheet in share mode as well", async () => {
+      window.history.replaceState(null, "", "/?y=2025&p=a5&sv=4");
+      setInnerWidth(390);
+      const share = vi.fn().mockResolvedValue(undefined);
+      defineNavigatorProperty("share", share);
+      app.isolateSelection = true;
+
+      await uiToggles.shareLink();
+
+      expect(share).toHaveBeenCalledWith({
+        url: window.location.href + "&i=1",
+        title: document.title,
+      });
     });
 
     it("shows an error toast when the clipboard is unavailable", async () => {

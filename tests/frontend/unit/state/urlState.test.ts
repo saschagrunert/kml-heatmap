@@ -1,8 +1,10 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, afterEach } from "vitest";
 import {
   isSectionLine,
   parseUrlParams,
   encodeStateToUrl,
+  SHARE_INTRO_PARAM,
+  takeShareIntro,
 } from "../../../../kml_heatmap/frontend/state/urlState";
 import {
   MAX_ZOOM,
@@ -420,6 +422,41 @@ describe("URL state management", () => {
 
     it("returns an empty string for an empty state", () => {
       expect(encodeStateToUrl({})).toBe("");
+    });
+  });
+
+  describe("the intro of a link to shared flights", () => {
+    const original = window.location.pathname + window.location.search;
+    afterEach(() => {
+      window.history.replaceState(null, "", original);
+    });
+
+    it("is taken off the address bar as it is read, the rest of the link kept", () => {
+      const link = "?y=2025&p=a5%2C1x&sv=4&v=100100001&lat=50.000000";
+      window.history.replaceState(null, "", "/" + link + "&i=1");
+
+      expect(takeShareIntro()).toBe(true);
+      expect(window.location.search).toBe(link);
+      // A reload of it plays nothing
+      expect(takeShareIntro()).toBe(false);
+    });
+
+    it("is not there on a link without it, which stays as it is", () => {
+      window.history.replaceState(null, "", "/?y=2025&p=a5&sv=4");
+
+      expect(takeShareIntro()).toBe(false);
+      expect(window.location.search).toBe("?y=2025&p=a5&sv=4");
+    });
+
+    it("is no part of the state, and never written into a link", () => {
+      window.history.replaceState(null, "", "/?y=2025&p=a5&sv=4&i=1");
+
+      const state = parseUrlParams(window.location.search)!;
+      expect(state).toEqual(parseUrlParams("y=2025&p=a5&sv=4"));
+      const link = new URLSearchParams(
+        encodeStateToUrl({ ...state, isolateSelection: true }),
+      );
+      expect(link.has(SHARE_INTRO_PARAM)).toBe(false);
     });
   });
 

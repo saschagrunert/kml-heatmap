@@ -14,6 +14,7 @@ import {
 } from "../utils/mapHelpers";
 import { MAP_SOURCES } from "../utils/constants";
 import { showToast } from "../utils/toast";
+import { SHARE_INTRO_PARAM } from "../state/urlState";
 import { NO_TIMING_MESSAGE, STILL_LOADING_MESSAGE } from "./actions";
 import { altitudeColours, setColorLayer } from "./layerVisibility";
 
@@ -367,7 +368,12 @@ export class UIToggles {
   async shareLink(): Promise<void> {
     // The URL is read right now, so the debounced save has to land first
     this.app.stateManager.flush();
-    const url = window.location.href;
+    // A link to shared flights draws them in as it opens, once (see
+    // takeShareIntro). The save has just written the link anew, with a
+    // query, as share mode has flights, and without a fragment.
+    const url =
+      window.location.href +
+      (this.app.isolateSelection ? `&${SHARE_INTRO_PARAM}=1` : "");
 
     if (canShareLink()) {
       try {

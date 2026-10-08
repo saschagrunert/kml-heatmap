@@ -674,7 +674,16 @@ replay has no Escape: its close button or a click on the map closes it.
   frame of Share, Replay and the altitude profile are of the shared flights the
   filter shows. A link opened in share mode shows the same flights the same way,
   with the same words for the others. Only a link to every year can tell a
-  flight the site no longer has, which it leaves out and says so
+  flight the site no longer has, which it leaves out and says so. A link from
+  Copy link (or Share link on a phone) in share mode opens with a short intro,
+  once: the camera eases from the link's view to frame the shared flights the
+  filter shows while their lines draw in one after another, in the order of
+  their files, about five seconds for all of them (each flight takes a part by
+  how long it took, and at least 0.6 s so a short hop is seen being drawn); a
+  flight without times shows at the end. Any key, click, touch or wheel skips to
+  the end, and one before the intro could start keeps it from playing; with
+  reduced motion the flights are only framed. A reload, a link copied from the
+  address bar and the saved state do not play it again (see `i` below)
 
 ## Shareable URLs
 
@@ -717,6 +726,9 @@ browser's address bar or use the copy-link button:
   older link stay as they were
 - The Flights tab of the statistics panel (`?l=1`), left out while the panel
   shows its figures
+- The intro of the shared flights (`&i=1`), which Copy link adds to a link in
+  share mode. The page takes it off the address bar as it opens, so the intro
+  plays once, and nothing writes it back
 - Debug logging in the browser console (`?debug=true`)
 - The line of the cross-section (`?x=51.55,11.9,51.6,12.3`), the latitude and
   longitude of its start and then of its end, left out while the tool is closed;

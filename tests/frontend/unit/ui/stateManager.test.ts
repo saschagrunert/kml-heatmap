@@ -777,6 +777,20 @@ describe("StateManager", () => {
   });
 
   describe("updateUrl", () => {
+    it("never writes the mark of the intro of shared flights back", () => {
+      // A link opened with it, if the app had not taken it off yet
+      setLocation("?y=2025&p=1&sv=4&v=100100001&i=1");
+      mockApp.selectedPathIds.add(1);
+      mockApp.isolateSelection = true;
+
+      stateManager.saveMapState();
+
+      const link = String(vi.mocked(history.replaceState).mock.calls[0]![2]);
+      expect(new URLSearchParams(link.slice(1)).has("i")).toBe(false);
+      expect(savedState()).not.toHaveProperty("i");
+      expect(JSON.stringify(savedState())).not.toMatch(/intro/i);
+    });
+
     it("updates browser URL with encoded state", () => {
       stateManager.updateUrl({ selectedYear: "2025", zoom: 9 });
 

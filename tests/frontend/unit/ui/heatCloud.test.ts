@@ -30,7 +30,10 @@ import {
 } from "../../../../kml_heatmap/frontend/ui/heatCloudShaders";
 import { toggleReplayAll } from "../../../../kml_heatmap/frontend/ui/replayAll";
 import { ReplayAllPlayer } from "../../../../kml_heatmap/frontend/ui/replayAllPlayer";
-import { REPLAY_ALL_LAYER } from "../../../../kml_heatmap/frontend/ui/replayAllLayer";
+import {
+  REPLAY_ALL_LAYER,
+  SHARE_INTRO_LAYER,
+} from "../../../../kml_heatmap/frontend/ui/replayAllLayer";
 import {
   CLOUD_POINT_FLOATS,
   type CloudPoints,
@@ -690,6 +693,24 @@ describe("the heat cloud", () => {
     map().emit("styledata");
     expect(order().indexOf(HEAT_CLOUD_LAYER)).toBe(
       order().indexOf(MAP_LAYERS.pathsAltitudeRibbons) - 1,
+    );
+  });
+
+  it("goes under the trails of a share link's intro, placed after them", async () => {
+    // Both stand just below the ribbons: the one placed last went on top,
+    // and that could be the cloud over the trails
+    app.threeDVisible = true;
+    await follow();
+    map().addLayer(
+      { id: SHARE_INTRO_LAYER, type: "custom" },
+      MAP_LAYERS.pathsAltitudeRibbons,
+    );
+    map().moveLayer(HEAT_CLOUD_LAYER);
+    map().emit("styledata");
+
+    const layers = order();
+    expect(layers.indexOf(HEAT_CLOUD_LAYER)).toBe(
+      layers.indexOf(SHARE_INTRO_LAYER) - 1,
     );
   });
 

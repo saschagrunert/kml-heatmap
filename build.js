@@ -392,8 +392,14 @@ function compareBundles(before, after, names) {
 // build after) for the airports that a failed airports.json leaves out,
 // said over flights whenever they come and loaded again once per Retry,
 // and an export that waits for the heat sources, less long before the
-// share sheet.
-const BUDGET_APP = { raw: 161.75 * 1024, gzip: 55.25 * 1024 };
+// share sheet. Raised again, by 0.75 KB raw and 0.25 KB gzipped (162.22 KB
+// and 55.17 KB gzipped in a local build after), for the intro of a link to
+// shared flights: the mark Copy link puts on such a link, taken off the
+// address bar as the page opens, the fetch of the intro, which lives in
+// the feature bundle, and the listening for input from the page open on,
+// as the intro is not to play over a view the visitor moved while the
+// data and the bundle were on their way.
+const BUDGET_APP = { raw: 162.5 * 1024, gzip: 55.5 * 1024 };
 // The feature bundle: replay and Replay all, the 3D view (relief, ribbons,
 // heat cloud), the imagery, the flight profile, the cross-section and the
 // hotspot tour. Fetched only when one of them is first used, so no part of
@@ -404,8 +410,12 @@ const BUDGET_APP = { raw: 161.75 * 1024, gzip: 55.25 * 1024 };
 // 110 B raw are code (the cursor and the hint over a flight without
 // times, the hover kept inside a flight); the rest of the 0.36 KB gzipped
 // came with the replay manager no longer importing ui/replayAll, which
-// moved that module and its own imports elsewhere in the bundle.
-const BUDGET_FEATURES = { raw: 149.5 * 1024, gzip: 57 * 1024 };
+// moved that module and its own imports elsewhere in the bundle. Raised by
+// 1.75 KB raw and 0.75 KB gzipped for the intro of a link to shared flights
+// (ui/shareIntro.ts, and a layer id and lasting trails for the player of
+// the replay of all flights): 151.21 KB and 57.14 KB gzipped in a local
+// build, 57.43 KB gzipped in CI.
+const BUDGET_FEATURES = { raw: 151.25 * 1024, gzip: 58 * 1024 };
 // The Wrapped bundle: the Wrapped dialog with its intro, and the statistics
 // rail, fetched the first time either opens. It shares nothing with the
 // feature bundle that the app does not have as well. About 14.1 KB gzipped
