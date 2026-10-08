@@ -179,27 +179,28 @@ const markupPlugin = {
 // quarter of the frontend and most visits open neither, so features.ts
 // (replay) and wrapped.ts (Wrapped and the statistics panel) are entry
 // points of their own that the app imports the first time each is used
-// (services/featureLoader.ts). With splitting, what the entry points have
-// in common is moved into a chunk that each of them imports, so there is a
-// single instance of every module that holds state (the DOM cache, the
-// toast live region).
+// (services/featureLoader.ts), and so is search.ts (the search of airports
+// and places). With splitting, what the entry points have in common is moved
+// into a chunk that each of them imports, so there is a single instance of
+// every module that holds state (the DOM cache, the toast live region).
 //
 // esbuild makes one chunk for every set of entry points that reach a module,
-// so three entry points could share code in up to four chunks. Both lazy
-// entry points import mapApp.ts for that reason: everything the app reaches
-// is then reached by all three, and the one chunk that holds it (the app
+// so four entry points could share code in up to eleven chunks. Every lazy
+// entry point imports mapApp.ts for that reason: everything the app reaches
+// is then reached by all of them, and the one chunk that holds it (the app
 // itself; mapApp.bundle.js only starts it) can carry a fixed name instead of
 // a hash. What is left of each lazy bundle is its own code. A module that
-// replay and Wrapped use and the app does not would still get a chunk of
-// its own; assertExpectedOutputs() fails the build when that happens (move
-// it where the app reaches it, as with segmentBounds in utils/geometry.ts,
-// or inline it in each lazy module that uses it).
+// two lazy bundles use and the app does not would still get a chunk of its
+// own; assertExpectedOutputs() fails the build when that happens (move it
+// where the app reaches it, as with segmentBounds in utils/geometry.ts, or
+// inline it in each lazy module that uses it).
 /** @type {import("esbuild").BuildOptions} */
 const buildOptions = {
   entryPoints: [
     join(FRONTEND_DIR, "mapApp.ts"),
     join(FRONTEND_DIR, "features.ts"),
     join(FRONTEND_DIR, "wrapped.ts"),
+    join(FRONTEND_DIR, "search.ts"),
   ],
   outdir: STATIC_DIR,
   entryNames: "[name].bundle",
@@ -397,6 +398,11 @@ const BUDGET_FEATURES = { raw: 149.5 * 1024, gzip: 57 * 1024 };
 // feature bundle that the app does not have as well. About 14.1 KB gzipped
 // in CI when it was last set.
 const BUDGET_WRAPPED = { raw: 43 * 1024, gzip: 15 * 1024 };
+// The search bundle: the panel of the search of airports and places, the
+// matching of the site's airports and the client of Photon, fetched the
+// first time the search opens. About 5.3 KB gzipped (13.25 KB raw) in a
+// local build when it was set.
+const BUDGET_SEARCH = { raw: 14 * 1024, gzip: 5.75 * 1024 };
 // The year worker (services/yearWorker.ts): fetched by every visit, preloaded
 // in the page head beside the app and started with the first year file. It
 // decodes the year files and draws the heat sources off the main thread.
@@ -419,6 +425,7 @@ const BUDGET_HTML_TO_IMAGE = { raw: 14 * 1024, gzip: 5.5 * 1024 };
 const APP_BUNDLE = "mapApp.bundle.js";
 const FEATURES_BUNDLE = "features.bundle.js";
 const WRAPPED_BUNDLE = "wrapped.bundle.js";
+const SEARCH_BUNDLE = "search.bundle.js";
 const SHARED_BUNDLE = "shared.bundle.js";
 const WORKER_BUNDLE = "yearWorker.bundle.js";
 
@@ -439,6 +446,7 @@ function analyzeBundleSizes() {
     ["🗺️  First visit", [APP_BUNDLE, SHARED_BUNDLE], BUDGET_APP],
     ["✨ Features", [FEATURES_BUNDLE], BUDGET_FEATURES],
     ["🎁 Wrapped", [WRAPPED_BUNDLE], BUDGET_WRAPPED],
+    ["🔎 Search", [SEARCH_BUNDLE], BUDGET_SEARCH],
     ["🧵 Year worker", [WORKER_BUNDLE], BUDGET_WORKER],
     [
       "🧭 MapLibre",
@@ -535,13 +543,14 @@ async function build() {
         esbuild.build(buildOptions),
         esbuild.build(workerBuildOptions),
       ]);
-      // The site publishes the five by name (see assertExpectedOutputs)
+      // The site publishes the six by name (see assertExpectedOutputs)
       assertExpectedOutputs(
         [result.metafile, workerResult.metafile],
         [
           APP_BUNDLE,
           FEATURES_BUNDLE,
           WRAPPED_BUNDLE,
+          SEARCH_BUNDLE,
           SHARED_BUNDLE,
           WORKER_BUNDLE,
         ],
@@ -552,7 +561,12 @@ async function build() {
       // Analyze bundle size and composition
       const overruns = analyzeBundleSizes();
 
-      const composed = [SHARED_BUNDLE, FEATURES_BUNDLE, WRAPPED_BUNDLE];
+      const composed = [
+        SHARED_BUNDLE,
+        FEATURES_BUNDLE,
+        WRAPPED_BUNDLE,
+        SEARCH_BUNDLE,
+      ];
       if (result.metafile) {
         for (const name of composed) {
           analyzeBundleComposition(result.metafile, name);

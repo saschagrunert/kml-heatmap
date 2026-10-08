@@ -16,13 +16,14 @@
  * for its intro's camera moves and heat cloud.
  *
  * The app is imported for the bundler's sake. esbuild puts every module in
- * a chunk by the set of entry points that reach it, so with three of them a
- * module the app shares with replay and not with Wrapped would get a chunk
- * of its own, and each such chunk would be one more file on the first visit
- * under the same fixed name. Reaching the app from both lazy entry points
- * gives all of it the same set, so the app is one chunk (shared.bundle.js)
- * and each lazy bundle is left with only its own code. The module runs once
- * all the same: by the time this bundle is imported, the page has run it.
+ * a chunk by the set of entry points that reach it, so with four of them a
+ * module the app shares with replay and not with Wrapped or the search
+ * would get a chunk of its own, and each such chunk would be one more file
+ * on the first visit under the same fixed name. Reaching the app from every
+ * lazy entry point gives all of it the same set, so the app is one chunk
+ * (shared.bundle.js) and each lazy bundle is left with only its own code.
+ * The module runs once all the same: by the time this bundle is imported,
+ * the page has run it.
  */
 import "./mapApp";
 export { ReplayManager } from "./ui/replayManager";

@@ -14,11 +14,8 @@ import {
   TOAST_STATUS_ID,
 } from "../utils/toast";
 import { airportCode, findHomeBase } from "../features/airports";
-import {
-  countryDisplayName,
-  countryFlagSrc,
-  groupByCountry,
-} from "../features/countries";
+import { countryFlagSrc, groupByCountry } from "../features/countries";
+import { countryDisplayName } from "../utils/formatters";
 import {
   calculateYearStats,
   findFurthestAirport,

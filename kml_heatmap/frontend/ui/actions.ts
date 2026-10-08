@@ -141,14 +141,19 @@ function actionHandlers(app: MapApp) {
     resetView: () => {
       app.resetView().catch(logError);
     },
-    // Replay, the hotspot tour, Wrapped and the cross-section live in lazily
-    // loaded bundles. Only these five can be the first thing a visitor
-    // touches; the rest are on chrome that exists only once the feature is
-    // open, so they find the manager already there.
+    // Replay, the hotspot tour, Wrapped, the cross-section and the search
+    // live in lazily loaded bundles. Only these six can be the first thing
+    // a visitor touches; the rest are on chrome that exists only once the
+    // feature is open, so they find the manager already there.
     toggleReplay: () => app.toggleReplay(),
     toggleReplayAll: () => app.toggleReplayAll(),
     toggleCrossSection: () => app.toggleCrossSection(),
     toggleHotspotTour: () => app.toggleHotspotTour(),
+    // Not deferred while the first year loads: the airports and the places
+    // it finds are no part of the flights
+    toggleSearch: () => app.toggleSearch(),
+    // The `/` key, which opens the search or goes back to its field
+    openSearch: () => app.toggleSearch(true),
     // Once the dropdown stops changing, see FilterManager.pickYear
     filterByYear: () => app.filterManager.pickYear(),
     filterByAircraft: () => app.filterManager.filterByAircraft(),

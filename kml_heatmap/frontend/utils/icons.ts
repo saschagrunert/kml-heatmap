@@ -47,6 +47,7 @@ import {
   Route,
   Satellite,
   Ruler,
+  Search,
   SlidersHorizontal,
   Star,
   Trophy,
@@ -97,6 +98,7 @@ export type IconName =
   | "ruler"
   | "climb"
   | "reset"
+  | "search"
   | "aircraftTop";
 
 /**
@@ -160,6 +162,7 @@ const NODES: Record<Exclude<IconName, keyof typeof OWN_PATHS>, IconNode> = {
   // A climb
   climb: ArrowUpFromLine,
   reset: RotateCcw,
+  search: Search,
 };
 
 /** One Lucide node list as the markup that goes inside an `<svg>` */

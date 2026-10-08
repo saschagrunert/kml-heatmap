@@ -106,6 +106,8 @@ export const toggleSequence = vi.fn();
 export const toggleCrossSection = vi.fn();
 /** The feature bundle's toggle of the hotspot tour */
 export const toggleHotspotTour = vi.fn();
+/** The search bundle's toggle of the search */
+export const toggleSearch = vi.fn();
 
 export const mockUITogglesInstance = {
   toggleHeatmap: vi.fn(),

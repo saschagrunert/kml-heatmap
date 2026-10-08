@@ -30,6 +30,8 @@ this repository.
   legend from less time to more
 - Altitude and groundspeed coloured flight paths
 - Airport markers with ICAO codes and visit counts
+- A search of the map's airports and of any place on earth (through Photon),
+  which takes the map there
 - Statistics panel (distance, altitude, flight time), with a sortable,
   searchable list of the flights next to it
 - Year and aircraft filtering

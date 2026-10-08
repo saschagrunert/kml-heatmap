@@ -15,13 +15,9 @@ import {
 } from "../calculations/panelStats";
 import { logError } from "../utils/logger";
 import { airportCode } from "../features/airports";
-import {
-  countryDisplayName,
-  countryFlagSrc,
-  groupByCountry,
-} from "../features/countries";
+import { countryFlagSrc, groupByCountry } from "../features/countries";
 import { FEET_TO_METERS, NAUTICAL_MILES_TO_KM } from "../utils/constants";
-import { formatNumber } from "../utils/formatters";
+import { countryDisplayName, formatNumber } from "../utils/formatters";
 import { escapeHtml, pluralize } from "../utils/htmlGenerators";
 import {
   formatBuildDate,

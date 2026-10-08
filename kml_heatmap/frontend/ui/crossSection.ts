@@ -636,9 +636,7 @@ function createTool(app: MapApp): Tool {
   const show = (): void => {
     // Nor while the hotspot tour holds the map, which closes it as it
     // starts; its control is held then, and this covers a late bundle
-    if (app.replayActive || app.wrappedVisible || app.tourView || !map()) {
-      return;
-    }
+    if (app.mapHeld || !map()) return;
     const target = map()!;
     const mapElement = document.getElementById("map");
     // Ahead of the map, in the <main> that holds it: after it, it was

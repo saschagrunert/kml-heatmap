@@ -145,14 +145,14 @@ python scripts/build_visual_site.py
 ## check_site_files.py
 
 Checks that a generated site has every file the page loads (the page, its
-configuration, the five bundles, the three stylesheets, the vendored MapLibre
-and html-to-image files and `data/metadata.json`), each of them not empty, or
-with `--package`, that the installed `kml_heatmap` package ships the template
-and the same assets and none of their source maps. CI runs it on the wheel it
-installed, on the site that wheel generates and on the sites the container image
-generates (all in the `packaging` job), from the one list in the script. Run
-`--package` with the Python of the environment the package is installed in,
-outside the checkout, so the installed package is imported and not the sources.
+configuration, the six bundles, the four stylesheets, the vendored MapLibre and
+html-to-image files and `data/metadata.json`), each of them not empty, or with
+`--package`, that the installed `kml_heatmap` package ships the template and the
+same assets and none of their source maps. CI runs it on the wheel it installed,
+on the site that wheel generates and on the sites the container image generates
+(all in the `packaging` job), from the one list in the script. Run `--package`
+with the Python of the environment the package is installed in, outside the
+checkout, so the installed package is imported and not the sources.
 
 ```bash
 python scripts/check_site_files.py docs
@@ -199,7 +199,7 @@ node scripts/e2e_durations.js --limit 50 */e2e-timings.json
 What `build.js` does without building, kept apart because `build.js` runs a
 build as it is imported: the GLSL of the custom layers written as a minified
 build ships it (`tightenGlsl`, `tightenShaders`), the sizes of the files, the
-check that the build wrote only the five bundles the site publishes
+check that the build wrote only the six bundles the site publishes
 (`assertExpectedOutputs`), the composition of a bundle and the flags of the
 command. `tests/frontend/unit/glsl.test.ts` holds the tightened shaders of every
 `ui/*Layer.ts` and `ui/*Shaders.ts` to the same tokens as written, and

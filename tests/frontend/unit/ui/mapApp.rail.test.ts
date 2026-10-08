@@ -17,6 +17,7 @@ import {
 import {
   CROSS_SECTION_UNAVAILABLE_MESSAGE,
   REPLAY_UNAVAILABLE_MESSAGE,
+  SEARCH_UNAVAILABLE_MESSAGE,
   STATS_UNAVAILABLE_MESSAGE,
   TOUR_UNAVAILABLE_MESSAGE,
   WRAPPED_UNAVAILABLE_MESSAGE,
@@ -35,6 +36,7 @@ import {
 } from "../../../../kml_heatmap/frontend/utils/toast";
 import {
   loadFeatures,
+  loadSearch,
   loadWrapped,
   noticeSiteUpdate,
   wasSiteUpdated,
@@ -140,6 +142,7 @@ vi.mock("../../../../kml_heatmap/frontend/services/featureLoader", () => ({
       }),
     }),
   ),
+  loadSearch: vi.fn(() => Promise.resolve({ toggleSearch: m.toggleSearch })),
   wasSiteUpdated: vi.fn(() => false),
   noticeSiteUpdate: vi.fn(() => null),
 }));
@@ -1287,6 +1290,165 @@ describe("MapApp controls and map", () => {
       await vi.waitFor(() =>
         expect(m.toggleHotspotTour).toHaveBeenCalledTimes(2),
       );
+    });
+  });
+
+  describe("the search", () => {
+    it("opens from its own bundle, once for quick presses", async () => {
+      await initializeApp(app);
+      const { deliver } = await holdNextLoad(loadSearch);
+      vi.mocked(loadFeatures).mockClear();
+
+      app.toggleSearch();
+      app.toggleSearch();
+      deliver();
+
+      await vi.waitFor(() =>
+        expect(m.toggleSearch).toHaveBeenCalledWith(app, false),
+      );
+      await Promise.resolve();
+      expect(m.toggleSearch).toHaveBeenCalledTimes(1);
+      expect(loadFeatures).not.toHaveBeenCalled();
+
+      app.toggleSearch();
+      await vi.waitFor(() => expect(m.toggleSearch).toHaveBeenCalledTimes(2));
+    });
+
+    it.each([["replayActive"], ["wrappedVisible"]] as const)(
+      "does not open while the map is held (%s)",
+      async (key) => {
+        await initializeApp(app);
+        app[key] = true;
+
+        app.toggleSearch();
+        await Promise.resolve();
+
+        expect(loadSearch).not.toHaveBeenCalled();
+      },
+    );
+
+    it("does not open while the hotspot tour holds the map", async () => {
+      await initializeApp(app);
+      app.tourView = {
+        center: { lat: 50, lng: 8 },
+        zoom: 9,
+        bearing: 0,
+        pitch: 0,
+        heatmapVisible: true,
+      } as NonNullable<MapApp["tourView"]>;
+
+      app.toggleSearch();
+
+      expect(loadSearch).not.toHaveBeenCalled();
+    });
+
+    it("says so when its bundle cannot be fetched", async () => {
+      await initializeApp(app);
+      vi.mocked(loadSearch).mockResolvedValueOnce(null);
+
+      app.toggleSearch();
+
+      await vi.waitFor(() =>
+        expect(showToast).toHaveBeenCalledWith(
+          SEARCH_UNAVAILABLE_MESSAGE,
+          "error",
+        ),
+      );
+    });
+
+    it("logs a search that fails to open, and takes the next press", async () => {
+      await initializeApp(app);
+      m.toggleSearch.mockImplementationOnce(() => {
+        throw new Error("no panel");
+      });
+
+      app.toggleSearch();
+      await vi.waitFor(() => expect(logError).toHaveBeenCalled());
+
+      app.toggleSearch();
+      await vi.waitFor(() => expect(m.toggleSearch).toHaveBeenCalledTimes(2));
+    });
+
+    describe("the / key", () => {
+      function press(
+        target: EventTarget = document.body,
+        init: KeyboardEventInit = {},
+      ): KeyboardEvent {
+        const event = new KeyboardEvent("keydown", {
+          key: "/",
+          bubbles: true,
+          cancelable: true,
+          ...init,
+        });
+        target.dispatchEvent(event);
+        return event;
+      }
+
+      it("opens the search, and keeps the key from the browser", async () => {
+        await initializeApp(app);
+
+        const event = press();
+
+        expect(event.defaultPrevented).toBe(true);
+        await vi.waitFor(() =>
+          // To open it, or go back to its field: not to close it
+          expect(m.toggleSearch).toHaveBeenCalledWith(app, true),
+        );
+      });
+
+      it("is left to a field that takes text, and to the browser with a modifier", async () => {
+        await initializeApp(app);
+        const field = document.createElement("input");
+        document.body.append(field);
+
+        expect(press(field).defaultPrevented).toBe(false);
+        expect(press(document.body, { ctrlKey: true }).defaultPrevented).toBe(
+          false,
+        );
+        expect(press(document.body, { key: "?" }).defaultPrevented).toBe(false);
+        await Promise.resolve();
+
+        expect(loadSearch).not.toHaveBeenCalled();
+        field.remove();
+      });
+
+      it("is left to the browser while the map is held", async () => {
+        await initializeApp(app);
+        app.replayActive = true;
+
+        expect(press().defaultPrevented).toBe(false);
+        await Promise.resolve();
+        expect(loadSearch).not.toHaveBeenCalled();
+      });
+
+      it("is left alone while a modal sheet or dialog is open", async () => {
+        await initializeApp(app);
+        const sheet = document.createElement("div");
+        sheet.setAttribute("aria-modal", "true");
+        document.body.append(sheet);
+
+        expect(press().defaultPrevented).toBe(false);
+        await Promise.resolve();
+        expect(loadSearch).not.toHaveBeenCalled();
+
+        // Closed, it holds the key no longer
+        sheet.hidden = true;
+        expect(press().defaultPrevented).toBe(true);
+        sheet.remove();
+      });
+
+      it("is not taken twice", async () => {
+        await initializeApp(app);
+        document.body.addEventListener(
+          "keydown",
+          (event) => event.preventDefault(),
+          { once: true, capture: true },
+        );
+
+        press();
+
+        expect(loadSearch).not.toHaveBeenCalled();
+      });
     });
   });
 

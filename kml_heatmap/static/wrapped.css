@@ -9,9 +9,9 @@
    here, because this file is absent until Wrapped is opened. It is appended
    after styles.css, so a rule here wins a tie on specificity: do not set a
    property here that styles.css relies on winning, `.initially-hidden` in
-   particular (see the note on it there). features.css is fetched by the
-   other lazy bundle and may land before or after this file, so the two
-   must not style the same elements. */
+   particular (see the note on it there). features.css and search.css are
+   fetched by the other lazy bundles and may land before or after this
+   file, so no two of them may style the same elements. */
 
 /* ==========================================================================
    Wrapped (year in review) modal

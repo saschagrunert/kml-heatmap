@@ -40,7 +40,8 @@ COPY build.js tsconfig.json ./
 COPY scripts/*.js ./scripts/
 COPY kml_heatmap/frontend/ ./kml_heatmap/frontend/
 COPY kml_heatmap/static/styles.css kml_heatmap/static/features.css \
-    kml_heatmap/static/wrapped.css ./kml_heatmap/static/
+    kml_heatmap/static/wrapped.css kml_heatmap/static/search.css \
+    ./kml_heatmap/static/
 RUN npm run build
 
 # Stage 2: the Python package without the TypeScript sources. A stage of its

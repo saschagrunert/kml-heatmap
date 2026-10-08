@@ -95,13 +95,18 @@ import {
   DEFAULT_AIRSPEED_RANGE,
   DEFAULT_ALTITUDE_RANGE,
   defineStoreAccessors,
+  isMapHeld,
   type Range,
 } from "./state/store";
 import { ReplayState } from "./ui/replayState";
 import { siteData, type SiteData } from "./state/siteData";
 import { ReliefState } from "./ui/reliefState";
 import { watchScrollEnd, type ScrollEndWatcher } from "./utils/scrollFade";
-import { loadFeatures, loadWrapped } from "./services/featureLoader";
+import {
+  loadFeatures,
+  loadSearch,
+  loadWrapped,
+} from "./services/featureLoader";
 import {
   BASE_STYLE_RETRY_MS,
   BASE_STYLE_UNAVAILABLE_MESSAGE,
@@ -111,9 +116,11 @@ import {
 } from "./baseStyle";
 import {
   CROSS_SECTION_UNAVAILABLE_MESSAGE,
+  followSearchKey,
   loadLazyBundle,
   prepareWrappedOnIntent,
   REPLAY_UNAVAILABLE_MESSAGE,
+  SEARCH_UNAVAILABLE_MESSAGE,
   STATS_UNAVAILABLE_MESSAGE,
   TOUR_UNAVAILABLE_MESSAGE,
   WRAPPED_BUNDLE_MESSAGES,
@@ -256,8 +263,8 @@ export class MapApp {
   private readonly lifetime = new AbortController();
   /** Set while a click on Replay waits for the feature bundle */
   private pendingReplayToggle: Promise<void> | null = null;
-  /** The toggles of the feature bundle a click waits for the bundle for */
-  private readonly pendingFeatureToggles = new Set<FeatureToggle>();
+  /** The toggles of a lazy bundle a click waits for the bundle for */
+  private readonly pendingToggles = new Set<FeatureToggle | "toggleSearch">();
   /**
    * Where the last fit to the start view takes the camera: the one of a
    * first visit, measured as the map opens, then that of every Reset view.
@@ -383,6 +390,15 @@ export class MapApp {
    */
   get siteData(): Readonly<SiteData> {
     return siteData;
+  }
+
+  /**
+   * Whether a replay (of one flight or of all), the hotspot tour or Wrapped
+   * holds the map: the search and the cross-section do not open then, as
+   * they would move the map or draw on it under them
+   */
+  get mapHeld(): boolean {
+    return isMapHeld(this.store);
   }
 
   /** Path info of the loaded dataset (single source of truth: currentData) */
@@ -834,6 +850,7 @@ export class MapApp {
     followSelectionHighlight(this);
     followStatsPanel(this);
     prepareWrappedOnIntent(this);
+    followSearchKey(this);
     followReplayAvailability(this);
     this.followFlightProfile();
     this.store.subscribeKeys(
@@ -1049,13 +1066,29 @@ export class MapApp {
   }
 
   private toggleFeature(name: FeatureToggle, unavailable: string): void {
-    const pending = this.pendingFeatureToggles;
+    this.toggleLazily(
+      name,
+      () => loadLazyBundle(loadFeatures, unavailable),
+      (features) => features[name](this),
+    );
+  }
+
+  /**
+   * Fetch a lazy bundle for the control `name` and run `toggle` with it,
+   * dropping a click on the same control while the bundle is on its way
+   */
+  private toggleLazily<T>(
+    name: FeatureToggle | "toggleSearch",
+    load: () => Promise<T | null>,
+    toggle: (module: T) => void,
+  ): void {
+    const pending = this.pendingToggles;
     if (pending.has(name)) return;
     pending.add(name);
-    loadLazyBundle(loadFeatures, unavailable)
-      .then((features) => {
+    load()
+      .then((module) => {
         pending.delete(name);
-        if (!this.destroyed) features?.[name](this);
+        if (module && !this.destroyed) toggle(module);
       })
       .catch((error: unknown) => {
         pending.delete(name);
@@ -1069,6 +1102,24 @@ export class MapApp {
    */
   toggleCrossSection(): void {
     this.toggleFeature("toggleCrossSection", CROSS_SECTION_UNAVAILABLE_MESSAGE);
+  }
+
+  /**
+   * Open or close the search of airports and places (ui/locationSearch.ts),
+   * which comes with a bundle of its own. As for Replay all, a press while
+   * the bundle is on its way is dropped, and one that loads nothing says
+   * so. Not while a replay, the hotspot tour or Wrapped holds the map, which
+   * a search would move under them: their holds say so on the button, and
+   * `/` does nothing meanwhile. With `open`, as for `/`, a search that is
+   * open already takes the focus back to its field rather than closing.
+   */
+  toggleSearch(open = false): void {
+    if (this.mapHeld) return;
+    this.toggleLazily(
+      "toggleSearch",
+      () => loadLazyBundle(loadSearch, SEARCH_UNAVAILABLE_MESSAGE),
+      (search) => search.toggleSearch(this, open),
+    );
   }
 
   /**

@@ -125,6 +125,7 @@ const HELD_CONTROL_IDS = [
   "replay-all-btn",
   "wrapped-btn",
   "cross-section-btn",
+  "search-btn",
 ];
 
 /**

@@ -111,6 +111,35 @@ says the charts show once zoomed in.
 
 ## Controls
 
+### Search
+
+Find an airport or a place and take the map there: **Search** at the top of the
+View group, `/` anywhere but in a text field or an open sheet or dialog, or the
+Search row of the More sheet on a phone. The field lists the airports of this
+map first, found as you type by their ICAO code, name or country (without regard
+to case or accents), and then the places Photon finds in OpenStreetMap, each
+with a short line under it (the country, or the kind of place and its region).
+Places are searched from three characters on, once you pause typing or press
+Enter with nothing listed, and the answers to the last 50 texts are kept for the
+visit, so none of them is asked again; the line under the list says while it
+searches, when nothing was found, and when Photon cannot be reached, takes
+longer than 10 seconds or the browser is offline, where the airports are still
+found. Photon is asked for what you type and nothing else (see
+[Privacy](privacy.md#requests-to-other-servers)); the panel credits it and
+OpenStreetMap.
+
+The arrow keys move through the list, Enter takes the option they are on, or the
+first one, and Escape, a press beside the panel or Tab out of it closes it. An
+airport is flown to and its popup opens, as a click on its marker opens it but
+without selecting its flights, with the keyboard's focus on its marker; where
+the marker is not shown (the Airports switch is off, or the filter leaves it
+out) a pulse marks it instead. A place is fitted to its extent where Photon
+gives one, at a zoom for its kind otherwise, and marked with a pulse until the
+next pick or Escape. The map keeps its bearing and tilt, frames the place clear
+of the panels over it, and jumps rather than flies under reduced motion. Replay,
+Replay all, the hotspot tour and Wrapped hold the search while they run, and
+close it as they start.
+
 ### Statistics
 
 View statistics (distance, altitude, landings, airports, flight time). Flight
@@ -545,6 +574,9 @@ the page groups the digits the same way.
 |                                                                   | Shift + Left or Right         | Turn the map by 15 degrees                                                                                                   |
 |                                                                   | Shift + Up or Down            | Tilt it by 10 degrees                                                                                                        |
 |                                                                   | + and -                       | Zoom in and out by a level, by two with Shift                                                                                |
+| Anywhere but a text field, a sheet or a dialog                    | `/`                           | Opens the search, or goes back to its field while it is open                                                                 |
+| The field of the search                                           | Up and Down                   | Move through what was found, round from either end                                                                           |
+|                                                                   | Enter                         | Takes the option the arrow keys are on, or the first one; with nothing listed, searches places at once                       |
 | Whatever is open                                                  | Escape                        | Closes the innermost thing that is open (see below)                                                                          |
 | The Layers, Filter or More sheet on a phone                       | Tab and Shift + Tab           | Move within the sheet and wrap round at its ends; focus stays inside until it closes (the statistics sheet does not hold it) |
 | The replay's slider                                               | Right or Up, Left or Down     | A hundredth of the flight on or back, at least one second                                                                    |
@@ -557,13 +589,14 @@ the page groups the digits the same way.
 | A row of the flight list                                          | Click, or Enter on its button | Selects that flight alone; with Ctrl, Cmd or Shift held, a click adds it to the selection or takes it out                    |
 | An airport marker                                                 | Enter                         | Opens its popup and moves focus into it, where Escape closes it again                                                        |
 
-Escape closes the innermost thing first: the readout of the heat cloud, then an
+Escape closes the innermost thing first: the readout of the heat cloud, the
+search while focus is in it (and the pulse of its last pick with it), then an
 airport's popup while focus is on its marker or inside the popup (focus goes
 back to the marker), then a sheet on a phone (the statistics sheet among them),
-a replay, Replay all, the hotspot tour, Wrapped or the cross-section, whose
-Escape takes back a point being placed or the line being redrawn before it
-closes the tool. The popup of a flight or of a replay has no Escape: its close
-button or a click on the map closes it.
+a replay, Replay all, the hotspot tour, Wrapped, the cross-section, whose Escape
+takes back a point being placed or the line being redrawn before it closes the
+tool, or the pulse the search left on the map. The popup of a flight or of a
+replay has no Escape: its close button or a click on the map closes it.
 
 ## Filtering
 

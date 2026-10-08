@@ -12,17 +12,21 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import {
   FEATURES_CSS_URL,
+  SEARCH_CSS_URL,
   SITE_UPDATED_MESSAGE,
   WRAPPED_CSS_URL,
   loadedFeatures,
   loadFeatures,
+  loadSearch,
   loadWrapped,
   resetFeatureLoader,
+  resetSearchLoader,
   resetWrappedLoader,
   wasSiteUpdated,
 } from "../../../../kml_heatmap/frontend/services/featureLoader";
 import type { FeatureModule } from "../../../../kml_heatmap/frontend/features";
 import type { WrappedModule } from "../../../../kml_heatmap/frontend/wrapped";
+import type { SearchModule } from "../../../../kml_heatmap/frontend/search";
 import { logError } from "../../../../kml_heatmap/frontend/utils/logger";
 
 vi.mock("../../../../kml_heatmap/frontend/utils/logger", () => ({
@@ -54,6 +58,11 @@ const importFeatures =
 /** Stands in for `import("../wrapped")` */
 const importWrapped =
   vi.fn<(failedImports: number) => Promise<WrappedModule>>();
+
+const search = { toggleSearch: vi.fn() } as unknown as SearchModule;
+
+/** Stands in for `import("../search")` */
+const importSearch = vi.fn<(failedImports: number) => Promise<SearchModule>>();
 
 describe("loadFeatures", () => {
   beforeEach(() => {
@@ -285,6 +294,38 @@ describe("loadWrapped", () => {
   });
 });
 
+describe("loadSearch", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    resetFeatureLoader(importFeatures);
+    resetWrappedLoader(importWrapped);
+    resetSearchLoader(importSearch);
+    importSearch.mockResolvedValue(search);
+    loadStylesheet.mockResolvedValue(undefined);
+  });
+
+  it("imports its own bundle and stylesheet, and neither of the others", async () => {
+    await expect(loadSearch()).resolves.toBe(search);
+
+    expect(importSearch).toHaveBeenCalledTimes(1);
+    expect(loadStylesheet).toHaveBeenCalledTimes(1);
+    expect(loadStylesheet).toHaveBeenCalledWith(SEARCH_CSS_URL);
+    expect(SEARCH_CSS_URL.startsWith("./")).toBe(true);
+    expect(importFeatures).not.toHaveBeenCalled();
+    expect(importWrapped).not.toHaveBeenCalled();
+  });
+
+  it("resolves with null and reports when the bundle cannot be loaded", async () => {
+    importSearch.mockRejectedValueOnce(new Error("offline"));
+
+    await expect(loadSearch()).resolves.toBeNull();
+    expect(logError).toHaveBeenCalledWith(
+      "Could not load the search bundle:",
+      expect.any(Error),
+    );
+  });
+});
+
 describe("a bundle of another build", () => {
   /** What a lazy bundle exports: the build it belongs to */
   const of = <T extends object>(module: T, build: string): T => ({
@@ -365,7 +406,7 @@ describe("a bundle of another build", () => {
     expect(notices()).toHaveLength(0);
   });
 
-  it.each(["features.ts", "wrapped.ts"])(
+  it.each(["features.ts", "wrapped.ts", "search.ts"])(
     "is told by the build %s exports",
     (entry) => {
       const source = readFileSync(

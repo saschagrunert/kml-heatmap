@@ -17,6 +17,7 @@ import {
   DEFAULT_AIRSPEED_RANGE,
   DEFAULT_ALTITUDE_RANGE,
   defineStoreAccessors,
+  isMapHeld,
   STORE_ACCESSOR_KEYS,
   type StoreState,
 } from "../../kml_heatmap/frontend/state/store";
@@ -179,6 +180,7 @@ interface MockManagers {
   toggleReplayAll: Mock;
   toggleCrossSection: Mock;
   toggleHotspotTour: Mock;
+  toggleSearch: Mock;
   resetView: Mock;
   isReset: Mock;
   canResetView: Mock;
@@ -410,6 +412,7 @@ function createMockManagers(): MockManagers {
     toggleReplayAll: vi.fn(),
     toggleCrossSection: vi.fn(),
     toggleHotspotTour: vi.fn(),
+    toggleSearch: vi.fn(),
     resetView: vi.fn(() => Promise.resolve()),
     // Something to reset unless a test says otherwise
     isReset: vi.fn(() => false),
@@ -538,6 +541,10 @@ function buildMockApp(
     mobileBar: null,
     ...mockManagers,
     ...other,
+    // The app's own predicate on the same store
+    get mapHeld(): boolean {
+      return isMapHeld(store);
+    },
     get fullPathInfo() {
       return store.get("currentData")?.path_info ?? null;
     },

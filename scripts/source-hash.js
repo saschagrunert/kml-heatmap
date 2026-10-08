@@ -31,6 +31,7 @@ const BUILD_FILES = [
   "kml_heatmap/static/styles.css",
   "kml_heatmap/static/features.css",
   "kml_heatmap/static/wrapped.css",
+  "kml_heatmap/static/search.css",
 ].map((name) => join(REPO_ROOT, name));
 
 /**

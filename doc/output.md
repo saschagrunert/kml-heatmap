@@ -19,7 +19,9 @@ output-dir/
 ├── features.bundle.js.map
 ├── wrapped.bundle.js      # Wrapped, the statistics panel and the flight list, imported on first use
 ├── wrapped.bundle.js.map
-├── shared.bundle.js       # The app, which the three above import
+├── search.bundle.js       # The search of airports and places, imported on first use
+├── search.bundle.js.map
+├── shared.bundle.js       # The app, which the four above import
 ├── shared.bundle.js.map
 ├── yearWorker.bundle.js   # Decodes the year files and writes the heat sources, in a worker
 ├── yearWorker.bundle.js.map
@@ -27,6 +29,7 @@ output-dir/
 ├── styles.css             # Linked in the page
 ├── features.css           # The styles of those features, fetched with their bundle
 ├── wrapped.css            # Wrapped, the statistics panel and the flight list, fetched with its bundle
+├── search.css             # The search, fetched with its bundle
 ├── manifest.json
 ├── favicon.svg
 ├── favicon.ico

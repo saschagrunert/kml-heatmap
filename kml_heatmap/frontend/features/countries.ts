@@ -1,25 +1,13 @@
 /**
  * The countries of the airports, for the statistics rail and Wrapped: the
- * name and the flag of a country and the airports grouped or counted by
- * theirs. Only the Wrapped bundle shows them, so they are kept out of
+ * flag of a country and the airports grouped or counted by theirs (its
+ * name is utils/formatters.ts's countryDisplayName, which the search uses
+ * as well). Only the Wrapped bundle shows them, so they are kept out of
  * features/airports.ts, which the map draws its markers with on the first
  * visit.
  */
 import { getAirportsByName } from "./airports";
 import { siteData } from "../state/siteData";
-
-const _displayNames =
-  typeof Intl !== "undefined"
-    ? new Intl.DisplayNames(["en"], { type: "region" })
-    : null;
-
-export function countryDisplayName(code: string): string {
-  try {
-    return _displayNames?.of(code) || code;
-  } catch {
-    return code;
-  }
-}
 
 /**
  * Path to a country's flag, relative to the page, or null when this site

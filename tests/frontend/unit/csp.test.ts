@@ -28,6 +28,9 @@ const LINKS = [
   "https://cloudless.eox.at",
   "https://registry.opendata.aws/terrain-tiles/",
   "https://github.com/saschagrunert/kml-heatmap",
+  // The credit of the search of places; the link to Photon's own page is
+  // taken as fetched, which its API's place in connect-src allows
+  "https://www.openstreetmap.org/copyright",
 ];
 
 /**
@@ -123,11 +126,13 @@ describe("the Content Security Policy", () => {
   const fetched = frontendUrls().filter(({ url }) => !isLink(url));
 
   it("finds the URLs of the map's sources in the frontend", () => {
-    // Guards the scan itself: every tile and style host the page uses
+    // Guards the scan itself: every tile and style host the page uses, and
+    // the geocoder of the search
     const hosts = new Set(fetched.map(({ url }) => new URL(url).hostname));
     expect([...hosts].sort()).toEqual([
       "basemaps.cartocdn.com",
       "nwy-tiles-api.prod.newaydata.com",
+      "photon.komoot.io",
       "s3.amazonaws.com",
       "tiles.maps.eox.at",
     ]);

@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import {
+  countryDisplayName,
   formatNumber,
   formatFileSize,
   formatTrack,
@@ -141,6 +142,22 @@ describe("formatter utilities", () => {
       expect(formatBuildDate("2026-09-21T14:03Z")).toBeNull();
       expect(formatBuildDate("<b>")).toBeNull();
     });
+  });
+});
+
+describe("countryDisplayName", () => {
+  it("converts ISO code to full country name", () => {
+    expect(countryDisplayName("DE")).toBe("Germany");
+    expect(countryDisplayName("US")).toBe("United States");
+    expect(countryDisplayName("FR")).toBe("France");
+  });
+
+  it("returns a non-empty string for unknown codes and the input for invalid ones", () => {
+    const unknown = countryDisplayName("ZZ");
+    expect(typeof unknown).toBe("string");
+    expect(unknown.length).toBeGreaterThan(0);
+    // Intl throws on malformed region codes; the input is returned as is
+    expect(countryDisplayName("not a code")).toBe("not a code");
   });
 });
 
