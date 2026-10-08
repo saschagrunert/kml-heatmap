@@ -101,7 +101,10 @@ describe("the readout of the heat cloud", () => {
 
   const touch = (): void => {
     clock += 50;
-    map().emit("touchstart", { originalEvent: { timeStamp: clock } });
+    const originalEvent = { timeStamp: clock } as Event;
+    // The app notes it on its clock (MapApp.touchClock)
+    app.touchClock.note(originalEvent);
+    map().emit("touchstart", { originalEvent });
   };
 
   const status = (): string =>
@@ -187,7 +190,7 @@ describe("the readout of the heat cloud", () => {
     expect(status()).toBe("");
   });
 
-  it("follows the filters and Isolate", async () => {
+  it("follows the filters and share mode", async () => {
     enter3D();
     app.selectedPathIds = new Set([2]);
     move(0, 0);

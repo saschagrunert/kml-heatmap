@@ -3,6 +3,7 @@
  * tiles that cannot answer yet, the Wrapped dialog's overview, and
  * destroy. The tooltip of a hover is in pathHover.test.ts.
  */
+import { readFileSync } from "node:fs";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import type { LngLat } from "maplibre-gl";
 import type { LayerManager } from "../../../../kml_heatmap/frontend/ui/layerManager";
@@ -36,6 +37,7 @@ describe("LayerManager pointer", () => {
   /** Callbacks waiting for the next animation frame, by their handle */
   let frames: Map<number, FrameRequestCallback>;
   const {
+    addSecondPath,
     runFrames,
     landed,
     holdSetData,
@@ -68,13 +70,17 @@ describe("LayerManager pointer", () => {
       return { pathId: segment.path_id, segment };
     }
 
-    it("opens a popup with the segment's values on touch and toggles the selection", () => {
-      (window as { ontouchstart?: unknown }).ontouchstart = null;
+    /** The button under the values of the popup of a tap, if any */
+    const action = (index = 0): HTMLButtonElement | null =>
+      tooltips()[index]!.getElement().querySelector(".segment-action");
+
+    it("opens a popup with the segment's values on touch and leaves the selection alone", () => {
       const lngLat = mockApp.map!.unproject([10, 10]) as LngLat;
 
       layerManager.onPathClick(
         hitOf(mockApp.currentData!.path_segments[0]!),
         lngLat,
+        true,
       );
 
       expect(tooltips()).toHaveLength(1);
@@ -93,16 +99,138 @@ describe("LayerManager pointer", () => {
       expect(popup.getLngLat()).toEqual(lngLat);
       expect(popup.isOpen()).toBe(true);
       expect(popup.getElement().innerHTML).toContain("3,000 ft");
+      // Looking at a flight on a phone selected it, and a second look
+      // took it out again
+      expect(mockApp.pathSelection.togglePathSelection).not.toHaveBeenCalled();
+    });
+
+    it("selects the flight of a tap with its button, which closes the values", () => {
+      layerManager.onPathClick(
+        hitOf(mockApp.currentData!.path_segments[0]!),
+        mockApp.map!.unproject([10, 10]) as LngLat,
+        true,
+      );
+      const button = action()!;
+      expect(button.textContent).toBe("Select flight");
+      expect(button.type).toBe("button");
+
+      button.click();
+
+      expect(
+        mockApp.pathSelection.togglePathSelection,
+      ).toHaveBeenCalledExactlyOnceWith(1);
+      expect(tooltips()[0]!.isOpen()).toBe(false);
+    });
+
+    it("offers to take a selected flight out", () => {
+      mockApp.selectedPathIds = new Set([1]);
+
+      layerManager.onPathClick(
+        hitOf(mockApp.currentData!.path_segments[0]!),
+        mockApp.map!.unproject([10, 10]) as LngLat,
+        true,
+      );
+
+      expect(action()!.textContent).toBe("Remove flight");
+    });
+
+    it("shows a mouse the values with a Remove in share mode, where the selection holds still", () => {
+      mockApp.selectedPathIds = new Set([1]);
+      mockApp.isolateSelection = true;
+
+      layerManager.onPathClick(
+        hitOf(mockApp.currentData!.path_segments[0]!),
+        mockApp.map!.unproject([10, 10]) as LngLat,
+      );
+
+      // A click on a shared flight took it out, and it vanished
+      expect(mockApp.pathSelection.togglePathSelection).not.toHaveBeenCalled();
+      expect(tooltips()[0]!.isOpen()).toBe(true);
+      expect(action()!.textContent).toBe("Remove flight");
+    });
+
+    it("shows a tap the values without a button during the hotspot tour", () => {
+      (mockApp as { tourView: unknown }).tourView = {};
+
+      layerManager.onPathClick(
+        hitOf(mockApp.currentData!.path_segments[0]!),
+        mockApp.map!.unproject([10, 10]) as LngLat,
+        true,
+      );
+
+      // The tour holds the selection, and Select did nothing
+      expect(tooltips()[0]!.isOpen()).toBe(true);
+      expect(action()!.hidden).toBe(true);
+    });
+
+    it("has the stylesheet hide a hidden button, whose display: block beat the browser's rule", () => {
+      // An empty blue bar stayed during the tour, and a stale Select that
+      // only closed the values. jsdom lets [hidden] win whatever the
+      // stylesheet says, so the rule itself is looked for.
+      const style = document.createElement("style");
+      style.textContent = readFileSync("kml_heatmap/static/styles.css", "utf8");
+      document.head.append(style);
+      try {
+        const hides = [...style.sheet!.cssRules].some(
+          (rule) =>
+            rule instanceof CSSStyleRule &&
+            rule.selectorText
+              .split(",")
+              .some(
+                (selector) => selector.trim() === ".segment-action[hidden]",
+              ) &&
+            rule.style.display === "none",
+        );
+        expect(hides).toBe(true);
+      } finally {
+        style.remove();
+      }
+    });
+
+    it("labels the button for the selection as it is now", () => {
+      layerManager.onPathClick(
+        hitOf(mockApp.currentData!.path_segments[0]!),
+        mockApp.map!.unproject([10, 10]) as LngLat,
+        true,
+      );
+      expect(action()!.textContent).toBe("Select flight");
+
+      // Ticked in a list meanwhile: "Select flight" took it out
+      mockApp.selectedPathIds.add(1);
+      mockApp.store.notifyMutation("selectedPathIds");
+      expect(action()!.textContent).toBe("Remove flight");
+
+      // A replay holds the selection, and the button did nothing
+      mockApp.replayActive = true;
+      expect(action()!.hidden).toBe(true);
+      mockApp.replayActive = false;
+      expect(action()!.hidden).toBe(false);
+
+      action()!.click();
+      expect(
+        mockApp.pathSelection.togglePathSelection,
+      ).toHaveBeenCalledExactlyOnceWith(1);
+    });
+
+    it("puts the values of a tap away as a mouse toggles a flight", () => {
+      const at = mockApp.map!.unproject([10, 10]) as LngLat;
+      const hit = hitOf(mockApp.currentData!.path_segments[0]!);
+      layerManager.onPathClick(hit, at, true);
+
+      layerManager.onPathClick(hit, at);
+
+      // They said what the flight was before the click
+      expect(tooltips()[0]!.isOpen()).toBe(false);
       expect(mockApp.pathSelection.togglePathSelection).toHaveBeenCalledWith(1);
     });
 
     it("closes the popup of a tap once the globe has turned its place away", () => {
-      (window as { ontouchstart?: unknown }).ontouchstart = null;
       mockApp.map!.setProjection({ type: "globe" });
       const lngLat = mockApp.map!.unproject([10, 10]) as LngLat;
       layerManager.onPathClick(
         hitOf(mockApp.currentData!.path_segments[0]!),
         lngLat,
+        true,
       );
       const popup = tooltips()[0]!;
 
@@ -116,12 +244,11 @@ describe("LayerManager pointer", () => {
     });
 
     it("replaces the popup of the tap before", () => {
-      (window as { ontouchstart?: unknown }).ontouchstart = null;
       const lngLat = mockApp.map!.unproject([10, 10]) as LngLat;
       const hit = hitOf(mockApp.currentData!.path_segments[0]!);
 
-      layerManager.onPathClick(hit, lngLat);
-      layerManager.onPathClick(hit, lngLat);
+      layerManager.onPathClick(hit, lngLat, true);
+      layerManager.onPathClick(hit, lngLat, true);
 
       expect(tooltips().map((popup) => popup.isOpen())).toEqual([false, true]);
     });
@@ -158,12 +285,13 @@ describe("LayerManager pointer", () => {
 
     it("closes the hover's tooltip and leaves the values of a tap open", () => {
       moveTo(pointAt(48.5, 16.5));
-      (window as { ontouchstart?: unknown }).ontouchstart = null;
+      // Another flight's: the tooltip of the tapped one steps aside
+      addSecondPath();
       layerManager.onPathClick(
-        { pathId: 1, segment: mockApp.currentData!.path_segments[0]! },
+        { pathId: 2, segment: mockApp.currentData!.path_segments.at(-1)! },
         mockApp.map!.unproject([10, 10]) as LngLat,
+        true,
       );
-      delete (window as { ontouchstart?: unknown }).ontouchstart;
       expect(tooltips().map((popup) => popup.isOpen())).toEqual([true, true]);
 
       // The flight runs on below the marker, so the same point would hit
@@ -175,6 +303,27 @@ describe("LayerManager pointer", () => {
 
       expect(tooltips().map((popup) => popup.isOpen())).toEqual([false, true]);
       expect(mockApp.map!.getCanvas().style.cursor).toBe("");
+    });
+
+    it("keeps the tooltip of a flight away while a click holds its values open", () => {
+      moveTo(pointAt(48.5, 16.5));
+      expect(tooltips().map((popup) => popup.isOpen())).toEqual([true]);
+
+      // Share mode shows a mouse the values with Remove, which the
+      // tooltip of the same flight covered
+      mockApp.isolateSelection = true;
+      layerManager.onPathClick(
+        { pathId: 1, segment: mockApp.currentData!.path_segments[0]! },
+        mockApp.map!.unproject([10, 10]) as LngLat,
+      );
+      expect(tooltips().map((popup) => popup.isOpen())).toEqual([false, true]);
+      moveTo(pointAt(48.5, 16.5));
+      expect(tooltips()[0]!.isOpen()).toBe(false);
+
+      // Back once the values are closed
+      tooltips()[1]!.remove();
+      moveTo(pointAt(48.5, 16.5));
+      expect(tooltips()[0]!.isOpen()).toBe(true);
     });
 
     describe("once the map has moved under a pointer that rests", () => {
@@ -343,12 +492,13 @@ describe("LayerManager pointer", () => {
       drawMode(layerManager, "altitude");
       mockApp.map!.renderedFeatures = [rendered(ALTITUDE, { r: 0, g: 1 })];
       moveTo(pointAt(48.5, 16.5));
-      (window as { ontouchstart?: unknown }).ontouchstart = null;
+      // Another flight's: the tooltip of the tapped one steps aside
+      addSecondPath();
       layerManager.onPathClick(
-        { pathId: 1, segment: mockApp.currentData!.path_segments[0]! },
+        { pathId: 2, segment: mockApp.currentData!.path_segments.at(-1)! },
         mockApp.map!.unproject([10, 10]) as LngLat,
+        true,
       );
-      delete (window as { ontouchstart?: unknown }).ontouchstart;
       mockApp.map!.emit("mousemove", { point: pointAt(48.5, 16.5) });
       expect(frames.size).toBe(1);
       expect(tooltips().map((popup) => popup.isOpen())).toEqual([true, true]);

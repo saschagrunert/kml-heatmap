@@ -172,10 +172,13 @@ test.describe("Core", () => {
       expect(title, selector).toBeTruthy();
       await expect(button).toHaveAttribute("aria-label", title!);
     }
-    // Unavailable, Isolate and Replay keep their name and say why in the
+    // Unavailable, Share mode and Replay keep their name and say why in the
     // title, which a screen reader reads as the description
     for (const [selector, name] of [
-      ["#isolate-btn", "Isolate selected flights"],
+      [
+        "#isolate-btn",
+        "Share mode: show only the selected flights and lock the selection",
+      ],
       ["#replay-btn", "Replay selected flights"],
     ]) {
       const button = page.locator(selector!);

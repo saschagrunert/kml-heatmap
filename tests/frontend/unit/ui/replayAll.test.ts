@@ -1451,6 +1451,23 @@ describe("the replay of all flights", () => {
       expect(player.time).toBeCloseTo(seconds(2) + LEG_PAUSE_S + 75, 6);
     });
 
+    it("plays the shared flights the filter shows, not the ones it hides", () => {
+      // Share mode keeps flights a filter hides, which the map does not draw
+      app.currentData = {
+        ...DAY,
+        path_info: DAY.path_info.map((info) => ({
+          ...info,
+          aircraft_registration: info.id === 2 ? "D-BBBB" : "D-AAAA",
+        })),
+      };
+      app.selectedAircraft = "D-AAAA";
+      app.selectedPathIds = new Set([1, 2]);
+
+      toggleSequence(asMapApp(app));
+
+      expect([...controlsOfApp()!.legs!.keys()]).toEqual([1]);
+    });
+
     it("closes from the Replay control, and gives it back", () => {
       open(1, 2);
 

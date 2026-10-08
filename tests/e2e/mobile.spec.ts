@@ -561,8 +561,8 @@ test.describe("Mobile bar", () => {
         "Pick flights with timing data to replay, under Statistics, Flights",
       );
 
-      // Isolating needs something to isolate. Unavailable the way Isolate
-      // is on the desktop: announced so, and still reachable by keyboard.
+      // Share mode needs something to share. Unavailable the way it is on
+      // the desktop: announced so, and still reachable by keyboard.
       const isolate = page.locator('.sheet-row[data-row="isolate"]');
       await expect(isolate).toHaveAttribute("aria-disabled", "true");
       expect(
@@ -576,7 +576,7 @@ test.describe("Mobile bar", () => {
       await expect(page.locator('.sheet-row[data-row="share"]')).toBeEnabled();
     });
 
-    test("isolate becomes available once a path is selected", async ({
+    test("share mode becomes available once a path is selected", async ({
       page,
     }) => {
       await selectPathForReplay(page);

@@ -295,7 +295,7 @@ hundred kilobytes for one layer.
 
 Wrapped's intro forces the cloud on (`forcedHeatCloud`) with a style of its own:
 the flights of the year and aircraft filters on flat ground (it is on the
-globe), at full strength, whatever the switch, Isolate, a colour layer or a
+globe), at full strength, whatever the switch, share mode, a colour layer or a
 selection say, and the switches are not touched. Its button cuts those points
 ahead of time, in idle callbacks rather than in the pointer's event, for the
 whole zoom level of the overview and the one below (closer in than the last
@@ -846,8 +846,8 @@ is the maths:
   `CRUISE_SPEED_MS`), times the part of it within the circle (`insideFraction`).
   A segment of no heat counts for nothing, as the cloud draws nothing of it, and
   a place with none has no readout. The flights are the path ids with any heat
-  within, of those the cloud draws (filters, Isolate). The heights are above the
-  ground the cloud stands on (`groundProfilesFt` at the relief level: the
+  within, of those the cloud draws (filters, share mode). The heights are above
+  the ground the cloud stands on (`groundProfilesFt` at the relief level: the
   sampled ground on the relief, the line between the fields on the globe), added
   up in 100 ft bins; the box names the run of four with the most of it, "mostly"
   from half of it on. The exposure never enters it: the box speaks of time, not
@@ -901,8 +901,8 @@ profile, the phone's bar and the floating compass) where it can, within the map.
 With it the readout showed at 44 of the 77 points, at each of the 39 with the
 tooltip too, and never over it. It hides over a marker (the event's target is
 not the canvas), while a button is held or the map moves, and after Escape until
-the pointer moves 8 px; a change of what it is worked out from (filters,
-Isolate, the relief) tells a resting pointer anew.
+the pointer moves 8 px; a change of what it is worked out from (filters, share
+mode, the relief) tells a resting pointer anew.
 
 ### Clicks and taps
 

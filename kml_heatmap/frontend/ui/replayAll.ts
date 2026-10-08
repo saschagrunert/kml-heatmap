@@ -34,7 +34,7 @@ import type { PathSegment } from "../types";
 import { fitTilted, sequenceLeg } from "../calculations/replayAll";
 import { flightOrder } from "../calculations/flightProfile";
 import { flightClockOf } from "../calculations/flightClock";
-import { datasetIndex } from "../calculations/datasetIndex";
+import { datasetIndex, shownSelection } from "../calculations/datasetIndex";
 import {
   segmentRangesFor,
   segmentsForPathIds,
@@ -628,7 +628,9 @@ export function toggleSequence(
     return;
   }
   if (!data) return;
-  const order = flightOrder(data.path_info, app.selectedPathIds);
+  // Of those the filter shows: share mode keeps flights it hides, which
+  // the map does not draw (shownSelection)
+  const order = flightOrder(data.path_info, shownSelection(app));
   const timed = order.filter((pathId) =>
     segmentsForPathIds(data.path_segments, [pathId]).some(
       (segment) => (segment.time ?? 0) > 0,

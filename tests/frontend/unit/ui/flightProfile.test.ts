@@ -198,7 +198,14 @@ describe("flight profile", () => {
     });
 
     it("stays away with no flight selected, and with more than it draws", () => {
-      const { app, root, toggle } = setup([]);
+      // Flights of the dataset: the profile counts those the filter shows
+      const more = Array.from({ length: DAY_MAX_FLIGHTS }, (_, i) => 10 + i);
+      const { app, root, toggle } = setup([], {
+        currentData: createDataset(
+          [{ id: 7 }, ...more.map((id) => ({ id }))],
+          [...flight(7), ...more.flatMap((id) => flight(id, false))],
+        ),
+      });
       expect(root.hidden).toBe(true);
       expect(toggle.hidden).toBe(true);
 
@@ -206,13 +213,39 @@ describe("flight profile", () => {
       app.store.notifyMutation("selectedPathIds");
       expect(root.hidden).toBe(false);
 
-      for (let id = 10; app.selectedPathIds.size <= DAY_MAX_FLIGHTS; id++) {
-        app.selectedPathIds.add(id);
-      }
+      for (const id of more) app.selectedPathIds.add(id);
       app.store.notifyMutation("selectedPathIds");
       expect(root.hidden).toBe(true);
       expect(toggle.hidden).toBe(true);
       expect(document.body.classList.contains("profile-open")).toBe(false);
+    });
+
+    it("shows the shared flights the filter shows", () => {
+      // Share mode keeps the flight the aircraft filter hides
+      const segments = [...flight(7), ...flight(8)];
+      const { app, root } = setup([7, 8], {
+        currentData: createDataset(
+          [
+            { id: 7, aircraft_registration: "D-ABCD" },
+            { id: 8, aircraft_registration: "D-EFGH" },
+          ],
+          segments,
+        ),
+        isolateSelection: true,
+      });
+      // Both, joined
+      expect(root.hidden).toBe(false);
+      expect(text(root, ".profile-axis")).toContain("2 flights");
+
+      // The one the filter shows, alone
+      app.selectedAircraft = "D-ABCD";
+      expect(root.hidden).toBe(false);
+      expect(text(root, ".profile-axis")).not.toContain("2 flights");
+      expect(text(root, ".profile-stats")).toContain("Highest 3,000 ft MSL");
+
+      // None: no profile of a flight the map does not draw
+      app.selectedAircraft = "D-NONE";
+      expect(root.hidden).toBe(true);
     });
 
     it("runs a flight without times along its distance", () => {

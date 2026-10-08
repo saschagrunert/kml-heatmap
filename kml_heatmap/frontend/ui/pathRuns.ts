@@ -177,7 +177,7 @@ interface RunTable {
    */
   box: Box | null;
   /**
-   * A cut for another zoom or view was left out while isolate mode hid the
+   * A cut for another zoom or view was left out while share mode hid the
    * runs (see isolatedOut); they are written again as they show
    */
   behind: boolean;
@@ -349,19 +349,19 @@ export function runsOnLayer(state: ModeState, set: RunSet): RunsOnLayer {
     segments: state.segments ?? [],
     selected: set === "selected",
     lift: null,
-    only: set === "main" && isolate && selected.size > 0 ? selected : null,
+    only: set === "main" && isolate ? selected : null,
   };
 }
 
 /**
- * Whether the runs of a set are out of sight as isolate mode shows the
+ * Whether the runs of a set are out of sight as share mode shows the
  * selection alone: the main layers are filtered to nothing (see
  * applyLook). A zoom or a pan that would cut them again for the view, and
  * in the 3D view smooth every flight for it, leaves them as they are
  * until they show again (see updateSelectionStyles).
  */
 export function isolatedOut(state: ModeState, set: RunSet): boolean {
-  return set === "main" && state.shown.isolate && state.shown.selected.size > 0;
+  return set === "main" && state.shown.isolate;
 }
 
 /**

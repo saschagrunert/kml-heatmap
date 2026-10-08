@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
   FilterManager,
   YEAR_PICK_DELAY_MS,
-  dropUnknownPathIds,
+  fitSelection,
 } from "../../../../kml_heatmap/frontend/ui/filterManager";
 import type { KMLDataset } from "../../../../kml_heatmap/frontend/types";
 import {
@@ -310,34 +310,74 @@ describe("FilterManager", () => {
       expect(mockApp.selectedAircraft).toBe("D-ABCD");
     });
 
-    it("clears selected paths when not initializing", async () => {
+    it("keeps the selected flights the new year shows and drops the others", async () => {
+      // It cleared them all, also the ones of the year picked
       mockApp.selectedPathIds.add(1);
+      mockApp.selectedPathIds.add(3);
+      addYearOption("2024");
+      (document.getElementById("year-select") as HTMLSelectElement).value =
+        "2024";
+      mockApp.dataManager.loadData.mockResolvedValue(year2024Data());
       const notify = vi.spyOn(mockApp.store, "notifyMutation");
 
       await filterManager.filterByYear();
 
-      expect(mockApp.selectedPathIds.size).toBe(0);
+      expect([...mockApp.selectedPathIds]).toEqual([3]);
       expect(notify).toHaveBeenCalledWith("selectedPathIds");
+      // Said, rather than gone without a word
+      // Said as it is: the file of 2024 cannot tell another year's flight
+      // from one the site lost
+      expect(toastMock.showToast).toHaveBeenCalledWith(
+        "1 selected flight is not in 2024 and was deselected",
+      );
     });
 
-    it("preserves selected paths when initializing", async () => {
-      mockApp.isInitializing = true;
+    it("says how many selected flights the year lacks", async () => {
       mockApp.selectedPathIds.add(1);
-      mockApp.isolateSelection = true;
+      mockApp.selectedPathIds.add(2);
+      addYearOption("2024");
+      (document.getElementById("year-select") as HTMLSelectElement).value =
+        "2024";
+      mockApp.dataManager.loadData.mockResolvedValue(year2024Data());
 
       await filterManager.filterByYear();
 
-      expect(mockApp.selectedPathIds.size).toBe(1);
+      expect(toastMock.showToast).toHaveBeenCalledWith(
+        "2 selected flights are not in 2024 and were deselected",
+      );
+    });
+
+    it("keeps every shared flight, the ones the year hides as well", async () => {
+      // The flights of a day shared from all years, and then their year
+      mockApp.selectedPathIds.add(1);
+      mockApp.selectedPathIds.add(3);
+      mockApp.isolateSelection = true;
+      addYearOption("2024");
+      (document.getElementById("year-select") as HTMLSelectElement).value =
+        "2024";
+      mockApp.dataManager.loadData.mockResolvedValue(year2024Data());
+
+      await filterManager.filterByYear();
+
+      // The shared set is fixed: the link hands both on, and the chip says
+      // the filter hides one
+      expect([...mockApp.selectedPathIds]).toEqual([1, 3]);
       expect(mockApp.isolateSelection).toBe(true);
+      expect(toastMock.showToast).not.toHaveBeenCalled();
     });
 
-    it("leaves isolate mode together with the selection", async () => {
+    it("keeps share mode where the year hides every shared flight", async () => {
       mockApp.selectedPathIds.add(1);
       mockApp.isolateSelection = true;
+      addYearOption("2024");
+      (document.getElementById("year-select") as HTMLSelectElement).value =
+        "2024";
+      mockApp.dataManager.loadData.mockResolvedValue(year2024Data());
 
       await filterManager.filterByYear();
 
-      expect(mockApp.isolateSelection).toBe(false);
+      expect([...mockApp.selectedPathIds]).toEqual([1]);
+      expect(mockApp.isolateSelection).toBe(true);
     });
 
     it("picks the year it is given and changes more of the store in the same flush", async () => {
@@ -581,8 +621,23 @@ describe("FilterManager", () => {
       expect(mockApp.dataManager.loadData.mock.calls[0]![2]).toBeUndefined();
       expect(mockApp.currentData).toEqual(year2024Data());
       expect([...mockApp.selectedPathIds]).toEqual([3]);
-      // What the link named and the site does not have is said, as on a
-      // first load that worked
+      // A dataset of one year cannot tell a flight of another from one the
+      // site lost, and says so (see the next test for every year)
+      expect(toastMock.showToast).toHaveBeenCalledWith(
+        "1 selected flight is not in 2024 and was deselected",
+      );
+    });
+
+    it("retries every year and says what the link named that the site lost", async () => {
+      mockApp.currentData = null;
+      mockApp.selectedYear = "all";
+      mockApp.selectedPathIds.add(3);
+      mockApp.selectedPathIds.add(99);
+      mockApp.dataManager.loadData.mockResolvedValue(year2024Data());
+
+      expect(await filterManager.loadShownYear()).toBe(true);
+
+      expect([...mockApp.selectedPathIds]).toEqual([3]);
       expect(toastMock.showToast).toHaveBeenCalledWith(
         "Left out 1 flight not on this site",
       );
@@ -718,13 +773,13 @@ describe("FilterManager", () => {
       expect(redraws).toHaveBeenCalledTimes(1);
     });
 
-    it("clears the selection in the same flush as the aircraft change", () => {
+    it("drops the flights it no longer shows in the same flush as the aircraft change", () => {
       const select = aircraftSelect();
       const option = document.createElement("option");
       option.value = "D-ABCD";
       select.appendChild(option);
       select.value = "D-ABCD";
-      mockApp.selectedPathIds.add(1);
+      mockApp.selectedPathIds.add(2);
       const seen: number[] = [];
       mockApp.store.subscribe("selectedAircraft", () => {
         seen.push(mockApp.selectedPathIds.size);
@@ -735,25 +790,62 @@ describe("FilterManager", () => {
       expect(seen).toEqual([0]);
     });
 
-    it("clears selected paths when not initializing", () => {
+    it("keeps the selected flights of the aircraft picked", () => {
       mockApp.selectedPathIds.add(1);
+      mockApp.selectedPathIds.add(2);
+      const select = aircraftSelect();
+      select.add(new Option("D-ABCD", "D-ABCD"));
+      select.value = "D-ABCD";
 
       filterManager.filterByAircraft();
 
-      expect(mockApp.selectedPathIds.size).toBe(0);
+      expect([...mockApp.selectedPathIds]).toEqual([1]);
     });
 
-    it("preserves selected paths when initializing", () => {
-      mockApp.isInitializing = true;
+    it("keeps every shared flight, the ones of another aircraft as well", () => {
       mockApp.selectedPathIds.add(1);
+      mockApp.selectedPathIds.add(2);
+      mockApp.isolateSelection = true;
+      const select = aircraftSelect();
+      select.add(new Option("D-ABCD", "D-ABCD"));
+      select.value = "D-ABCD";
 
       filterManager.filterByAircraft();
 
-      expect(mockApp.selectedPathIds.size).toBe(1);
+      expect([...mockApp.selectedPathIds]).toEqual([1, 2]);
+      expect(mockApp.isolateSelection).toBe(true);
     });
 
-    it("leaves isolate mode in the same flush as the selection (regression)", () => {
+    it("keeps the selected flights a year that failed to load may hold", () => {
+      // A link to all years with one of them missing: its flights are not
+      // in the dataset, and a Retry would bring them
+      mockApp.currentData = { ...mockApp.currentData!, incomplete: true };
+      mockApp.selectedPathIds.add(2);
+      mockApp.selectedPathIds.add(99);
+      const select = aircraftSelect();
+      select.add(new Option("D-ABCD", "D-ABCD"));
+      select.value = "D-ABCD";
+
+      filterManager.filterByAircraft();
+
+      // The flight of another aircraft goes, the unknown one stays
+      expect([...mockApp.selectedPathIds]).toEqual([99]);
+    });
+
+    it("keeps every selected flight for every aircraft", () => {
       mockApp.selectedPathIds.add(1);
+      mockApp.selectedPathIds.add(2);
+      const updates = vi.fn();
+      mockApp.store.subscribe("selectedPathIds", updates);
+
+      filterManager.filterByAircraft();
+
+      expect(mockApp.selectedPathIds.size).toBe(2);
+      expect(updates).not.toHaveBeenCalled();
+    });
+
+    it("keeps share mode with its one flight of another aircraft", () => {
+      mockApp.selectedPathIds.add(2);
       mockApp.isolateSelection = true;
       const select = aircraftSelect();
       const option = document.createElement("option");
@@ -767,9 +859,10 @@ describe("FilterManager", () => {
 
       filterManager.filterByAircraft();
 
-      // Isolating an empty selection left the button pressed but stuck, and
-      // the next flight click hid every other flight at once
-      expect(seen).toEqual([[0, false]]);
+      // It left share mode with its flight, which the link then lost
+      expect(seen).toEqual([]);
+      expect([...mockApp.selectedPathIds]).toEqual([2]);
+      expect(mockApp.isolateSelection).toBe(true);
     });
 
     describe("while a year switch loads", () => {
@@ -1004,7 +1097,7 @@ describe("FilterManager", () => {
     });
   });
 
-  describe("dropUnknownPathIds", () => {
+  describe("fitSelection", () => {
     const data = createDataset([
       { id: 840108108563, year: 2025 },
       { id: 7, year: 2025 },
@@ -1017,7 +1110,7 @@ describe("FilterManager", () => {
       const listener = vi.fn();
       mockApp.store.subscribe("selectedPathIds", listener);
 
-      dropUnknownPathIds(asMapApp(mockApp), data);
+      fitSelection(asMapApp(mockApp), data);
 
       expect(mockApp.selectedPathIds).toBe(selected);
       expect([...selected]).toEqual([7, 840108108563]);
@@ -1025,32 +1118,23 @@ describe("FilterManager", () => {
       expect(listener).not.toHaveBeenCalled();
     });
 
-    it("drops unknown ids and keeps isolating the rest", () => {
+    it("leaves out what a dataset of every year lacks, shared or not, and says so", () => {
       mockApp.selectedPathIds = new Set([3, 7, 12]);
       mockApp.isolateSelection = true;
       const listener = vi.fn();
       mockApp.store.subscribe("selectedPathIds", listener);
 
-      dropUnknownPathIds(asMapApp(mockApp), data);
+      fitSelection(asMapApp(mockApp), data);
 
       expect([...mockApp.selectedPathIds]).toEqual([7]);
       expect(mockApp.isolateSelection).toBe(true);
       expect(listener).toHaveBeenCalledTimes(1);
-      // Quietly, unless asked: a year switch leaves out the others' flights
-      expect(toastMock.showToast).not.toHaveBeenCalled();
-    });
-
-    it("says how many flights of a link it left out, when asked", () => {
-      mockApp.selectedPathIds = new Set([3, 7, 12]);
-
-      dropUnknownPathIds(asMapApp(mockApp), data, true);
-
       expect(toastMock.showToast).toHaveBeenCalledExactlyOnceWith(
         "Left out 2 flights not on this site",
       );
     });
 
-    it("turns isolation off when no selected id is left", () => {
+    it("turns share mode off when no selected id is left, in the same update", () => {
       mockApp.selectedPathIds = new Set([3]);
       mockApp.isolateSelection = true;
       const seen: [number, boolean][] = [];
@@ -1058,21 +1142,80 @@ describe("FilterManager", () => {
         seen.push([mockApp.selectedPathIds.size, mockApp.isolateSelection]);
       });
 
-      dropUnknownPathIds(asMapApp(mockApp), data);
+      fitSelection(asMapApp(mockApp), data);
 
       expect(mockApp.selectedPathIds.size).toBe(0);
       expect(mockApp.isolateSelection).toBe(false);
-      // Both changes arrive together: never an empty isolated selection
       expect(seen).toEqual([[0, false]]);
+    });
+
+    it("keeps share mode where the filter draws none of the flights it shares", () => {
+      // A link to flights of an aircraft that is named otherwise now: share
+      // mode stays, and the chip says the filter hides them all
+      mockApp.selectedPathIds = new Set([7, 840108108563]);
+      mockApp.isolateSelection = true;
+      mockApp.selectedAircraft = "D-EFGH";
+
+      fitSelection(asMapApp(mockApp), data);
+
+      expect(mockApp.isolateSelection).toBe(true);
+      expect(mockApp.selectedPathIds.size).toBe(2);
+    });
+
+    it("deselects what the filter hides outside share mode, and says so", () => {
+      mockApp.selectedPathIds = new Set([7, 840108108563]);
+      mockApp.selectedAircraft = "D-EFGH";
+
+      fitSelection(asMapApp(mockApp), data);
+
+      expect(mockApp.selectedPathIds.size).toBe(0);
+      expect(toastMock.showToast).toHaveBeenCalledExactlyOnceWith(
+        "2 selected flights are hidden by the filter and were deselected",
+      );
+    });
+
+    it("keeps a shared flight a dataset of one year lacks, which may be another year's", () => {
+      mockApp.selectedYear = "2025";
+      mockApp.selectedPathIds = new Set([7, 99]);
+      mockApp.isolateSelection = true;
+
+      fitSelection(asMapApp(mockApp), data);
+
+      expect([...mockApp.selectedPathIds]).toEqual([7, 99]);
+      expect(toastMock.showToast).not.toHaveBeenCalled();
+    });
+
+    it("says a flight a dataset of one year lacks is not in that year, not that a filter hid it", () => {
+      // A flight a re-export removed, or one of another year: one year's
+      // file cannot tell, and a link's dead id was said to be filtered
+      mockApp.selectedYear = "2025";
+      mockApp.selectedPathIds = new Set([7, 99]);
+
+      fitSelection(asMapApp(mockApp), data);
+
+      expect([...mockApp.selectedPathIds]).toEqual([7]);
+      expect(toastMock.showToast).toHaveBeenCalledExactlyOnceWith(
+        "1 selected flight is not in 2025 and was deselected",
+      );
     });
 
     it("keeps the ids when a year of the dataset failed to load", () => {
       mockApp.selectedPathIds = new Set([7, 99]);
       mockApp.isolateSelection = true;
 
-      dropUnknownPathIds(asMapApp(mockApp), { ...data, incomplete: true });
+      fitSelection(asMapApp(mockApp), { ...data, incomplete: true });
 
       expect([...mockApp.selectedPathIds]).toEqual([7, 99]);
+      expect(mockApp.isolateSelection).toBe(true);
+    });
+
+    it("keeps share mode when a year failed to load, which may hold the flights", () => {
+      mockApp.selectedPathIds = new Set([7, 99]);
+      mockApp.isolateSelection = true;
+      mockApp.selectedAircraft = "D-EFGH";
+
+      fitSelection(asMapApp(mockApp), { ...data, incomplete: true });
+
       expect(mockApp.isolateSelection).toBe(true);
     });
 
@@ -1081,7 +1224,7 @@ describe("FilterManager", () => {
       const listener = vi.fn();
       mockApp.store.subscribe("selectedPathIds", listener);
 
-      dropUnknownPathIds(asMapApp(mockApp), data);
+      fitSelection(asMapApp(mockApp), data);
 
       expect(listener).not.toHaveBeenCalled();
     });

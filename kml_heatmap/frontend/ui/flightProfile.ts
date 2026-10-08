@@ -40,6 +40,7 @@ import type { KMLDataset, PathSegment } from "../types";
 import type { ReplayManager } from "./replayManager";
 import type { ReplayState } from "./replayState";
 import { segmentsForPathIds } from "../calculations/statistics";
+import { shownSelection } from "../calculations/datasetIndex";
 import {
   flightOrder,
   flightProfile,
@@ -406,10 +407,14 @@ export function followFlightProfile(app: MapApp): HTMLElement {
     if (!shown) leave();
   };
 
-  /** Build the profile again when the flights or the dataset changed */
+  /**
+   * Build the profile again when the flights or the dataset changed: the
+   * selected flights the filter shows, as Replay plays them
+   * (MapApp.canReplay); share mode keeps the ones a filter hides
+   */
   const refresh = (): void => {
     const current = app.currentData;
-    const selected = app.selectedPathIds;
+    const selected = shownSelection(app);
     const ids =
       current && selected.size <= DAY_MAX_FLIGHTS
         ? flightOrder(current.path_info, selected)
@@ -622,7 +627,10 @@ export function followFlightProfile(app: MapApp): HTMLElement {
   resized?.observe(root);
 
   const store = app.store;
-  store.subscribeKeys(["selectedPathIds", "currentData"], refresh);
+  store.subscribeKeys(
+    ["selectedPathIds", "currentData", "selectedYear", "selectedAircraft"],
+    refresh,
+  );
   store.subscribeKeys(["replayActive"], place);
   store.subscribeKeys(["wrappedVisible"], sync);
   followCrossSection(app, sync, app.signal);

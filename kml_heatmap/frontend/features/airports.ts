@@ -153,14 +153,16 @@ export function findHomeBase(airportCounts: AirportCounts): string | null {
 /**
  * Determine which airports are visible for the current filter and selection.
  *
- * - no filter and no isolation: every airport (returns null)
+ * - no filter and no share mode: every airport (returns null)
  * - year/aircraft filter: airports touched by matching paths
  * - selection: airports of the selected paths are added, so a selection
  *   never hides an airport the filter shows (with or without a filter)
- * - isolate mode: only airports of the selected paths
+ * - share mode: only airports of the selected paths
  * @param filtered - The paths the year/aircraft filter keeps, null for none
- * @param selectedPathIds - The selected paths
- * @param isolateSelection - Whether the selection is isolated
+ * @param selectedPathIds - The selected paths the filter shows (share mode
+ *   keeps the ones it hides, whose airports are not to show either)
+ * @param isolateSelection - Whether the selection is shared, which the
+ *   store ends with the last flight
  * @param pathInfoById - The paths of the dataset by id
  * @returns Set of visible airport names, or null when all are visible
  */
@@ -170,16 +172,15 @@ export function calculateVisibleAirports(
   isolateSelection: boolean,
   pathInfoById: ReadonlyMap<number, PathInfo>,
 ): Set<string> | null {
-  const hasIsolation = isolateSelection && selectedPathIds.size > 0;
-  if (!filtered && !hasIsolation) return null;
+  if (!filtered && !isolateSelection) return null;
 
   const visible = new Set<string>();
   const add = (info: PathInfo | undefined): void => {
     if (info?.start_airport) visible.add(info.start_airport);
     if (info?.end_airport) visible.add(info.end_airport);
   };
-  // Isolate mode ignores filter-only airports
-  if (filtered && !hasIsolation) filtered.forEach(add);
+  // Share mode ignores filter-only airports
+  if (filtered && !isolateSelection) filtered.forEach(add);
   for (const pathId of selectedPathIds) add(pathInfoById.get(pathId));
   return visible;
 }

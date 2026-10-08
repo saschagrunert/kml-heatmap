@@ -233,20 +233,6 @@
             <span class="control-label">Hotspot tour</span>
           </button>
         </div>
-        <div class="control-row">
-          <button
-            id="isolate-btn"
-            class="btn-surface control-btn"
-            data-action="toggleIsolateSelection"
-            data-icon="isolate"
-            title="Isolate selected flights"
-            aria-label="Isolate selected flights"
-            aria-disabled="true"
-            aria-pressed="false"
-          >
-            <span class="control-label">Isolate</span>
-          </button>
-        </div>
       </div>
 
       <div
@@ -255,6 +241,23 @@
         aria-labelledby="share-group-title"
       >
         <h2 class="control-group-title" id="share-group-title">Share</h2>
+        <!-- Share mode: the selected flights alone, and a selection that
+             holds still while they are shown (ui/pathSelection.ts). The id
+             and the action keep the name the mode had before. -->
+        <div class="control-row">
+          <button
+            id="isolate-btn"
+            class="btn-surface control-btn"
+            data-action="toggleIsolateSelection"
+            data-icon="isolate"
+            title="Share mode: show only the selected flights and lock the selection"
+            aria-label="Share mode: show only the selected flights and lock the selection"
+            aria-disabled="true"
+            aria-pressed="false"
+          >
+            <span class="control-label">Share mode</span>
+          </button>
+        </div>
         <div class="control-row">
           <button
             id="share-btn"
@@ -664,9 +667,19 @@
       <!-- What is selected, and the way out of it. A selection is only drawn
          on the map where the paths themselves are drawn; at the zoom levels
          that show the heat bloom alone it had no representation at all, and
-         nothing anywhere said how many flights Isolate and the shared link
-         would carry. Filled by ui/pathSelection.ts. -->
+         nothing anywhere said how many flights share mode and the shared
+         link would carry. Share mode is entered and left here as well,
+         with the link beside it while it is on. Filled by
+         ui/pathSelection.ts. -->
       <div id="selection-chip" hidden>
+        <!-- Share mode's mark, on a phone in place of the word "Sharing"
+             before the count (styles.css) -->
+        <span
+          id="selection-chip-mode"
+          data-icon="isolate"
+          role="img"
+          aria-label="Sharing"
+        ></span>
         <span id="selection-chip-count"></span>
         <!-- Replay where a phone's pick of flights lands, which has no
            Replay but in the More sheet (styles.css shows it on a phone) -->
@@ -680,6 +693,41 @@
           hidden
         >
           <span class="control-label">Replay</span>
+        </button>
+        <button
+          type="button"
+          id="selection-share-btn"
+          class="btn-surface"
+          data-action="toggleIsolateSelection"
+          data-icon="isolate"
+          title="Share mode: show only these flights and lock the selection"
+          aria-label="Share mode: show only these flights and lock the selection"
+        >
+          <span class="control-label">Share</span>
+        </button>
+        <button
+          type="button"
+          id="selection-link-btn"
+          class="btn-surface"
+          data-action="shareLink"
+          data-icon="share"
+          title="Copy link to these flights"
+          aria-label="Copy link to these flights"
+          hidden
+        >
+          <span class="control-label">Copy link</span>
+        </button>
+        <button
+          type="button"
+          id="selection-exit-btn"
+          class="btn-surface"
+          data-action="toggleIsolateSelection"
+          data-icon="close"
+          title="Exit share mode, keeping the flights selected"
+          aria-label="Exit share mode, keeping the flights selected"
+          hidden
+        >
+          <span class="control-label">Exit</span>
         </button>
         <button
           type="button"

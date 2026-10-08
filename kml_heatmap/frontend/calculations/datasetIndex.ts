@@ -123,3 +123,37 @@ export function datasetIndex(data: KMLDataset): DatasetIndex {
   }
   return index;
 }
+
+/** The keys of the store a filtered selection is worked out from */
+interface FilterState {
+  readonly currentData: KMLDataset | null;
+  readonly selectedYear: string;
+  readonly selectedAircraft: string;
+  readonly selectedPathIds: ReadonlySet<number>;
+}
+
+/** The flights of `data` the year and aircraft filters of `app` show */
+export function shownPathIds(
+  app: FilterState,
+  data: KMLDataset,
+): ReadonlySet<number> {
+  return datasetIndex(data).filter(app.selectedYear, app.selectedAircraft)
+    .pathIds;
+}
+
+/**
+ * The selected flights the year and aircraft filters show: what is drawn,
+ * counted, framed and replayed of the selection. A filter change cleared
+ * the selection, so nothing that read it asked the filter; share mode now
+ * keeps the flights a filter hides (ui/filterManager.ts), and only its
+ * chip and its link speak of them. The selection itself where the filter
+ * shows all of it, as it does outside share mode.
+ */
+export function shownSelection(app: FilterState): ReadonlySet<number> {
+  const selected = app.selectedPathIds;
+  const data = app.currentData;
+  if (!data || selected.size === 0) return selected;
+  const shown = shownPathIds(app, data);
+  const kept = [...selected].filter((pathId) => shown.has(pathId));
+  return kept.length === selected.size ? selected : new Set(kept);
+}

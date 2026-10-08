@@ -739,7 +739,10 @@ main {
   opacity: 0.5;
   cursor: not-allowed;
 }
-#selection-chip #selection-replay-btn {
+#selection-chip #selection-replay-btn,
+#selection-chip button[hidden],
+.segment-action[hidden],
+#selection-chip-mode {
   display: none;
 }
 
@@ -1319,6 +1322,20 @@ main > #map .maplibregl-ctrl-bottom-right {
 .segment-tooltip .maplibregl-popup-content,
 .segment-tooltip .maplibregl-popup-tip {
   pointer-events: none;
+}
+/* Select or Remove under the values of a tapped flight: looking at one no
+   longer changes the selection (ui/pathHover.ts) */
+.segment-action {
+  display: block;
+  width: 100%;
+  min-height: var(--btn-min-height);
+  margin-top: var(--space-sm);
+  border: 1px solid var(--color-accent-blue);
+  border-radius: var(--radius-control);
+  background: rgba(var(--color-accent-blue-rgb), 0.15);
+  color: var(--color-accent-blue);
+  font: inherit;
+  cursor: pointer;
 }
 
 /* ==========================================================================
@@ -2157,6 +2174,22 @@ main > #map .maplibregl-ctrl-bottom-right {
   body:not(.stats-open) #selection-chip #selection-replay-btn:not([hidden]) {
     display: flex;
   }
+  /* "Sharing 1 flight" with Replay, the link, Exit and the profile beside
+     it ran out of a 360 px screen: share mode's mark and accent say it in
+     place of the word, and the link and Exit are icons named by their
+     labels (ui/pathSelection.ts) */
+  #selection-chip.is-sharing {
+    border-color: var(--color-accent-blue);
+  }
+  .is-sharing #selection-chip-mode {
+    display: flex;
+    color: var(--color-accent-blue);
+  }
+  .selection-chip-word,
+  #selection-link-btn .control-label,
+  #selection-exit-btn .control-label {
+    display: none;
+  }
   .stats-open #selection-chip {
     inset: var(--safe-top) calc(var(--space-sm) + var(--safe-right)) auto auto;
     transform: none;
@@ -2267,12 +2300,31 @@ main > #map .maplibregl-ctrl-bottom-right {
   border-radius: var(--radius-control);
   padding: 3px var(--space-xs);
   cursor: pointer;
+  flex: 1;
+}
+/* A row: the checkbox that adds the flight to the selection, and the
+   button that picks it alone (ui/airportFlights.ts) */
+.kh-popup-flights > * {
+  display: flex;
+  align-items: center;
 }
 /* A rule in the gap between two rows (the list holds nothing else): bare
    lines of text did not read as something to pick. A shadow, so the rows
    keep their height. */
-.kh-popup-flight + * {
+.kh-popup-flights > * + * {
   box-shadow: 0 -1px var(--color-divider);
+}
+/* The checkbox of a flight in a list, in the colour of a selection; the
+   flight list of the statistics rail has them too (ui/flightList.ts). At
+   the 24 px a target needs (WCAG 2.5.8): the rows are closer than that. */
+.kh-pick {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  margin: 0 var(--space-xs);
+  vertical-align: middle;
+  accent-color: var(--color-accent-blue);
+  cursor: pointer;
 }
 .kh-popup-flight:hover {
   background: var(--color-bg-hover);

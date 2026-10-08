@@ -3,6 +3,7 @@ import {
   DatasetIndex,
   FilterView,
   datasetIndex,
+  shownSelection,
 } from "../../../../kml_heatmap/frontend/calculations/datasetIndex";
 import type {
   KMLDataset,
@@ -270,5 +271,35 @@ describe("FilterView", () => {
       const view = new DatasetIndex(makeDataset()).filter("2025", "all");
       expect(view.segments()).toBe(view.segments());
     });
+  });
+});
+
+describe("shownSelection", () => {
+  const data = createDataset([
+    { id: 1, year: 2025, aircraft_registration: "D-AAAA" },
+    { id: 2, year: 2025, aircraft_registration: "D-BBBB" },
+  ]);
+  const state = (
+    selected: number[],
+    aircraft = "all",
+    currentData: KMLDataset | null = data,
+  ) => ({
+    currentData,
+    selectedYear: "all",
+    selectedAircraft: aircraft,
+    selectedPathIds: new Set(selected),
+  });
+
+  it("is the selection itself where the filter shows all of it", () => {
+    const app = state([1, 2]);
+    expect(shownSelection(app)).toBe(app.selectedPathIds);
+    const none = state([1, 2], "all", null);
+    expect(shownSelection(none)).toBe(none.selectedPathIds);
+  });
+
+  it("leaves out the selected flights the filter hides, or the dataset lacks", () => {
+    // Share mode keeps them; nothing draws, counts or frames them
+    expect([...shownSelection(state([1, 2, 99], "D-AAAA"))]).toEqual([1]);
+    expect([...shownSelection(state([2], "D-AAAA"))]).toEqual([]);
   });
 });

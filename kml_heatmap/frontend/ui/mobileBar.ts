@@ -19,7 +19,11 @@ import type { MapApp } from "../mapApp";
 import type { SheetRow, SheetSwitchRow } from "./mobileSheet";
 import { MobileSheet } from "./mobileSheet";
 import { icon, type IconName } from "../utils/icons";
-import { canShareLink, PHONE_LAYOUT_QUERY } from "../utils/device";
+import {
+  followPhoneLayout,
+  isPhoneLayout,
+  shareLinkLabel,
+} from "../utils/device";
 import {
   TOGGLES,
   type Toggle,
@@ -113,8 +117,8 @@ export class MobileBar {
   private readonly app: MapApp;
   private readonly tabs = new Map<TabId, HTMLButtonElement>();
   private readonly unsubscribes: (() => void)[] = [];
-  private readonly mql: MediaQueryList;
-  private readonly onBreakpoint: (e: MediaQueryListEvent) => void;
+  /** Ends following the phone layout (followPhoneLayout) */
+  private unfollowLayout: (() => void) | null = null;
   private mounted = false;
   /**
    * Ends following the replay and the hotspot tour, which the bar does
@@ -137,9 +141,6 @@ export class MobileBar {
       this.tabs.set(spec.id, tab);
       this.root.append(tab);
     }
-
-    this.mql = window.matchMedia(PHONE_LAYOUT_QUERY);
-    this.onBreakpoint = (e) => this.syncBreakpoint(e.matches);
   }
 
   /**
@@ -155,8 +156,10 @@ export class MobileBar {
 
   /** Mount now if the viewport is small and follow it from then on */
   start(): void {
-    this.syncBreakpoint(this.mql.matches);
-    this.mql.addEventListener("change", this.onBreakpoint);
+    this.syncBreakpoint(isPhoneLayout());
+    this.unfollowLayout ??= followPhoneLayout((phone) =>
+      this.syncBreakpoint(phone),
+    );
     this.unsubscribeEdge ??= this.app.store.subscribeKeys(
       ["replayActive", "tourView"],
       () => this.followEdge(),
@@ -164,7 +167,8 @@ export class MobileBar {
   }
 
   destroy(): void {
-    this.mql.removeEventListener("change", this.onBreakpoint);
+    this.unfollowLayout?.();
+    this.unfollowLayout = null;
     this.unsubscribeEdge?.();
     this.unsubscribeEdge = null;
     this.unmount();
@@ -480,7 +484,6 @@ export class MobileBar {
         ...needsFlights,
         onSelect: () => runAction(app, "toggleCrossSection"),
       },
-      ...this.toggleRows("more"),
       {
         kind: "action",
         id: "reset-view",
@@ -504,12 +507,14 @@ export class MobileBar {
         ...needsFlights,
         onSelect: () => runAction(app, "exportMap"),
       },
+      // Share mode next to the link it is for, as in the Share group
+      ...this.toggleRows("more"),
       {
         kind: "action",
         id: "share",
         icon: "share",
         // What the row does: the share sheet, where the phone has one
-        label: canShareLink() ? "Share link" : "Copy link",
+        label: shareLinkLabel(),
         onSelect: () => runAction(app, "shareLink"),
       },
       {

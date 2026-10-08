@@ -22,6 +22,7 @@ import {
   type StoreState,
 } from "../../kml_heatmap/frontend/state/store";
 import { TOGGLES } from "../../kml_heatmap/frontend/state/toggles";
+import { TouchClock } from "../../kml_heatmap/frontend/utils/device";
 import { segmentsForPathIds } from "../../kml_heatmap/frontend/calculations/statistics";
 import { DAY_MAX_FLIGHTS } from "../../kml_heatmap/frontend/utils/constants";
 import {
@@ -139,6 +140,7 @@ interface MockManagers {
     updateStatsPanel: Mock;
     updateStatsForSelection: Mock;
   };
+  touchClock: TouchClock;
   pathSelection: {
     togglePathSelection: Mock;
     selectPathsByAirport: Mock;
@@ -146,7 +148,9 @@ interface MockManagers {
     toggleIsolateSelection: Mock;
     updateIsolateButton: Mock;
     selectFlight: Mock;
+    pickFromList: Mock;
     markSelected: Mock;
+    held: Mock;
   };
   airportManager: {
     updateAirportPopups: Mock;
@@ -345,6 +349,7 @@ function createMockManagers(): MockManagers {
       updateStatsPanel: vi.fn(),
       updateStatsForSelection: vi.fn(),
     },
+    touchClock: new TouchClock(),
     pathSelection: {
       togglePathSelection: vi.fn(),
       selectPathsByAirport: vi.fn(),
@@ -352,7 +357,9 @@ function createMockManagers(): MockManagers {
       toggleIsolateSelection: vi.fn(),
       updateIsolateButton: vi.fn(),
       selectFlight: vi.fn(),
+      pickFromList: vi.fn(),
       markSelected: vi.fn(), // replaced below once the app exists
+      held: vi.fn(), // so is this
     },
     airportManager: {
       updateAirportPopups: vi.fn(),
@@ -557,18 +564,23 @@ function buildMockApp(
   defineStoreAccessors(app);
 
   const mockApp = app as unknown as MockApp;
-  // Marks the buttons of the flight lists the way PathSelection does, from
-  // the app's selection
+  // Marks the buttons and checkboxes of the flight lists the way
+  // PathSelection does, from the app's selection
   mockApp.pathSelection.markSelected.mockImplementation(
-    (buttons: Iterable<HTMLElement>) => {
-      for (const button of buttons) {
-        const id = Number(button.dataset["pathId"]);
-        button.setAttribute(
-          "aria-pressed",
-          String(mockApp.selectedPathIds.has(id)),
+    (rows: Iterable<HTMLElement>) => {
+      for (const row of rows) {
+        const selected = mockApp.selectedPathIds.has(
+          Number(row.dataset["pathId"]),
         );
+        if (row instanceof HTMLInputElement) row.checked = selected;
+        else row.setAttribute("aria-pressed", String(selected));
       }
     },
+  );
+
+  // A replay or the hotspot tour holds the selection, as PathSelection says
+  mockApp.pathSelection.held.mockImplementation(
+    () => mockApp.replayActive || mockApp.tourView !== null,
   );
 
   return mockApp;

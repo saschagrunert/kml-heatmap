@@ -411,7 +411,7 @@ describe("layers feature", () => {
       });
     });
 
-    it("draws selected paths at normal weight in isolate mode", () => {
+    it("draws selected paths at normal weight in share mode", () => {
       const props = calculateSegmentProperties({
         pathId: 1,
         selectedPathIds: new Set([1]),

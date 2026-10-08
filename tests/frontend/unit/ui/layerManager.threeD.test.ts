@@ -414,7 +414,7 @@ describe("LayerManager 3D view", () => {
       expect(ribbonWidthM()).toBeCloseTo(at7 / 2, 3);
     });
 
-    it("writes neither the selection nor the flights isolate mode hides for isolation alone", async () => {
+    it("writes neither the selection nor the flights share mode hides for isolation alone", async () => {
       mockApp.map!.jumpTo({ zoom: 7.2 });
       await drawClimb();
       await terrainCode();

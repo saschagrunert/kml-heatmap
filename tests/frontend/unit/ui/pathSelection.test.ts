@@ -3,9 +3,12 @@ import {
   CONTROL_COLUMNS,
   ISOLATE_HINT,
   mapChromePadding,
+  NOT_SHARED_HINT,
   PathSelection,
+  type PickList,
 } from "../../../../kml_heatmap/frontend/ui/pathSelection";
 import { resetSafeArea } from "../../../../kml_heatmap/frontend/utils/safeArea";
+import { TOAST_STACK_ID } from "../../../../kml_heatmap/frontend/utils/toast";
 import {
   createMockApp,
   createDataset,
@@ -45,12 +48,18 @@ describe("PathSelection", () => {
   let chip: HTMLElement;
   let chipCount: HTMLElement;
   let clearBtn: HTMLButtonElement;
+  let shareBtn: HTMLButtonElement;
+  let linkBtn: HTMLButtonElement;
+  let exitBtn: HTMLButtonElement;
 
   beforeEach(() => {
     vi.clearAllMocks();
     btn = document.createElement("button");
     btn.id = "isolate-btn";
-    btn.setAttribute("aria-label", "Isolate selected flights");
+    btn.setAttribute(
+      "aria-label",
+      "Share mode: show only the selected flights",
+    );
     document.body.appendChild(btn);
 
     chip = document.createElement("div");
@@ -58,9 +67,17 @@ describe("PathSelection", () => {
     chip.hidden = true;
     chipCount = document.createElement("span");
     chipCount.id = "selection-chip-count";
-    clearBtn = document.createElement("button");
-    clearBtn.id = "selection-clear-btn";
-    chip.append(chipCount, clearBtn);
+    const chipButton = (id: string): HTMLButtonElement => {
+      const button = document.createElement("button");
+      button.id = id;
+      button.innerHTML = '<span class="control-label"></span>';
+      return button;
+    };
+    shareBtn = chipButton("selection-share-btn");
+    linkBtn = chipButton("selection-link-btn");
+    exitBtn = chipButton("selection-exit-btn");
+    clearBtn = chipButton("selection-clear-btn");
+    chip.append(chipCount, shareBtn, linkBtn, exitBtn, clearBtn);
     document.body.appendChild(chip);
 
     mockApp = createMockApp({
@@ -89,6 +106,9 @@ describe("PathSelection", () => {
   afterEach(() => {
     btn.remove();
     chip.remove();
+    // A toast of one test stays for seconds, and a test that reads the
+    // first one read another test's in CI
+    document.getElementById(TOAST_STACK_ID)?.remove();
   });
 
   describe("togglePathSelection", () => {
@@ -129,7 +149,7 @@ describe("PathSelection", () => {
       ).not.toHaveBeenCalled();
     });
 
-    it("restyles the paths in isolate mode, which keep their runs", () => {
+    it("restyles the paths in share mode, which keep their runs", () => {
       mockApp.selectedPathIds.add(1);
       mockApp.isolateSelection = true;
       settle();
@@ -140,7 +160,7 @@ describe("PathSelection", () => {
       expect(restyles()).toBe(1);
     });
 
-    it("disables isolate mode when the last path is deselected", () => {
+    it("disables share mode when the last path is deselected", () => {
       mockApp.selectedPathIds.add(1);
       mockApp.isolateSelection = true;
       settle();
@@ -196,7 +216,7 @@ describe("PathSelection", () => {
       expect(restyles()).toBe(0);
     });
 
-    it("restyles the paths when isolate mode is active", () => {
+    it("restyles the paths when share mode is active", () => {
       mockApp.selectedPathIds.add(4);
       mockApp.isolateSelection = true;
       settle();
@@ -247,21 +267,21 @@ describe("PathSelection", () => {
       expect(restyles()).toBe(1);
     });
 
-    it("disables isolate mode when clearing selection", () => {
+    it("disables share mode when clearing selection", () => {
       mockApp.isolateSelection = true;
       settle();
 
       pathSelection.clearSelection();
 
       expect(mockApp.isolateSelection).toBe(false);
-      // Leaving isolate mode lifts the filter that hid the other paths
+      // Leaving share mode lifts the filter that hid the other paths
       expect(rebuilds()).toBe(0);
       expect(restyles()).toBe(1);
     });
   });
 
   describe("toggleIsolateSelection", () => {
-    it("enables isolate mode when paths are selected and restyles", () => {
+    it("enables share mode when paths are selected and restyles", () => {
       mockApp.selectedPathIds.add(1);
 
       pathSelection.toggleIsolateSelection();
@@ -271,7 +291,7 @@ describe("PathSelection", () => {
       expect(restyles()).toBe(1);
     });
 
-    it("disables isolate mode when toggled again", () => {
+    it("disables share mode when toggled again", () => {
       mockApp.selectedPathIds.add(1);
       mockApp.isolateSelection = true;
       settle();
@@ -331,6 +351,43 @@ describe("PathSelection", () => {
 
       pathSelection.toggleIsolateSelection();
       expect(map.fitBounds).toHaveBeenCalledTimes(1);
+    });
+
+    it("frames the shared flights the filter shows, not the ones it hides", () => {
+      mockApp.currentData = createDataset(
+        [
+          { id: 1, aircraft_registration: "D-AAAA" },
+          { id: 2, aircraft_registration: "D-BBBB" },
+        ],
+        [
+          createSegment({
+            path_id: 1,
+            coords: [
+              [50, 8],
+              [51, 9],
+            ],
+          }),
+          createSegment({
+            path_id: 2,
+            coords: [
+              [40, 2],
+              [41, 3],
+            ],
+          }),
+        ],
+      );
+      mockApp.selectedPathIds.add(1);
+      mockApp.selectedPathIds.add(2);
+      mockApp.selectedAircraft = "D-AAAA";
+      const map = mockApp.map!;
+
+      pathSelection.toggleIsolateSelection();
+
+      // A flight not drawn widened the frame by a country
+      expect(map.fitBounds.mock.calls[0]![0]).toEqual([
+        [8, 50],
+        [9, 51],
+      ]);
     });
   });
 
@@ -539,6 +596,334 @@ describe("PathSelection", () => {
     });
   });
 
+  describe("while the hotspot tour runs", () => {
+    beforeEach(() => {
+      mockApp.selectedPathIds.add(1);
+      mockApp.tourView = {} as NonNullable<MockApp["tourView"]>;
+    });
+
+    it("keeps the selection and the mode the tour tours", () => {
+      // The tour holds Clear and Share mode; a list and the values of a
+      // flight left open on the map reached the selection all the same
+      pathSelection.selectFlight(2);
+      pathSelection.selectFlight(3, true);
+      pathSelection.togglePathSelection(1);
+      pathSelection.clearSelection();
+      pathSelection.toggleIsolateSelection();
+      const list: PickList = { order: [1, 2, 3], anchor: 1 };
+      pathSelection.pickFromList(
+        3,
+        new MouseEvent("click", { shiftKey: true }),
+        list,
+      );
+
+      expect([...mockApp.selectedPathIds]).toEqual([1]);
+      expect(mockApp.isolateSelection).toBe(false);
+      // An ignored click is no start of a range
+      expect(list.anchor).toBe(1);
+    });
+  });
+
+  describe("share mode", () => {
+    beforeEach(() => {
+      mockApp.selectedPathIds.add(1);
+      mockApp.selectedPathIds.add(2);
+      mockApp.store.notifyMutation("selectedPathIds");
+      pathSelection.toggleIsolateSelection();
+    });
+
+    it("only shows a shared flight picked from a list", async () => {
+      mockApp.currentData = createDataset(
+        [{ id: 1 }, { id: 2 }],
+        [1, 2].map((id) =>
+          createSegment({
+            path_id: id,
+            coords: [
+              [50 + id, 8],
+              [51 + id, 9],
+            ],
+          }),
+        ),
+      );
+      const map = mockApp.map!;
+      map.fitBounds.mockClear();
+
+      // A pick added the flight or took it out of the shared ones, and
+      // before that cleared them, which ended the mode
+      pathSelection.selectFlight(1);
+
+      expect([...mockApp.selectedPathIds]).toEqual([1, 2]);
+      expect(mockApp.isolateSelection).toBe(true);
+      // Brought into view alone, once the layout has settled
+      await vi.waitFor(() => expect(map.fitBounds).toHaveBeenCalledTimes(1));
+      expect(map.fitBounds.mock.calls[0]![0]).toEqual([
+        [8, 51],
+        [9, 52],
+      ]);
+    });
+
+    it("leaves the map alone when it was moved, or the flight went, before the frame", async () => {
+      mockApp.currentData = createDataset(
+        [{ id: 1 }, { id: 2 }],
+        [1, 2].map((id) =>
+          createSegment({
+            path_id: id,
+            coords: [
+              [50 + id, 8],
+              [51 + id, 9],
+            ],
+          }),
+        ),
+      );
+      const map = mockApp.map!;
+      map.fitBounds.mockClear();
+      const settled = async (): Promise<void> => {
+        for (let i = 0; i < 6; i++) {
+          await new Promise((resolve) => setTimeout(resolve, 20));
+        }
+      };
+
+      // Moved by hand while the layout settled: the user's map is theirs
+      pathSelection.selectFlight(1);
+      map.emit("movestart", { originalEvent: new MouseEvent("mousedown") });
+      await settled();
+      // Taken out of the shared ones meanwhile, by its checkbox
+      pathSelection.selectFlight(2);
+      pathSelection.togglePathSelection(2);
+      await settled();
+      // Out of share mode meanwhile, by Exit
+      pathSelection.selectFlight(1);
+      pathSelection.toggleIsolateSelection();
+      await settled();
+
+      expect(map.fitBounds).not.toHaveBeenCalled();
+    });
+
+    it("says how to add a flight that is not shared, and leaves it out", async () => {
+      const map = mockApp.map!;
+      map.fitBounds.mockClear();
+
+      pathSelection.selectFlight(3);
+
+      expect([...mockApp.selectedPathIds]).toEqual([1, 2]);
+      expect(
+        [...document.querySelectorAll(".toast-notification")].map(
+          (toast) => toast.textContent,
+        ),
+      ).toContain(NOT_SHARED_HINT);
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(map.fitBounds).not.toHaveBeenCalled();
+    });
+
+    it("adds or takes out a flight of its checkbox, and ends with the last one", () => {
+      pathSelection.selectFlight(3, true);
+      expect([...mockApp.selectedPathIds]).toEqual([1, 2, 3]);
+
+      pathSelection.selectFlight(3, true);
+      pathSelection.selectFlight(1, true);
+      expect([...mockApp.selectedPathIds]).toEqual([2]);
+      expect(mockApp.isolateSelection).toBe(true);
+
+      pathSelection.selectFlight(2, true);
+      expect(mockApp.selectedPathIds.size).toBe(0);
+      expect(mockApp.isolateSelection).toBe(false);
+    });
+
+    it("is left with the flights still selected", () => {
+      pathSelection.toggleIsolateSelection();
+
+      expect(mockApp.isolateSelection).toBe(false);
+      expect([...mockApp.selectedPathIds]).toEqual([1, 2]);
+    });
+  });
+
+  describe("pickFromList", () => {
+    const click = (init: MouseEventInit = {}): MouseEvent =>
+      new MouseEvent("click", init);
+    let list: PickList;
+    beforeEach(() => {
+      list = { order: [5, 4, 3, 2, 1], anchor: null };
+    });
+
+    it("picks the flight of a plain click alone", () => {
+      mockApp.selectedPathIds.add(1);
+
+      pathSelection.pickFromList(3, click(), list);
+
+      expect([...mockApp.selectedPathIds]).toEqual([3]);
+    });
+
+    it("adds a flight with Ctrl or Cmd, or takes it out", () => {
+      mockApp.selectedPathIds.add(1);
+
+      pathSelection.pickFromList(3, click({ ctrlKey: true }), list);
+      expect([...mockApp.selectedPathIds]).toEqual([1, 3]);
+
+      pathSelection.pickFromList(1, click({ metaKey: true }), list);
+      expect([...mockApp.selectedPathIds]).toEqual([3]);
+    });
+
+    it("adds or takes out the flight of a checkbox, and ticks it as the selection is", () => {
+      // A finger has no Ctrl: the box is how it puts flights together
+      const box = document.createElement("input");
+      box.type = "checkbox";
+      document.body.append(box);
+      mockApp.selectedPathIds.add(1);
+      const tick = (): MouseEvent => {
+        const event = click();
+        box.addEventListener(
+          "click",
+          (e) => pathSelection.pickFromList(2, e, list),
+          { once: true },
+        );
+        box.dispatchEvent(event);
+        return event;
+      };
+
+      tick();
+      expect([...mockApp.selectedPathIds]).toEqual([1, 2]);
+      expect(box.checked).toBe(true);
+
+      tick();
+      expect([...mockApp.selectedPathIds]).toEqual([1]);
+      expect(box.checked).toBe(false);
+
+      // Held by a replay, the box goes back to what the selection is
+      mockApp.replayActive = true;
+      tick();
+      expect(box.checked).toBe(false);
+      box.remove();
+    });
+
+    it("adds the flights from the one clicked last with Shift, in the list's order", () => {
+      pathSelection.pickFromList(4, click(), list);
+      pathSelection.pickFromList(2, click({ shiftKey: true }), list);
+
+      expect([...mockApp.selectedPathIds].sort()).toEqual([2, 3, 4]);
+
+      // Backwards as well, from the last click on
+      pathSelection.pickFromList(5, click({ shiftKey: true }), list);
+      expect([...mockApp.selectedPathIds].sort()).toEqual([2, 3, 4, 5]);
+    });
+
+    it("takes a range out with Shift where the row clicked was ticked", () => {
+      for (const id of [5, 4, 3, 2, 1]) mockApp.selectedPathIds.add(id);
+      list.anchor = 4;
+
+      pathSelection.pickFromList(2, click({ shiftKey: true }), list);
+
+      // What the box of the row goes to, for the whole range: it added
+      // the range whatever the box said, and a ticked one stayed ticked
+      expect([...mockApp.selectedPathIds].sort()).toEqual([1, 5]);
+    });
+
+    it("toggles the row of the range's start alone with Shift", () => {
+      list.anchor = 3;
+
+      pathSelection.pickFromList(3, click({ shiftKey: true }), list);
+      expect([...mockApp.selectedPathIds]).toEqual([3]);
+
+      // A second Shift on it added it again; it takes it out
+      pathSelection.pickFromList(3, click({ shiftKey: true }), list);
+      expect(mockApp.selectedPathIds.size).toBe(0);
+    });
+
+    it("ends share mode with a range that takes the last shared flights out", () => {
+      mockApp.selectedPathIds.add(3);
+      mockApp.selectedPathIds.add(4);
+      mockApp.isolateSelection = true;
+      list.anchor = 4;
+      const box = document.createElement("input");
+      box.type = "checkbox";
+      box.checked = true;
+      document.body.append(box);
+      const seen: [number, boolean][] = [];
+      mockApp.store.subscribe("selectedPathIds", () => {
+        seen.push([mockApp.selectedPathIds.size, mockApp.isolateSelection]);
+      });
+      box.addEventListener(
+        "click",
+        (e) => pathSelection.pickFromList(3, e, list),
+        { once: true },
+      );
+
+      box.dispatchEvent(click({ shiftKey: true }));
+
+      expect(mockApp.selectedPathIds.size).toBe(0);
+      // Never an empty selection still shared
+      expect(seen).toEqual([[0, false]]);
+      box.remove();
+    });
+
+    it("keeps a start of the range for each list", () => {
+      const other: PickList = { order: [1, 2, 3], anchor: null };
+
+      pathSelection.pickFromList(5, click({ ctrlKey: true }), list);
+      pathSelection.pickFromList(1, click({ ctrlKey: true }), other);
+
+      expect(list.anchor).toBe(5);
+      expect(other.anchor).toBe(1);
+      // From 5 in this list's order, not from 1 of the other one's
+      pathSelection.pickFromList(3, click({ shiftKey: true }), list);
+      expect([...mockApp.selectedPathIds].sort()).toEqual([1, 3, 4, 5]);
+    });
+
+    it("adds the flights of a range in one update", () => {
+      pathSelection.pickFromList(5, click(), list);
+      const updates = vi.fn();
+      mockApp.store.subscribe("selectedPathIds", updates);
+
+      pathSelection.pickFromList(1, click({ shiftKey: true }), list);
+
+      expect(updates).toHaveBeenCalledOnce();
+      expect(mockApp.selectedPathIds.size).toBe(5);
+    });
+
+    it("adds the one flight with Shift where no click came before in the list", () => {
+      mockApp.selectedPathIds.add(1);
+
+      pathSelection.pickFromList(3, click({ shiftKey: true }), {
+        order: [3, 2],
+        anchor: null,
+      });
+
+      expect([...mockApp.selectedPathIds]).toEqual([1, 3]);
+    });
+
+    it("changes the flights of share mode with the checkbox alone", () => {
+      mockApp.selectedPathIds.add(1);
+      mockApp.isolateSelection = true;
+      const box = document.createElement("input");
+      box.type = "checkbox";
+      document.body.append(box);
+      const tick = (init: MouseEventInit = {}): void => {
+        box.addEventListener(
+          "click",
+          (e) => pathSelection.pickFromList(3, e, list),
+          { once: true },
+        );
+        box.dispatchEvent(click(init));
+      };
+
+      // A row, with or without a key held, only shows its flight, and is
+      // no start of a range
+      list.anchor = 5;
+      pathSelection.pickFromList(4, click(), list);
+      pathSelection.pickFromList(2, click({ ctrlKey: true }), list);
+      pathSelection.pickFromList(2, click({ metaKey: true }), list);
+      pathSelection.pickFromList(1, click({ shiftKey: true }), list);
+      expect([...mockApp.selectedPathIds]).toEqual([1]);
+      expect(list.anchor).toBe(5);
+
+      // Its box adds a range with Shift, from the box ticked last
+      tick({ shiftKey: true });
+      expect([...mockApp.selectedPathIds].sort()).toEqual([1, 3, 4, 5]);
+      expect(box.checked).toBe(true);
+      expect(mockApp.isolateSelection).toBe(true);
+      box.remove();
+    });
+  });
+
   describe("selectFlight", () => {
     it("selects just the flight", () => {
       mockApp.selectedPathIds.add(1);
@@ -560,12 +945,10 @@ describe("PathSelection", () => {
 
     it("selects nothing when the flight is the whole selection", () => {
       mockApp.selectedPathIds.add(2);
-      mockApp.isolateSelection = true;
 
       pathSelection.selectFlight(2);
 
       expect(mockApp.selectedPathIds.size).toBe(0);
-      expect(mockApp.isolateSelection).toBe(false);
     });
 
     it("swaps the selection in one update, announced once", () => {
@@ -815,6 +1198,21 @@ describe("PathSelection", () => {
   });
 
   describe("markSelected", () => {
+    it("ticks the checkboxes of the selected flights only", () => {
+      mockApp.selectedPathIds.add(1);
+      const boxes = [1, 2].map((id) => {
+        const box = document.createElement("input");
+        box.type = "checkbox";
+        box.dataset["pathId"] = String(id);
+        return box;
+      });
+
+      pathSelection.markSelected(boxes);
+
+      expect(boxes.map((b) => b.checked)).toEqual([true, false]);
+      expect(boxes[0]!.hasAttribute("aria-pressed")).toBe(false);
+    });
+
     it("presses the buttons of the selected flights only", () => {
       mockApp.selectedPathIds.add(2);
       const buttons = [1, 2].map((id) => {
@@ -900,18 +1298,194 @@ describe("PathSelection", () => {
 
       expect(chipCount.textContent).toBe("1,200 flights selected");
     });
+
+    it("says how many shared flights the filter hides, all of them too", () => {
+      mockApp.currentData = createDataset([
+        { id: 1, aircraft_registration: "D-AAAA" },
+        { id: 2, aircraft_registration: "D-BBBB" },
+        { id: 3, aircraft_registration: "D-BBBB" },
+      ]);
+      pathSelection.togglePathSelection(1);
+      pathSelection.togglePathSelection(2);
+      pathSelection.togglePathSelection(3);
+      pathSelection.toggleIsolateSelection();
+      expect(chipCount.textContent).toBe("Sharing 3 flights");
+
+      mockApp.selectedAircraft = "D-AAAA";
+      expect(chipCount.textContent).toBe(
+        "Sharing 3 flights, 2 hidden by the filter",
+      );
+      // A phone leaves out the words in .selection-chip-word
+      expect(
+        [...chipCount.childNodes]
+          .filter(
+            (node) =>
+              !(node instanceof Element) ||
+              !node.classList.contains("selection-chip-word"),
+          )
+          .map((node) => node.textContent)
+          .join(""),
+      ).toBe("3 flights, 2 hidden");
+
+      mockApp.selectedAircraft = "D-XXXX";
+      expect(chipCount.textContent).toBe(
+        "Sharing 3 flights, all hidden by the filter",
+      );
+      expect(mockApp.isolateSelection).toBe(true);
+
+      // Outside share mode the filter has deselected them already
+      mockApp.isolateSelection = false;
+      expect(chipCount.textContent).toBe("3 flights selected");
+    });
+
+    it("says a shared flight a year's dataset lacks is not in that year, the one it may be gone from", () => {
+      // The year's file cannot tell another year's flight from one a
+      // re-export removed: "hidden by the filter" was not so
+      mockApp.currentData = createDataset([
+        { id: 1, year: 2025, aircraft_registration: "D-AAAA" },
+        { id: 2, year: 2025, aircraft_registration: "D-BBBB" },
+      ]);
+      mockApp.selectedYear = "2025";
+      pathSelection.togglePathSelection(1);
+      pathSelection.togglePathSelection(99);
+      pathSelection.toggleIsolateSelection();
+      expect(chipCount.textContent).toBe("Sharing 2 flights, 1 not in 2025");
+
+      // One the year lacks and one the aircraft hides
+      mockApp.selectedAircraft = "D-BBBB";
+      expect(chipCount.textContent).toBe("Sharing 2 flights, none shown");
+
+      mockApp.selectedAircraft = "all";
+      pathSelection.togglePathSelection(1);
+      pathSelection.togglePathSelection(98);
+      expect(chipCount.textContent).toBe("Sharing 2 flights, none in 2025");
+    });
+
+    it("deselects on Exit what the filter hides, as a filter change does outside share mode", () => {
+      mockApp.currentData = createDataset([
+        { id: 1, aircraft_registration: "D-AAAA" },
+        { id: 2, aircraft_registration: "D-BBBB" },
+      ]);
+      pathSelection.togglePathSelection(1);
+      pathSelection.togglePathSelection(2);
+      pathSelection.toggleIsolateSelection();
+      mockApp.selectedAircraft = "D-AAAA";
+      const seen: [number, boolean][] = [];
+      mockApp.store.subscribe("selectedPathIds", () =>
+        seen.push([mockApp.selectedPathIds.size, mockApp.isolateSelection]),
+      );
+
+      // Exit: "2 flights selected" stayed with one drawn
+      pathSelection.toggleIsolateSelection();
+
+      expect([...mockApp.selectedPathIds]).toEqual([1]);
+      expect(mockApp.isolateSelection).toBe(false);
+      expect(seen).toEqual([[1, false]]);
+      expect(chipCount.textContent).toBe("1 flight selected");
+      expect(
+        [...document.querySelectorAll(".toast-notification")].map(
+          (toast) => toast.textContent,
+        ),
+      ).toContain(
+        "1 selected flight is hidden by the filter and was deselected",
+      );
+    });
+
+    it("offers Share and Clear outside share mode, the link and Exit in it", () => {
+      const shown = (): string[] =>
+        [shareBtn, linkBtn, exitBtn, clearBtn]
+          .filter((button) => !button.hidden)
+          .map((button) => button.id);
+      pathSelection.togglePathSelection(1);
+      pathSelection.togglePathSelection(2);
+      expect(shown()).toEqual(["selection-share-btn", "selection-clear-btn"]);
+
+      shareBtn.addEventListener("click", () =>
+        pathSelection.toggleIsolateSelection(),
+      );
+      shareBtn.click();
+
+      expect(mockApp.isolateSelection).toBe(true);
+      expect(chipCount.textContent).toBe("Sharing 2 flights");
+      // A phone shows the mark of the chip in place of the word
+      expect(chip.classList.contains("is-sharing")).toBe(true);
+      expect(chipCount.querySelector(".selection-chip-word")?.textContent).toBe(
+        "Sharing ",
+      );
+      expect(toastMock.announceStatus).toHaveBeenLastCalledWith(
+        "Sharing 2 flights",
+      );
+      expect(shown()).toEqual(["selection-link-btn", "selection-exit-btn"]);
+      expect(linkBtn.textContent).toBe("Copy link");
+      // Named by what it says, for speech input
+      expect(linkBtn.getAttribute("aria-label")).toBe(
+        "Copy link to these flights",
+      );
+
+      mockApp.isolateSelection = false;
+      expect(chipCount.textContent).toBe("2 flights selected");
+      expect(chip.classList.contains("is-sharing")).toBe(false);
+      expect(shown()).toEqual(["selection-share-btn", "selection-clear-btn"]);
+    });
+
+    it("names the link anew as the layout crosses the phone's breakpoint", () => {
+      const listeners: ((event: { matches: boolean }) => void)[] = [];
+      let phone = false;
+      const matchMedia = vi.fn(() => ({
+        get matches() {
+          return phone;
+        },
+        addEventListener: (
+          _: string,
+          listener: (event: { matches: boolean }) => void,
+        ) => listeners.push(listener),
+        removeEventListener: vi.fn(),
+      }));
+      vi.stubGlobal("matchMedia", matchMedia);
+      Object.defineProperty(navigator, "share", {
+        value: vi.fn(),
+        configurable: true,
+      });
+      try {
+        new PathSelection(asMapApp(mockApp));
+        expect(linkBtn.textContent).toBe("Copy link");
+
+        // Turned or narrowed into the phone layout, nothing selected anew
+        phone = true;
+        for (const listener of listeners) listener({ matches: true });
+
+        expect(linkBtn.textContent).toBe("Share link");
+        expect(linkBtn.getAttribute("aria-label")).toBe(
+          "Share link to these flights",
+        );
+      } finally {
+        vi.unstubAllGlobals();
+        Reflect.deleteProperty(navigator, "share");
+      }
+    });
+
+    it("hands the focus on to the button that takes the place of the one pressed", () => {
+      pathSelection.togglePathSelection(1);
+      shareBtn.focus();
+
+      mockApp.isolateSelection = true;
+      expect(document.activeElement).toBe(exitBtn);
+
+      mockApp.isolateSelection = false;
+      expect(document.activeElement).toBe(shareBtn);
+    });
   });
 
-  describe("isolate button", () => {
+  describe("share mode button", () => {
     it("is announced as unavailable without a selection, and stays focusable", () => {
       expect(btn.getAttribute("aria-disabled")).toBe("true");
       expect(btn.disabled).toBe(false);
-      expect(btn.title).toBe("Select flights to isolate");
+      expect(btn.title).toBe("Select flights to share");
 
       mockApp.selectedPathIds.add(1);
       mockApp.store.notifyMutation("selectedPathIds");
       expect(btn.getAttribute("aria-disabled")).toBe("false");
-      expect(btn.title).toBe("Isolate selected flights");
+      expect(btn.title).toBe("Share mode: show only the selected flights");
 
       mockApp.isolateSelection = true;
       expect(btn.getAttribute("aria-disabled")).toBe("false");
@@ -949,7 +1523,7 @@ describe("PathSelection", () => {
       expect(btn.classList.contains("active")).toBe(false);
     });
 
-    it("follows isolate mode through the store", () => {
+    it("follows share mode through the store", () => {
       mockApp.selectedPathIds.add(1);
       mockApp.store.notifyMutation("selectedPathIds");
 

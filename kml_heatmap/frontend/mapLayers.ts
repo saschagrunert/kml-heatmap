@@ -240,7 +240,7 @@ function addDataLayersTo(map: MapLibreMap): void {
   // ui/heatmapPaint.ts, which the data manager sets as paint properties. The
   // source merges the fixes into clusters for the zooms at which they are too
   // many to draw one by one (see HEATMAP_CLUSTER), adding up the heat of each
-  // point, `w` (see drawHeat in services/heatSource.ts). Isolate draws the
+  // point, `w` (see drawHeat in services/heatSource.ts). Share mode draws the
   // selected flights from a source of their own, so neither is written again
   // for it. The layers end where they have faded out to the heat lines (see
   // HEAT_LINES), so their sources are not cut into tiles of every level beyond

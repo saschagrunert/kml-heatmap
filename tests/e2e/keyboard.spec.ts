@@ -140,7 +140,7 @@ test.describe("Keyboard", () => {
     await expect(page.locator(".kh-popup-airport")).not.toBeFocused();
   });
 
-  test("Isolate says it is unavailable without a selection", async ({
+  test("Share mode says it is unavailable without a selection", async ({
     page,
   }) => {
     const isolate = page.locator("#isolate-btn");

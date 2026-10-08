@@ -20,6 +20,7 @@ import type { PathSegment } from "../types";
 import { domCache } from "../utils/domCache";
 import { generateSegmentPopupHtml } from "../utils/htmlGenerators";
 import { segmentsForPathIds } from "../calculations/statistics";
+import { shownSelection } from "../calculations/datasetIndex";
 import { calculateSegmentProperties, rangeMiddle } from "../features/layers";
 import {
   CONFIGS,
@@ -65,7 +66,8 @@ export function resolveColorRange(
   states: Readonly<Record<LayerMode, ModeState>>,
   config: LayerConfig,
 ): Range {
-  const selected = app.selectedPathIds;
+  // Of what is drawn: share mode keeps the flights the filter hides
+  const selected = shownSelection(app);
   const data = app.currentData;
   const full = rangeOf(app, config.mode);
   if (selected.size === 0 || !data) return full;
@@ -93,7 +95,7 @@ export function resolveColorRange(
 /**
  * Style the two layers of a mode for the current selection. The handle
  * owns their visibility, so what the main layer must not show (the
- * selected flights, drawn on top, or in isolate mode everything) is left
+ * selected flights, drawn on top, or in share mode everything) is left
  * out by a filter.
  */
 export function applyLook(

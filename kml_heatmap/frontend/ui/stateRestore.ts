@@ -22,7 +22,7 @@ import { StateManager } from "./stateManager";
 
 /**
  * The toggles `restoreState` sets from a saved state. The panels reopen
- * once there is data for them (see initialize), and isolating needs a
+ * once there is data for them (see initialize), and share mode needs a
  * selection, which `restoreState` sees to on its own.
  */
 const RESTORED_TOGGLES: readonly ToggleKey[] = TOGGLES.filter(
@@ -116,9 +116,10 @@ export function restoreState(app: MapApp): void {
     if (app.altitudeVisible && app.airspeedVisible) {
       app.airspeedVisible = false;
     }
-    // Isolating nothing is not a state the controls can leave: a link
+    // Sharing nothing is not a state the controls can leave: a link
     // written before path ids were versioned drops its selection but still
-    // carries the isolate flag
+    // carries the share mode flag. The flights its filter hides stay
+    // shared, and the chip says so (see fitSelection).
     if (state.isolateSelection !== undefined) {
       app.isolateSelection =
         state.isolateSelection && app.selectedPathIds.size > 0;

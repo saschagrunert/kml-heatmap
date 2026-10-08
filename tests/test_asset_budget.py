@@ -34,7 +34,10 @@ from kml_heatmap.site_assets import CSS_FILES, STATIC_DIR, _copy_and_minify_css
 # the map when the first year fails to load, the dimmed parts of an
 # unavailable sheet row and the phone's two line credit. Lowered from 44 KB
 # when the content of the statistics panel moved to wrapped.css with its code
-# (38,394 B after).
+# (38,394 B after). Raised from 40 KB to 40.75 KB for share mode: the Select
+# or Remove under the values of a tapped flight, the checkboxes of the
+# airport popup's flights, the chip's buttons that come and go and its
+# shorter form on a phone (40,844 B before, 41,622 B after).
 #
 # features.css and wrapped.css are fetched with their lazy bundles, not by a
 # first visit, so they are the more forgiving. The two were one 28.8 KB sheet
@@ -60,7 +63,7 @@ from kml_heatmap.site_assets import CSS_FILES, STATIC_DIR, _copy_and_minify_css
 # and places, fetched with its bundle, was set at 4,004 B with the same 2 KB
 # of room.
 STYLESHEET_BUDGET_BYTES = {
-    "styles.css": 40 * 1024,
+    "styles.css": int(40.75 * 1024),
     "features.css": int(21.5 * 1024),
     "wrapped.css": 36 * 1024,
     "search.css": int(5.75 * 1024),

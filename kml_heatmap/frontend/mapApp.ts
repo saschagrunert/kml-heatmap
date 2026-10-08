@@ -21,6 +21,7 @@ import {
   type LngLat,
   type LngLatBoundsLike,
   type MapMouseEvent,
+  type MapTouchEvent,
   type PaddingOptions,
   type StyleSpecification,
 } from "maplibre-gl";
@@ -72,7 +73,7 @@ import {
   whenStyleReady,
 } from "./utils/mapHelpers";
 import { prefersReducedMotion } from "./utils/motion";
-import { isPhoneLayout } from "./utils/device";
+import { isPhoneLayout, TouchClock } from "./utils/device";
 import { resetSafeArea } from "./utils/safeArea";
 import {
   DAY_MAX_FLIGHTS,
@@ -141,6 +142,7 @@ import {
 } from "./ui/replayButton";
 import {
   datasetIndex,
+  shownSelection,
   type PathIdsByAirport,
 } from "./calculations/datasetIndex";
 import type { StoreAccessors } from "./state/store";
@@ -276,7 +278,10 @@ export class MapApp {
     moveend?: (e: object) => void;
     zoomend?: (e: object) => void;
     click?: (e: MapMouseEvent) => void;
+    touchstart?: (e: MapTouchEvent) => void;
   } = {};
+  /** Tells the map's taps from its clicks (see handleMapClick) */
+  readonly touchClock = new TouchClock();
 
   // Map and layers
   map: MapLibreMap | null;
@@ -598,10 +603,11 @@ export class MapApp {
     this.lifetime.abort();
     resetSafeArea(true);
     if (this.map) {
-      const { moveend, zoomend, click } = this.mapHandlers;
+      const { moveend, zoomend, click, touchstart } = this.mapHandlers;
       if (moveend) this.map.off("moveend", moveend);
       if (zoomend) this.map.off("zoomend", zoomend);
       if (click) this.map.off("click", click);
+      if (touchstart) this.map.off("touchstart", touchstart);
       this.map.off("moveend", this.syncResetButton);
       this.map.off("error", this.handleMapError);
     }
@@ -871,7 +877,7 @@ export class MapApp {
 
   /**
    * Go back to what a first visit shows: the newest year, every aircraft,
-   * the heatmap and the airports, nothing selected or isolated, flat and
+   * the heatmap and the airports, nothing selected or shared, flat and
    * north up over all the flights. It goes through the year filter, so the
    * dropdowns, the loaded data and the store change together in one batch;
    * the saved state and the link follow the store and the camera as ever.
@@ -879,7 +885,7 @@ export class MapApp {
    * (REPLAY_DISABLED_CONTROL_IDS) and the phone's bar steps aside.
    */
   async resetView(): Promise<void> {
-    // Like Isolate with nothing selected: unavailable, and a press says why
+    // Like Share mode with nothing selected: unavailable, and a press says why
     // (see syncResetButton)
     if (!this.canResetView()) {
       showToast(this.resetViewReason() ?? RESET_VIEW_DONE_MESSAGE);
@@ -889,10 +895,14 @@ export class MapApp {
     const applied = await this.filterManager.filterByYear(
       this.defaultYear,
       () => {
-        // The selection goes with the year switch, as with every filter
+        // A filter change keeps the flights it still shows; this one is
+        // the start view, with nothing selected
         for (const key of [...TOGGLE_KEYS, "selectedAircraft"] as const) {
           this.store.set(key, defaults[key]);
         }
+        // The one way to clear it; never held here, as a replay and the
+        // hotspot tour hold Reset view as well (ui/heldControls.ts)
+        this.pathSelection.clearSelection();
       },
     );
     // A reset happens whole or not at all. Replaced by a newer filter
@@ -967,26 +977,30 @@ export class MapApp {
 
   /**
    * Whether the current selection can be replayed: a flight with a segment
-   * timed after its start among it. Replay runs from 0 to the latest
-   * segment time, so a flight whose times are all 0 (a single timed
-   * segment, or points logged at the same second) finished the moment it
-   * started and drew nothing. More than one, up to DAY_MAX_FLIGHTS, play
-   * one after another, those without times left out (ui/replayAll.ts).
+   * timed after its start among the selected flights the filter shows
+   * (shownSelection). Replay runs from 0 to the latest segment time, so a
+   * flight whose times are all 0 (a single timed segment, or points logged
+   * at the same second) finished the moment it started and drew nothing.
+   * More than one, up to DAY_MAX_FLIGHTS, play one after another, those
+   * without times left out (ui/replayAll.ts). Share mode keeps the flights
+   * a filter hides, which the map does not draw: they are neither played
+   * nor counted.
    */
   canReplay(): boolean {
     return (
-      this.selectedPathIds.size <= DAY_MAX_FLIGHTS && this.timedSelection()
+      shownSelection(this).size <= DAY_MAX_FLIGHTS && this.timedSelection()
     );
   }
 
   /** Whether a flight of the selection has times to replay (canReplay) */
   private timedSelection(): boolean {
     const segments = this.fullPathSegments;
+    const shown = shownSelection(this);
     return (
-      this.selectedPathIds.size > 0 &&
+      shown.size > 0 &&
       this.hasTimingData &&
       !!segments &&
-      segmentsForPathIds(segments, this.selectedPathIds).some(
+      segmentsForPathIds(segments, shown).some(
         (segment) => (segment.time ?? 0) > 0,
       )
     );
@@ -1007,11 +1021,12 @@ export class MapApp {
   /**
    * Whether Replay plays the selection one after another, in the panel of
    * the replay of all flights (toggleSequence in ui/replayAll.ts), rather
-   * than the replay of one flight: with more than one selected. Replay and
-   * a click on the flight profile both go by it.
+   * than the replay of one flight: with more than one selected that the
+   * filter shows (shownSelection). Replay and a click on the flight profile
+   * both go by it.
    */
   playsInSequence(): boolean {
-    return this.selectedPathIds.size > 1;
+    return shownSelection(this).size > 1;
   }
 
   /**
@@ -1124,14 +1139,15 @@ export class MapApp {
 
   /**
    * Fetch the feature bundle as up to DAY_MAX_FLIGHTS flights are first
-   * selected: it draws their profile from then on (ui/flightProfile.ts). A
-   * failed fetch is tried again with the next selection, or as a replay of
-   * it opens, which fetched the bundle itself.
+   * selected, of those the filter shows (shownSelection): it draws their
+   * profile from then on (ui/flightProfile.ts). A failed fetch is tried
+   * again with the next selection, or as a replay of it opens, which
+   * fetched the bundle itself.
    */
   private followFlightProfile(): void {
     let pending = false;
     const check = (): void => {
-      const size = this.selectedPathIds.size;
+      const size = shownSelection(this).size;
       if (pending || !size || size > DAY_MAX_FLIGHTS) return;
       pending = true;
       void loadFeatures().then((features) => {
@@ -1143,7 +1159,13 @@ export class MapApp {
       });
     };
     let stop: (() => void) | null = this.store.subscribeKeys(
-      ["selectedPathIds", "replayActive"],
+      [
+        "selectedPathIds",
+        "replayActive",
+        "currentData",
+        "selectedYear",
+        "selectedAircraft",
+      ],
       check,
     );
     check();
@@ -1151,7 +1173,7 @@ export class MapApp {
 
   /**
    * Show Reset view unavailable while the page is what it would make of it,
-   * or still loading, the way Isolate and Replay are: aria-disabled, which
+   * or still loading, the way Share mode and Replay are: aria-disabled, which
    * the stylesheet dims, but still in the tab order. It runs for the keys
    * Reset view sets, the data (a first visit's year is only known with it),
    * the end of the first load and the end of every camera move, the fit's
@@ -1163,7 +1185,7 @@ export class MapApp {
     if (this.replayActive) return;
     const button = domCache.get("reset-view-btn");
     if (button) {
-      // Dimmed, its tooltip says why, as Isolate's does
+      // Dimmed, its tooltip says why, as Share mode's does
       setUnavailableFor(button, this.resetViewReason());
     }
     this.mobileBar?.refreshSheet();
@@ -1260,10 +1282,12 @@ export class MapApp {
         this.airportManager.updateAirportMarkerSizes();
       },
       click: (e) => this.handleMapClick(e),
+      touchstart: (e) => this.touchClock.note(e.originalEvent),
     };
     this.map.on("moveend", this.mapHandlers.moveend!);
     this.map.on("zoomend", this.mapHandlers.zoomend!);
     this.map.on("click", this.mapHandlers.click!);
+    this.map.on("touchstart", this.mapHandlers.touchstart!);
   }
 
   /**
@@ -1314,27 +1338,25 @@ export class MapApp {
 
     const hit = this.layerManager.hitTest(e.point);
     // The tiles still show the data of before, so this may well be a click
-    // on a flight. Clearing the selection would throw away the user's work
-    // on a guess; doing nothing costs a second click at worst.
+    // on a flight. Acting on a guess would put away what the user has open;
+    // doing nothing costs a second click at worst.
     if (hit === "stale") return;
     // From here on the click is acted on, and only then does it close what
     // a click on the map closes: an ignored click changes nothing at all
     this.airportManager.closePopup();
     if (hit) {
-      this.layerManager.onPathClick(hit, e.lngLat);
+      this.layerManager.onPathClick(
+        hit,
+        e.lngLat,
+        this.touchClock.isTouchClick(e.originalEvent),
+      );
       return;
     }
-    // A click on the empty map: the values a tap left go with the selection.
-    // Only where the flights can be clicked, in a colour layer: over the
-    // heat alone a click on a flight is one on the empty map, and the
-    // selection is cleared with the chip's Clear instead.
+    // A click on the empty map puts the values a tap left away, and leaves
+    // the selection alone, in share mode or not: a click that missed a
+    // flight by a few pixels, or one that read the heat cloud, threw away
+    // the flights someone had put together. The chip's Clear clears.
     this.layerManager.closeSegmentPopup();
-    if (
-      this.selectedPathIds.size > 0 &&
-      (this.altitudeVisible || this.airspeedVisible)
-    ) {
-      this.pathSelection.clearSelection();
-    }
   }
 }
 

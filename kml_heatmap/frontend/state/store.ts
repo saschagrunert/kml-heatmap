@@ -231,6 +231,7 @@ export class AppStore {
     const oldVal = this.state[key];
     if (oldVal === value) return;
     this.state[key] = value;
+    this.settle(key);
     if (this.batchDepth > 0 || this.isNotifying) {
       if (!this.pendingOldValues.has(key)) {
         this.pendingOldValues.set(key, oldVal);
@@ -241,6 +242,7 @@ export class AppStore {
   }
 
   notifyMutation<K extends keyof StoreState>(key: K): void {
+    this.settle(key);
     const val = this.state[key];
     if (this.batchDepth > 0 || this.isNotifying) {
       if (!this.pendingOldValues.has(key)) {
@@ -249,6 +251,19 @@ export class AppStore {
       this.pendingMutations.add(key);
     } else {
       this.notify(key, val, val);
+    }
+  }
+
+  /**
+   * Keep what a key says of another before any listener hears of either:
+   * share mode (`isolateSelection`) ends with the last flight it shares,
+   * however the selection lost it. Four places ended it each, and a
+   * listener that ran between a change and its end saw an empty selection
+   * still shared, which left the button pressed but stuck.
+   */
+  private settle(key: keyof StoreState): void {
+    if (key === "selectedPathIds" && this.state.selectedPathIds.size === 0) {
+      this.set("isolateSelection", false);
     }
   }
 

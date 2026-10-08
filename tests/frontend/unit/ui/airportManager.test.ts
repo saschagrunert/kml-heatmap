@@ -611,14 +611,16 @@ describe("AirportManager", () => {
       expect(hidden()).toEqual(["EDDK", "LOWW"]);
     });
 
-    it("adds airports of selected paths to the filter's airports", () => {
+    it("adds no airport of a selected flight the filter hides", () => {
+      // Share mode keeps such a flight, which the map does not draw; its
+      // airports showed all the same
       mockApp.selectedYear = "2025";
       // Path 3 flew in 2024, to EDDK
       mockApp.selectedPathIds.add(3);
 
       airportManager.showAirports();
 
-      expect(hidden()).toEqual(["LOWW"]);
+      expect(hidden()).toEqual(["EDDK", "LOWW"]);
     });
 
     it("keeps every airport for a selection without a filter (regression)", () => {
@@ -629,12 +631,15 @@ describe("AirportManager", () => {
       expect(hidden()).toEqual([]);
     });
 
-    it("only shows airports of selected paths in isolate mode", () => {
-      mockApp.selectedYear = "2025";
+    it("only shows airports of selected paths in share mode", () => {
       mockApp.selectedPathIds.add(3);
       mockApp.isolateSelection = true;
 
       expect(hidden()).toEqual(["EDDM", "LOWW"]);
+
+      // Of those the filter shows: none, where it hides the one shared
+      mockApp.selectedYear = "2025";
+      expect(hidden()).toEqual(["EDDF", "EDDM", "EDDK", "LOWW"]);
     });
 
     it("shows hidden markers that become visible again", () => {
@@ -750,6 +755,29 @@ describe("AirportManager", () => {
 
       expect(mockApp.pathSelection.selectPathsByAirport).not.toHaveBeenCalled();
       expect(airportManager.isPopupOpen("EDDF")).toBe(true);
+    });
+
+    it("opens the popup but leaves the selection alone while the hotspot tour runs", () => {
+      mockApp.tourView = {} as NonNullable<MockApp["tourView"]>;
+
+      airportManager.activateAirport("EDDF");
+
+      expect(mockApp.pathSelection.selectPathsByAirport).not.toHaveBeenCalled();
+      expect(airportManager.isPopupOpen("EDDF")).toBe(true);
+    });
+
+    it("only opens the popup over a selection, in share mode or not", () => {
+      // The home base's hundreds of flights joined the two or three picked
+      mockApp.selectedPathIds = new Set([7]);
+
+      airportManager.activateAirport("EDDF");
+      expect(airportManager.isPopupOpen("EDDF")).toBe(true);
+
+      mockApp.isolateSelection = true;
+      airportManager.activateAirport("EDDM");
+
+      expect(mockApp.pathSelection.selectPathsByAirport).not.toHaveBeenCalled();
+      expect(airportManager.isPopupOpen("EDDM")).toBe(true);
     });
   });
 

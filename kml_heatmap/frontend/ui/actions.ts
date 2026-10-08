@@ -14,8 +14,8 @@ import { focusStatsRail } from "./appChrome";
 /** Said for a control that waits for the first load (runAction) */
 export const STILL_LOADING_MESSAGE = "Still loading the flights";
 
-/** Why Isolate cannot act yet, on the button and in the phone's sheet */
-export const NO_SELECTION_MESSAGE = "Select flights to isolate";
+/** Why Share mode cannot act yet, on the button and in the phone's sheet */
+export const NO_SELECTION_MESSAGE = "Select flights to share";
 
 /** Said for a control that needs flights while none loaded (runAction) */
 export const NO_DATA_MESSAGE = "The flights did not load, use Retry";

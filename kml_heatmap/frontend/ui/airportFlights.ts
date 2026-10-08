@@ -3,7 +3,10 @@
  *
  * A click on a path is the only other way to select a single flight, and a
  * keyboard cannot click a path, so without this list replay, which plays
- * the selected flights, was out of a keyboard's reach. Each flight is
+ * the selected flights, was out of a keyboard's reach. A row picks its
+ * flight alone, and its checkbox adds it to the selection or takes it out:
+ * that is how flights of the airport join a selection made already, or the
+ * flights of share mode (see PathSelection.pickFromList). Each flight is
  * named by its route, aircraft and year only: a date or a time of day
  * would say when somebody flew.
  *
@@ -21,6 +24,7 @@ import { datasetIndex } from "../calculations/datasetIndex";
 import { escapeHtml } from "../utils/htmlGenerators";
 import { airportCode } from "../features/airports";
 import { watchScrollEnd, type ScrollEndWatcher } from "../utils/scrollFade";
+import type { PickList } from "./pathSelection";
 
 /** Apps whose selection the open list already follows */
 const following = new WeakSet<MapApp>();
@@ -39,6 +43,34 @@ function routeEnd(label = "?"): string {
  */
 export function flightRoute(path: PathInfo): string {
   return routeEnd(path.start_airport) + " → " + routeEnd(path.end_airport);
+}
+
+/**
+ * How a list names a flight: its route, aircraft and year. The airport
+ * popup's rows and the checkboxes of both lists say it, so a row of the
+ * flight list is not one of several "EDXX → EDXX" circuits alike.
+ */
+export function flightLabel(path: PathInfo): string {
+  return [flightRoute(path), path.aircraft_registration, path.year]
+    .filter(Boolean)
+    .join(" · ");
+}
+
+/**
+ * The checkbox of a listed flight, which adds it to the selection or takes
+ * it out, while the rest of its row picks it alone (see
+ * PathSelection.pickFromList). Named after the flight by `label`, which is
+ * escaped already. This list and the flight list of the statistics rail
+ * have one per row.
+ */
+export function pickBox(id: number, label: string): string {
+  return (
+    '<input type="checkbox" class="kh-pick" data-path-id="' +
+    id +
+    '" aria-label="Select ' +
+    label +
+    '">'
+  );
 }
 
 /**
@@ -62,18 +94,22 @@ export function listFlights(app: MapApp, popup: Popup, name: string): void {
 
   const byId = datasetIndex(data).pathInfoById;
   let html = "";
+  /** The flights in the order of the rows, for a Shift click's range */
+  const order: number[] = [];
+  const picks: PickList = { order, anchor: null };
   for (const id of app.airportToPaths[name] ?? []) {
     const path = byId.get(id);
     if (!path) continue;
-    const label = [flightRoute(path), path.aircraft_registration, path.year]
-      .filter(Boolean)
-      .join(" · ");
+    order.push(id);
+    const label = escapeHtml(flightLabel(path));
     html +=
+      "<div>" +
+      pickBox(id, label) +
       '<button type="button" class="kh-popup-flight" data-path-id="' +
       id +
       '">' +
-      escapeHtml(label) +
-      "</button>";
+      label +
+      "</button></div>";
   }
   if (!html) return;
 
@@ -93,11 +129,11 @@ export function listFlights(app: MapApp, popup: Popup, name: string): void {
 
   const title = document.createElement("div");
   title.className = "popup-section-label kh-popup-flights-label";
-  title.textContent = "Select a flight";
+  title.textContent = "Flights";
   const list = document.createElement("div");
   list.className = "kh-popup-flights";
   list.setAttribute("role", "group");
-  list.setAttribute("aria-label", "Select a flight");
+  list.setAttribute("aria-label", "Flights");
   list.innerHTML = html;
   host.append(title, list);
   // A long list stops mid-row; the bottom fades while there is more
@@ -107,11 +143,15 @@ export function listFlights(app: MapApp, popup: Popup, name: string): void {
   popup.once("close", () => watcher.stop());
 
   list.addEventListener("click", (event) => {
-    const button = (event.target as Element).closest<HTMLElement>(
+    const row = (event.target as Element).closest<HTMLElement>(
       "[data-path-id]",
     );
-    if (button) {
-      app.pathSelection.selectFlight(Number(button.dataset["pathId"]));
+    if (row) {
+      app.pathSelection.pickFromList(
+        Number(row.dataset["pathId"]),
+        event,
+        picks,
+      );
     }
   });
 
@@ -151,14 +191,17 @@ export function runwayUse(paths: PathInfo[], code?: string): string {
 
 /**
  * Mark the listed flights that are part of the selection. Opening the popup
- * selects every flight of the airport, which pressed every row: the list
- * looked like a choice already made. While all of them are selected they
- * stay pressed for a screen reader, and the stylesheet draws them as rows
- * to pick from (`is-all-pressed`), unless there is only one.
+ * with nothing selected selects every flight of the airport, which pressed
+ * every row: the list looked like a choice already made. While all of them
+ * are selected they stay pressed for a screen reader, and the stylesheet
+ * draws them as rows to pick from (`is-all-pressed`), unless there is only
+ * one.
  */
 function markSelected(app: MapApp): void {
+  app.pathSelection.markSelected(
+    document.querySelectorAll<HTMLElement>(".kh-popup-flights [data-path-id]"),
+  );
   const buttons = document.querySelectorAll<HTMLElement>(".kh-popup-flight");
-  app.pathSelection.markSelected(buttons);
   // The one flight of an airport pressed or not is the whole choice, and
   // drawn unpressed both ways a press on it showed nothing
   document

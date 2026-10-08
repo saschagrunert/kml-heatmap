@@ -220,7 +220,7 @@ export function rangeMiddle(range: Range): number {
  * - no selection: normal weight, 0.85 opacity
  * - selected path: heavier line, full opacity
  * - unselected path while a selection exists: dimmed
- * - isolate mode: only selected paths are drawn, at normal weight
+ * - share mode: only selected paths are drawn, at normal weight
  */
 export function calculateSegmentProperties(options: {
   pathId: number;

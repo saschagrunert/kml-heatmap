@@ -200,9 +200,9 @@ test.describe("State Persistence", () => {
     }) => {
       // The 8th slot of the visibility string carried the hide-controls
       // flag. The feature is gone but links minted before it went away
-      // still set the bit, and the isolate flag behind it has to survive
-      // the slot being ignored rather than shifting by one. Isolation only
-      // sticks with a selection to isolate, so the link carries one.
+      // still set the bit, and the share mode flag behind it has to survive
+      // the slot being ignored rather than shifting by one. Share mode only
+      // sticks with a selection to share, so the link carries one.
       await gotoApp(page);
       const pathId = await firstPathId(page);
       await gotoApp(page, `/?v=100100011&${selectionParams(pathId)}`);
@@ -282,7 +282,7 @@ test.describe("State Persistence", () => {
       expect(hasPath).toBe(true);
     });
 
-    test("a linked flight that no longer exists is dropped with the isolate flag", async ({
+    test("a linked flight that no longer exists is dropped with the share mode flag", async ({
       page,
     }) => {
       const pathId = await firstPathId(page);
@@ -295,7 +295,9 @@ test.describe("State Persistence", () => {
         return id;
       });
 
-      await gotoApp(page, `/?v=100100001&${selectionParams(missing)}`);
+      // Of every year: a dataset of one year has none of the others,
+      // whose flights share mode keeps under the chip's "not in" the year
+      await gotoApp(page, `/?v=100100001&y=all&${selectionParams(missing)}`);
 
       expect(
         await page.evaluate(() => ({
@@ -441,8 +443,8 @@ test.describe("State Persistence", () => {
     test.setTimeout(90000);
     await holdElevationTiles(page);
     const mobile = await usesMobileBar(page);
-    // Nothing to reset on a first visit: announced and dimmed, like Isolate
-    // with nothing selected
+    // Nothing to reset on a first visit: announced and dimmed, like Share
+    // mode with nothing selected
     await expectResetAvailable(page, mobile, false);
     const years = await knownYears(page);
     const newest = await page.evaluate(() => window.mapApp!.selectedYear);

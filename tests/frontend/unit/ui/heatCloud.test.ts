@@ -327,7 +327,7 @@ describe("the heat cloud", () => {
     expect(latitudesOf(drawn())).toEqual([48, 49]);
   });
 
-  it("draws every flight while Isolate has nothing to isolate, and follows the selection only while isolated", async () => {
+  it("draws every flight while share mode has nothing to share, and follows the selection only in share mode", async () => {
     app.threeDVisible = true;
     await follow();
     app.isolateSelection = true;
@@ -979,7 +979,7 @@ describe("the heat cloud", () => {
       }
     });
 
-    it("draws the year of the cards, whatever the Heatmap switch, Isolate, a colour layer or a selection say, and leaves them as they were", async () => {
+    it("draws the year of the cards, whatever the Heatmap switch, share mode, a colour layer or a selection say, and leaves them as they were", async () => {
       app.store.batch(() => {
         app.heatmapVisible = false;
         app.selectedPathIds = new Set([1]);

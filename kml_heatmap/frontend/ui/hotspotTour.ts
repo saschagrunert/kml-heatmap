@@ -3,7 +3,7 @@
  * a way into the 3D view that explains itself.
  *
  * It finds the places where the heat the map shows is strongest
- * (calculations/hotspots.ts: the filters and Isolate count, and the heat
+ * (calculations/hotspots.ts: the filters and Share mode count, and the heat
  * is weighed as for the heatmap), turns the 3D view and the heatmap on,
  * and flies to each in turn, tilted, turning slowly over it while a
  * caption names the place and the time spent there. Pause, the
@@ -47,7 +47,11 @@ import {
 import { findHomeBase } from "../features/airports";
 import { siteData } from "../state/siteData";
 import { applyToggleButtonState } from "../utils/buttonState";
-import { focusModeControl, holdControls } from "./heldControls";
+import {
+  focusModeControl,
+  holdControls,
+  SELECTION_CONTROL_IDS,
+} from "./heldControls";
 import { domCache } from "../utils/domCache";
 import { DEGREES_TO_RADIANS, metresPerPixel } from "../utils/geometry";
 import { setControlIcon, type IconName } from "../utils/icons";
@@ -118,8 +122,7 @@ const HELD_CONTROL_IDS = [
   "compass-float-btn",
   "year-select",
   "aircraft-select",
-  "isolate-btn",
-  "selection-clear-btn",
+  ...SELECTION_CONTROL_IDS,
   "reset-view-btn",
   "replay-btn",
   "replay-all-btn",
@@ -180,10 +183,10 @@ function tourStops(app: MapApp, map: MapLibreMap): TourStop[] {
   );
   const kept = view.pathIds;
   const selected = app.selectedPathIds;
-  const keep =
-    app.isolateSelection && selected.size > 0
-      ? (pathId: number) => kept.has(pathId) && selected.has(pathId)
-      : (pathId: number) => kept.has(pathId);
+  // Share mode ends with its last flight (AppStore.settle)
+  const keep = app.isolateSelection
+    ? (pathId: number) => kept.has(pathId) && selected.has(pathId)
+    : (pathId: number) => kept.has(pathId);
   const home = findHomeBase(view.airportCounts());
   const airports = siteData.airports ?? [];
   const { width, height } = mapSize(map);

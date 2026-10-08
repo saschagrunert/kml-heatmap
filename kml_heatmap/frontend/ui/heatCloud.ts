@@ -136,7 +136,8 @@ const CLOUD_KEYS: readonly (keyof StoreState)[] = [
  * filters
  */
 function isolatesIn(app: MapApp, forced: boolean): boolean {
-  return !forced && app.isolateSelection && app.selectedPathIds.size > 0;
+  // Share mode ends with its last flight (AppStore.settle)
+  return !forced && app.isolateSelection;
 }
 
 /**

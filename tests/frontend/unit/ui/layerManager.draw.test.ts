@@ -509,7 +509,7 @@ describe("LayerManager drawing", () => {
       );
     });
 
-    it("shows only the selected runs in isolate mode, at normal weight", () => {
+    it("shows only the selected runs in share mode, at normal weight", () => {
       addSecondPath();
       mockApp.selectedPathIds.add(1);
       mockApp.isolateSelection = true;
@@ -536,7 +536,7 @@ describe("LayerManager drawing", () => {
       ]);
     });
 
-    it("brings the other paths back when isolate mode ends", () => {
+    it("brings the other paths back when share mode ends", () => {
       addSecondPath();
       mockApp.selectedPathIds.add(1);
       mockApp.isolateSelection = true;
