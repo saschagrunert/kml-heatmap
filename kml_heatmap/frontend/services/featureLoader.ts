@@ -5,7 +5,7 @@
  * neither, so each is an entry point of its own that is imported the first
  * time it is used: features.ts (features.bundle.js) for replay, the relief,
  * the heat cloud and the selection ribbons of the 3D view, the satellite
- * imagery, the profile of a single selected flight, the cross-section and
+ * imagery, the profile of the selected flights, the cross-section and
  * the hotspot tour, wrapped.ts (wrapped.bundle.js) for Wrapped and the
  * statistics panel. They are apart because opening one says nothing about
  * the other. Each gets one shared promise, and a failure that resolves

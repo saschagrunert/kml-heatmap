@@ -281,7 +281,8 @@ opacity under the aviation chart or a selection's lines (`dimsHeatCloud`; not
 under a colour layer as the flat heatmap, since the ribbons are drawn in front
 of the cloud, which dimmed for them was a faint halo round the flights), and at
 a quarter (`CLOUD_REPLAY_OPACITY`) and without its pulses while the replay of
-one flight runs (the replay of all flights builds it up at full strength, see
+one flight runs, or of several one after another (the replay of all flights
+builds it up at full strength, see
 [The replay of all flights](#the-replay-of-all-flights)), where the flat heatmap
 is hidden; the Heatmap button stays pressed then (`heatCloud` and
 `heatmapVisible`), and disabled as for every replay. Points the cloud does not
@@ -724,6 +725,8 @@ not what the pixels look like.
 ## The replay of all flights
 
 The replay of all flights builds its heat up with the cloud: while it is open
+(and plays every flight at once, not the selected ones one after another, whose
+clock is not that of every flight the heat is of; `replayAllTime` is null then)
 the cloud is drawn at full strength up to the replay's clock
 (`HeatCloudStyle.until`, `u_until` in the vertex shader, which leaves out a
 stretch not begun and cuts the one under way where the clock is), on the flat

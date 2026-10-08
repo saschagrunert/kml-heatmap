@@ -2,11 +2,13 @@
  * The flights of the replay of all flights (ui/replayAll.ts) as the points its
  * layer draws (ui/replayAllLayer.ts): every flight's curve, uploaded once with
  * the seconds into its flight at each point (flightClock.ts), so a frame only
- * tells the layer the time. The curves and their heights are the ones the
- * ribbons and the heat cloud are cut from (groundedFlights), thinned as the
- * heat cloud thins them, a little closer (REPLAY_ALL_STEP_PX): a year of
- * flights is some 150,000 points, which a phone cannot draw every frame, and a
- * few thousand zoomed out.
+ * tells the layer the time. Played one after another (the Replay control
+ * with several flights selected), each flight's seconds start where the one
+ * before has landed (sequenceStarts). The curves and their heights are the
+ * ones the ribbons and the heat cloud are cut from (groundedFlights), thinned
+ * as the heat cloud thins them, a little closer (REPLAY_ALL_STEP_PX): a year
+ * of flights is some 150,000 points, which a phone cannot draw every frame,
+ * and a few thousand zoomed out.
  */
 import type { PathSegment } from "../types";
 import {
@@ -44,6 +46,49 @@ const HEIGHT_STEP_PX = 1;
 const MIN_FLIGHT_S = 1;
 
 /**
+ * Seconds of the clock between the landing of one flight and the start of
+ * the next where they play one after another (see sequenceStarts): a
+ * second and a half at 200 times their speed. Never the time the aircraft
+ * stood on the ground, which would say how the day went.
+ */
+export const LEG_PAUSE_S = 300;
+
+/**
+ * Where on one clock each of the flights `pathIds` starts when they play
+ * one after another in the order given, by the seconds each takes,
+ * `duration` (see FlightClock): the first at 0, and each after the one
+ * before has landed and LEG_PAUSE_S have passed. A flight shorter than
+ * MIN_FLIGHT_S has no clock to play by, and is left out.
+ */
+export function sequenceStarts(
+  pathIds: Iterable<number>,
+  duration: ReadonlyMap<number, number>,
+): Map<number, number> {
+  const starts = new Map<number, number>();
+  let at = 0;
+  for (const pathId of pathIds) {
+    const seconds = duration.get(pathId) ?? 0;
+    if (seconds < MIN_FLIGHT_S || starts.has(pathId)) continue;
+    starts.set(pathId, at);
+    at += seconds + LEG_PAUSE_S;
+  }
+  return starts;
+}
+
+/**
+ * The flight of `starts` (see sequenceStarts) that has started last by
+ * `time`, with when it started; the first before it has started
+ */
+export function sequenceLeg(
+  starts: ReadonlyMap<number, number>,
+  time: number,
+): [pathId: number, start: number] | undefined {
+  let leg: [number, number] | undefined;
+  for (const entry of starts) if (!leg || entry[1] <= time) leg = entry;
+  return leg;
+}
+
+/**
  * The floats of a point: x, y, ground, lift, the seconds into its flight,
  * and 1 where the stretch to the next point is drawn (0 at the last point
  * of a curve)
@@ -56,8 +101,8 @@ export interface ReplayAllPoints {
    * `REPLAY_ALL_POINT_FLOATS` floats per point, one curve after the other:
    * x and y in Mercator units from `origin`, the ground under the point
    * and the height above it in feet (as for the heat cloud, see
-   * CloudPoints), the seconds into its flight, and whether it joins the
-   * next point
+   * CloudPoints), the seconds into its flight (on the clock of the run,
+   * see sequenceStarts), and whether it joins the next point
    */
   points: Float32Array;
   /** The number of points */
@@ -66,7 +111,10 @@ export interface ReplayAllPoints {
   origin: readonly [number, number];
   /** The Mercator x of the westernmost and easternmost point, unwrapped */
   xs: readonly [number, number];
-  /** The seconds of the longest flight: when the last one has landed */
+  /**
+   * When the last flight has landed: the seconds of the longest, or of
+   * all of them one after another
+   */
   duration: number;
   /** The flights among the points */
   flights: number;
@@ -107,7 +155,9 @@ export function worldShifts(starts: readonly number[]): number[] {
  * kept at the middle of the zoom level `detail`, where its height has
  * changed by HEIGHT_STEP_PX as exaggerated at the relief level `level`,
  * and at either end of a curve. A flight whose clock is shorter than
- * MIN_FLIGHT_S (no times and no speeds) sits out.
+ * MIN_FLIGHT_S (no times and no speeds) sits out. With `starts`, each
+ * flight's clock begins where it gives (see sequenceStarts) rather than
+ * at 0, so the flights play one after another.
  */
 export function replayAllPoints(
   segments: readonly PathSegment[],
@@ -116,6 +166,7 @@ export function replayAllPoints(
   keep: (pathId: number) => boolean,
   detail: number,
   level: number,
+  starts?: ReadonlyMap<number, number>,
 ): ReplayAllPoints {
   const exaggeration = liftExaggeration(level);
   // The points are picked first, and the bounds with them, which the
@@ -128,6 +179,8 @@ export function replayAllPoints(
   const curves: {
     line: SmoothedLine;
     times: Float64Array;
+    /** When its flight starts on the clock of the run */
+    start: number;
     end: number;
     box: [west: number, south: number, east: number, north: number];
     shift: number;
@@ -150,7 +203,8 @@ export function replayAllPoints(
       keep(pathId)
     ) {
       played.add(pathId);
-      duration = Math.max(duration, seconds);
+      const start = starts?.get(pathId) ?? 0;
+      duration = Math.max(duration, start + seconds);
       const { points, heights, ground } = chain;
       // Weighed as the heat cloud weighs them, which keeps one weighing of
       // the curve for both: the times are the same for every weighing
@@ -199,7 +253,14 @@ export function replayAllPoints(
           along = 0;
         }
       }
-      curves.push({ line: chain, times, end: kept.length, box, shift: 0 });
+      curves.push({
+        line: chain,
+        times,
+        start,
+        end: kept.length,
+        box,
+        shift: 0,
+      });
     }
     i = end;
   }
@@ -225,7 +286,7 @@ export function replayAllPoints(
   }
   const points = new Float32Array(total * size);
   let n = 0;
-  for (const { line, times, end, shift } of curves) {
+  for (const { line, times, start, end, shift } of curves) {
     const { ground, heights } = line;
     // Every point joins the next but the last of its curve
     for (; n < end; n++) {
@@ -236,7 +297,7 @@ export function replayAllPoints(
       points[k + 1] = mercatorY(lat) - origin[1];
       points[k + 2] = ground?.[j] ?? 0;
       points[k + 3] = heights[j]!;
-      points[k + 4] = times[j]!;
+      points[k + 4] = start + times[j]!;
       points[k + 5] = n < end - 1 ? 1 : 0;
     }
   }

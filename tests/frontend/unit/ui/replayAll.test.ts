@@ -3,6 +3,7 @@
  * once on the map, and the control and panel that make it a replay of the
  * map, holding the filters and the selection meanwhile.
  */
+import { REPLAY_PRECONDITION_MESSAGE } from "../../../../kml_heatmap/frontend/ui/replayButton";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
   REPLAY_ALL_NOTHING_MESSAGE,
@@ -12,7 +13,9 @@ import {
   replayAllClock,
   replayAllTime,
   toggleReplayAll,
+  toggleSequence,
 } from "../../../../kml_heatmap/frontend/ui/replayAll";
+import { flightClock } from "../../../../kml_heatmap/frontend/calculations/flightClock";
 import {
   REPLAY_ALL_SPEED,
   ReplayAllPlayer,
@@ -31,7 +34,10 @@ import { REPLAY_PANEL_HEIGHT_VAR } from "../../../../kml_heatmap/frontend/ui/rep
 import { restingPitch } from "../../../../kml_heatmap/frontend/ui/replayState";
 import { heldGroundedFlights } from "../../../../kml_heatmap/frontend/calculations/groundProfile";
 import { REPLAY_CAMERA_MOVE } from "../../../../kml_heatmap/frontend/utils/mapHelpers";
-import { fitTilted } from "../../../../kml_heatmap/frontend/calculations/replayAll";
+import {
+  fitTilted,
+  LEG_PAUSE_S,
+} from "../../../../kml_heatmap/frontend/calculations/replayAll";
 import { MAP_MAX_ZOOM } from "../../../../kml_heatmap/frontend/utils/constants";
 import {
   LIFT_MAX_ZOOM,
@@ -47,7 +53,10 @@ import {
   type MockApp,
 } from "../../testHelpers";
 
-const toast = vi.hoisted(() => ({ showToast: vi.fn() }));
+const toast = vi.hoisted(() => ({
+  showToast: vi.fn(),
+  announceStatus: vi.fn(),
+}));
 /** Every cut of the curves, counted, and the zoom and relief levels of the last */
 const cuts = vi.hoisted(() => ({
   count: 0,
@@ -75,6 +84,7 @@ vi.mock(
 vi.mock("../../../../kml_heatmap/frontend/utils/toast", async (original) => ({
   ...(await original<object>()),
   showToast: toast.showToast,
+  announceStatus: toast.announceStatus,
 }));
 
 /** A flight of `path_id` along the latitude `lat`: five fixes 30 s apart */
@@ -1267,6 +1277,212 @@ describe("the replay of all flights", () => {
 
       toggleReplayAll(asMapApp(app));
       expect(app.replayActive).toBe(false);
+    });
+  });
+
+  describe("the selected flights one after another", () => {
+    /**
+     * A day of four flights, read in the order 2, 1, 4, 5: 2 and 1 timed,
+     * 4 without times, and 5 logged 1,000 s apart standing still, which
+     * its clock counts as no time at all
+     */
+    const DAY = createDataset(
+      [
+        { id: 2, year: 2025, start_airport: "EDDS", end_airport: "EDTF" },
+        { id: 1, year: 2025, start_airport: "EDTF", end_airport: "EDDS" },
+        { id: 4, year: 2025, start_airport: "EDDS", end_airport: "EDDS" },
+        { id: 5, year: 2025, start_airport: "EDDS", end_airport: "EDDS" },
+      ],
+      [
+        ...flight(1, 47),
+        ...flight(2, 48),
+        ...flight(4, 49).map((segment) => {
+          delete segment.time;
+          return segment;
+        }),
+        ...flight(5, 50)
+          .slice(0, 2)
+          .map((segment, i) => ({
+            ...segment,
+            groundspeed_knots: 0,
+            time: i * 1000,
+          })),
+      ],
+    );
+    const seconds = (pathId: number): number =>
+      flightClock(DAY.path_segments).duration.get(pathId)!;
+    const clock = (): string =>
+      document.getElementById("replay-all-clock")!.textContent ?? "";
+    const held = (id: string): boolean => isHeld(document.getElementById(id));
+    const replay = (): HTMLElement => document.getElementById("replay-btn")!;
+    const open = (...ids: number[]): ReplayAllPlayer => {
+      app.currentData = DAY;
+      app.selectedPathIds = new Set(ids);
+      toggleSequence(asMapApp(app));
+      return controlsOfApp()!;
+    };
+    /** The player of the app's controls: the last one started */
+    const controlsOfApp = (): ReplayAllPlayer | null => {
+      const players = vi.mocked(ReplayAllPlayer.prototype.start).mock.contexts;
+      return (players.at(-1) as ReplayAllPlayer | undefined) ?? null;
+    };
+
+    beforeEach(() => {
+      vi.spyOn(ReplayAllPlayer.prototype, "start");
+    });
+
+    it("plays them in the order of their files, from the Replay control", () => {
+      const player = open(1, 2);
+
+      expect(app.replayActive).toBe(true);
+      expect(app.replayState.all).toBe(true);
+      // Every flight given a slot is drawn: each segment is on a curve of
+      // two points at least (smoothFlights), so only the clock leaves one
+      // out (sequenceStarts), before the slots are laid out
+      expect(player.flights).toBe(player.legs!.size);
+      expect([...player.legs!]).toEqual([
+        [2, 0],
+        [1, seconds(2) + LEG_PAUSE_S],
+      ]);
+      expect(player.duration).toBeCloseTo(
+        seconds(2) + LEG_PAUSE_S + seconds(1),
+        3,
+      );
+      expect(clock()).toBe("1 of 2, EDDS → EDTF: 0:00 in");
+      // Replay is its control, and Replay all held with the rest
+      expect(replay().getAttribute("aria-pressed")).toBe("true");
+      expect(replay().dataset["icon"]).toBe("stop");
+      expect(held("replay-btn")).toBe(false);
+      expect(held("replay-all-btn")).toBe(true);
+      expect(held("year-select")).toBe(true);
+      const panel = document.getElementById("replay-all-controls")!;
+      expect(panel.getAttribute("aria-label")).toBe(
+        "Replay of the selected flights",
+      );
+      expect(
+        document.getElementById("replay-all-time")!.getAttribute("aria-label"),
+      ).toBe("Time into the selected flights");
+      // No heat builds up behind them: it would be of every flight at once
+      expect(replayAllTime(asMapApp(app))).toBeNull();
+      expect(toast.showToast).not.toHaveBeenCalled();
+    });
+
+    it("reads which flight flies, and the time into it, through the pause after it", () => {
+      const player = open(1, 2);
+      const second = seconds(2) + LEG_PAUSE_S;
+
+      player.seek(seconds(2) + 100);
+      expect(clock()).toBe("1 of 2, EDDS → EDTF: 0:01 in");
+      player.seek(second + 61);
+      expect(clock()).toBe("2 of 2, EDTF → EDDS: 0:01 in");
+      expect(player.legTime(1, 20)).toBeCloseTo(second + 20, 6);
+      // Its landing, at most
+      expect(player.legTime(1)).toBeCloseTo(second + seconds(1), 6);
+      expect(player.legTime(1, 1e6)).toBeCloseTo(second + seconds(1), 6);
+      expect(player.legTime(4, 20)).toBe(0);
+    });
+
+    it("ends as the last of them lands, with every trail still drawn", () => {
+      const player = open(1, 2);
+
+      frames.run();
+      frames.run(100, 60);
+
+      expect(player.playing).toBe(false);
+      expect(player.time).toBeCloseTo(player.duration, 6);
+      // The trails fade over twice the run: the first a quarter as bright
+      const style = (
+        layer() as unknown as { style: () => { fade: number } | null }
+      ).style()!;
+      expect(style.fade).toBeCloseTo(2 * player.duration, 6);
+    });
+
+    it("leaves out a flight without times, and says so", () => {
+      const player = open(4, 1, 2);
+
+      expect(player.flights).toBe(2);
+      expect([...player.legs!.keys()]).toEqual([2, 1]);
+      expect(toast.showToast).toHaveBeenCalledWith(
+        "Left out 1 of the 3 selected flights: not enough timing data",
+        "info",
+      );
+    });
+
+    it("says how many play, one of them as one", () => {
+      open(1);
+
+      expect(toast.announceStatus).toHaveBeenLastCalledWith(
+        "Replaying 1 flight one after another at 200 times their speed",
+      );
+    });
+
+    it("counts a flight its clock leaves out among those left out", () => {
+      const player = open(5, 1, 2);
+
+      expect([...player.legs!.keys()]).toEqual([2, 1]);
+      expect(toast.showToast).toHaveBeenCalledWith(
+        "Left out 1 of the 3 selected flights: not enough timing data",
+        "info",
+      );
+    });
+
+    it("says why when none of them can be played", () => {
+      open(5);
+
+      expect(app.replayActive).toBe(false);
+      expect(toast.showToast).toHaveBeenCalledWith(
+        REPLAY_PRECONDITION_MESSAGE,
+        "info",
+      );
+    });
+
+    it("opens paused at a moment of one of them", () => {
+      app.currentData = DAY;
+      app.selectedPathIds = new Set([1, 2]);
+
+      // Halfway through flight 1's third segment, 60 s into it
+      toggleSequence(asMapApp(app), {
+        segment: DAY.path_segments[2]!,
+        fraction: 0.5,
+      });
+
+      const player = controlsOfApp()!;
+      expect(player.playing).toBe(false);
+      expect(player.time).toBeCloseTo(seconds(2) + LEG_PAUSE_S + 75, 6);
+    });
+
+    it("closes from the Replay control, and gives it back", () => {
+      open(1, 2);
+
+      toggleSequence(asMapApp(app));
+
+      expect(app.replayActive).toBe(false);
+      expect(app.replayState.all).toBe(false);
+      expect(replay().getAttribute("aria-pressed")).toBe("false");
+      expect(replay().dataset["icon"]).toBe("play");
+      expect(held("replay-all-btn")).toBe(false);
+      expect(held("year-select")).toBe(false);
+    });
+
+    it("leaves the other open to a click whose bundle came late", () => {
+      app.currentData = DAY;
+      app.selectedPathIds = new Set([1, 2]);
+      // Replay all, then a Replay that waited for the bundle: it closed
+      // the replay of all flights the moment it opened
+      toggleReplayAll(asMapApp(app));
+      toggleSequence(asMapApp(app));
+
+      expect(app.replayActive).toBe(true);
+      expect(controlsOfApp()!.legs).toBeNull();
+      toggleReplayAll(asMapApp(app));
+      expect(app.replayActive).toBe(false);
+
+      // And the other way round
+      const player = open(1, 2);
+      toggleReplayAll(asMapApp(app));
+
+      expect(app.replayActive).toBe(true);
+      expect(player.legs!.size).toBe(2);
     });
   });
 });

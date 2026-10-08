@@ -7,17 +7,21 @@
  * and the feature bundle is fetched.
  */
 import { setUnavailableFor } from "../utils/buttonState";
+import { DAY_MAX_FLIGHTS } from "../utils/constants";
 import { domCache } from "../utils/domCache";
 
-export const REPLAY_BUTTON_LABEL = "Replay selected flight";
+/** Several selected flights play one after another (ui/replayAll.ts) */
+export const REPLAY_BUTTON_LABEL = "Replay selected flights";
 export const REPLAY_PRECONDITION_MESSAGE =
-  "Pick one flight with timing data to replay, under Statistics, Flights";
+  "Pick flights with timing data to replay, under Statistics, Flights";
+/** More than a day of flights, such as all of an airport's (DAY_MAX_FLIGHTS) */
+export const REPLAY_TOO_MANY_MESSAGE = `Select up to ${DAY_MAX_FLIGHTS} flights to replay them one after another; Replay all plays more`;
 
 /**
  * Show whether replay is available for the current selection.
- * @param ready - What MapApp.canReplay() says
+ * @param hint - Why it is not, null where it is (MapApp.replayHint)
  */
-export function updateReplayButtonState(ready: boolean): void {
+export function updateReplayButtonState(hint: string | null): void {
   const btn = domCache.get("replay-btn", HTMLButtonElement);
   if (!btn) return;
 
@@ -25,5 +29,5 @@ export function updateReplayButtonState(ready: boolean): void {
   // aria-disabled says so without taking it out of the tab order, which
   // the disabled attribute would, and the stylesheet dims it. A mode that
   // holds the button keeps its own title until it ends
-  setUnavailableFor(btn, ready ? null : REPLAY_PRECONDITION_MESSAGE);
+  setUnavailableFor(btn, hint);
 }

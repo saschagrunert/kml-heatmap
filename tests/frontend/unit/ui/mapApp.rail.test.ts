@@ -1,6 +1,11 @@
 /**
  * MapApp: store-driven controls, the statistics rail, map events and setup.
  */
+import { DAY_MAX_FLIGHTS } from "../../../../kml_heatmap/frontend/utils/constants";
+import {
+  REPLAY_PRECONDITION_MESSAGE,
+  REPLAY_TOO_MANY_MESSAGE,
+} from "../../../../kml_heatmap/frontend/ui/replayButton";
 import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
 import { MapApp } from "../../../../kml_heatmap/frontend/mapApp";
 import {
@@ -117,9 +122,10 @@ vi.mock("../../../../kml_heatmap/frontend/services/featureLoader", () => ({
       // The satellite switch hands itself over to the bundle
       followSatellite: vi.fn(),
       toggleReplayAll: m.toggleReplayAll,
+      toggleSequence: m.toggleSequence,
       toggleCrossSection: m.toggleCrossSection,
       toggleHotspotTour: m.toggleHotspotTour,
-      // And a single selected flight to its profile
+      // And the selected flights to their profile
       followFlightProfile: vi.fn(),
     }),
   ),
@@ -221,14 +227,14 @@ describe("MapApp controls and map", () => {
 
       expect(btn.getAttribute("aria-disabled")).toBe("true");
       expect(btn.title).toBe(
-        "Pick one flight with timing data to replay, under Statistics, Flights",
+        "Pick flights with timing data to replay, under Statistics, Flights",
       );
 
       app.selectedPathIds.add(1);
       app.store.notifyMutation("selectedPathIds");
 
       expect(btn.getAttribute("aria-disabled")).toBe("false");
-      expect(btn.title).toBe("Replay selected flight");
+      expect(btn.title).toBe("Replay selected flights");
       // The stylesheet dims it from the attribute
       expect(btn.style.opacity).toBe("");
     });
@@ -806,6 +812,41 @@ describe("MapApp controls and map", () => {
       expect(replayButton().getAttribute("aria-disabled")).toBe("true");
     });
 
+    it("plays up to a day of flights, and says why not more", async () => {
+      await initializeApp(app);
+      const chip = document.getElementById("selection-replay-btn")!;
+      // One timed flight among eight
+      app.selectedPathIds.add(1);
+      for (let id = 100; app.selectedPathIds.size < DAY_MAX_FLIGHTS; id++) {
+        app.selectedPathIds.add(id);
+      }
+      app.store.notifyMutation("selectedPathIds");
+      expect(app.canReplay()).toBe(true);
+      expect(app.replayHint()).toBeNull();
+
+      // All of a home airport's, say: Replay all is the one for those
+      app.selectedPathIds.add(200);
+      app.store.notifyMutation("selectedPathIds");
+      expect(app.canReplay()).toBe(false);
+      expect(app.replayHint()).toBe(REPLAY_TOO_MANY_MESSAGE);
+      expect(replayButton().getAttribute("aria-disabled")).toBe("true");
+      expect(replayButton().title).toBe(
+        "Select up to 8 flights to replay them one after another; Replay all plays more",
+      );
+      expect(chip.hidden).toBe(true);
+    });
+
+    it("says first that no flight has times, which fewer would not mend", async () => {
+      await initializeApp(app);
+      for (let id = 100; app.selectedPathIds.size <= DAY_MAX_FLIGHTS; id++) {
+        app.selectedPathIds.add(id);
+      }
+      app.store.notifyMutation("selectedPathIds");
+
+      expect(app.replayHint()).toBe(REPLAY_PRECONDITION_MESSAGE);
+      expect(replayButton().title).toBe(REPLAY_PRECONDITION_MESSAGE);
+    });
+
     it("leaves the button to a running replay", async () => {
       await initializeApp(app);
       app.selectedPathIds.add(1);
@@ -853,14 +894,15 @@ describe("MapApp controls and map", () => {
       return bundle;
     }
 
-    it("fetches the feature bundle as one flight is first selected", async () => {
+    it("fetches the feature bundle as up to eight flights are first selected", async () => {
       await initializeApp(app);
       const bundle = await nextBundle();
 
-      await select(1, 2);
+      // More than the profile draws
+      await select(1, 2, 3, 4, 5, 6, 7, 8, 9);
       expect(loadFeatures).not.toHaveBeenCalled();
 
-      await select(1);
+      await select(1, 2);
       await vi.waitFor(() =>
         expect(bundle.followFlightProfile).toHaveBeenCalledWith(app),
       );
@@ -1024,6 +1066,50 @@ describe("MapApp controls and map", () => {
 
       expect(m.mockReplayManagerInstance.toggleReplay).not.toHaveBeenCalled();
       expect(app.replayManager).toBeUndefined();
+    });
+
+    it("plays several selected flights one after another, without a replay manager", async () => {
+      await initializeApp(app);
+      m.toggleSequence.mockClear();
+      app.selectedPathIds.add(1);
+      app.selectedPathIds.add(100);
+      expect(app.playsInSequence()).toBe(true);
+
+      app.toggleReplay();
+
+      await vi.waitFor(() =>
+        expect(m.toggleSequence).toHaveBeenCalledWith(app),
+      );
+      expect(app.replayManager).toBeUndefined();
+
+      // And Replay closes them again, as it would the replay of all
+      m.toggleSequence.mockClear();
+      app.replayState.all = true;
+      app.replayActive = true;
+      app.toggleReplay();
+      await vi.waitFor(() =>
+        expect(m.toggleSequence).toHaveBeenCalledWith(app),
+      );
+      expect(app.replayManager).toBeUndefined();
+    });
+
+    it("plays a flight selected while the bundle loads with the one before", async () => {
+      await initializeApp(app);
+      const { deliver } = await holdNextLoad(loadFeatures);
+      m.mockReplayManagerInstance.toggleReplay.mockClear();
+      m.toggleSequence.mockClear();
+      app.selectedPathIds.add(1);
+
+      app.toggleReplay();
+      // A second one picked before the bundle came: the manager replayed
+      // the first of them alone
+      app.selectedPathIds.add(100);
+      deliver();
+
+      await vi.waitFor(() =>
+        expect(m.toggleSequence).toHaveBeenCalledWith(app),
+      );
+      expect(m.mockReplayManagerInstance.toggleReplay).not.toHaveBeenCalled();
     });
 
     it("opens Replay all once for quick clicks while the bundle loads", async () => {

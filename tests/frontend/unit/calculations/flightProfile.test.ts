@@ -7,9 +7,14 @@
 import { describe, it, expect } from "vitest";
 import {
   FIELD_RADIUS_KM,
+  flightOrder,
   flightProfile,
+  joinProfiles,
+  LEG_GAP_SHARE,
   locate,
+  snapToLegs,
   valueAt,
+  type FlightProfile,
 } from "../../../../kml_heatmap/frontend/calculations/flightProfile";
 import { heightsAboveGround } from "../../../../kml_heatmap/frontend/calculations/statistics";
 import type { PathSegment } from "../../../../kml_heatmap/frontend/types";
@@ -179,5 +184,85 @@ describe("locate and valueAt", () => {
     expect(valueAt(x, 4, locate(4, x, 33))).toBe(33);
     // The last segment has no next start to go towards
     expect(valueAt(x, 4, { index: 3, fraction: 0.5 })).toBe(40);
+  });
+});
+
+describe("flightOrder", () => {
+  it("orders the flights by year, then as the files were read", () => {
+    const pathInfo = [
+      { id: 5, year: 2025 },
+      { id: 2, year: 2024 },
+      { id: 9, year: 2025 },
+      { id: 4, year: 2024 },
+      { id: 1, year: 2023 },
+    ];
+
+    expect(flightOrder(pathInfo, new Set([9, 4, 5]))).toEqual([4, 5, 9]);
+    expect(flightOrder(pathInfo, new Set([9, 5, 1]))).toEqual([1, 5, 9]);
+    expect(flightOrder(pathInfo, new Set([3]))).toEqual([]);
+  });
+});
+
+describe("joinProfiles", () => {
+  /** Nine minutes north, then two of a short hop that climbs to 4,000 ft */
+  const first = (): FlightProfile => flightProfile(flight(), [])!;
+  const second = (): FlightProfile =>
+    flightProfile(flight({ altitudes: [500, 4000, 600] }), [])!;
+  /** 3 % of the 540 s and 120 s of the two */
+  const GAP_S = (540 + 120) * LEG_GAP_SHARE;
+
+  it("puts the flights one after another with a narrow gap between them", () => {
+    const joined = joinProfiles([first(), second()]);
+
+    expect(joined.timed).toBe(true);
+    expect(joined.legs).toEqual([
+      { first: 0, last: 9, timed: true },
+      { first: 10, last: 12, timed: true },
+    ]);
+    expect(joined.segments).toHaveLength(13);
+    expect([...joined.x.slice(0, 10)]).toEqual([
+      0, 60, 120, 180, 240, 300, 360, 420, 480, 540,
+    ]);
+    // Each flight from 0, after the gap: never the time on the ground
+    expect(joined.x[10]).toBeCloseTo(540 + GAP_S, 9);
+    expect(joined.x[12]).toBeCloseTo(540 + GAP_S + 120, 9);
+    expect(joined.altitudeFt[11]).toBe(4000);
+    expect(joined.groundFt[11]).toBe(300);
+  });
+
+  it("gives the figures of all the flights", () => {
+    const a = first();
+    const joined = joinProfiles([a, second()]);
+
+    expect(joined.maxAltitudeFt).toBe(4000);
+    // The hop never gets 2 km from both its ends: the first's lowest
+    expect(joined.lowestEnRouteFt).toBe(a.lowestEnRouteFt);
+    expect(joined.lowSeconds).toBe(a.lowSeconds);
+    expect(joined.fromTerrain).toBe(true);
+  });
+
+  it("runs along the distance once a flight has no times", () => {
+    const joined = joinProfiles([
+      first(),
+      flightProfile(flight({ timed: false }), [])!,
+    ]);
+
+    expect(joined.timed).toBe(false);
+    expect(joined.lowSeconds).toBeNull();
+    // The timed one by its km as well
+    expect(joined.x[1]).toBeCloseTo(STEP_KM, 2);
+    const gap = 18 * STEP_KM * LEG_GAP_SHARE;
+    expect(joined.x[10]).toBeCloseTo(9 * STEP_KM + gap, 1);
+  });
+
+  it("finds the nearer flight in a gap", () => {
+    const joined = joinProfiles([first(), second()]);
+    const { x, legs } = joined;
+
+    expect(snapToLegs(x, legs, 300)).toBe(300);
+    expect(snapToLegs(x, legs, 545)).toBe(540);
+    expect(snapToLegs(x, legs, 540 + GAP_S - 1)).toBe(x[10]);
+    expect(snapToLegs(x, legs, -10)).toBe(0);
+    expect(snapToLegs(x, legs, 5000)).toBe(x[12]);
   });
 });

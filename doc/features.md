@@ -178,10 +178,12 @@ years or each earlier year was shown); it does not load them itself.
 Animate one flight with adjustable speed (1x to 500x, default 50x) and an
 auto-zoom button that follows the airplane; Escape closes it. The whole track is
 drawn dimmed and the flown part paints over it in the colours of the active
-scale. Replay needs exactly one selected flight with timing data; a toast
-explains why it is unavailable otherwise, and with nothing selected the Flights
-tab of the statistics opens to pick one from. A flight is picked on the map only
-where it is drawn, with Altitude or Groundspeed on.
+scale. Replay needs a selected flight with timing data; a toast explains why it
+is unavailable otherwise, and with nothing selected the Flights tab of the
+statistics opens to pick one from. With two to eight selected, Replay plays them
+one after another (see [Replay all](#replay-all)); with more, such as all of an
+airport's, it is unavailable and says that Replay all plays more. A flight is
+picked on the map only where it is drawn, with Altitude or Groundspeed on.
 
 The chase button (the target next to auto-zoom) watches the flight from a chase
 plane: the camera sits behind and above the airplane, tilted to 70 degrees at
@@ -229,6 +231,19 @@ the More sheet, and its panel is laid out like the replay's: the clock on a line
 of its own, the close button in the corner and the controls in one row, the
 slider between play and the speed.
 
+With two to eight flights selected, Replay plays them in the same panel one
+after another instead, for a quick look at a day of several: in the order of
+their files (by year, then as the files were read), each starting once the one
+before has landed and a pause of 5 minutes of flight has passed (1.5 seconds at
+200x), at the same speeds and with the same slider, tilt, fit and orbit. Never
+the time on the ground between them, nor a date or an hour. The clock names the
+flight in the air and the time into it ("2 of 3, EDDS → EDTF: 0:42 in"). The
+trails stay until the last flight has landed, fading over the whole run so the
+first flight ends a quarter as bright as the last, and no heat builds up behind
+them. Selected flights without timing data to play by are left out, and a toast
+says how many. Replay is the control that ends it, with Escape and the close
+button; Replay all is held meanwhile.
+
 ### Hotspot tour
 
 Fly over the busiest places of what the heatmap shows, in the 3D view with the
@@ -256,17 +271,30 @@ and the relief and the cloud follow the view they arrive at.
 
 ### Altitude profile
 
-With exactly one flight selected, a strip at the bottom of the map draws its
-altitude over time (over the distance flown for a flight without times), with
-the ground filled in underneath, and the highest altitude, the lowest height
-above the ground en route and the time spent below 1,000 ft above it en route
-("5 min", "1 h 12 min", never a clock that reads as hours); en route leaves out
-2 km around each airfield. Pointing at the chart reads out the values there and
-marks the place on the map, and pointing at the flight on the map moves the
-chart's cursor. A click or a drag on it (a tap on a phone) opens the replay
-paused at that moment; during a replay the chart is its timeline, and during the
-replay of all flights it is put away. The button with the mountain on the
-selection chip puts it away and brings it back, and the browser remembers which.
+With a flight selected, a strip at the bottom of the map draws its altitude over
+time (over the distance flown for a flight without times), with the ground
+filled in underneath, and the highest altitude, the lowest height above the
+ground en route and the time spent below 1,000 ft above it en route ("5 min", "1
+h 12 min", never a clock that reads as hours); en route leaves out 2 km around
+each airfield. Pointing at the chart reads out the values there and marks the
+place on the map, and pointing at the flight on the map moves the chart's
+cursor. A click or a drag on it (a tap on a phone) opens the replay paused at
+that moment; during a replay the chart is its timeline, and during the replay of
+all flights it is put away. The button with the mountain on the selection chip
+puts it away and brings it back, and the browser remembers which.
+
+With two to eight flights selected, it draws them one after another in the order
+of their files, each named by its route over its part of the chart ("EDDS →
+EDTF") and parted from the next by a dashed line and a narrow gap of the same
+width each time, never the time on the ground; it runs over the distance flown
+unless every one of them has times, and ends with how many flights it shows. The
+figures are those of all of them, the readout gives the time into the flight
+pointed at (a point in a gap reads the nearer end of a flight), and a click on
+one with times opens the replay of them one after another, paused at that
+moment, also where the chart runs over the distance; the pointer turns into a
+hand over those, and a click on one without times says it has no timing data.
+Where only one of them has a profile, it is drawn as a single flight. More than
+eight have no profile.
 
 ### Cross-section
 
@@ -544,12 +572,13 @@ button or a click on the map closes it.
   aircraft
 - **Path selection** - Click paths to highlight and view detailed statistics. A
   chip at the top of the map says how many flights are selected and clears them
-  again; on a phone it also replays the flight when it is the only one and has
-  timing data, and while the statistics sheet is open it moves into the sheet's
-  header without its count. With neither colour layer on, the selected flights
-  are drawn as thin light lines over the heatmap, which steps back while they
-  show, at every zoom level, and the lines are fainter the more flights are
-  selected; in the 3D view they are lifted to their height with the heat cloud
+  again; on a phone it also replays the selected flights, up to eight, when one
+  of them has timing data, and while the statistics sheet is open it moves into
+  the sheet's header without its count. With neither colour layer on, the
+  selected flights are drawn as thin light lines over the heatmap, which steps
+  back while they show, at every zoom level, and the lines are fainter the more
+  flights are selected; in the 3D view they are lifted to their height with the
+  heat cloud
 - **Airport selection** - Click an airport marker to select all flights that
   visited it; click the map beside every flight to clear the selection, with
   Altitude or Groundspeed on, where the flights can be clicked (over the heat

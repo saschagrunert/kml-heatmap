@@ -464,6 +464,27 @@ body.replay-all-active .color-legend {
   border: 2px solid var(--color-text);
   box-sizing: border-box;
 }
+/* The routes of several flights over their parts of the chart, the gaps
+   between them dashed */
+.profile-legs {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.profile-leg {
+  position: absolute;
+  height: 100%;
+  box-sizing: border-box;
+  padding: 0 var(--space-xs);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+.profile-leg + .profile-leg {
+  border-left: 1px dashed var(--color-border);
+}
 .profile-axis {
   display: flex;
   justify-content: space-between;

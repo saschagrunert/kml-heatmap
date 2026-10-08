@@ -99,6 +99,8 @@ export const mockWrappedManagerInstance = {
 
 /** The feature bundle's toggle of the replay of all flights */
 export const toggleReplayAll = vi.fn();
+/** And of the selected flights one after another */
+export const toggleSequence = vi.fn();
 
 /** The feature bundle's toggle of the cross-section */
 export const toggleCrossSection = vi.fn();
@@ -183,7 +185,7 @@ export function setupDOM(): void {
       </div>
     </div>
     <button id="heatmap-btn"></button>
-    <button id="replay-btn" aria-label="Replay selected flight"></button>
+    <button id="replay-btn" aria-label="Replay selected flights"></button>
     <button id="selection-replay-btn" hidden></button>
     <button id="altitude-btn"></button>
     <button id="airspeed-btn"></button>

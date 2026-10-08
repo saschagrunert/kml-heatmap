@@ -495,24 +495,24 @@ export function selectionParams(...pathIds: number[]): string {
 }
 
 /**
- * Toggle one path in or out of the selection and wait until the selection
+ * Toggle one path in or out of the selection and check that the selection
  * has the expected size, so the change has taken before the caller asserts
- * on anything that follows from it.
+ * on anything that follows from it. The toggle is synchronous, so the size
+ * is read in the same evaluation: a waitForFunction polls once a frame, and
+ * in the 3D view on a busy runner's software WebGL a frame took 2.7 s, so
+ * the poll that would have passed at once ran out of its 5 s.
  */
 export async function togglePathSelection(
   page: Page,
   pathId: number,
   expectedSize: number,
 ): Promise<void> {
-  await page.evaluate(
-    (id) => window.mapApp!.pathSelection.togglePathSelection(id),
-    pathId,
-  );
-  await page.waitForFunction(
-    (size) => window.mapApp!.selectedPathIds.size === size,
-    expectedSize,
-    { timeout: 5000 },
-  );
+  const size = await page.evaluate((id) => {
+    const app = window.mapApp!;
+    app.pathSelection.togglePathSelection(id);
+    return app.selectedPathIds.size;
+  }, pathId);
+  expect(size).toBe(expectedSize);
 }
 
 /**
@@ -562,12 +562,42 @@ export async function selectPathForReplay(page: Page): Promise<number> {
   return pathId!;
 }
 
+/**
+ * Select the first `count` flights with times, in the order of their
+ * files, which the profile and the replay of several go by
+ */
+export async function selectFlightsForReplay(
+  page: Page,
+  count: number,
+): Promise<number[]> {
+  await waitForPathData(page);
+
+  const pathIds = await page.evaluate((count) => {
+    const app = window.mapApp!;
+    const timed = new Set(
+      (app.fullPathSegments ?? [])
+        .filter((segment) => (segment.time ?? 0) > 0)
+        .map((segment) => segment.path_id),
+    );
+    return app
+      .fullPathInfo!.filter((path) => timed.has(path.id))
+      .slice(0, count)
+      .map((path) => path.id);
+  }, count);
+  expect(pathIds).toHaveLength(count);
+
+  for (const [index, id] of pathIds.entries()) {
+    await togglePathSelection(page, id, index + 1);
+  }
+  return pathIds;
+}
+
 /** Activate replay mode (select path + toggle replay) */
 export async function activateReplay(page: Page): Promise<number> {
   const pathId = await selectPathForReplay(page);
   await expect(page.locator("#replay-btn")).toHaveAttribute(
     "title",
-    "Replay selected flight",
+    "Replay selected flights",
   );
   await startReplay(page);
   await expect(page.locator("#replay-controls")).toBeVisible({

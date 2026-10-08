@@ -66,12 +66,20 @@ test.describe("Keyboard", () => {
       expect(label).not.toMatch(/\d{1,2}:\d{2}|\d{4}-\d{2}-\d{2}/);
     }
 
-    // Enter on the marker selected every flight of the airport
+    // Enter on the marker selected every flight of the airport, which
+    // replay plays one after another up to a day of them (DAY_MAX_FLIGHTS)
     await expect(flights.first()).toHaveAttribute("aria-pressed", "true");
+    const many = airport.flights > 8;
     await expect(page.locator("#replay-btn")).toHaveAttribute(
       "aria-disabled",
-      airport.flights === 1 ? "false" : "true",
+      String(many),
     );
+    if (many) {
+      await expect(page.locator("#replay-btn")).toHaveAttribute(
+        "title",
+        "Select up to 8 flights to replay them one after another; Replay all plays more",
+      );
+    }
 
     await flights.first().focus();
     await page.keyboard.press("Enter");

@@ -7,8 +7,11 @@
 import { describe, it, expect, vi } from "vitest";
 import {
   fitTilted,
+  LEG_PAUSE_S,
   REPLAY_ALL_POINT_FLOATS,
   replayAllPoints,
+  sequenceLeg,
+  sequenceStarts,
   worldShifts,
   type FitMap,
   type ReplayAllPoints,
@@ -47,10 +50,12 @@ function build(
     keep = () => true,
     detail = 12,
     level = 6,
+    starts,
   }: {
     keep?: (pathId: number) => boolean;
     detail?: number;
     level?: number;
+    starts?: ReadonlyMap<number, number>;
   } = {},
 ): ReplayAllPoints {
   const flights = smoothFlights(segments, (i) => segments[i]!.altitude_ft, {
@@ -63,6 +68,7 @@ function build(
     keep,
     detail,
     level,
+    starts,
   );
 }
 
@@ -263,6 +269,87 @@ describe("replayAllPoints", () => {
     expect(points.flights).toBe(0);
     expect(points.duration).toBe(0);
     expect(points.bounds).toBeNull();
+  });
+
+  it("plays flights one after another from where `starts` puts them", () => {
+    const segments = [...flight(1, 47), ...flight(2, 48)];
+    const clock = flightClock(segments);
+    const first = clock.duration.get(1)!;
+    const second = clock.duration.get(2)!;
+    // The second flight first, as the order of the files may have it
+    const starts = sequenceStarts([2, 1], clock.duration);
+    const points = build(segments, {
+      starts,
+      keep: (pathId) => starts.has(pathId),
+    });
+    const times = column(points, 4);
+    const once = build(segments);
+    const alone = column(once, 4);
+
+    expect(points.flights).toBe(2);
+    // Flight 1's curve comes first in the dataset, and starts after the
+    // whole of flight 2 and the pause
+    const offset = second + LEG_PAUSE_S;
+    expect(times[0]).toBeCloseTo(offset, 3);
+    const split = alone.indexOf(0, 1);
+    expect(split).toBeGreaterThan(0);
+    for (let k = 0; k < split; k++) {
+      expect(times[k]).toBeCloseTo(alone[k]! + offset, 2);
+    }
+    // Flight 2 plays from 0, as it would alone
+    expect(times.slice(split)).toEqual(alone.slice(split));
+    // The run ends as the last of them lands
+    expect(points.duration).toBeCloseTo(offset + first, 6);
+  });
+});
+
+describe("sequenceStarts", () => {
+  it("starts each flight where the one before has landed, after a pause", () => {
+    const duration = new Map([
+      [5, 3600],
+      [3, 1800],
+      [9, 2400],
+    ]);
+
+    expect([...sequenceStarts([3, 9, 5], duration)]).toEqual([
+      [3, 0],
+      [9, 1800 + LEG_PAUSE_S],
+      [5, 1800 + 2400 + 2 * LEG_PAUSE_S],
+    ]);
+  });
+
+  it("leaves out a flight without a clock, and one given twice", () => {
+    const duration = new Map([
+      [1, 600],
+      [2, 0],
+      [3, 900],
+    ]);
+
+    expect([...sequenceStarts([1, 2, 4, 1, 3], duration)]).toEqual([
+      [1, 0],
+      [3, 600 + LEG_PAUSE_S],
+    ]);
+    expect(sequenceStarts([], duration).size).toBe(0);
+  });
+});
+
+describe("sequenceLeg", () => {
+  const starts = new Map([
+    [7, 0],
+    [4, 1000],
+    [8, 2500],
+  ]);
+
+  it("is the flight that has started last", () => {
+    expect(sequenceLeg(starts, 0)).toEqual([7, 0]);
+    expect(sequenceLeg(starts, 999)).toEqual([7, 0]);
+    expect(sequenceLeg(starts, 1000)).toEqual([4, 1000]);
+    expect(sequenceLeg(starts, 9999)).toEqual([8, 2500]);
+  });
+
+  it("is the first one before it has started, and none of no flights", () => {
+    expect(sequenceLeg(starts, -5)).toEqual([7, 0]);
+    expect(sequenceLeg(new Map(), 10)).toBeUndefined();
   });
 });
 

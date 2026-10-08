@@ -5,6 +5,7 @@ import {
   gotoApp,
   readSavedState,
   selectionParams,
+  selectFlightsForReplay,
   selectPathForReplay,
   toggleLayer,
   togglePathSelection,
@@ -84,35 +85,43 @@ test.describe("Path Selection", () => {
     const replayBtn = page.locator("#replay-btn");
     await expect(replayBtn).toHaveAttribute(
       "title",
-      "Pick one flight with timing data to replay, under Statistics, Flights",
+      "Pick flights with timing data to replay, under Statistics, Flights",
     );
 
     await selectPathForReplay(page);
 
     await expect(replayBtn).toBeEnabled();
-    await expect(replayBtn).toHaveAttribute("title", "Replay selected flight");
+    await expect(replayBtn).toHaveAttribute("title", "Replay selected flights");
     await expect(replayBtn).toHaveCSS("opacity", "1");
   });
 
-  test("selecting multiple paths marks the replay button unavailable", async ({
+  test("selecting two flights replays them one after another", async ({
     page,
   }) => {
-    await waitForPathData(page);
+    await selectFlightsForReplay(page, 2);
 
-    const pathIds = await page.evaluate(() =>
-      window.mapApp!.fullPathInfo!.slice(0, 2).map((p) => p.id),
+    const replayBtn = page.locator("#replay-btn");
+    await expect(replayBtn).toHaveAttribute("title", "Replay selected flights");
+    await expect(replayBtn).toHaveCSS("opacity", "1");
+
+    await replayBtn.click();
+    const panel = page.locator("#replay-all-controls");
+    await expect(panel).toBeVisible({ timeout: 10000 });
+    await expect(panel).toHaveAttribute(
+      "aria-label",
+      "Replay of the selected flights",
     );
-    expect(pathIds).toHaveLength(2);
-
-    for (const [index, id] of pathIds.entries()) {
-      await togglePathSelection(page, id, index + 1);
-    }
-
-    await expect(page.locator("#replay-btn")).toHaveAttribute(
-      "title",
-      "Pick one flight with timing data to replay, under Statistics, Flights",
+    await expect(page.locator("#replay-all-clock")).toHaveText(
+      /^[12] of 2, .+: \d+:\d{2} in$/,
     );
-    await expect(page.locator("#replay-btn")).toHaveCSS("opacity", "0.5");
+    await expect(replayBtn).toHaveAttribute("aria-pressed", "true");
+    await expect(page.locator("#replay-all-btn")).toBeDisabled();
+
+    // Replay closes it again
+    await replayBtn.click();
+    await expect(panel).toBeHidden();
+    await expect(replayBtn).toHaveAttribute("aria-pressed", "false");
+    await expect(page.locator("#replay-all-btn")).toBeEnabled();
   });
 
   test("deselecting all paths marks the replay button unavailable", async ({
@@ -121,14 +130,14 @@ test.describe("Path Selection", () => {
     const pathId = await selectPathForReplay(page);
     await expect(page.locator("#replay-btn")).toHaveAttribute(
       "title",
-      "Replay selected flight",
+      "Replay selected flights",
     );
 
     await togglePathSelection(page, pathId, 0);
 
     await expect(page.locator("#replay-btn")).toHaveAttribute(
       "title",
-      "Pick one flight with timing data to replay, under Statistics, Flights",
+      "Pick flights with timing data to replay, under Statistics, Flights",
     );
   });
 

@@ -7,7 +7,10 @@ import {
   REPLAY_LEGEND_HEIGHT_VAR,
   REPLAY_PANEL_HEIGHT_VAR,
 } from "../../../../kml_heatmap/frontend/ui/replayManager";
-import { REPLAY_PRECONDITION_MESSAGE } from "../../../../kml_heatmap/frontend/ui/replayButton";
+import {
+  REPLAY_PRECONDITION_MESSAGE,
+  REPLAY_TOO_MANY_MESSAGE,
+} from "../../../../kml_heatmap/frontend/ui/replayButton";
 import { STILL_LOADING_MESSAGE } from "../../../../kml_heatmap/frontend/ui/actions";
 import {
   LIVE_REGION_DELAY_MS,
@@ -40,10 +43,20 @@ import {
 } from "../../testHelpers";
 import { setColorLayer } from "../../../../kml_heatmap/frontend/ui/layerVisibility";
 import * as motion from "../../../../kml_heatmap/frontend/utils/motion";
+import { toggleSequence } from "../../../../kml_heatmap/frontend/ui/replayAll";
 
 vi.mock("../../../../kml_heatmap/frontend/utils/htmlGenerators", () => ({
   generateSegmentPopupHtml: vi.fn(() => "<div>popup</div>"),
 }));
+
+// The replay of several flights one after another has tests of its own
+vi.mock(
+  "../../../../kml_heatmap/frontend/ui/replayAll",
+  async (importOriginal) => ({
+    ...(await importOriginal<object>()),
+    toggleSequence: vi.fn(),
+  }),
+);
 
 function toastText(): string | null {
   return document.querySelector(".toast-notification")?.textContent ?? null;
@@ -59,6 +72,7 @@ describe("ReplayManager activation", () => {
     mockAnimationFrame();
     mockApp = createReplayMockApp();
     replayManager = createReplayManager(mockApp);
+    vi.mocked(toggleSequence).mockClear();
   });
 
   afterEach(() => {
@@ -127,11 +141,23 @@ describe("ReplayManager activation", () => {
       expect(mockApp.flightListVisible).toBe(true);
     });
 
-    it("shows an explanatory toast when multiple paths are selected", () => {
-      mockApp.selectedPathIds = new Set([1, 2]);
+    it("says Replay all is the one for more than a day of flights", () => {
+      mockApp.selectedPathIds = new Set([1, 2, 3, 4, 5, 6, 7, 8, 9]);
 
       replayManager.toggleReplay();
 
+      expect(toggleSequence).not.toHaveBeenCalled();
+      expect(mockApp.replayActive).toBe(false);
+      expect(toastText()).toBe(REPLAY_TOO_MANY_MESSAGE);
+    });
+
+    it("shows an explanatory toast when none of several selected has timing data", () => {
+      mockApp.selectedPathIds = new Set([1, 2]);
+      mockApp.hasTimingData = false;
+
+      replayManager.toggleReplay();
+
+      expect(toggleSequence).not.toHaveBeenCalled();
       expect(mockApp.replayActive).toBe(false);
       expect(toastText()).toBe(REPLAY_PRECONDITION_MESSAGE);
       // They are picked already
@@ -262,7 +288,7 @@ describe("ReplayManager activation", () => {
     it("swaps the replay button to stop without losing its label", () => {
       mockApp.selectedPathIds = new Set([1]);
       // As the template names it
-      el("replay-btn").setAttribute("aria-label", "Replay selected flight");
+      el("replay-btn").setAttribute("aria-label", "Replay selected flights");
 
       replayManager.toggleReplay();
 
@@ -276,14 +302,14 @@ describe("ReplayManager activation", () => {
       // A toggle keeps its name: "Stop replay, pressed" said the opposite
       // of what a press does. aria-pressed carries the state.
       expect(replayBtn.getAttribute("aria-label")).toBe(
-        "Replay selected flight",
+        "Replay selected flights",
       );
-      expect(replayBtn.title).toBe("Replay selected flight");
+      expect(replayBtn.title).toBe("Replay selected flights");
     });
 
     it("restores the replay button on deactivation", () => {
       mockApp.selectedPathIds = new Set([1]);
-      el("replay-btn").setAttribute("aria-label", "Replay selected flight");
+      el("replay-btn").setAttribute("aria-label", "Replay selected flights");
       replayManager.toggleReplay();
 
       replayManager.toggleReplay();
@@ -296,7 +322,7 @@ describe("ReplayManager activation", () => {
       );
       expect(replayBtn.getAttribute("aria-pressed")).toBe("false");
       expect(replayBtn.getAttribute("aria-label")).toBe(
-        "Replay selected flight",
+        "Replay selected flights",
       );
     });
 

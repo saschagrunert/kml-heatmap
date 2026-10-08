@@ -77,7 +77,7 @@ test.describe("the lazy bundles", () => {
     // which is what the main bundle has to answer on its own
     await expect(page.locator("#replay-btn")).toHaveAttribute(
       "title",
-      "Pick one flight with timing data to replay, under Statistics, Flights",
+      "Pick flights with timing data to replay, under Statistics, Flights",
     );
   });
 

@@ -33,7 +33,6 @@ import {
   NO_TIMING_MESSAGE,
   runAction,
 } from "./actions";
-import { REPLAY_PRECONDITION_MESSAGE } from "./replayButton";
 import { focusStatsRail } from "./appChrome";
 
 /** Control columns the bar replaces while it is mounted */
@@ -443,7 +442,7 @@ export class MobileBar {
         icon: "play",
         // The name the control has in the columns
         label: "Replay",
-        hint: () => (app.canReplay() ? null : REPLAY_PRECONDITION_MESSAGE),
+        hint: () => app.replayHint(),
         isDisabled: () => !app.canReplay(),
         onSelect: () => {
           runAction(app, "toggleReplay");

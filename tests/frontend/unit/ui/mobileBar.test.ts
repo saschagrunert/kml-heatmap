@@ -82,6 +82,7 @@ function createMockApp() {
     // Replay and Wrapped come from lazily loaded bundles; the
     // bar asks the app for them and for whether replay is possible at all
     canReplay: vi.fn(() => true),
+    replayHint: vi.fn((): string | null => null),
     loadReplay: vi.fn(() => Promise.resolve(replayManager)),
     toggleReplay: vi.fn(() => {
       replayManager.toggleReplay();
@@ -688,6 +689,7 @@ describe("MobileBar", () => {
 
     it("explains why replay is unavailable", () => {
       app.canReplay.mockReturnValue(false);
+      app.replayHint.mockReturnValue(REPLAY_PRECONDITION_MESSAGE);
       dismissSheet();
       tab("more").click();
 

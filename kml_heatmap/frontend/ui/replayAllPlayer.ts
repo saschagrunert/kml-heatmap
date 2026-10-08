@@ -1,7 +1,7 @@
 /**
  * The player of the replay of all flights (see ui/replayAll.ts): it plays
- * every flight of a run at once and draws them (ui/replayAllLayer.ts), and
- * nothing else.
+ * every flight of a run at once, or one after another, and draws them
+ * (ui/replayAllLayer.ts), and nothing else.
  */
 import type { MapApp } from "../mapApp";
 import type { KMLDataset } from "../types";
@@ -14,6 +14,7 @@ import {
 import { isLiftedAt, liftExaggeration } from "../calculations/lift";
 import {
   replayAllPoints,
+  sequenceStarts,
   type ReplayAllPoints,
 } from "../calculations/replayAll";
 import { FEET_TO_METERS, MAP_LAYERS, MAX_FRAME_S } from "../utils/constants";
@@ -90,16 +91,30 @@ export interface ReplayAllRun {
    * were specks.
    */
   scale?: number;
+  /**
+   * Whether the flights `pathIds` play one after another in the order
+   * given (see sequenceStarts) rather than all at once. Their trails fade
+   * over the whole run, the first the faintest, so the run ends on all of
+   * them.
+   */
+  sequence?: boolean;
 }
 
 /**
- * Plays every flight of a run at once on the map of `app`. It needs no
- * panel and changes no state of the app, so another part of it (Wrapped's
- * intro) can play it under its own camera; ReplayAllControls is the one
- * that makes it a replay of the map.
+ * How many times the seconds of a run the trails of one played one after
+ * another fade over: by the end, the first flight's are a quarter as
+ * bright as the last one's
+ */
+const SEQUENCE_FADE_RUNS = 2;
+
+/**
+ * Plays every flight of a run at once, or one after another, on the map of
+ * `app`. It needs no panel and changes no state of the app, so another
+ * part of it (Wrapped's intro) can play it under its own camera;
+ * ReplayAllControls is the one that makes it a replay of the map.
  */
 export class ReplayAllPlayer {
-  /** The seconds into every flight */
+  /** The seconds into every flight, or into a run of one after another */
   time = 0;
   /** Seconds of flight a second */
   speed: number = REPLAY_ALL_SPEED;
@@ -120,6 +135,12 @@ export class ReplayAllPlayer {
   private readonly layer: ReplayAllLayer;
   private points: ReplayAllPoints | null = null;
   private keep: ((pathId: number) => boolean) | null = null;
+  /**
+   * Where each flight starts on the clock of a run played one after
+   * another, in the order played (see sequenceStarts); null for one that
+   * plays them all at once
+   */
+  legs: Map<number, number> | null = null;
   /**
    * The zoom the camera is on its way to (ReplayAllRun.zoom), until the
    * map comes to the end of a zoom, and whether it is near enough to draw
@@ -185,7 +206,7 @@ export class ReplayAllPlayer {
     return this.keep !== null;
   }
 
-  /** The seconds of the longest flight of the run */
+  /** When the last flight of the run has landed */
   get duration(): number {
     return this.points?.duration ?? 0;
   }
@@ -214,7 +235,16 @@ export class ReplayAllPlayer {
     const map = app.map;
     const data = app.currentData;
     if (!map || !data || this.broken) return Promise.resolve(false);
-    this.keep = keepOf(app, data, run.pathIds);
+    const legs = (this.legs =
+      run.sequence && run.pathIds
+        ? sequenceStarts(
+            run.pathIds,
+            flightClockOf(data.path_segments).duration,
+          )
+        : null);
+    this.keep = legs
+      ? (pathId) => legs.has(pathId)
+      : keepOf(app, data, run.pathIds);
     this.speed = run.speed ?? REPLAY_ALL_SPEED;
     this.scale = run.scale ?? 1;
     this.zoomAhead = run.zoom ?? null;
@@ -285,7 +315,7 @@ export class ReplayAllPlayer {
   /** Let the clock run, from the start again once every trail has faded */
   resume(): void {
     if (!this.active || this.playing) return;
-    if (this.time >= this.duration + this.fade()) this.time = 0;
+    if (this.time >= this.end()) this.time = 0;
     this.playing = true;
     this.lastFrame = null;
     this.frame = requestAnimationFrame(this.tick);
@@ -309,6 +339,7 @@ export class ReplayAllPlayer {
     this.following?.abort();
     this.following = null;
     this.keep = null;
+    this.legs = null;
     this.zoomAhead = null;
     this.aheadDrawn = false;
     this.points = null;
@@ -328,7 +359,31 @@ export class ReplayAllPlayer {
 
   /** The seconds of flight a trail fades over at the speed played */
   private fade(): number {
-    return Math.min(TRAIL_FADE_S * this.speed, TRAIL_MOST_S);
+    return this.legs
+      ? this.duration * SEQUENCE_FADE_RUNS
+      : Math.min(TRAIL_FADE_S * this.speed, TRAIL_MOST_S);
+  }
+
+  /**
+   * Where the run has played to the end: once every trail has faded, or
+   * for one played one after another, whose trails stay, as the last
+   * flight lands
+   */
+  private end(): number {
+    return this.duration + (this.legs ? 0 : this.fade());
+  }
+
+  /**
+   * The time on the clock of a run played one after another that is
+   * `seconds` into the flight `pathId` on its own clock (FlightClock), its
+   * landing at most and by default; 0 for a flight it does not play
+   */
+  legTime(pathId: number, seconds = Infinity): number {
+    const start = this.legs?.get(pathId);
+    const data = this.app.currentData;
+    if (start === undefined || !data) return 0;
+    const duration = flightClockOf(data.path_segments).duration.get(pathId);
+    return start + Math.min(seconds, duration ?? 0);
   }
 
   /**
@@ -376,8 +431,8 @@ export class ReplayAllPlayer {
       this.settle = null;
       if (before < this.duration) this.onLanded?.();
     }
-    // Played to the end once the last trail has faded
-    const end = this.duration + this.fade();
+    // Played to the end once the last trail has faded (see end)
+    const end = this.end();
     if (this.time >= end) {
       this.time = end;
       this.playing = false;
@@ -495,6 +550,7 @@ export class ReplayAllPlayer {
         keep,
         detail,
         level,
+        this.legs ?? undefined,
       );
       const oldest = this.cuts.keys().next();
       if (!oldest.done && this.cuts.size >= CUTS_KEPT) {

@@ -75,6 +75,7 @@ import { prefersReducedMotion } from "./utils/motion";
 import { isPhoneLayout } from "./utils/device";
 import { resetSafeArea } from "./utils/safeArea";
 import {
+  DAY_MAX_FLIGHTS,
   DEFAULT_ZOOM,
   HEATMAP_LAYER_IDS,
   MAP_LAYERS,
@@ -127,6 +128,10 @@ import {
   setupStatsRail,
 } from "./ui/appChrome";
 import { segmentsForPathIds } from "./calculations/statistics";
+import {
+  REPLAY_PRECONDITION_MESSAGE,
+  REPLAY_TOO_MANY_MESSAGE,
+} from "./ui/replayButton";
 import {
   datasetIndex,
   type PathIdsByAirport,
@@ -944,16 +949,24 @@ export class MapApp {
   }
 
   /**
-   * Whether the current selection can be replayed: one flight with a
-   * segment timed after its start. Replay runs from 0 to the latest segment
-   * time, so a flight whose times are all 0 (a single timed segment, or
-   * points logged at the same second) finished the moment it started and
-   * drew nothing.
+   * Whether the current selection can be replayed: a flight with a segment
+   * timed after its start among it. Replay runs from 0 to the latest
+   * segment time, so a flight whose times are all 0 (a single timed
+   * segment, or points logged at the same second) finished the moment it
+   * started and drew nothing. More than one, up to DAY_MAX_FLIGHTS, play
+   * one after another, those without times left out (ui/replayAll.ts).
    */
   canReplay(): boolean {
+    return (
+      this.selectedPathIds.size <= DAY_MAX_FLIGHTS && this.timedSelection()
+    );
+  }
+
+  /** Whether a flight of the selection has times to replay (canReplay) */
+  private timedSelection(): boolean {
     const segments = this.fullPathSegments;
     return (
-      this.selectedPathIds.size === 1 &&
+      this.selectedPathIds.size > 0 &&
       this.hasTimingData &&
       !!segments &&
       segmentsForPathIds(segments, this.selectedPathIds).some(
@@ -963,14 +976,46 @@ export class MapApp {
   }
 
   /**
+   * Why the selection cannot be replayed (see canReplay), null if it can:
+   * no times at all before too many flights, which fewer would not mend
+   */
+  replayHint(): string | null {
+    return !this.timedSelection()
+      ? REPLAY_PRECONDITION_MESSAGE
+      : this.canReplay()
+        ? null
+        : REPLAY_TOO_MANY_MESSAGE;
+  }
+
+  /**
+   * Whether Replay plays the selection one after another, in the panel of
+   * the replay of all flights (toggleSequence in ui/replayAll.ts), rather
+   * than the replay of one flight: with more than one selected. Replay and
+   * a click on the flight profile both go by it.
+   */
+  playsInSequence(): boolean {
+    return this.selectedPathIds.size > 1;
+  }
+
+  /**
    * Open or close replay, fetching the feature bundle on first use. Clicks
    * that land while the bundle is still on its way are dropped: each one
    * queued a toggle of its own, and two quick ones opened replay and closed
    * it again the moment the bundle arrived. What opened meanwhile, Replay
    * all or Wrapped waiting on the same bundle, is not closed by the late
-   * click, nor covered by a replay.
+   * click, nor covered by a replay. Several flights play one after another
+   * (playsInSequence), without the replay manager, and the Replay control
+   * closes them as well.
    */
   toggleReplay(): void {
+    if (
+      this.replayActive
+        ? this.replayState.all
+        : this.playsInSequence() && this.canReplay() && !this.tourView
+    ) {
+      this.toggleFeature("toggleSequence", REPLAY_UNAVAILABLE_MESSAGE);
+      return;
+    }
     if (this.replayManager) {
       this.replayManager.toggleReplay();
       return;
@@ -979,7 +1024,9 @@ export class MapApp {
       .then((manager) => {
         this.pendingReplayToggle = null;
         if (this.destroyed || this.replayActive || this.wrappedVisible) return;
-        manager?.toggleReplay();
+        // Decided again: a flight selected meanwhile makes it a replay of
+        // several, which the manager would have played the first of
+        if (manager) this.toggleReplay();
       })
       .catch((error) => {
         this.pendingReplayToggle = null;
@@ -1025,15 +1072,16 @@ export class MapApp {
   }
 
   /**
-   * Fetch the feature bundle as a single flight is first selected: it
-   * draws that flight's profile from then on (ui/flightProfile.ts). A
-   * failed fetch is tried again with the next single selection, or as a
-   * replay of it opens, which fetched the bundle itself.
+   * Fetch the feature bundle as up to DAY_MAX_FLIGHTS flights are first
+   * selected: it draws their profile from then on (ui/flightProfile.ts). A
+   * failed fetch is tried again with the next selection, or as a replay of
+   * it opens, which fetched the bundle itself.
    */
   private followFlightProfile(): void {
     let pending = false;
     const check = (): void => {
-      if (pending || this.selectedPathIds.size !== 1) return;
+      const size = this.selectedPathIds.size;
+      if (pending || !size || size > DAY_MAX_FLIGHTS) return;
       pending = true;
       void loadFeatures().then((features) => {
         pending = false;

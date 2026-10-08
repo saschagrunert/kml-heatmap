@@ -272,7 +272,7 @@ export class PathSelection {
 
   /**
    * Clearing and Isolate leave the selection alone while replay runs: it
-   * plays the one selected flight, and a change dimmed the replay's own
+   * plays the selected flights, and a change dimmed the replay's own
    * Stop button and switched the statistics to another view mid-flight.
    * Their controls are disabled then as well.
    */
