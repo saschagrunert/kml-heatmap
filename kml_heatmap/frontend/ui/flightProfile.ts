@@ -51,6 +51,7 @@ import { formatSpeed, formatTime } from "../utils/replayFormatters";
 import type { Coordinate } from "../utils/geometry";
 import { setControlIcon } from "../utils/icons";
 import { toLngLat } from "../utils/mapHelpers";
+import { storedFlag, storeFlag } from "../utils/storedFlag";
 import { showToast } from "../utils/toast";
 import { crossSectionOpen, followCrossSection } from "./crossSection";
 import { heldReason } from "./heldControls";
@@ -92,15 +93,6 @@ function formatX(profile: FlightProfile, value: number): string {
   return profile.timed
     ? formatTime(value - x[0]!, span)
     : formatNumber(value, span < 10 ? 1 : 0) + " km";
-}
-
-/** Whether the strip was put away; storage may be unavailable */
-function storedCollapsed(): boolean {
-  try {
-    return localStorage.getItem(PROFILE_STORAGE_KEY) === "1";
-  } catch {
-    return false;
-  }
 }
 
 /** A drag on the chart, from the press to the release */
@@ -162,7 +154,7 @@ export function followFlightProfile(app: MapApp): HTMLElement {
   /** The flight and the dataset the profile is of */
   let pathId: number | null = null;
   let data: KMLDataset | null = null;
-  let collapsed = storedCollapsed();
+  let collapsed = storedFlag(PROFILE_STORAGE_KEY);
   let drag: Drag | null = null;
   /** The place on the map the pointer on the chart stands for */
   let marker: Marker | null = null;
@@ -506,12 +498,7 @@ export function followFlightProfile(app: MapApp): HTMLElement {
     "click",
     () => {
       collapsed = !collapsed;
-      try {
-        if (collapsed) localStorage.setItem(PROFILE_STORAGE_KEY, "1");
-        else localStorage.removeItem(PROFILE_STORAGE_KEY);
-      } catch {
-        // Unavailable storage: remembered for the page's lifetime only
-      }
+      storeFlag(PROFILE_STORAGE_KEY, collapsed);
       sync();
     },
     lifetime,

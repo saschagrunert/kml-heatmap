@@ -6,7 +6,7 @@
  * that interface; the behaviour the columns cover on wider viewports is
  * exercised here through the bar instead.
  */
-import { test, expect, type Page } from "./fixtures";
+import { test, expect, THREE_D_TIP_KEY, type Page } from "./fixtures";
 import {
   activateReplay,
   attachErrorCollectors,
@@ -910,6 +910,45 @@ test.describe("Mobile bar", () => {
       await expect(compass(page)).toBeVisible();
 
       await expectNoA11yViolations(page, "mobile compass");
+    });
+  });
+
+  test.describe("The tip of the 3D view", () => {
+    // A phone that has never had it (see the fixture)
+    test.use({ threeDTip: "fresh" });
+
+    test("comes with the first flight picked, and its 3D button turns 3D on", async ({
+      page,
+    }) => {
+      const tip = toastMessage(page, "Turn on 3D to lift the flights");
+      await toggleStatsPanel(page);
+      await page.locator("#flights-tab").click();
+      await page.locator("#flight-list-panel tbody .kh-flight").first().click();
+
+      await expect(tip).toBeVisible();
+      // Over the map, clear of the bar
+      const bar = (await page.locator("#mobile-bar").boundingBox())!;
+      await expect
+        .poll(async () => {
+          const box = (await tip.boundingBox())!;
+          return box.y + box.height <= bar.y;
+        })
+        .toBe(true);
+
+      await tip.getByRole("button", { name: "3D", exact: true }).click();
+
+      await expect(page.locator("#three-d-btn")).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      );
+      await expect(tip).toHaveCount(0);
+      // Remembered, so it does not come on this phone again
+      expect(
+        await page.evaluate(
+          (key) => localStorage.getItem(key),
+          THREE_D_TIP_KEY,
+        ),
+      ).toBe("1");
     });
   });
 

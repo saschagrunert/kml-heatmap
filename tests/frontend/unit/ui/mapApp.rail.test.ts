@@ -64,6 +64,7 @@ vi.mock("../../../../kml_heatmap/frontend/utils/toast", () => ({
   showToast: vi.fn(),
   announceStatus: vi.fn(),
   dismissToast: vi.fn(),
+  TOAST_DURATION_MS: 4000,
 }));
 const mobileBarMock = vi.hoisted(() => ({ mountFor: vi.fn() }));
 vi.mock("../../../../kml_heatmap/frontend/ui/mobileBar", () => ({

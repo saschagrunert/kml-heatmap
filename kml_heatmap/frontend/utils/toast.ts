@@ -103,7 +103,7 @@ export interface ToastAction {
 }
 
 /** How long an info toast stays on screen (ms) */
-const TOAST_DURATION_MS = 4000;
+export const TOAST_DURATION_MS = 4000;
 
 /**
  * Take a toast off the screen. One that holds focus hands it to the map's
@@ -155,13 +155,14 @@ export function dismissToast(message?: string): void {
  * and it can carry the action that puts it right. Info with an action stays
  * as well: a button that went away after a few seconds could not be reached
  * in time by keyboard. The same message shown again replaces the one on
- * screen rather than stacking a copy.
+ * screen rather than stacking a copy. Returns the toast, for a caller that
+ * takes it away itself.
  */
 export function showToast(
   message: string,
   type: "error" | "info" = "info",
   action?: ToastAction,
-): void {
+): HTMLElement {
   // Several toasts in a row stack in one container instead of being drawn
   // on top of each other at the same fixed position
   const stack = ensureElement(TOAST_STACK_ID, (container) => {
@@ -193,4 +194,5 @@ export function showToast(
 
   stack.appendChild(toast);
   requestAnimationFrame(() => toast.classList.add("toast-visible"));
+  return toast;
 }
