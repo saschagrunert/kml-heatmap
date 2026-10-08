@@ -424,6 +424,26 @@ export class ReplayCamera {
   /** Whether the camera is moving the map for a frame of `follow` */
   private framing = false;
 
+  /** Wall-clock time before which the follow leaves the map alone (hold) */
+  private heldUntil = 0;
+
+  /**
+   * Leave the map to a move of the replay's own for `ms`: the follow would
+   * jump to an airplane that has gone on to the next of several flights,
+   * off the map, and zoom out as it found it there
+   */
+  hold(ms: number): void {
+    this.heldUntil = performance.now() + ms;
+  }
+
+  /**
+   * Whether the user's hand is on the map: a camera move of the replay's
+   * own would end their drag or pinch (see keepAirplaneInView)
+   */
+  userMoving(): boolean {
+    return !!this.userMovement?.isActive();
+  }
+
   /**
    * A map that turns under a paused airplane changes where its track
    * points on screen, and no frame of the replay comes to say so. The
@@ -755,7 +775,13 @@ export class ReplayCamera {
     // moment it starts. The follow picks up again once the airplane nears
     // the edge after they let go, and so it does after the compass on its
     // way north, which is a move of the app.
-    if (map.isZooming() || this.userMovement?.isActive()) {
+    // And a move of the replay's own to the next of several flights (see
+    // hold)
+    if (
+      map.isZooming() ||
+      this.userMovement?.isActive() ||
+      performance.now() < this.heldUntil
+    ) {
       this.following = null;
       return;
     }

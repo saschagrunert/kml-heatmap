@@ -105,17 +105,30 @@ test.describe("Path Selection", () => {
     await expect(replayBtn).toHaveCSS("opacity", "1");
 
     await replayBtn.click();
-    const panel = page.locator("#replay-all-controls");
+    // The panel of the replay of one flight, its time naming the flight
+    const panel = page.locator("#replay-controls");
     await expect(panel).toBeVisible({ timeout: 10000 });
-    await expect(panel).toHaveAttribute(
-      "aria-label",
-      "Replay of the selected flights",
+    await expect(page.locator("#replay-time-display")).toHaveText(
+      /^1 of 2, .+ → .+: \d+:\d{2}(:\d{2})? in$/,
     );
-    await expect(page.locator("#replay-all-clock")).toHaveText(
-      /^[12] of 2, .+: \d+:\d{2} in$/,
+    await expect(page.locator("#replay-slider")).toHaveAttribute(
+      "aria-valuetext",
+      /^1 of 2, /,
     );
+    await expect(page.locator("#replay-all-controls")).toHaveCount(0);
     await expect(replayBtn).toHaveAttribute("aria-pressed", "true");
     await expect(page.locator("#replay-all-btn")).toBeDisabled();
+
+    // At the end of the first flight's part of the timeline the second
+    // starts, named as it
+    await page.evaluate(() => {
+      const state = window.mapApp!.replayState;
+      const second = state.smoothed!.legs[1]!;
+      window.mapApp!.replayManager!.seekReplay(String(second.start + 1));
+    });
+    await expect(page.locator("#replay-time-display")).toHaveText(
+      /^2 of 2, .+ → .+: (0:0)?0:01 in$/,
+    );
 
     // Replay closes it again
     await replayBtn.click();

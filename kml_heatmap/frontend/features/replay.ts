@@ -53,8 +53,37 @@ export interface ReplayCurve extends SmoothedFlights {
    * smoothed (see replayCurve)
    */
   times: Float64Array;
+  /**
+   * Per segment: the seconds the airplane takes along it, to the start of
+   * the next one of its flight, or for the last of a flight its own time
+   */
+  spent: Float64Array;
   /** When the airplane is at the end of the last segment (see replayCurve) */
   end: number;
+  /** The flights of the replay, one after another (see ReplayLeg) */
+  legs: ReplayLeg[];
+}
+
+/**
+ * A flight of a replay of several one after another, on the replay's one
+ * clock: its segments from `first` to `end` (exclusive), when the airplane
+ * starts it and when it has landed
+ */
+export interface ReplayLeg {
+  first: number;
+  end: number;
+  start: number;
+  finish: number;
+}
+
+/**
+ * The flight of `legs` the clock is on at `time`: the last to have
+ * started, which is still the one that landed during the pause after it
+ */
+export function legAt(legs: readonly ReplayLeg[], time: number): number {
+  let leg = 0;
+  while ((legs[leg + 1]?.start ?? Infinity) <= time) leg++;
+  return leg;
 }
 
 /**
@@ -90,12 +119,18 @@ const TIME_WINDOW = 2;
  * TIME_WINDOW fixes on either side, but never before the one of the fix
  * before, nor past the logged ones of its neighbours. The first and the
  * last fix keep theirs, and so does one where the flight stands.
+ *
+ * `segments` may hold several flights, each after the one before (the
+ * replay of a selection): each is timed on its own, as it would be alone,
+ * and then put on one clock, starting where the one before has landed and
+ * `pauseS` have passed (see ReplayLeg). The first starts at 0, at its first fix.
  */
 export function replayCurve(
   segments: readonly PathSegment[],
   heightOf: (index: number) => number,
   groundOf?: (index: number) => number,
   offsets?: SmoothFlightsOptions["offsets"],
+  pauseS = 0,
 ): ReplayCurve {
   const curves = smoothFlights(segments, heightOf, {
     turnStepDeg: FLAT_TURN_STEP_DEG,
@@ -110,6 +145,9 @@ export function replayCurve(
     return metres;
   });
   const count = segments.length;
+  // Whether the segment at `i` is the last of its flight
+  const lastOfFlight = (i: number): boolean =>
+    segments[i + 1]?.path_id !== segments[i]!.path_id;
   // Whether the segment at `i` carries on the one before along the curve
   const joined = (i: number): boolean =>
     i > 0 &&
@@ -122,6 +160,8 @@ export function replayCurve(
   const logged = Float64Array.from(segments, (segment) => segment.time ?? 0);
   const times = logged.slice();
   for (let i = 1; i + 1 < count; i++) {
+    // The first and the last fix of each flight keep their times
+    if (lastOfFlight(i) || lastOfFlight(i - 1)) continue;
     let first = i;
     let last = i;
     while (first > i - TIME_WINDOW && joined(first)) first--;
@@ -156,20 +196,28 @@ export function replayCurve(
     const chain = along[curves.chainOf[i]!];
     if (!chain) continue;
     length[i] = chain[curves.to[i]!]! - chain[curves.from[i]!]!;
-    seconds[i] = i + 1 < count ? Math.max(times[i + 1]! - times[i]!, 0) : 0;
+    seconds[i] = lastOfFlight(i) ? 0 : Math.max(times[i + 1]! - times[i]!, 0);
   }
   // The speed of a segment, or null without a time to tell
   const speed = (i: number): number | null =>
     seconds[i]! > 0 ? length[i]! / seconds[i]! : null;
-  // The last segment has no next one to end at: it takes the time its
-  // length does at its logged groundspeed, or at the speed of the one
-  // before, and the airplane flies it rather than jumping to its end
-  const last = count - 1;
-  if (last >= 0 && length[last]! > 0) {
+  // Each flight from where the one before has landed and the pause has
+  // passed, the first from 0. The last segment of a flight has no next one
+  // to end at: it takes the time its length does at its logged
+  // groundspeed, or at the speed of the one before, and the airplane flies
+  // it rather than jumping to its end.
+  const legs: ReplayLeg[] = [];
+  let end = 0;
+  for (let first = 0; first < count;) {
+    let last = first;
+    while (!lastOfFlight(last)) last++;
+    const start = legs.length ? end + pauseS : 0;
+    const shift = start - times[first]!;
+    for (let i = first; i <= last; i++) times[i] = times[i]! + shift;
     const knots = segments[last]!.groundspeed_knots;
     const metresPerSecond =
       knots > 0 ? (knots * 1852) / 3600 : joined(last) ? speed(last - 1) : 0;
-    if (metresPerSecond) {
+    if (length[last]! > 0 && metresPerSecond) {
       const flown = Math.min(
         length[last]! / metresPerSecond,
         LAST_SEGMENT_MAX_S,
@@ -178,6 +226,9 @@ export function replayCurve(
       // two could not be reached by dragging to its end
       seconds[last] = Math.ceil(times[last]! + flown) - times[last]!;
     }
+    end = times[last]! + seconds[last]!;
+    legs.push({ first, end: last + 1, start, finish: end });
+    first = last + 1;
   }
   // The speed at the fix a segment starts at
   const atStart = new Float64Array(count);
@@ -200,8 +251,16 @@ export function replayCurve(
     startSlope[i] = atStart[i]! * seconds[i]!;
     endSlope[i] = (joined(i + 1) ? atStart[i + 1]! : own) * seconds[i]!;
   }
-  const end = last >= 0 ? times[last]! + seconds[last]! : 0;
-  return { ...curves, along, startSlope, endSlope, times, end };
+  return {
+    ...curves,
+    along,
+    startSlope,
+    endSlope,
+    times,
+    spent: seconds,
+    end,
+    legs,
+  };
 }
 
 /**

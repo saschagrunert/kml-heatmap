@@ -36,7 +36,9 @@ import {
   liftExaggeration,
   ribbonWidthZoom,
 } from "../calculations/lift";
-import { replayPoint, type ReplayPoint } from "../features/replay";
+import { legAt, replayPoint, type ReplayPoint } from "../features/replay";
+import { datasetIndex } from "../calculations/datasetIndex";
+import { flightRoute } from "./airportFlights";
 import { prefersReducedMotion } from "../utils/motion";
 import { ReplayCamera } from "./replayCamera";
 import {
@@ -561,6 +563,39 @@ export class ReplayRenderer {
     }
   }
 
+  /**
+   * "2 of 3, EDDS → EDTF": the flight `leg` of several the replay plays,
+   * named by its route
+   */
+  legName(state: ReplayState, leg: number): string {
+    const legs = state.smoothed?.legs ?? [];
+    const segment = state.segments[legs[leg]?.first ?? -1];
+    const data = this.app.currentData;
+    const path =
+      segment && data && datasetIndex(data).pathInfoById.get(segment.path_id);
+    return `${leg + 1} of ${legs.length}${path ? ", " + flightRoute(path) : ""}`;
+  }
+
+  /**
+   * The clock of a replay of several flights: which of them flies, and the
+   * time into it ("2 of 3, EDDS → EDTF: 0:42 in"), still the one that
+   * landed during the pause after it; never a date or an hour. Null for
+   * one flight, whose clock is the replay's. The time is written as the
+   * longest of them would be, so it keeps its width from one to the next
+   * (see ReplayManager.setupReplayUI).
+   */
+  legClock(state: ReplayState, leg?: number): string | null {
+    const legs = state.smoothed?.legs ?? [];
+    if (legs.length < 2) return null;
+    leg ??= legAt(legs, state.currentTime);
+    const { start, finish } = legs[leg]!;
+    // None before it starts, as its width is measured at another (see
+    // ReplayManager.setupReplayUI)
+    const into = Math.max(Math.min(state.currentTime, finish) - start, 0);
+    const longest = Math.max(...legs.map((l) => l.finish - l.start));
+    return `${this.legName(state, leg)}: ${formatTime(into, longest)} in`;
+  }
+
   /** Write the time and the slider of the transport row */
   updateTransport(state: ReplayState): void {
     const currentTime = state.currentTime;
@@ -568,14 +603,19 @@ export class ReplayRenderer {
     // minute count beside an hour count
     const currentLabel = formatTime(currentTime, state.maxTime);
     const maxLabel = formatTime(state.maxTime);
+    const legClock = this.legClock(state);
 
     // The transport row is written only when its text changes: at 50x the
     // label changes a few times a second, the frame loop runs sixty
-    const timeText = currentLabel + " / " + maxLabel;
+    const timeText = legClock ?? currentLabel + " / " + maxLabel;
     if (timeText !== this.transport.timeText) {
       this.transport.timeText = timeText;
       const timeDisplay = domCache.get("replay-time-display");
-      if (timeDisplay) timeDisplay.textContent = timeText;
+      if (timeDisplay) {
+        timeDisplay.textContent = timeText;
+        // In full where too narrow a panel cuts it short (features.css)
+        timeDisplay.title = legClock ?? "";
+      }
     }
 
     const slider = domCache.get("replay-slider", HTMLInputElement);
@@ -587,7 +627,7 @@ export class ReplayRenderer {
     }
     // Rewriting this every frame would make screen readers announce
     // continuously, so only do it when the spoken value changes
-    const valueText = currentLabel + " of " + maxLabel;
+    const valueText = legClock ?? currentLabel + " of " + maxLabel;
     if (slider.getAttribute("aria-valuetext") !== valueText) {
       slider.setAttribute("aria-valuetext", valueText);
     }
@@ -606,11 +646,15 @@ export class ReplayRenderer {
     const currentTime = state.currentTime;
     // A segment's time is when it starts, so until the next segment's time
     // the airplane is on this one, moving from its first point to its
-    // second. The last one ends with the replay (see replayCurve).
+    // second. The last one of a flight takes the time the curve gives it
+    // (see replayCurve), and the airplane waits at its end for the next.
+    // The curve's time of each segment is that (ReplayCurve.spent).
     const [[lat1, lon1], [lat2, lon2]] = segment.coords;
     let fraction = 1;
     const start = segment.time ?? 0;
-    const duration = (next ? (next.time ?? 0) : state.maxTime) - start;
+    const duration =
+      state.smoothed?.spent[index] ??
+      (next ? (next.time ?? 0) : state.maxTime) - start;
     if (duration > 0) {
       fraction = Math.min(Math.max((currentTime - start) / duration, 0), 1);
     }

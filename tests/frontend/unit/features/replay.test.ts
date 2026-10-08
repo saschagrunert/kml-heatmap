@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  legAt,
   liftReplayCurve,
   prepareReplaySegments,
   replayCurve,
@@ -175,6 +176,71 @@ describe("replay feature", () => {
       segments[last]!.groundspeed_knots = 1;
       const crawl = replayCurve(segments, () => 0);
       expect(crawl.end - start(crawl)).toBe(120);
+    });
+
+    it("puts several flights on one clock, each timed as it is alone", () => {
+      const one = flight(turn, [2, 3, 2, 2, 4, 2]);
+      // A second flight back the other way, logged from 0 as every flight
+      const two = flight([...turn].reverse(), [3, 2, 2, 5, 2, 2]).map(
+        (segment) => ({ ...segment, path_id: 2 }),
+      );
+      const alone = [one, two].map((segments) =>
+        replayCurve(segments, () => 0),
+      );
+      const curve = replayCurve(
+        [...one, ...two],
+        () => 0,
+        undefined,
+        undefined,
+        60,
+      );
+
+      // The first from its own first fix, the second where the first has
+      // landed and a minute has passed
+      expect(curve.legs).toEqual([
+        { first: 0, end: 6, start: 0, finish: alone[0]!.end },
+        {
+          first: 6,
+          end: 12,
+          start: alone[0]!.end + 60,
+          finish: alone[0]!.end + 60 + alone[1]!.end,
+        },
+      ]);
+      expect(curve.end).toBe(curve.legs[1]!.finish);
+      // Each with its own smoothed times, its slopes and the time of its
+      // last segment, which waits for no next one
+      for (let i = 0; i < 6; i++) {
+        expect(curve.times[i]).toBeCloseTo(alone[0]!.times[i]!, 9);
+        expect(curve.times[6 + i]).toBeCloseTo(
+          curve.legs[1]!.start + alone[1]!.times[i]!,
+          9,
+        );
+        expect(curve.startSlope[6 + i]).toBeCloseTo(
+          alone[1]!.startSlope[i]!,
+          9,
+        );
+        expect(curve.endSlope[i]).toBeCloseTo(alone[0]!.endSlope[i]!, 9);
+      }
+      expect(curve.spent[5]).toBe(alone[0]!.spent[5]);
+      expect(curve.times[5]! + curve.spent[5]!).toBe(curve.legs[0]!.finish);
+      // A curve of each, never one from the landing to the next start
+      expect(curve.chainOf[5]).not.toBe(curve.chainOf[6]);
+    });
+
+    it("tells which flight the clock is on, the one that landed through the pause after it", () => {
+      const legs = [
+        { first: 0, end: 3, start: 0, finish: 100 },
+        { first: 3, end: 5, start: 160, finish: 300 },
+        { first: 5, end: 9, start: 360, finish: 400 },
+      ];
+
+      expect(legAt(legs, -1)).toBe(0);
+      expect(legAt(legs, 0)).toBe(0);
+      expect(legAt(legs, 130)).toBe(0);
+      expect(legAt(legs, 160)).toBe(1);
+      expect(legAt(legs, 359)).toBe(1);
+      expect(legAt(legs, 400)).toBe(2);
+      expect(legAt([], 10)).toBe(0);
     });
 
     it("changes speed smoothly across a fix, where each segment had its own", () => {

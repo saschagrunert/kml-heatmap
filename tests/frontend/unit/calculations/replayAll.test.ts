@@ -10,7 +10,6 @@ import {
   LEG_PAUSE_S,
   REPLAY_ALL_POINT_FLOATS,
   replayAllPoints,
-  sequenceLeg,
   sequenceStarts,
   worldShifts,
   type FitMap,
@@ -330,26 +329,6 @@ describe("sequenceStarts", () => {
       [3, 600 + LEG_PAUSE_S],
     ]);
     expect(sequenceStarts([], duration).size).toBe(0);
-  });
-});
-
-describe("sequenceLeg", () => {
-  const starts = new Map([
-    [7, 0],
-    [4, 1000],
-    [8, 2500],
-  ]);
-
-  it("is the flight that has started last", () => {
-    expect(sequenceLeg(starts, 0)).toEqual([7, 0]);
-    expect(sequenceLeg(starts, 999)).toEqual([7, 0]);
-    expect(sequenceLeg(starts, 1000)).toEqual([4, 1000]);
-    expect(sequenceLeg(starts, 9999)).toEqual([8, 2500]);
-  });
-
-  it("is the first one before it has started, and none of no flights", () => {
-    expect(sequenceLeg(starts, -5)).toEqual([7, 0]);
-    expect(sequenceLeg(new Map(), 10)).toBeUndefined();
   });
 });
 

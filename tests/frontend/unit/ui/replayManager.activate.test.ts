@@ -43,20 +43,10 @@ import {
 } from "../../testHelpers";
 import { setColorLayer } from "../../../../kml_heatmap/frontend/ui/layerVisibility";
 import * as motion from "../../../../kml_heatmap/frontend/utils/motion";
-import { toggleSequence } from "../../../../kml_heatmap/frontend/ui/replayAll";
 
 vi.mock("../../../../kml_heatmap/frontend/utils/htmlGenerators", () => ({
   generateSegmentPopupHtml: vi.fn(() => "<div>popup</div>"),
 }));
-
-// The replay of several flights one after another has tests of its own
-vi.mock(
-  "../../../../kml_heatmap/frontend/ui/replayAll",
-  async (importOriginal) => ({
-    ...(await importOriginal<object>()),
-    toggleSequence: vi.fn(),
-  }),
-);
 
 function toastText(): string | null {
   return document.querySelector(".toast-notification")?.textContent ?? null;
@@ -72,7 +62,6 @@ describe("ReplayManager activation", () => {
     mockAnimationFrame();
     mockApp = createReplayMockApp();
     replayManager = createReplayManager(mockApp);
-    vi.mocked(toggleSequence).mockClear();
   });
 
   afterEach(() => {
@@ -146,7 +135,6 @@ describe("ReplayManager activation", () => {
 
       replayManager.toggleReplay();
 
-      expect(toggleSequence).not.toHaveBeenCalled();
       expect(mockApp.replayActive).toBe(false);
       expect(toastText()).toBe(REPLAY_TOO_MANY_MESSAGE);
     });
@@ -157,7 +145,6 @@ describe("ReplayManager activation", () => {
 
       replayManager.toggleReplay();
 
-      expect(toggleSequence).not.toHaveBeenCalled();
       expect(mockApp.replayActive).toBe(false);
       expect(toastText()).toBe(REPLAY_PRECONDITION_MESSAGE);
       // They are picked already
@@ -984,14 +971,14 @@ describe("ReplayManager activation", () => {
 
       replayManager.initializeReplay();
 
-      // In order, at their times, which the replay smooths by a hair here
-      // (see replayCurve): the first and the last as they are
-      expect(replayManager.state.segments[0]!.time).toBe(-10);
+      // In order, at their times from the first fix, which the replay
+      // smooths by a hair here (see replayCurve): the first and the last as
+      // they are
       expect(replayManager.state.segments.map((s) => s.time)).toEqual([
-        -10,
-        expect.closeTo(0, 1),
-        expect.closeTo(60, 1),
-        120,
+        0,
+        expect.closeTo(10, 1),
+        expect.closeTo(70, 1),
+        130,
       ]);
     });
 

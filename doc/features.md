@@ -212,18 +212,34 @@ years or each earlier year was shown); it does not load them itself.
 
 ### Replay
 
-Animate one flight with adjustable speed (1x to 500x, default 50x) and an
-auto-zoom button that follows the airplane; Escape closes it. The whole track is
-drawn dimmed and the flown part paints over it in the colours of the active
-scale. Replay needs a selected flight with timing data; a toast explains why it
-is unavailable otherwise, and with nothing selected the Flights tab of the
-statistics opens to pick one from; in share mode, where the filter hides every
-shared flight, it says they are hidden by the filter. A replay, Replay all and
-the flights one after another put away a flight's or an airport's popup left
-open as they start. With two to eight selected, Replay plays them one after
-another (see [Replay all](#replay-all)); with more, such as all of an airport's,
-it is unavailable and says that Replay all plays more. A flight is picked on the
-map only where it is drawn, with Altitude or Groundspeed on.
+Animate the selected flights with adjustable speed (1x to 1000x, default 50x)
+and an auto-zoom button that follows the airplane; Escape closes it. The whole
+track is drawn dimmed and the flown part paints over it in the colours of the
+active scale. Replay needs a selected flight with timing data; a toast explains
+why it is unavailable otherwise, and with nothing selected the Flights tab of
+the statistics opens to pick one from; in share mode, where the filter hides
+every shared flight, it says they are hidden by the filter. A replay and Replay
+all put away a flight's or an airport's popup left open as they start. With more
+than eight selected, such as all of an airport's, it is unavailable and says
+that Replay all plays more. A flight is picked on the map only where it is
+drawn, with Altitude or Groundspeed on.
+
+With two to eight selected, the same panel plays them one after another, for a
+look at a day of several: in the order of their files (by year, then as the
+files were read), on one clock. The airplane lands, waits there for a minute of
+the clock (a second at 60x) and appears at the first fix of the next flight;
+never the time on the ground between them, nor a date or an hour. The time reads
+which flight flies and how far into it ("2 of 3, EDDS → EDTF: 0:42 in"), as wide
+as that of the flight with the longest route so the panel keeps its width, and
+the live region says each flight as it starts, even at 1000x. The timeline runs
+over all of them: the altitude profile, as for one flight, where it is shown,
+and otherwise the slider, with each flight's part of its track drawn and the
+pauses left out. The trails of the flights before stay, the route of each is
+drawn dimmed on its own, and the trail is coloured on the ranges of all of them.
+Auto-zoom moves the view over to the start of each flight, and without it the
+view moves only where the start is off the map; the chase view flies over on its
+own. Selected flights without timing data are left out, and a toast says how
+many.
 
 The chase button (the target next to auto-zoom) watches the flight from a chase
 plane: the camera sits behind and above the airplane, tilted to 70 degrees at
@@ -271,20 +287,6 @@ the More sheet, and its panel is laid out like the replay's: the clock on a line
 of its own, the close button in the corner and the controls in one row, the
 slider between play and the speed.
 
-With two to eight flights selected, Replay plays them in the same panel one
-after another instead, for a quick look at a day of several: in the order of
-their files (by year, then as the files were read), each starting once the one
-before has landed and a pause of 5 minutes of flight has passed (1.5 seconds at
-200x), at the same speeds and with the same slider, tilt, fit and orbit. Never
-the time on the ground between them, nor a date or an hour. The clock names the
-flight in the air and the time into it ("2 of 3, EDDS → EDTF: 0:42 in"). The
-trails stay until the last flight has landed, fading over the whole run so the
-first flight ends a quarter as bright as the last, and no heat builds up behind
-them. Selected flights without timing data to play by are left out, and a toast
-says how many. A drag or a click to the end of the slider stays at the end,
-paused, rather than start again from the first flight. Replay is the control
-that ends it, with Escape and the close button; Replay all is held meanwhile.
-
 ### Hotspot tour
 
 Fly over the busiest places of what the heatmap shows, in the 3D view with the
@@ -331,11 +333,12 @@ width each time, never the time on the ground; it runs over the distance flown
 unless every one of them has times, and ends with how many flights it shows. The
 figures are those of all of them, the readout gives the time into the flight
 pointed at (a point in a gap reads the nearer end of a flight), and a click on
-one with times opens the replay of them one after another, paused at that
-moment, also where the chart runs over the distance; the pointer turns into a
-hand over those, and a click on one without times says it has no timing data.
-Where only one of them has a profile, it is drawn as a single flight. More than
-eight have no profile.
+one with times opens the replay of them one after another (see
+[Replay](#replay)), paused at that moment, also where the chart runs over the
+distance; during it the cursor follows the flight in the air; the pointer turns
+into a hand over those, and a click on one without times says it has no timing
+data. Where only one of them has a profile, it is drawn as a single flight. More
+than eight have no profile.
 
 ### Cross-section
 

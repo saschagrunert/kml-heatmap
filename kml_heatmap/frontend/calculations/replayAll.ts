@@ -2,8 +2,8 @@
  * The flights of the replay of all flights (ui/replayAll.ts) as the points its
  * layer draws (ui/replayAllLayer.ts): every flight's curve, uploaded once with
  * the seconds into its flight at each point (flightClock.ts), so a frame only
- * tells the layer the time. Played one after another (the Replay control
- * with several flights selected), each flight's seconds start where the one
+ * tells the layer the time. Played one after another (the intro of a share
+ * link, ui/shareIntro.ts), each flight's seconds start where the one
  * before has landed (sequenceStarts). The curves and their heights are the
  * ones the ribbons and the heat cloud are cut from (groundedFlights), thinned
  * as the heat cloud thins them, a little closer (REPLAY_ALL_STEP_PX): a year
@@ -73,19 +73,6 @@ export function sequenceStarts(
     at += seconds + LEG_PAUSE_S;
   }
   return starts;
-}
-
-/**
- * The flight of `starts` (see sequenceStarts) that has started last by
- * `time`, with when it started; the first before it has started
- */
-export function sequenceLeg(
-  starts: ReadonlyMap<number, number>,
-  time: number,
-): [pathId: number, start: number] | undefined {
-  let leg: [number, number] | undefined;
-  for (const entry of starts) if (!leg || entry[1] <= time) leg = entry;
-  return leg;
 }
 
 /**

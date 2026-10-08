@@ -96,12 +96,15 @@ export function appendTrailSegment(
   const start = toLngLat(from);
   const last = state.trailRuns[state.trailRuns.length - 1];
   const tail = last?.coords[last.coords.length - 1];
-  // A run goes on across the antimeridian in the next copy of the world
+  // A run goes on across the antimeridian in the next copy of the world,
+  // and not into the next of several flights, which the airplane starts
+  // anew where it may have landed
   const continues =
     last !== undefined &&
     tail !== undefined &&
     last.color === color &&
     last.lastIndex === index - 1 &&
+    state.segments[index - 1]!.path_id === segment.path_id &&
     unwrapLng(start[0], tail[0]) === tail[0] &&
     tail[1] === start[1];
 

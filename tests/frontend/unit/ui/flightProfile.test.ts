@@ -12,7 +12,8 @@ import {
   PROFILE_STORAGE_KEY,
 } from "../../../../kml_heatmap/frontend/ui/flightProfile";
 import { DAY_MAX_FLIGHTS } from "../../../../kml_heatmap/frontend/utils/constants";
-import { toggleSequence } from "../../../../kml_heatmap/frontend/ui/replayAll";
+import { flightOrder } from "../../../../kml_heatmap/frontend/calculations/flightProfile";
+import type { ReplayCurve } from "../../../../kml_heatmap/frontend/features/replay";
 import { REPLAY_PANEL_HEIGHT_VAR } from "../../../../kml_heatmap/frontend/ui/replayManager";
 import { toggleCrossSection } from "../../../../kml_heatmap/frontend/ui/crossSection";
 import { holdControls } from "../../../../kml_heatmap/frontend/ui/heldControls";
@@ -29,15 +30,6 @@ import {
   type MockApp,
   type MockAppOverrides,
 } from "../../testHelpers";
-
-// The replay of several flights one after another has tests of its own
-vi.mock(
-  "../../../../kml_heatmap/frontend/ui/replayAll",
-  async (importOriginal) => ({
-    ...(await importOriginal<object>()),
-    toggleSequence: vi.fn(),
-  }),
-);
 
 /** Ten segments due north, a minute apart, over ground at 300 ft */
 const ALTITUDES = [800, 1500, 2500, 1100, 1200, 3000, 3000, 1800, 600, 300];
@@ -89,6 +81,40 @@ interface Setup {
 
 let lifetime = new AbortController();
 
+/**
+ * The replay of the selected flights as the manager opens it: those with
+ * times one after another, in the order of their files, on one clock with
+ * a pause of a minute between them; their smoothed times here twice the
+ * logged ones, and the last segment of each two minutes long
+ */
+function openReplay(app: MockApp): void {
+  const data = app.currentData!;
+  const segments: PathSegment[] = [];
+  const legs: ReplayCurve["legs"] = [];
+  for (const id of flightOrder(data.path_info, app.selectedPathIds)) {
+    const own = data.path_segments.filter(
+      (segment) => segment.path_id === id && segment.time !== undefined,
+    );
+    if (own.length < 2) continue;
+    const start = legs.length ? legs[legs.length - 1]!.finish + 60 : 0;
+    const first = segments.length;
+    segments.push(
+      ...own.map((segment) => ({
+        ...segment,
+        time: start + segment.time! * 2,
+      })),
+    );
+    legs.push({
+      first,
+      end: segments.length,
+      start,
+      finish: segments[segments.length - 1]!.time! + 120,
+    });
+  }
+  app.replayState.segments = segments;
+  app.replayState.smoothed = { legs } as unknown as ReplayCurve;
+}
+
 function setup(
   selected: number[] = [7],
   overrides: MockAppOverrides = {},
@@ -110,12 +136,8 @@ function setup(
   const followTime = vi.fn();
   (app.replayManager as unknown as { followTime: Mock }).followTime =
     followTime;
-  // Opening replay swaps in the smoothed times: here twice the logged ones
   app.replayManager.toggleReplay.mockImplementation(() => {
-    app.replayState.segments = flight(7).map((segment) => ({
-      ...segment,
-      time: segment.time! * 2,
-    }));
+    openReplay(app);
     app.replayActive = true;
   });
   const root = followFlightProfile(asMapApp(app));
@@ -562,6 +584,7 @@ describe("flight profile", () => {
 
       // Segments that are not the profile's: by the time alone
       app.replayState.segments = app.replayState.segments.slice(1);
+      app.replayState.smoothed = null;
       app.replayState.currentTime = 270;
       follow(app.replayState);
       expect(cursor.getAttribute("x1")).toBe("500.0");
@@ -858,10 +881,6 @@ describe("flight profile", () => {
       });
     }
 
-    beforeEach(() => {
-      vi.mocked(toggleSequence).mockClear();
-    });
-
     it("draws them one after another in the order of their files", () => {
       const { root } = day();
 
@@ -913,21 +932,46 @@ describe("flight profile", () => {
       plot.dispatchEvent(pointer("pointerdown", 0.75));
       window.dispatchEvent(pointer("pointerup", 0.75));
 
-      expect(app.replayManager.toggleReplay).not.toHaveBeenCalled();
-      expect(toggleSequence).toHaveBeenCalledOnce();
-      const [opened, at] = vi.mocked(toggleSequence).mock.calls[0]!;
-      expect(opened).toBe(app);
-      // 261.9 s into flight 7: its fifth segment, of a minute
-      expect(at!.segment).toBe(app.currentData!.path_segments[4]);
-      expect(at!.fraction).toBeCloseTo((834.3 - 572.4 - 240) / 60, 6);
+      // The replay of both, where the map is, paused at the same moment
+      // of flight 7 on its clock: 261.9 s into it, twice that in the
+      // replay's smoothed times
+      expect(app.replayManager.toggleReplay).toHaveBeenCalledWith(false);
+      const second = app.replayState.smoothed!.legs[1]!;
+      expect(second.first).toBe(10);
+      expect(
+        Number(app.replayManager.seekReplay.mock.calls.at(-1)![0]),
+      ).toBeCloseTo(second.start + 2 * (834.3 - 572.4), 0);
+      expect(app.replayManager.playReplay).not.toHaveBeenCalled();
+    });
+
+    it("keeps its cursor on the flight the replay plays", () => {
+      const { app, root, followTime } = day();
+      app.replayManager.toggleReplay();
+      const follow = followTime.mock.calls[0]![0] as (
+        state: typeof app.replayState,
+      ) => void;
+      const cursor = (): number =>
+        Number(cursorOf(root, "cursor").getAttribute("x1"));
+      const [first, second] = app.replayState.smoothed!.legs;
+
+      // Half way through flight 9, the first
+      app.replayState.currentTime = 540;
+      follow(app.replayState);
+      expect(cursor()).toBeCloseTo((270 / 1112.4) * 1000, 0);
+
+      // Waiting at its landing for flight 7: at its end
+      app.replayState.currentTime = first!.finish + 30;
+      follow(app.replayState);
+      expect(cursor()).toBeCloseTo((540 / 1112.4) * 1000, 0);
+
+      // Four and a half minutes into flight 7
+      app.replayState.currentTime = second!.start + 540;
+      follow(app.replayState);
+      expect(cursor()).toBeCloseTo(((572.4 + 270) / 1112.4) * 1000, 0);
     });
   });
 
   describe("several flights, one of them without times", () => {
-    beforeEach(() => {
-      vi.mocked(toggleSequence).mockClear();
-    });
-
     it("opens the replay at a flight with times, along the distance", () => {
       // 7 timed, then 8 without times: the chart runs along the km
       const { app, root, plot } = setup([7, 8]);
@@ -942,11 +986,12 @@ describe("flight profile", () => {
       plot.dispatchEvent(pointer("pointerdown", 0.25));
       window.dispatchEvent(pointer("pointerup", 0.25));
 
-      expect(app.replayManager.toggleReplay).not.toHaveBeenCalled();
-      expect(toggleSequence).toHaveBeenCalledOnce();
-      const [, at] = vi.mocked(toggleSequence).mock.calls[0]!;
-      expect(at!.segment.path_id).toBe(7);
-      expect(app.currentData!.path_segments).toContain(at!.segment);
+      // The replay of flight 7 alone, at that point of it: 8 has no times
+      expect(app.replayManager.toggleReplay).toHaveBeenCalledWith(false);
+      expect(app.replayState.smoothed!.legs).toHaveLength(1);
+      const time = Number(app.replayManager.seekReplay.mock.calls.at(-1)![0]);
+      expect(time).toBeGreaterThan(0);
+      expect(time).toBeLessThan(2 * 540);
     });
 
     it("says a flight without times has no replay, once for a drag", () => {
@@ -958,7 +1003,6 @@ describe("flight profile", () => {
       window.dispatchEvent(pointer("pointermove", 0.9));
       window.dispatchEvent(pointer("pointerup", 0.9));
 
-      expect(toggleSequence).not.toHaveBeenCalled();
       expect(app.replayManager.toggleReplay).not.toHaveBeenCalled();
       expect(toastSpy).toHaveBeenCalledOnce();
       expect(toastSpy).toHaveBeenCalledWith(NO_TIMES_MESSAGE);
@@ -977,9 +1021,9 @@ describe("flight profile", () => {
 
       plot.dispatchEvent(pointer("pointerdown", 0.5));
       window.dispatchEvent(pointer("pointerup", 0.5));
-      // Both are selected: they play one after another, not as one
-      expect(app.replayManager.toggleReplay).not.toHaveBeenCalled();
-      expect(toggleSequence).toHaveBeenCalledOnce();
+      // The replay of both, which plays the one with times
+      expect(app.replayManager.toggleReplay).toHaveBeenCalledWith(false);
+      expect(app.replayManager.seekReplay).toHaveBeenLastCalledWith("540");
     });
   });
 

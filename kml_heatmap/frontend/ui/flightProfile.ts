@@ -14,7 +14,7 @@
  * each named by its route over its part of the chart, with a narrow gap
  * between them rather than the time on the ground (joinProfiles); the
  * readout gives the time into the flight pointed at, and a click opens the
- * replay of them one after another there (toggleSequence). More than that
+ * replay of them one after another there, on one clock. More than that
  * have no profile.
  *
  * Pointing at the chart reads out the values there and marks the place on
@@ -55,10 +55,9 @@ import {
 } from "../calculations/flightProfile";
 import { datasetIndex } from "../calculations/datasetIndex";
 import { flightRoute } from "./airportFlights";
-import { toggleSequence } from "./replayAll";
 import { airplaneLiftPx } from "../calculations/airplaneLift";
 import { liftExaggeration } from "../calculations/lift";
-import { prepareReplaySegments } from "../features/replay";
+import { legAt, prepareReplaySegments } from "../features/replay";
 import { siteData } from "../state/siteData";
 import { domCache } from "../utils/domCache";
 import { formatDuration } from "../utils/duration";
@@ -446,19 +445,45 @@ export function followFlightProfile(app: MapApp): HTMLElement {
     sync();
   };
 
-  /** Move the replay's cursor to its time */
+  /**
+   * The flight `k` of the profile in the replay of `state`: its first point
+   * on the chart, how many it has, and their times on the replay's clock,
+   * when the replay's segments of it are the profile's point for point;
+   * null otherwise. The replay's times are the logged ones smoothed
+   * (initializeReplay), on the same segments of each flight it plays.
+   */
+  const replayRun = (state: ReplayState, k: number) => {
+    const { first, last } = legs[k] ?? {
+      first: 0,
+      last: profile!.segments.length - 1,
+    };
+    const segments = state.segments;
+    const leg = state.smoothed?.legs.find(
+      (leg) => segments[leg.first]?.path_id === pathIds[k],
+    );
+    const count = last - first + 1;
+    return leg && leg.end - leg.first === count
+      ? { first, count, time: (i: number) => segments[leg.first + i]!.time! }
+      : null;
+  };
+
+  /**
+   * Move the replay's cursor to its time: on the flight it plays, at the
+   * same point of the chart, of several flights the one of that flight
+   */
   const followReplay = (state: ReplayState): void => {
     if (!profile) return;
-    const segments = state.segments;
-    // The replay's times are the logged ones smoothed (initializeReplay),
-    // point for point on the same segments: the cursor is at the same
-    // point of the chart's own times
-    setCursor(
-      replayCursor,
-      segments.length === profile.segments.length
-        ? locate(segments.length, (i) => segments[i]!.time!, state.currentTime)
-        : locateX(state.currentTime),
-    );
+    const curve = state.smoothed;
+    const leg = curve?.legs[legAt(curve.legs, state.currentTime)];
+    const run =
+      leg &&
+      replayRun(state, pathIds.indexOf(state.segments[leg.first]!.path_id));
+    let point: ProfilePoint | null = null;
+    if (run) {
+      const at = locate(run.count, run.time, state.currentTime);
+      point = { index: run.first + at.index, fraction: at.fraction };
+    } else if (!legs.length) point = locateX(state.currentTime);
+    setCursor(replayCursor, point);
   };
 
   /**
@@ -486,11 +511,19 @@ export function followFlightProfile(app: MapApp): HTMLElement {
       manager.toggleReplay(false);
       if (!app.replayActive) return;
     }
-    const segments = manager.state.segments;
+    // The same point of the flight there, on the replay's clock
+    const run = replayRun(
+      manager.state,
+      legs.length ? legs.findIndex(({ last }) => point.index <= last) : 0,
+    );
+    if (!run && legs.length) return;
     manager.seekReplay(
       String(
-        segments.length === profile!.segments.length
-          ? valueAt((i) => segments[i]!.time!, segments.length, point)
+        run
+          ? valueAt(run.time, run.count, {
+              index: point.index - run.first,
+              fraction: point.fraction,
+            })
           : at(profile!.x, point),
       ),
     );
@@ -514,15 +547,6 @@ export function followFlightProfile(app: MapApp): HTMLElement {
       const held = heldReason(domCache.get("replay-btn"));
       if (held !== null) {
         showToast(held);
-        return;
-      }
-      if (app.playsInSequence()) {
-        // Several flights play one after another, in the panel of the
-        // replay of all flights, which puts the strip away
-        toggleSequence(app, {
-          segment: profile.segments[point.index]!,
-          fraction: point.fraction,
-        });
         return;
       }
     }

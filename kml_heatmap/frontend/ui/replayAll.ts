@@ -19,29 +19,13 @@
  * (see replayAllTime) and at the height of the flights, unless the
  * Heatmap switch is off.
  *
- * The same panel plays a selection of several flights one after another,
- * from the Replay control (toggleSequence): in the order of their files,
- * each from where the one before has landed and a short pause
- * (LEG_PAUSE_S), at the speeds and with the slider of the replay of all
- * flights, for a quick look at a day of several. Its clock reads which of
- * them flies and the time into it ("2 of 3, EDDS → EDTF: 0:42 in"), never
- * a date or an hour; its trails stay to the end, and no heat builds up
- * behind them, which would be of every flight at once.
+ * A selection of several flights plays one after another in the replay of
+ * one flight (ui/replayManager.ts), not here.
  */
 import type { LngLat } from "maplibre-gl";
 import type { MapApp } from "../mapApp";
-import type { PathSegment } from "../types";
-import { fitTilted, sequenceLeg } from "../calculations/replayAll";
-import { flightOrder } from "../calculations/flightProfile";
-import { flightClockOf } from "../calculations/flightClock";
-import { datasetIndex, shownSelection } from "../calculations/datasetIndex";
-import {
-  segmentRangesFor,
-  segmentsForPathIds,
-} from "../calculations/statistics";
-import { flightRoute } from "./airportFlights";
+import { fitTilted } from "../calculations/replayAll";
 import { pluralFlights } from "../utils/htmlGenerators";
-import { REPLAY_PRECONDITION_MESSAGE } from "./replayButton";
 import { MAP_MAX_ZOOM } from "../utils/constants";
 import { applyToggleButtonState } from "../utils/buttonState";
 import {
@@ -88,16 +72,11 @@ const HELD_CONTROL_IDS = [
   ...REPLAY_HELD_CONTROL_IDS,
   "altitude-btn",
   "airspeed-btn",
+  "replay-btn",
 ];
 
 /** The control that opens and closes the replay of all flights */
 const REPLAY_ALL_BUTTON_ID = "replay-all-btn";
-
-/**
- * The control that opens and closes the replay of the selected flights
- * one after another, which holds the other, as the other holds it
- */
-const REPLAY_BUTTON_ID = "replay-btn";
 
 /**
  * The tilt a flatter map is turned to while the flights play at their
@@ -125,34 +104,11 @@ const FIT_MARGIN_PX = 24;
  */
 const SLIDER_STEP_S = 60;
 
-/** "0:42": hours and minutes */
-function hoursMinutes(seconds: number): string {
-  const minutes = Math.floor(seconds / 60);
-  const hours = Math.floor(minutes / 60);
-  return `${hours}:${String(minutes % 60).padStart(2, "0")}`;
-}
-
 /** "0:42 into every flight": hours and minutes into every flight */
 export function replayAllClock(seconds: number): string {
-  return `${hoursMinutes(seconds)} into every flight`;
-}
-
-/**
- * "2 of 3, EDDS → EDTF: 0:42 in": which of the flights played one after
- * another flies at `time` (the last to have started, and still the one
- * that landed during the pause after it), named by `route`, and the hours
- * and minutes into it
- */
-function sequenceClock(
-  player: ReplayAllPlayer,
-  time: number,
-  route: (pathId: number) => string,
-): string {
-  const legs = player.legs!;
-  const [pathId, start] = sequenceLeg(legs, time)!;
-  const into = Math.min(time, player.legTime(pathId)) - start;
-  const place = [...legs.keys()].indexOf(pathId) + 1;
-  return `${place} of ${legs.size}, ${route(pathId)}: ${hoursMinutes(into)} in`;
+  const minutes = Math.floor(seconds / 60);
+  const hours = Math.floor(minutes / 60);
+  return `${hours}:${String(minutes % 60).padStart(2, "0")} into every flight`;
 }
 
 /** An icon-only button of the panel, named by its title */
@@ -178,13 +134,6 @@ export class ReplayAllControls {
   private clock: HTMLElement | null = null;
   private slider: HTMLInputElement | null = null;
   private open = false;
-  /**
-   * The control of what plays: the replay of all flights', or Replay's for
-   * the selected flights one after another
-   */
-  private control = REPLAY_ALL_BUTTON_ID;
-  /** What plays, as the panel's names say it */
-  private what = "all flights";
   /** The clock as last written, so a frame writes it only when it changes */
   private shown = "";
   private stopWatchingUser: (() => void) | null = null;
@@ -225,11 +174,8 @@ export class ReplayAllControls {
     else this.show();
   }
 
-  /**
-   * Start every flight the filters keep, or the flights `sequence` one
-   * after another in its order, and hold the rest of the page
-   */
-  show(sequence?: readonly number[]): void {
+  /** Start every flight the filters keep, and hold the rest of the page */
+  show(): void {
     const app = this.app;
     const map = app.map;
     // Not while another has the map, the hotspot tour among them: its
@@ -239,19 +185,11 @@ export class ReplayAllControls {
     const speed = Number(
       panel.querySelector<HTMLSelectElement>("select")?.value,
     );
-    void this.player.start(
-      sequence ? { speed, pathIds: sequence, sequence: true } : { speed },
-    );
+    void this.player.start({ speed });
     if (this.player.flights === 0) {
       if (this.player.unavailable) {
         showToast(REPLAY_ALL_UNAVAILABLE_MESSAGE, "error");
-      } else {
-        // The selected flights say it as the replay of one does
-        showToast(
-          sequence ? REPLAY_PRECONDITION_MESSAGE : REPLAY_ALL_NOTHING_MESSAGE,
-          "info",
-        );
-      }
+      } else showToast(REPLAY_ALL_NOTHING_MESSAGE, "info");
       return;
     }
     // A popup left open on the map, a tapped flight's or an airport's,
@@ -260,22 +198,7 @@ export class ReplayAllControls {
     app.airportManager.closePopup();
     app.layerManager.closeSegmentPopup();
     this.open = true;
-    const control = (this.control = sequence
-      ? REPLAY_BUTTON_ID
-      : REPLAY_ALL_BUTTON_ID);
-    const what = (this.what = sequence
-      ? "the selected flights"
-      : "all flights");
-    panel.setAttribute("aria-label", "Replay of " + what);
-    nameButton(
-      panel.querySelector("#replay-all-close-btn")!,
-      "Close the replay of " + what,
-    );
     const slider = this.slider!;
-    slider.setAttribute(
-      "aria-label",
-      sequence ? "Time into the selected flights" : "Time into every flight",
-    );
     slider.max = String(
       Math.ceil(this.player.duration / SLIDER_STEP_S) * SLIDER_STEP_S,
     );
@@ -284,8 +207,8 @@ export class ReplayAllControls {
     app.replayActive = true;
     this.release?.();
     this.release = holdControls(
-      [...HELD_CONTROL_IDS, sequence ? REPLAY_ALL_BUTTON_ID : REPLAY_BUTTON_ID],
-      "the replay of " + what,
+      HELD_CONTROL_IDS,
+      "the replay of all flights",
       this.app.signal,
     );
     document.body.classList.add("replay-all-active");
@@ -296,7 +219,7 @@ export class ReplayAllControls {
     // its clock, which on a phone takes a row of its own
     this.unfollowPanel?.();
     this.unfollowPanel = followPanelHeight(panel, this.app.signal);
-    const button = domCache.get(control);
+    const button = domCache.get(REPLAY_ALL_BUTTON_ID);
     if (button) {
       setControlIcon(button, "stop");
       applyToggleButtonState(button, true);
@@ -346,7 +269,7 @@ export class ReplayAllControls {
       threeD();
     };
     announceStatus(
-      `Replaying ${pluralFlights(this.player.flights)}${sequence ? " one after another" : ""} at ${this.player.speed} times their speed`,
+      `Replaying ${pluralFlights(this.player.flights)} at ${this.player.speed} times their speed`,
     );
   }
 
@@ -362,7 +285,7 @@ export class ReplayAllControls {
     this.unfollowPanel?.();
     this.unfollowPanel = null;
     document.body.classList.remove("replay-all-active");
-    const button = domCache.get(this.control);
+    const button = domCache.get(REPLAY_ALL_BUTTON_ID);
     if (button) {
       setControlIcon(button, "play");
       applyToggleButtonState(button, false);
@@ -387,8 +310,8 @@ export class ReplayAllControls {
         state.layingBack = null;
       });
     }
-    if (hadFocus) focusModeControl(this.app, this.control);
-    announceStatus(`Replay of ${this.what} closed`);
+    if (hadFocus) focusModeControl(this.app, REPLAY_ALL_BUTTON_ID);
+    announceStatus("Replay of all flights closed");
   }
 
   /**
@@ -460,19 +383,15 @@ export class ReplayAllControls {
       setControlIcon(play, player.playing ? "pause" : "play");
       nameButton(
         play,
-        `${player.playing ? "Pause" : "Play"} the replay of ${this.what}`,
+        player.playing
+          ? "Pause the replay of all flights"
+          : "Play the replay of all flights",
       );
     }
     const time = Math.min(player.time, player.duration);
     const slider = this.slider!;
     slider.value = String(time);
-    const data = this.app.currentData;
-    const text =
-      player.legs && data
-        ? sequenceClock(player, time, (pathId) =>
-            flightRoute(datasetIndex(data).pathInfoById.get(pathId)!),
-          )
-        : replayAllClock(time);
+    const text = replayAllClock(time);
     if (text !== this.shown) {
       this.shown = text;
       if (this.clock) this.clock.textContent = text;
@@ -490,8 +409,8 @@ export class ReplayAllControls {
     if (this.panel) return this.panel;
     const panel = document.createElement("div");
     panel.id = "replay-all-controls";
-    // Named, as its slider and close button are, by what plays (see show)
     panel.setAttribute("role", "region");
+    panel.setAttribute("aria-label", "Replay of all flights");
     panel.hidden = true;
 
     const play = panelButton("replay-all-play-btn", "play");
@@ -518,16 +437,16 @@ export class ReplayAllControls {
     slider.id = "replay-all-time";
     slider.min = "0";
     slider.step = String(SLIDER_STEP_S);
+    slider.setAttribute("aria-label", "Time into every flight");
     slider.addEventListener("input", () => {
       this.player.seek(Number(slider.value));
     });
     slider.addEventListener("pointerdown", () => {
       if (!this.player.playing) return;
       this.player.pause();
-      // Not from the end, where it would start again from the first flight:
-      // the flights one after another end as the last lands, and a drag or
-      // a click there stays with it, paused. Every flight at once plays on
-      // from there while the trails fade.
+      // Not from the end, where it would start again from the first
+      // flight: a drag or a click there stays with it, paused. Before it,
+      // every flight plays on from there while the trails fade.
       const letGo = (): void => {
         removeEventListener("pointerup", letGo);
         removeEventListener("pointercancel", letGo);
@@ -564,6 +483,7 @@ export class ReplayAllControls {
     });
 
     const exit = panelButton("replay-all-close-btn", "close");
+    nameButton(exit, "Close the replay of all flights");
     exit.addEventListener("click", () => this.close());
 
     const live = document.createElement("div");
@@ -582,104 +502,22 @@ export class ReplayAllControls {
 /** The controls of each app, made the first time they are used */
 const controlsOf = new WeakMap<MapApp, ReplayAllControls>();
 
-/** The controls of `app`, made the first time they are wanted */
-function controlsFor(app: MapApp): ReplayAllControls {
+/**
+ * The seconds into every flight while the replay of all flights of `app`
+ * is open, which the heat is drawn up to (see ui/heatCloud.ts), and null
+ * otherwise: Wrapped's intro plays its own player under the whole year
+ */
+export function replayAllTime(app: MapApp): number | null {
+  const controls = controlsOf.get(app);
+  return controls?.isOpen ? controls.player.time : null;
+}
+
+/** Open or close the replay of all flights of `app` */
+export function toggleReplayAll(app: MapApp): void {
   let controls = controlsOf.get(app);
   if (!controls) {
     controls = new ReplayAllControls(app);
     controlsOf.set(app, controls);
   }
-  return controls;
-}
-
-/**
- * The seconds into every flight while the replay of all flights of `app`
- * is open, which the heat is drawn up to (see ui/heatCloud.ts), and null
- * otherwise: Wrapped's intro plays its own player under the whole year.
- * Null as well while the selected flights play one after another, whose
- * clock is not the one of every flight the heat is of.
- */
-export function replayAllTime(app: MapApp): number | null {
-  const controls = controlsOf.get(app);
-  return controls?.isOpen && !controls.player.legs
-    ? controls.player.time
-    : null;
-}
-
-/**
- * Open or close the replay of all flights of `app`; not the selected flights
- * one after another, which hold its control, and which a click whose bundle
- * came late found playing
- */
-export function toggleReplayAll(app: MapApp): void {
-  const controls = controlsFor(app);
-  if (!controls.player.legs) controls.toggle();
-}
-
-/**
- * Play the flights selected in `app` one after another, in the order of
- * their files (flightOrder), or close their replay, as the Replay control
- * does with more than one selected. Flights without timing data are left
- * out, and a toast says how many. With `at`, it opens paused at that
- * `fraction` of the dataset's segment `segment` on its flight's clock
- * (FlightClock), which shortens breaks in the log: a click on the profile
- * of the flights (ui/flightProfile.ts), which runs along the logged times.
- * The replay of all flights, which a click whose bundle came late found
- * open, stays open.
- */
-export function toggleSequence(
-  app: MapApp,
-  at?: { segment: PathSegment; fraction: number },
-): void {
-  const controls = controlsFor(app);
-  const data = app.currentData;
-  if (controls.isOpen) {
-    if (controls.player.legs) controls.close();
-    return;
-  }
-  if (!data) return;
-  // Decided again: a click whose bundle came late found another selection,
-  // of one flight, or of more than play one after another. Replay takes it
-  // as it is now: one flight replays, and too many are said to be.
-  if (!app.canReplay() || !app.playsInSequence()) {
-    app.toggleReplay();
-    return;
-  }
-  // Of those the filter shows: share mode keeps flights it hides, which
-  // the map does not draw (shownSelection)
-  const order = flightOrder(data.path_info, shownSelection(app));
-  const timed = order.filter((pathId) =>
-    segmentsForPathIds(data.path_segments, [pathId]).some(
-      (segment) => (segment.time ?? 0) > 0,
-    ),
-  );
-  controls.show(timed);
-  if (!controls.isOpen) return;
-  // The player leaves out as well a flight whose clock is too short to
-  // play by (sequenceStarts): its times are all within a second
-  const left = order.length - controls.player.flights;
-  if (left > 0) {
-    showToast(
-      `Left out ${left} of the ${order.length} selected flights: not enough timing data`,
-      "info",
-    );
-  }
-  if (at) {
-    const { segment, fraction } = at;
-    const segments = data.path_segments;
-    // Looked for among its flight's own segments, which are side by side
-    const i = segments.indexOf(
-      segment,
-      segmentRangesFor(segments)?.get(segment.path_id)?.[0],
-    );
-    const clock = flightClockOf(segments);
-    const player = controls.player;
-    player.pause();
-    player.seek(
-      player.legTime(
-        segment.path_id,
-        (clock.start[i] ?? 0) + fraction * (clock.spent[i] ?? 0),
-      ),
-    );
-  }
+  controls.toggle();
 }

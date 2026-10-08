@@ -35,7 +35,8 @@ this repository.
 - Statistics panel (distance, altitude, flight time), with a sortable,
   searchable list of the flights next to it
 - Year and aircraft filtering
-- Flight replay with animated airplane marker
+- Flight replay with an animated airplane marker, of up to eight selected
+  flights one after another
 - Replay of all flights at once, each from its own start, at up to 1000x, at
   their height, with a time slider and the heat building up behind them
 - A hotspot tour: a short flight in the 3D view over the busiest places of the

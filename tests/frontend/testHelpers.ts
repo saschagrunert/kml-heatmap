@@ -179,7 +179,6 @@ interface MockManagers {
   replayState: ReplayState;
   canReplay: Mock;
   replayHint: Mock;
-  playsInSequence: Mock;
   toggleReplay: Mock;
   toggleReplayAll: Mock;
   toggleCrossSection: Mock;
@@ -408,9 +407,6 @@ function createMockManagers(): MockManagers {
             ).some((segment) => (segment.time ?? 0) > 0)
           ? REPLAY_TOO_MANY_MESSAGE
           : REPLAY_PRECONDITION_MESSAGE;
-    }),
-    playsInSequence: vi.fn(function (this: MockApp) {
-      return this.selectedPathIds.size > 1;
     }),
     // Like the app's once the manager is there: straight to it
     toggleReplay: vi.fn(() => {

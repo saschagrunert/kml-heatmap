@@ -1611,8 +1611,12 @@ describe("ReplayRenderer", () => {
           [50.01, 8.03],
         ];
         mockReplayManager.state.segments = segments;
-        mockReplayManager.state.currentTime = 5;
         lifted(true);
+        // On the curve's times, as the replay puts them on its segments
+        // (ReplayManager.initializeReplay)
+        const { times } = mockReplayManager.state.smoothed!;
+        segments.forEach((segment, i) => (segment.time = times[i]!));
+        mockReplayManager.state.currentTime = times[1]! / 2;
         map.jumpTo({ zoom: 13, pitch: 60 });
 
         callUpdateDisplay();
@@ -1630,7 +1634,7 @@ describe("ReplayRenderer", () => {
         expect(lon).toBeCloseTo(onCurve!.position[1], 9);
         expect(Math.abs(lon - 8)).toBeGreaterThan(1e-5);
         // Flat, on the same curve: the lines are drawn along it too
-        lifted(false);
+        mockReplayManager.state.lifted = false;
         callUpdateDisplay();
         expect(airplane.getLatLng()[1]).toBeCloseTo(lon, 9);
       });

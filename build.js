@@ -419,8 +419,18 @@ const BUDGET_APP = { raw: 163.25 * 1024, gzip: 56.25 * 1024 };
 // 1.75 KB raw and 0.75 KB gzipped for the intro of a link to shared flights
 // (ui/shareIntro.ts, and a layer id and lasting trails for the player of
 // the replay of all flights): 151.21 KB and 57.14 KB gzipped in a local
-// build, 57.43 KB gzipped in CI.
-const BUDGET_FEATURES = { raw: 151.25 * 1024, gzip: 58 * 1024 };
+// build, 57.43 KB gzipped in CI. Raised by 1.25 KB raw and 0.5 KB gzipped
+// for the replay of one flight playing two to eight selected ones one
+// after another on one clock (the legs of the curve, the timeline's parts,
+// the clock naming the flight, the camera across the legs and the
+// profile's cursor on them), which took the place of the panel of the
+// replay of all flights playing them: some 1.2 KB raw more than that path,
+// 152.46 KB and 57.73 KB gzipped in a local build. Raised by 0.5 KB raw and
+// 0.25 KB gzipped for its review: a frame that stops at the start of each
+// flight, the camera held only for a move to it, and the time of each
+// flight as wide as the longest: 152.78 KB and 57.85 KB gzipped in a local
+// build, some 58.14 KB in CI.
+const BUDGET_FEATURES = { raw: 153 * 1024, gzip: 58.75 * 1024 };
 // The Wrapped bundle: the Wrapped dialog with its intro, and the statistics
 // rail, fetched the first time either opens. It shares nothing with the
 // feature bundle that the app does not have as well. About 14.1 KB gzipped
