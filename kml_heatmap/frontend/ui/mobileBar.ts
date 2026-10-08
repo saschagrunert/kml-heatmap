@@ -436,6 +436,14 @@ export class MobileBar {
   private moreRows(): SheetRow[] {
     const app = this.app;
     return [
+      // The panel spans the top of the map once the sheet is closed
+      {
+        kind: "action",
+        id: "search",
+        icon: "search",
+        label: "Search",
+        onSelect: () => runAction(app, "toggleSearch"),
+      },
       {
         kind: "action",
         id: "replay",

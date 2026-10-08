@@ -84,11 +84,11 @@ build date and commit under the same name in every build too. So nothing may be
 cached as if it were immutable, and a rebuild has to reach the browser through
 revalidation:
 
-| Path                                                                        | Cache policy                                                                                                                              |
-| --------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| `index.html`, `map_config.js`, `data/**`                                    | `no-cache`, or a `max-age` of minutes: what a rebuild changes first. With `no-cache` the browser keeps a copy and asks whether it changed |
-| `*.bundle.js`, `styles.css`, `features.css`, `wrapped.css`, `vendor/`       | A modest `max-age` (an hour to a day), never `immutable`: they change with a rebuild under the same names                                 |
-| `flags/`, the favicons, `manifest.json`, `preview.png`, `y/`, `f/`, `*.map` | The same modest `max-age`                                                                                                                 |
+| Path                                                                                | Cache policy                                                                                                                              |
+| ----------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `index.html`, `map_config.js`, `data/**`                                            | `no-cache`, or a `max-age` of minutes: what a rebuild changes first. With `no-cache` the browser keeps a copy and asks whether it changed |
+| `*.bundle.js`, `styles.css`, `features.css`, `wrapped.css`, `search.css`, `vendor/` | A modest `max-age` (an hour to a day), never `immutable`: they change with a rebuild under the same names                                 |
+| `flags/`, the favicons, `manifest.json`, `preview.png`, `y/`, `f/`, `*.map`         | The same modest `max-age`                                                                                                                 |
 
 Revalidation works with `ETag` or `Last-Modified`. A server that derives its
 ETags from the modification times, as GitHub Pages does, keeps them for the

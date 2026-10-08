@@ -233,15 +233,7 @@ export class ReplayAllControls {
     const map = app.map;
     // Not while another has the map, the hotspot tour among them: its
     // control is held then, and this covers a click whose bundle came late
-    if (
-      this.open ||
-      !map ||
-      app.replayActive ||
-      app.wrappedVisible ||
-      app.tourView
-    ) {
-      return;
-    }
+    if (this.open || !map || app.mapHeld) return;
     const panel = this.panelOf();
     const speed = Number(
       panel.querySelector<HTMLSelectElement>("select")?.value,

@@ -36,8 +36,8 @@ let listening = false;
 /**
  * Controls held by the replay of one flight and of all of them alike: the
  * filters, the selection and Wrapped would change or take the map under
- * either, and so would the other modes. Each adds its own (see
- * ui/replayManager.ts and ui/replayAll.ts).
+ * either, and so would the other modes and the search, which moves it.
+ * Each adds its own (see ui/replayManager.ts and ui/replayAll.ts).
  */
 export const REPLAY_HELD_CONTROL_IDS = [
   "heatmap-btn",
@@ -51,6 +51,7 @@ export const REPLAY_HELD_CONTROL_IDS = [
   "reset-view-btn",
   "cross-section-btn",
   "hotspot-tour-btn",
+  "search-btn",
 ] as const;
 
 /**

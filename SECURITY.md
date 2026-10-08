@@ -48,9 +48,10 @@ scripts or styles. Only `connect-src` names foreign hosts: CARTO
 glyphs and sprite of the base map), the open flightmaps tile server
 (`nwy-tiles-api.prod.newaydata.com`), the elevation tiles on AWS (the
 `elevation-tiles-prod` bucket on `s3.amazonaws.com`, not the whole host) the 3D
-view draws its relief from, and EOX's satellite imagery (`tiles.maps.eox.at`),
-which the browser asks for only while the Satellite switch is on, and which then
-sees the visitor's address and the area in view (see
+view draws its relief from, EOX's satellite imagery (`tiles.maps.eox.at`), which
+the browser asks for only while the Satellite switch is on, and which then sees
+the visitor's address and the area in view, and Photon (`photon.komoot.io`),
+which the search asks for the places a visitor types (see
 [Privacy](doc/privacy.md#requests-to-other-servers)). Besides those
 `connect-src` allows `blob:`: MapLibre's worker reads the heatmap's sources from
 Blob URLs of the GeoJSON the page's year worker wrote. Chrome holds that worker

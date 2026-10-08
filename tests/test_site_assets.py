@@ -45,8 +45,8 @@ BOUNDS = CoordinateExtent(49.0, 51.0, 7.0, 9.0)
 def bundle(tmp_path_factory, monkeypatch):
     """Stand-ins for the built JavaScript bundles.
 
-    Returns the main one; the feature and Wrapped bundles sit next to it,
-    the way `npm run build` leaves them.
+    Returns the main one; the feature, Wrapped and search bundles sit next
+    to it, the way `npm run build` leaves them.
     """
     static = tmp_path_factory.mktemp("static")
     bundle = static / "mapApp.bundle.js"
@@ -55,11 +55,14 @@ def bundle(tmp_path_factory, monkeypatch):
     features.write_text("// features\n")
     wrapped = static / "wrapped.bundle.js"
     wrapped.write_text("// wrapped\n")
+    search = static / "search.bundle.js"
+    search.write_text("// search\n")
     monkeypatch.setattr("kml_heatmap.site_assets.BUNDLE_FILE", bundle)
     monkeypatch.setattr("kml_heatmap.site_assets.FEATURES_BUNDLE_FILE", features)
     monkeypatch.setattr("kml_heatmap.site_assets.WRAPPED_BUNDLE_FILE", wrapped)
+    monkeypatch.setattr("kml_heatmap.site_assets.SEARCH_BUNDLE_FILE", search)
     monkeypatch.setattr(
-        "kml_heatmap.site_assets.BUNDLE_FILES", (bundle, features, wrapped)
+        "kml_heatmap.site_assets.BUNDLE_FILES", (bundle, features, wrapped, search)
     )
     return bundle
 
@@ -350,12 +353,15 @@ class TestPackageAssets:
         assert (tmp_path / "styles.css").stat().st_size > 0
         assert (tmp_path / "mapApp.bundle.js").read_text() == bundle.read_text()
         assert not (tmp_path / "mapApp.bundle.js.map").exists()
-        # Replay and Wrapped are fetched on demand, each from a bundle and a
-        # stylesheet of its own, so the page needs them next to it as well
+        # Replay, Wrapped and the search are fetched on demand, each from a
+        # bundle and a stylesheet of its own, so the page needs them next to
+        # it as well
         assert (tmp_path / "features.bundle.js").read_text() == "// features\n"
         assert (tmp_path / "wrapped.bundle.js").read_text() == "// wrapped\n"
+        assert (tmp_path / "search.bundle.js").read_text() == "// search\n"
         assert (tmp_path / "features.css").stat().st_size > 0
         assert (tmp_path / "wrapped.css").stat().st_size > 0
+        assert (tmp_path / "search.css").stat().st_size > 0
         for fname in ("favicon.svg", "manifest.json"):
             assert (tmp_path / fname).exists()
         # The library bundle was removed; it must not reappear in the output

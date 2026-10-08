@@ -56,11 +56,14 @@ from kml_heatmap.site_assets import CSS_FILES, STATIC_DIR, _copy_and_minify_css
 # the map and its place beside the legends and the toasts (13,608 B before,
 # 17,471 B after), and from 19 KB for the panel of the hotspot tour, its
 # caption, its place over the phone's bar and the toasts above it (18,582 B
-# before, 20,992 B after).
+# before, 20,992 B after). search.css, the panel of the search of airports
+# and places, fetched with its bundle, was set at 4,004 B with the same 2 KB
+# of room.
 STYLESHEET_BUDGET_BYTES = {
     "styles.css": 40 * 1024,
     "features.css": int(21.5 * 1024),
     "wrapped.css": 36 * 1024,
+    "search.css": int(5.75 * 1024),
 }
 
 # The same sheets gzipped at level 9, as build.js measures the bundles: the
@@ -69,11 +72,13 @@ STYLESHEET_BUDGET_BYTES = {
 # shape: about 5 % of room over the size when a budget is set, raised on
 # purpose in the change that needs it, with the sizes before and after
 # here. Set at 7,672 B (styles.css), 3,777 B (features.css) and 5,878 B
-# (wrapped.css), with the print styles taken out of the first two.
+# (wrapped.css), with the print styles taken out of the first two, and at
+# 1,192 B for search.css.
 STYLESHEET_GZIP_BUDGET_BYTES = {
     "styles.css": int(7.875 * 1024),
     "features.css": int(3.875 * 1024),
     "wrapped.css": int(6.125 * 1024),
+    "search.css": int(1.25 * 1024),
 }
 
 

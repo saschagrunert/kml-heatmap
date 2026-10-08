@@ -167,6 +167,19 @@ export function defineStoreAccessors(
   }
 }
 
+/**
+ * Whether a replay (of one flight or of all), the hotspot tour or Wrapped
+ * holds the map, which nothing else may then move or draw on: MapApp's
+ * `mapHeld`, here so that test doubles derive it the same way
+ */
+export function isMapHeld(store: Pick<AppStore, "get">): boolean {
+  return (
+    store.get("replayActive") ||
+    store.get("wrappedVisible") ||
+    store.get("tourView") !== null
+  );
+}
+
 export function createDefaultState(): StoreState {
   return {
     selectedYear: "all",

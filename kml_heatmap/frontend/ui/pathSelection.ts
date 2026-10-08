@@ -245,8 +245,7 @@ export class PathSelection {
         // Unless the selection moved on while the bundle loaded
         const selected = app.selectedPathIds;
         const still = selected.size === 1 && selected.has(pathId);
-        const busy = app.replayActive || app.wrappedVisible || app.tourView;
-        if (still && !moved && !busy) this.frameSelection(true);
+        if (still && !moved && !app.mapHeld) this.frameSelection(true);
       });
   }
 

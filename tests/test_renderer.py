@@ -147,11 +147,14 @@ def bundle(tmp_path_factory, monkeypatch):
     features.write_text("/* test features */", encoding="utf-8")
     wrapped = static / "wrapped.bundle.js"
     wrapped.write_text("/* test wrapped */", encoding="utf-8")
+    search = static / "search.bundle.js"
+    search.write_text("/* test search */", encoding="utf-8")
     monkeypatch.setattr("kml_heatmap.site_assets.BUNDLE_FILE", bundle)
     monkeypatch.setattr("kml_heatmap.site_assets.FEATURES_BUNDLE_FILE", features)
     monkeypatch.setattr("kml_heatmap.site_assets.WRAPPED_BUNDLE_FILE", wrapped)
+    monkeypatch.setattr("kml_heatmap.site_assets.SEARCH_BUNDLE_FILE", search)
     monkeypatch.setattr(
-        "kml_heatmap.site_assets.BUNDLE_FILES", (bundle, features, wrapped)
+        "kml_heatmap.site_assets.BUNDLE_FILES", (bundle, features, wrapped, search)
     )
     return bundle
 
@@ -1388,6 +1391,7 @@ class TestCreateProgressiveHeatmap:
         assert (out / "mapApp.bundle.js").exists()
         assert (out / "features.bundle.js").exists()
         assert (out / "wrapped.bundle.js").exists()
+        assert (out / "search.bundle.js").exists()
         assert (out / "CNAME").read_text() == "maps.example.org"
 
     @pytest.mark.usefixtures("bundle")

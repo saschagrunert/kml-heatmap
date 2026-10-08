@@ -2,15 +2,17 @@
  * Lazy bundles - what the app says when one cannot be fetched
  *
  * Replay, the relief, the cross-section and the hotspot tour come with the
- * feature bundle, Wrapped and the statistics panel with the Wrapped bundle
- * (services/featureLoader.ts fetches both). MapApp fetches them the first
- * time one of their controls is used (MapApp.loadReplay, loadWrapped,
- * loadStats and toggleFeature); this module holds what those share: the
- * message each part of the app shows when its code could not be loaded,
- * `loadLazyBundle`, which shows it and takes back the one of an earlier
- * failure once a later try has worked, and the fetch of the Wrapped bundle
- * ahead of a click on its button (`prepareWrappedOnIntent`), so its intro
- * is ready to play. It is part of the first visit, like the app: nothing
+ * feature bundle, Wrapped and the statistics panel with the Wrapped bundle,
+ * the search of airports and places with the search bundle
+ * (services/featureLoader.ts fetches all three). MapApp fetches them the
+ * first time one of their controls is used (MapApp.loadReplay, loadWrapped,
+ * loadStats, toggleFeature and toggleSearch); this module holds what those
+ * share: the message each part of the app shows when its code could not be
+ * loaded, `loadLazyBundle`, which shows it and takes back the one of an
+ * earlier failure once a later try has worked, the fetch of the Wrapped
+ * bundle ahead of a click on its button (`prepareWrappedOnIntent`), so its
+ * intro is ready to play, and the key that opens the search
+ * (`followSearchKey`). It is part of the first visit, like the app: nothing
  * here may reach into the lazy bundles other than through featureLoader.
  */
 import type { MapApp } from "../mapApp";
@@ -22,6 +24,7 @@ import {
 } from "../services/featureLoader";
 import { TRY_AGAIN } from "../services/lazyImport";
 import { logError } from "../utils/logger";
+import { runAction } from "./actions";
 import { prefersReducedMotion } from "../utils/motion";
 import { dismissToast, showToast } from "../utils/toast";
 import { whenIdle } from "../utils/whenIdle";
@@ -42,6 +45,8 @@ export const STATS_UNAVAILABLE_MESSAGE =
   "Statistics are unavailable: their code could not be loaded" + TRY_AGAIN;
 export const CROSS_SECTION_UNAVAILABLE_MESSAGE =
   "The cross-section is unavailable: its code could not be loaded" + TRY_AGAIN;
+export const SEARCH_UNAVAILABLE_MESSAGE =
+  "Search is unavailable: its code could not be loaded" + TRY_AGAIN;
 
 /** What a control starts in the feature bundle once it has arrived */
 export type FeatureToggle = keyof Pick<
@@ -116,4 +121,42 @@ export function prepareWrappedOnIntent(app: MapApp): void {
       signal: app.signal,
     });
   }
+}
+
+/**
+ * Open the search with `/`, as many sites do, from anywhere but a field
+ * that takes text (the flight list's search, the search itself) or a
+ * select, and without a modifier: Ctrl or Alt with it is the browser's or
+ * the system's. The key is the browser's quick find in Firefox otherwise,
+ * which the page takes over. Not while a modal is open (a sheet of the
+ * phone's bar, which a tablet with a keyboard may have, or Wrapped): the
+ * search would open outside it, and one Escape close both. Nor while a
+ * replay, the tour or Wrapped holds the map, which the search does not
+ * open under (MapApp.toggleSearch): the key stays the browser's. On an
+ * open search it goes back to the field; Escape and the button close it.
+ */
+export function followSearchKey(app: MapApp): void {
+  document.addEventListener(
+    "keydown",
+    (event) => {
+      const target = event.target;
+      if (
+        event.key !== "/" ||
+        event.ctrlKey ||
+        event.metaKey ||
+        event.altKey ||
+        event.defaultPrevented ||
+        app.mapHeld ||
+        document.querySelector('[aria-modal="true"]:not([hidden])') ||
+        (target instanceof HTMLElement &&
+          (target.isContentEditable ||
+            target.matches("input, textarea, select")))
+      ) {
+        return;
+      }
+      event.preventDefault();
+      runAction(app, "openSearch");
+    },
+    { signal: app.signal },
+  );
 }

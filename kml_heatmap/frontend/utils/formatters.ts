@@ -61,3 +61,22 @@ export function formatFileSize(bytes: number): string {
   const text = value < 10 ? value.toFixed(1) : String(Math.round(value));
   return `${text} ${unit}`;
 }
+
+const regions =
+  typeof Intl !== "undefined" && "DisplayNames" in Intl
+    ? new Intl.DisplayNames(["en"], { type: "region" })
+    : null;
+
+/**
+ * The English name of a country by its ISO code ("DE" is "Germany"), or
+ * the code where the browser has no name for it. For the statistics, Wrapped
+ * and the search: here, where the app reaches it, so the two lazy bundles
+ * share it without a chunk of their own (see build.js).
+ */
+export function countryDisplayName(code: string): string {
+  try {
+    return regions?.of(code) || code;
+  } catch {
+    return code;
+  }
+}

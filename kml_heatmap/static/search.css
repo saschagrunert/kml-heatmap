@@ -1,0 +1,230 @@
+/* The search of airports and places (ui/locationSearch.ts), fetched with
+   search.bundle.js the first time the search opens, as features.css and
+   wrapped.css are with theirs (see the header of styles.css). The Search
+   button is a control of the left column like the others, so it needs
+   nothing here: it is drawn pressed through .control-btn.active while the
+   panel is open.
+
+   The dependency runs one way, as for features.css and wrapped.css: this
+   file may use the tokens styles.css defines, and nothing in styles.css
+   may depend on a rule here. Those two may land before or after this file,
+   so no two of them may style the same elements. */
+
+/* At the top of the map, as wide as a phone allows; beside the Search
+   button where the columns are shown (.is-anchored) */
+.location-search {
+  position: fixed;
+  top: calc(var(--edge-gap) + var(--safe-top));
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: var(--z-panel);
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  width: min(
+    360px,
+    calc(100vw - var(--edge-gap) * 2 - var(--safe-left) - var(--safe-right))
+  );
+  max-height: calc(
+    100dvh - var(--edge-gap) * 2 - var(--safe-top) - var(--safe-bottom)
+  );
+  overflow: hidden;
+  /* A hair short of opaque: on a phone it spans nearly the whole top edge
+     (see --color-bg-edge in styles.css) */
+  background-color: var(--color-bg-edge);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-panel);
+  box-shadow: var(--shadow-panel);
+  color: var(--color-text);
+  font-size: var(--text-md);
+}
+.location-search[hidden] {
+  display: none;
+}
+/* The button's place, which the script measures as the panel opens, as
+   the window changes size, as the column scrolls and as it moves beside
+   the statistics */
+.location-search.is-anchored {
+  /* Within the window, for a button the column has scrolled out of view,
+     and from no lower than its middle */
+  --search-y: clamp(
+    calc(var(--edge-gap) + var(--safe-top)),
+    var(--search-top),
+    50dvh
+  );
+  top: var(--search-y);
+  left: var(--search-left);
+  transform: none;
+  max-width: calc(
+    100vw - var(--search-left) - var(--edge-gap) - var(--safe-right)
+  );
+  /* Down from the button, so the list is what gives way in a low window */
+  max-height: calc(
+    100dvh - var(--search-y) - var(--edge-gap) - var(--safe-bottom)
+  );
+}
+
+/* The field: a search glyph, the input and the close button in one row,
+   with the ring of the keyboard's focus around all three */
+.location-search-field {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: 0 var(--space-xs) 0 var(--space-md);
+  color: var(--color-text-muted);
+  border-radius: var(--radius-panel) var(--radius-panel) 0 0;
+}
+.location-search-field:focus-within {
+  outline: var(--focus-ring);
+  outline-offset: -2px;
+}
+.location-search-field input {
+  flex: 1;
+  min-width: 0;
+  min-height: var(--btn-min-height);
+  padding: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--color-text);
+  font: inherit;
+  font-size: var(--text-base);
+}
+.location-search-field input::placeholder {
+  color: var(--color-text-dim);
+}
+.location-search-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  min-width: var(--btn-min-height);
+  min-height: var(--btn-min-height);
+  border: none;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+@media (hover: hover) {
+  .location-search-close:hover {
+    background-color: var(--color-bg-active);
+    color: var(--color-text);
+  }
+  .location-search-option:hover {
+    background-color: var(--color-bg-hover);
+  }
+}
+.location-search-close:focus-visible,
+.location-search-credit a:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: -2px;
+}
+
+/* What was found: the airports, then the places, each under its heading;
+   the list scrolls rather than the panel growing past the map */
+.location-search-results {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  max-height: min(50dvh, 360px);
+  padding: var(--space-xs) 0;
+  border-top: 1px solid var(--color-divider);
+}
+.location-search-heading {
+  padding: var(--space-xs) var(--space-md);
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.location-search-option {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--space-sm) var(--space-md);
+  cursor: pointer;
+}
+/* The option the arrow keys are on: the accent at its edge, as a row of
+   the sheet that is on */
+.location-search-option[aria-selected="true"] {
+  background-color: var(--color-bg-active);
+  box-shadow: inset 3px 0 0 var(--color-accent-blue);
+}
+.location-search-name,
+.location-search-detail {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.location-search-detail {
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+
+/* The line that says what is going on, and the credit Photon and
+   OpenStreetMap ask for, which is always there */
+.location-search-status,
+.location-search-credit {
+  margin: 0;
+  padding: var(--space-sm) var(--space-md);
+  border-top: 1px solid var(--color-divider);
+}
+.location-search-status {
+  color: var(--color-text-secondary);
+}
+.location-search-credit {
+  color: var(--color-text-dim);
+  font-size: var(--text-xs);
+}
+.location-search-credit a {
+  color: var(--color-text-secondary);
+}
+
+/* The pulse at a place that was picked: a dot with a ring that grows and
+   fades. A marker of its own, which the pointer goes through to the map;
+   at rest under reduced motion. */
+.location-search-pin {
+  width: 14px;
+  height: 14px;
+  box-sizing: border-box;
+  border: 2px solid var(--color-text);
+  border-radius: 50%;
+  background-color: var(--color-accent-blue);
+  box-shadow: var(--shadow-control);
+  pointer-events: none;
+}
+.location-search-pin::after {
+  content: "";
+  position: absolute;
+  inset: -2px;
+  border: 2px solid var(--color-accent-blue);
+  border-radius: 50%;
+  animation: location-search-pulse 1.6s ease-out infinite;
+}
+@keyframes location-search-pulse {
+  from {
+    transform: scale(1);
+    opacity: 0.9;
+  }
+  to {
+    transform: scale(3.5);
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .location-search-pin::after {
+    animation: none;
+    transform: scale(2);
+    opacity: 0.6;
+  }
+}
+@media (forced-colors: active) {
+  .location-search-option[aria-selected="true"] {
+    outline: 2px solid Highlight;
+    outline-offset: -2px;
+  }
+  .location-search-pin {
+    forced-color-adjust: none;
+  }
+}

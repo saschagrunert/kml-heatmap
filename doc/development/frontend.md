@@ -15,8 +15,8 @@ the flights is in [Rendering](rendering.md) and [Heat](heat.md), the tests in
     lives beside it: the base style and its fallback (`baseStyle.ts`), the saved
     state put back at start (`ui/stateRestore.ts`), the controls that follow the
     store (`ui/appChrome.ts`) and what the app says when a lazy bundle cannot be
-    fetched (`ui/lazyBundles.ts`). `features.ts` and `wrapped.ts` are the entry
-    points of the two lazy bundles
+    fetched (`ui/lazyBundles.ts`). `features.ts`, `wrapped.ts` and `search.ts`
+    are the entry points of the three lazy bundles
   - `calculations/` - Statistics and data processing
   - `features/` - Airports, layers, replay, wrapped
   - `services/` - Data loading and caching
@@ -37,11 +37,12 @@ the flights is in [Rendering](rendering.md) and [Heat](heat.md), the tests in
     by name so the bundler keeps only the ones the page draws; the GitHub mark
     and the top-down aircraft are drawn in `utils/icons.ts` because Lucide
     carries neither
-- **Stylesheets** in `kml_heatmap/static/` (`styles.css`, `features.css` and
-  `wrapped.css`, see [Stylesheets](#stylesheets))
+- **Stylesheets** in `kml_heatmap/static/` (`styles.css`, `features.css`,
+  `wrapped.css` and `search.css`, see [Stylesheets](#stylesheets))
 - **Build output** in `kml_heatmap/static/` (`mapApp.bundle.js`,
-  `features.bundle.js`, `wrapped.bundle.js`, `shared.bundle.js`,
-  `yearWorker.bundle.js`, their source maps, `vendor/` and `flags/`)
+  `features.bundle.js`, `wrapped.bundle.js`, `search.bundle.js`,
+  `shared.bundle.js`, `yearWorker.bundle.js`, their source maps, `vendor/` and
+  `flags/`)
 - **Build scripts** `build.js` and `scripts/*.js`, plain JavaScript with JSDoc
   types that `tsconfig.node.json` checks (`npm run typecheck`). The type checks
   run TypeScript 7 (the `typescript7` alias of `package.json`, called by path
@@ -72,7 +73,7 @@ the tool writes and opens on as the page does).
 
 ## Bundles
 
-`npm run build` produces five bundles. `mapApp.bundle.js` starts the map,
+`npm run build` produces six bundles. `mapApp.bundle.js` starts the map,
 `features.bundle.js` holds Replay, the relief, the heat cloud and the ribbons of
 the 3D view (of every flight and of a selection: the 3D view cuts the flights
 once it has arrived, and draws them flat when it cannot be loaded), the
@@ -87,23 +88,29 @@ of the app, and says it is loading until the bundle is in; see
 `ui/statsPanel.ts`); the page imports each of the last two the first time one of
 its features is opened, and both as soon as Wrapped's button is pointed at or
 focused, for its intro (`ui/wrappedIntro.ts`), unless the system asks for
-reduced motion. `shared.bundle.js` is the app itself and everything the lazy
-bundles use of it. `yearWorker.bundle.js` is a build of its own, which decodes
-the year files and writes the heat sources off the main thread (see
-[The year worker](data.md#the-year-worker)).
+reduced motion. `search.bundle.js` holds the search of airports and places
+(`ui/locationSearch.ts`, with the matching of the site's airports in
+`calculations/airportSearch.ts` and the client of Photon in
+`services/photon.ts`); the first visit carries only its button, its row in the
+phone's More sheet and the `/` key (`followSearchKey` in `ui/lazyBundles.ts`),
+and the page imports it the first time the search opens. `shared.bundle.js` is
+the app itself and everything the lazy bundles use of it. `yearWorker.bundle.js`
+is a build of its own, which decodes the year files and writes the heat sources
+off the main thread (see [The year worker](data.md#the-year-worker)).
 
 ### Shared chunk
 
 The bundler moves the modules the entry points share into a chunk that each of
 them imports, because several of them hold state that has to be a single
 instance. It makes one chunk for every set of entry points that reach a module,
-so both lazy entry points import `mapApp.ts`: everything the app reaches is then
-reached by all three and lands in the one chunk, which has a fixed name that the
-site publishes and the page preloads. A module replay and Wrapped share without
-the app would still get a chunk of its own, and the build fails if it ever
-writes another file (`assertExpectedOutputs` in `build.js`); such a module
-belongs where the app reaches it (`segmentBounds` in `utils/geometry.ts` is
-one), or in the feature bundle, which hands it to Wrapped's code through
+so every lazy entry point imports `mapApp.ts`: everything the app reaches is
+then reached by all of them and lands in the one chunk, which has a fixed name
+that the site publishes and the page preloads. A module two lazy bundles share
+without the app would still get a chunk of its own, and the build fails if it
+ever writes another file (`assertExpectedOutputs` in `build.js`); such a module
+belongs where the app reaches it (`segmentBounds` in `utils/geometry.ts` is one,
+`countryDisplayName` in `utils/formatters.ts`, for Wrapped and the search,
+another), or in the feature bundle, which hands it to Wrapped's code through
 `FeatureModule`: the camera moves Wrapped's intro and the hotspot tour share
 (`ui/cameraScript.ts`) do that, as the intro waits for the feature bundle
 anyway.
@@ -144,14 +151,15 @@ the statistics rail falls back to the ISO country code.
 ## Stylesheets
 
 The styles are split the same way as the bundles and travel with them:
-`kml_heatmap/static/styles.css` is linked in the page, `features.css` and
-`wrapped.css` are fetched alongside their bundles (see
+`kml_heatmap/static/styles.css` is linked in the page, `features.css`,
+`wrapped.css` and `search.css` are fetched alongside their bundles (see
 `services/featureLoader.ts`), and each has its own budget in
 `tests/test_asset_budget.py` (see [Size budgets](budgets.md#stylesheets)). A
-rule belongs in `features.css` when its selector names replay and in
-`wrapped.css` when it names Wrapped or what the statistics rail renders, its
-tabs and the flight list included; the file headers spell out the rest,
-including the one-way dependency on `styles.css`.
+rule belongs in `features.css` when its selector names replay, in `wrapped.css`
+when it names Wrapped or what the statistics rail renders, its tabs and the
+flight list included, and in `search.css` when it names the search panel or its
+pulse on the map; the file headers spell out the rest, including the one-way
+dependency on `styles.css`.
 
 A surface across the whole width of the map on a phone (the tab bar, its sheet)
 takes `--color-bg-edge`, the secondary surface at an alpha of 0.99: Chrome

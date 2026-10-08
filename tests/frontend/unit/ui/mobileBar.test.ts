@@ -463,6 +463,7 @@ describe("MobileBar", () => {
 
       expect(sheetTitle()).toBe("More");
       expect(sheetRows()).toEqual([
+        "search",
         "replay",
         "replay-all",
         "hotspot-tour",

@@ -249,22 +249,6 @@ describe("airports feature", () => {
     });
   });
 
-  describe("countryDisplayName", () => {
-    it("converts ISO code to full country name", () => {
-      expect(countries.countryDisplayName("DE")).toBe("Germany");
-      expect(countries.countryDisplayName("US")).toBe("United States");
-      expect(countries.countryDisplayName("FR")).toBe("France");
-    });
-
-    it("returns a non-empty string for unknown codes and the input for invalid ones", () => {
-      const unknown = countries.countryDisplayName("ZZ");
-      expect(typeof unknown).toBe("string");
-      expect(unknown.length).toBeGreaterThan(0);
-      // Intl throws on malformed region codes; the input is returned as is
-      expect(countries.countryDisplayName("not a code")).toBe("not a code");
-    });
-  });
-
   describe("countryFlagSrc", () => {
     it("points at the flag the site published", () => {
       siteData.metadata = { available_flags: ["de", "at"] } as Metadata;

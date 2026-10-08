@@ -80,6 +80,18 @@ EOX sees the visitor's address and which tiles, as AWS and CARTO do. Nothing is
 fetched from EOX while it is off, and it is off unless the visitor, their saved
 state or the link they followed turns it on.
 
+**The page asks Photon for the places a visitor searches for** (see
+[Search](features.md#search)): once the visitor has typed three characters or
+more into the search and paused or pressed Enter, the page sends what was typed,
+in lower case, to Photon of komoot (`photon.komoot.io`), which looks it up in
+OpenStreetMap. Photon sees that text, the visitor's address and which site asks
+(the browser names the page's origin in a request to another site), but no
+cookie, no address of the page and nothing about the flights or the map in view.
+The site's own airports are matched on the page and never sent. Nothing is sent
+while the search is closed or holds fewer than three characters, and the page
+keeps the answers to the last 50 texts for the visit, so it does not send one of
+them again.
+
 **The page asks open flightmaps for the aviation charts of the area in view**
 while the Aviation switch is on and the map is zoomed in far enough to draw them
 (see [Aviation](features.md#aviation)): its tile server
