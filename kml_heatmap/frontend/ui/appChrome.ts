@@ -10,14 +10,15 @@
  * map's credit, which the legends and toasts stand on, is kept in a CSS
  * variable here as well (`followAttributionHeight`). What they follow is
  * the app's public state alone; their store subscriptions end with the
- * app's (MapApp.destroy unsubscribes them all).
+ * app's (MapApp.destroy unsubscribes them all). The page itself is scrolled
+ * back after the phone's keyboard (`followKeyboard`).
  */
 import type { Map as MapLibreMap } from "maplibre-gl";
 import type { MapApp } from "../mapApp";
 import { TOGGLES } from "../state/toggles";
 import { syncLegend, syncToggleButton } from "../utils/buttonState";
 import { domCache } from "../utils/domCache";
-import { slideMapBesideRail } from "../utils/mapHelpers";
+import { KEYED_FIELDS, slideMapBesideRail } from "../utils/mapHelpers";
 import { prefersReducedMotion } from "../utils/motion";
 import { updateReplayButtonState } from "./replayButton";
 
@@ -185,4 +186,45 @@ export function followAttributionHeight(
   });
   observer.observe(credit);
   signal.addEventListener("abort", () => observer.disconnect());
+}
+
+/**
+ * How long the keyboard of a phone takes to go after its field loses the
+ * focus (ms)
+ */
+const KEYBOARD_CLOSE_MS = 300;
+
+/**
+ * Scroll the page back once the keyboard of a phone has gone. The page
+ * never scrolls: the map and the controls over it fill the window. Safari
+ * on iOS scrolls it all the same while its keyboard is up, to keep the
+ * field in view, and since iOS 26 does not always undo that as the
+ * keyboard goes: what is fixed to the bottom edge, the phone's bar first
+ * of all, is left below the screen, whichever field the keyboard was for.
+ * So as the focus leaves a field and as the visible part of the window
+ * changes size, a page found scrolled is scrolled back, unless a field
+ * that takes keys has the focus (the keyboard, or a select's picker, is
+ * still up for it) or the page is pinched larger, which moves the visible
+ * part of the window too. It stops with `signal`, the wait for the
+ * keyboard as well.
+ */
+export function followKeyboard(signal: AbortSignal): void {
+  const viewport = window.visualViewport;
+  const settle = (): void => {
+    if (
+      signal.aborted ||
+      document.activeElement?.matches(KEYED_FIELDS) ||
+      (viewport && viewport.scale > 1)
+    ) {
+      return;
+    }
+    // Either may be the one scrolled; one that is not stays as it is
+    document.documentElement.scrollTop = document.body.scrollTop = 0;
+  };
+  document.addEventListener(
+    "focusout",
+    () => setTimeout(settle, KEYBOARD_CLOSE_MS),
+    { signal },
+  );
+  viewport?.addEventListener("resize", settle, { signal });
 }

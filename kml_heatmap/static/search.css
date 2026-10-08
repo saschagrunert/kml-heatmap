@@ -90,6 +90,13 @@
   font: inherit;
   font-size: var(--text-base);
 }
+@media (pointer: coarse) {
+  /* Under 16 px iOS zooms the page into a field that takes focus, and
+     keeps it zoomed once the keyboard has gone */
+  .location-search-field input {
+    font-size: 16px;
+  }
+}
 .location-search-field input::placeholder {
   color: var(--color-text-dim);
 }

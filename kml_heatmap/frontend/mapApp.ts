@@ -132,6 +132,7 @@ import {
 import { applyPendingFilterChanges, restoreState } from "./ui/stateRestore";
 import {
   followAttributionHeight,
+  followKeyboard,
   followReplayAvailability,
   setupButtonSync,
   setupStatsRail,
@@ -899,6 +900,7 @@ export class MapApp {
     followStatsPanel(this);
     prepareWrappedOnIntent(this);
     followSearchKey(this);
+    followKeyboard(this.signal);
     followReplayAvailability(this);
     this.followFlightProfile();
     this.store.subscribeKeys(
