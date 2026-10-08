@@ -176,7 +176,7 @@ test.describe("Core", () => {
     // title, which a screen reader reads as the description
     for (const [selector, name] of [
       ["#isolate-btn", "Isolate selected flights"],
-      ["#replay-btn", "Replay selected flight"],
+      ["#replay-btn", "Replay selected flights"],
     ]) {
       const button = page.locator(selector!);
       await expect(button).toHaveAttribute("aria-disabled", "true");
@@ -233,7 +233,7 @@ test.describe("Core", () => {
     ).toBe(false);
     await expect(replayBtn).toHaveAttribute(
       "title",
-      "Pick one flight with timing data to replay, under Statistics, Flights",
+      "Pick flights with timing data to replay, under Statistics, Flights",
     );
     // Announced as unavailable, but still in the tab order
     await expect(replayBtn).toHaveAttribute("aria-disabled", "true");

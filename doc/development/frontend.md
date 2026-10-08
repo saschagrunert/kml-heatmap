@@ -76,7 +76,7 @@ the tool writes and opens on as the page does).
 `features.bundle.js` holds Replay, the relief, the heat cloud and the ribbons of
 the 3D view (of every flight and of a selection: the 3D view cuts the flights
 once it has arrived, and draws them flat when it cannot be loaded), the
-satellite imagery, the profile of a single selected flight, the cross-section
+satellite imagery, the profile of the selected flights, the cross-section
 (`ui/crossSection.ts`, with its corridor, chart, words and elements in the
 `ui/crossSection*.ts` modules beside it; the first visit carries only its
 control in the View group and its row in the phone's More sheet) and the hotspot

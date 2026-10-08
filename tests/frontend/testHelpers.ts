@@ -22,6 +22,11 @@ import {
 } from "../../kml_heatmap/frontend/state/store";
 import { TOGGLES } from "../../kml_heatmap/frontend/state/toggles";
 import { segmentsForPathIds } from "../../kml_heatmap/frontend/calculations/statistics";
+import { DAY_MAX_FLIGHTS } from "../../kml_heatmap/frontend/utils/constants";
+import {
+  REPLAY_PRECONDITION_MESSAGE,
+  REPLAY_TOO_MANY_MESSAGE,
+} from "../../kml_heatmap/frontend/ui/replayButton";
 import { followLayerVisibility } from "../../kml_heatmap/frontend/ui/layerVisibility";
 import {
   syncLegend,
@@ -168,6 +173,8 @@ interface MockManagers {
    */
   replayState: ReplayState;
   canReplay: Mock;
+  replayHint: Mock;
+  playsInSequence: Mock;
   toggleReplay: Mock;
   toggleReplayAll: Mock;
   toggleCrossSection: Mock;
@@ -368,14 +375,33 @@ function createMockManagers(): MockManagers {
     // The real predicate, the way MapApp.canReplay puts it
     canReplay: vi.fn(function (this: MockApp) {
       const segments = this.fullPathSegments;
+      const size = this.selectedPathIds.size;
       return (
-        this.selectedPathIds.size === 1 &&
+        size > 0 &&
+        size <= DAY_MAX_FLIGHTS &&
         this.hasTimingData &&
         !!segments &&
         segmentsForPathIds(segments, this.selectedPathIds).some(
           (segment) => (segment.time ?? 0) > 0,
         )
       );
+    }),
+    // As MapApp.replayHint puts it: no times at all before too many
+    replayHint: vi.fn(function (this: MockApp) {
+      return this.canReplay()
+        ? null
+        : this.selectedPathIds.size > DAY_MAX_FLIGHTS &&
+            this.selectedPathIds.size > 0 &&
+            this.hasTimingData &&
+            segmentsForPathIds(
+              this.fullPathSegments ?? [],
+              this.selectedPathIds,
+            ).some((segment) => (segment.time ?? 0) > 0)
+          ? REPLAY_TOO_MANY_MESSAGE
+          : REPLAY_PRECONDITION_MESSAGE;
+    }),
+    playsInSequence: vi.fn(function (this: MockApp) {
+      return this.selectedPathIds.size > 1;
     }),
     // Like the app's once the manager is there: straight to it
     toggleReplay: vi.fn(() => {

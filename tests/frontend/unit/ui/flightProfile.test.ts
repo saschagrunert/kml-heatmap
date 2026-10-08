@@ -6,10 +6,13 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { Mock } from "vitest";
 import {
   followFlightProfile,
+  NO_TIMES_MESSAGE,
   profileSegments,
   PROFILE_HEIGHT_VAR,
   PROFILE_STORAGE_KEY,
 } from "../../../../kml_heatmap/frontend/ui/flightProfile";
+import { DAY_MAX_FLIGHTS } from "../../../../kml_heatmap/frontend/utils/constants";
+import { toggleSequence } from "../../../../kml_heatmap/frontend/ui/replayAll";
 import { REPLAY_PANEL_HEIGHT_VAR } from "../../../../kml_heatmap/frontend/ui/replayManager";
 import { toggleCrossSection } from "../../../../kml_heatmap/frontend/ui/crossSection";
 import { holdControls } from "../../../../kml_heatmap/frontend/ui/heldControls";
@@ -26,6 +29,15 @@ import {
   type MockApp,
   type MockAppOverrides,
 } from "../../testHelpers";
+
+// The replay of several flights one after another has tests of its own
+vi.mock(
+  "../../../../kml_heatmap/frontend/ui/replayAll",
+  async (importOriginal) => ({
+    ...(await importOriginal<object>()),
+    toggleSequence: vi.fn(),
+  }),
+);
 
 /** Ten segments due north, a minute apart, over ground at 300 ft */
 const ALTITUDES = [800, 1500, 2500, 1100, 1200, 3000, 3000, 1800, 600, 300];
@@ -185,7 +197,7 @@ describe("flight profile", () => {
       expect(toggle.getAttribute("aria-controls")).toBe("flight-profile");
     });
 
-    it("stays away without exactly one flight selected", () => {
+    it("stays away with no flight selected, and with more than it draws", () => {
       const { app, root, toggle } = setup([]);
       expect(root.hidden).toBe(true);
       expect(toggle.hidden).toBe(true);
@@ -194,9 +206,12 @@ describe("flight profile", () => {
       app.store.notifyMutation("selectedPathIds");
       expect(root.hidden).toBe(false);
 
-      app.selectedPathIds.add(8);
+      for (let id = 10; app.selectedPathIds.size <= DAY_MAX_FLIGHTS; id++) {
+        app.selectedPathIds.add(id);
+      }
       app.store.notifyMutation("selectedPathIds");
       expect(root.hidden).toBe(true);
+      expect(toggle.hidden).toBe(true);
       expect(document.body.classList.contains("profile-open")).toBe(false);
     });
 
@@ -784,6 +799,155 @@ describe("flight profile", () => {
       plot.dispatchEvent(pointer("pointerdown", 0.5, { button: 2 }));
 
       expect(app.replayManager.toggleReplay).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("several flights", () => {
+    /**
+     * Flights 7 and 9 of a day, both timed and nine minutes long; 9 was
+     * read first. Joined, 9 runs from 0 to 540 s and 7 from 572.4 s on,
+     * after a gap of 3 % of the two: the chart is 1,112.4 s across.
+     */
+    function day(): Setup {
+      const segments = [...flight(7), ...flight(9)];
+      return setup([7, 9], {
+        currentData: createDataset(
+          [
+            { id: 9, start_airport: "EDDS", end_airport: "EDTF" },
+            {
+              id: 7,
+              start_airport: "EDTF",
+              end_airport: "EDDS",
+              max_altitude_ft: 3040,
+            },
+          ],
+          segments,
+        ),
+      });
+    }
+
+    beforeEach(() => {
+      vi.mocked(toggleSequence).mockClear();
+    });
+
+    it("draws them one after another in the order of their files", () => {
+      const { root } = day();
+
+      expect(root.hidden).toBe(false);
+      const routes = [...root.querySelectorAll(".profile-leg")].map(
+        (leg) => leg.textContent,
+      );
+      expect(routes).toEqual(["EDDS → EDTF", "EDTF → EDDS"]);
+      // Each its own line, nothing drawn across the gap
+      const line = root.querySelector(".profile-line")!.getAttribute("d")!;
+      expect(line.match(/M/g)).toHaveLength(2);
+      expect(text(root, ".profile-axis")).toBe("0:002 flights");
+      // The routes are hidden over the chart, and read out with it
+      expect(
+        root.querySelector(".profile-plot")!.getAttribute("aria-label"),
+      ).toBe(
+        "Altitude over time, 2 flights: EDDS → EDTF, EDTF → EDDS, highest 3,040 ft MSL",
+      );
+      expect(text(root, ".profile-stats")).toContain("Highest 3,040 ft MSL");
+    });
+
+    it("reads the time into the flight pointed at, and not the gap", () => {
+      const { app, root, plot, hover } = day();
+      const segments = app.currentData!.path_segments;
+
+      // 834 s into the chart, 262 s into the second flight
+      plot.dispatchEvent(pointer("pointermove", 0.75));
+      expect(text(root, ".profile-readout")).toMatch(/ · 4:21$/);
+      // In the gap: the nearer end of a flight, the first one's
+      plot.dispatchEvent(pointer("pointermove", 0.49));
+      expect(text(root, ".profile-readout")).toMatch(/ · 9:00$/);
+
+      // The middle of flight 7's fifth segment, on the map
+      hover.onHover!(segments[4]!);
+      expect(text(root, ".profile-readout")).toMatch(/ · 4:30$/);
+      // The last of flight 9, read first: its landing, not the gap after
+      hover.onHover!(segments[19]!);
+      expect(text(root, ".profile-readout")).toMatch(/ · 9:00$/);
+      const cursor = root.querySelector(".profile-hover")!;
+      expect(Number(cursor.getAttribute("x1"))).toBeCloseTo(
+        (540 / 1112.4) * 1000,
+        0,
+      );
+    });
+
+    it("opens the replay of them one after another at the moment pressed", () => {
+      const { app, plot } = day();
+
+      plot.dispatchEvent(pointer("pointerdown", 0.75));
+      window.dispatchEvent(pointer("pointerup", 0.75));
+
+      expect(app.replayManager.toggleReplay).not.toHaveBeenCalled();
+      expect(toggleSequence).toHaveBeenCalledOnce();
+      const [opened, at] = vi.mocked(toggleSequence).mock.calls[0]!;
+      expect(opened).toBe(app);
+      // 261.9 s into flight 7: its fifth segment, of a minute
+      expect(at!.segment).toBe(app.currentData!.path_segments[4]);
+      expect(at!.fraction).toBeCloseTo((834.3 - 572.4 - 240) / 60, 6);
+    });
+  });
+
+  describe("several flights, one of them without times", () => {
+    beforeEach(() => {
+      vi.mocked(toggleSequence).mockClear();
+    });
+
+    it("opens the replay at a flight with times, along the distance", () => {
+      // 7 timed, then 8 without times: the chart runs along the km
+      const { app, root, plot } = setup([7, 8]);
+      expect(text(root, ".profile-axis")).toBe("0 km2 flights");
+      // The pointer says a click replays only over the flight with times
+      plot.dispatchEvent(pointer("pointermove", 0.25));
+      expect(root.classList.contains("is-timed")).toBe(true);
+      plot.dispatchEvent(pointer("pointermove", 0.75));
+      expect(root.classList.contains("is-timed")).toBe(false);
+
+      // A quarter across is on flight 7, which the replay plays
+      plot.dispatchEvent(pointer("pointerdown", 0.25));
+      window.dispatchEvent(pointer("pointerup", 0.25));
+
+      expect(app.replayManager.toggleReplay).not.toHaveBeenCalled();
+      expect(toggleSequence).toHaveBeenCalledOnce();
+      const [, at] = vi.mocked(toggleSequence).mock.calls[0]!;
+      expect(at!.segment.path_id).toBe(7);
+      expect(app.currentData!.path_segments).toContain(at!.segment);
+    });
+
+    it("says a flight without times has no replay, once for a drag", () => {
+      const { app, plot } = setup([7, 8]);
+      const toastSpy = vi.spyOn(toast, "showToast");
+
+      plot.dispatchEvent(pointer("pointerdown", 0.75));
+      window.dispatchEvent(pointer("pointermove", 0.8));
+      window.dispatchEvent(pointer("pointermove", 0.9));
+      window.dispatchEvent(pointer("pointerup", 0.9));
+
+      expect(toggleSequence).not.toHaveBeenCalled();
+      expect(app.replayManager.toggleReplay).not.toHaveBeenCalled();
+      expect(toastSpy).toHaveBeenCalledOnce();
+      expect(toastSpy).toHaveBeenCalledWith(NO_TIMES_MESSAGE);
+      toastSpy.mockRestore();
+    });
+
+    it("draws one that has a profile on its own, and plays both from it", () => {
+      // 9 is a stub of one segment, which has no profile
+      const segments = [...flight(7), ...flight(9).slice(0, 1)];
+      const { app, root, plot } = setup([7, 9], {
+        currentData: createDataset([{ id: 7 }, { id: 9 }], segments),
+      });
+
+      expect(root.querySelectorAll(".profile-leg")).toHaveLength(0);
+      expect(text(root, ".profile-axis")).toBe("0:009:00");
+
+      plot.dispatchEvent(pointer("pointerdown", 0.5));
+      window.dispatchEvent(pointer("pointerup", 0.5));
+      // Both are selected: they play one after another, not as one
+      expect(app.replayManager.toggleReplay).not.toHaveBeenCalled();
+      expect(toggleSequence).toHaveBeenCalledOnce();
     });
   });
 

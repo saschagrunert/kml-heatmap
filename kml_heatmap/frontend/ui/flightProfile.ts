@@ -1,13 +1,21 @@
 /**
- * Flight profile - the altitude of the one selected flight, over the ground
+ * Flight profile - the altitude of the selected flights, over the ground
  *
- * With exactly one flight selected, a strip at the bottom of the map draws
- * its altitude against its time (against the distance flown for a flight
+ * With a flight selected, a strip at the bottom of the map draws its
+ * altitude against its time (against the distance flown for a flight
  * without times), with the ground filled in underneath and a row of
  * figures: the highest altitude, the lowest height above the ground en
  * route and the time spent low (calculations/flightProfile.ts). Its data is
  * all in the browser already: the flight's segments, sliced out of the
  * dataset.
+ *
+ * With two to DAY_MAX_FLIGHTS selected, say the flights of a day, it
+ * draws them one after another in the order of their files (flightOrder),
+ * each named by its route over its part of the chart, with a narrow gap
+ * between them rather than the time on the ground (joinProfiles); the
+ * readout gives the time into the flight pointed at, and a click opens the
+ * replay of them one after another there (toggleSequence). More than that
+ * have no profile.
  *
  * Pointing at the chart reads out the values there and marks the place on
  * the map; pointing at the flight on the map moves the chart's cursor
@@ -22,7 +30,7 @@
  *
  * Whether it shows is remembered in the browser, and the selection chip
  * carries the toggle. It comes with the feature bundle, which the app
- * fetches as a single flight is first selected (MapApp.followFlightProfile).
+ * fetches as a flight is first selected (MapApp.followFlightProfile).
  * A closure rather than a class: the bundle carries a class's member names
  * as they are written.
  */
@@ -33,13 +41,20 @@ import type { ReplayManager } from "./replayManager";
 import type { ReplayState } from "./replayState";
 import { segmentsForPathIds } from "../calculations/statistics";
 import {
+  flightOrder,
   flightProfile,
+  joinProfiles,
   locate,
+  snapToLegs,
   valueAt,
   LOW_HEIGHT_FT,
   type FlightProfile,
+  type ProfileLeg,
   type ProfilePoint,
 } from "../calculations/flightProfile";
+import { datasetIndex } from "../calculations/datasetIndex";
+import { flightRoute } from "./airportFlights";
+import { toggleSequence } from "./replayAll";
 import { airplaneLiftPx } from "../calculations/airplaneLift";
 import { liftExaggeration } from "../calculations/lift";
 import { prepareReplaySegments } from "../features/replay";
@@ -47,6 +62,8 @@ import { siteData } from "../state/siteData";
 import { domCache } from "../utils/domCache";
 import { formatDuration } from "../utils/duration";
 import { formatNumber } from "../utils/formatters";
+import { DAY_MAX_FLIGHTS } from "../utils/constants";
+import { pluralFlights } from "../utils/htmlGenerators";
 import { formatSpeed, formatTime } from "../utils/replayFormatters";
 import type { Coordinate } from "../utils/geometry";
 import { setControlIcon } from "../utils/icons";
@@ -62,14 +79,21 @@ import { heightUnit } from "./crossSectionText";
 const VIEW_W = 1000;
 const VIEW_H = 100;
 
-/** Share of the chart's height kept free above the highest point */
+/**
+ * Share of the chart's height kept free above the highest point, and with
+ * several flights, for their routes over them
+ */
 const HEADROOM = 0.12;
+const LEGS_HEADROOM = 0.3;
 
 /** Whether the strip was put away, kept in the browser like a panel's */
 export const PROFILE_STORAGE_KEY = "kml-heatmap-profile-collapsed";
 
 /** The strip's height, which the toasts stand on (features.css) */
 export const PROFILE_HEIGHT_VAR = "--flight-profile-h";
+
+/** Said for a click on a flight of the profile that has no replay */
+export const NO_TIMES_MESSAGE = "No timing data for this flight";
 
 /** How far a finger may move and still tap, in pixels */
 const TAP_SLOP_PX = 6;
@@ -104,8 +128,8 @@ interface Drag {
 }
 
 /**
- * Show the profile of the one selected flight from now on, for as long as
- * the app lives. Returns the strip.
+ * Show the profile of the selected flights from now on, for as long as the
+ * app lives. Returns the strip.
  */
 export function followFlightProfile(app: MapApp): HTMLElement {
   const lifetime = { signal: app.signal };
@@ -131,6 +155,9 @@ export function followFlightProfile(app: MapApp): HTMLElement {
     cursor.setAttribute("y2", String(VIEW_H));
     cursor.setAttribute("visibility", "hidden");
   }
+  // The routes of the flights one after another, over the chart
+  const routes = element("div", "profile-legs", plot);
+  routes.setAttribute("aria-hidden", "true");
   const dot = element("span", "profile-dot", plot);
   dot.hidden = true;
   const axis = element("div", "profile-axis", root);
@@ -151,9 +178,15 @@ export function followFlightProfile(app: MapApp): HTMLElement {
     ?.insertBefore(toggle, domCache.get("selection-clear-btn"));
 
   let profile: FlightProfile | null = null;
-  /** The flight and the dataset the profile is of */
-  let pathId: number | null = null;
+  /**
+   * The flights selected as it was drawn, the dataset, and the flights
+   * drawn, in their order
+   */
+  let drawnFor = "";
   let data: KMLDataset | null = null;
+  let pathIds: number[] = [];
+  /** The flights of a profile of several, none for one (joinProfiles) */
+  let legs: ProfileLeg[] = [];
   let collapsed = storedFlag(PROFILE_STORAGE_KEY);
   let drag: Drag | null = null;
   /** The place on the map the pointer on the chart stands for */
@@ -179,15 +212,22 @@ export function followFlightProfile(app: MapApp): HTMLElement {
     const x = profile!.x;
     return locate(x.length, (i) => x[i]!, value);
   };
-  /** The point of the profile under a pointer at `clientX` */
+  /**
+   * The point of the profile under a pointer at `clientX`: in a gap
+   * between two flights, the nearer end of one
+   */
   const pointAt = (clientX: number): ProfilePoint => {
     const box = plot.getBoundingClientRect();
     const share =
       box.width > 0
         ? Math.min(1, Math.max(0, (clientX - box.left) / box.width))
         : 0;
-    return locateX(x0 + share * (x1 - x0));
+    const value = x0 + share * (x1 - x0);
+    return locateX(legs.length ? snapToLegs(profile!.x, legs, value) : value);
   };
+  /** Whether the flight at `point` has times, and a click there replays it */
+  const timedAt = (point: ProfilePoint): boolean =>
+    !!(legs.find(({ last }) => point.index <= last) ?? profile)?.timed;
   const setCursor = (cursor: SVGElement, point: ProfilePoint | null): void => {
     if (point) {
       const x = chartX(at(profile!.x, point)).toFixed(1);
@@ -224,11 +264,13 @@ export function followFlightProfile(app: MapApp): HTMLElement {
     // Between two fixes the values are the line's, to the nearest 10 ft
     const tens = (feet: number): string =>
       formatNumber(Math.round(Math.max(0, feet) / 10) * 10);
+    // Of several flights, the time or the distance into the one there
+    const leg = legs.find(({ last }) => point.index <= last);
     readout.textContent = [
       `${tens(altitude)} ft`,
       tens(heightFt) + " " + heightUnit(shown),
       ...(speed > 0 ? [formatSpeed(speed)] : []),
-      formatX(shown, x),
+      formatX(shown, leg ? x - shown.x[leg.first]! + x0 : x),
     ].join(" · ");
     const map = app.map;
     if (!onMap || !map) {
@@ -272,18 +314,41 @@ export function followFlightProfile(app: MapApp): HTMLElement {
     x0 = x[0]!;
     x1 = x[count - 1]!;
     y0 = low;
-    y1 = low + Math.max(high - low, 100) * (1 + HEADROOM);
+    y1 =
+      low +
+      Math.max(high - low, 100) *
+        (1 + (legs.length ? LEGS_HEADROOM : HEADROOM));
     const xOf = (i: number): string => chartX(x[i]!).toFixed(1);
     const yOf = (feet: number): string =>
       (VIEW_H - ((feet - y0) / (y1 - y0)) * VIEW_H).toFixed(1);
+    // Each flight of several on its own, with nothing across the gaps
     let path = "";
-    let floor = `M${xOf(0)} ${VIEW_H}`;
-    for (let i = 0; i < count; i++) {
-      path += `${i ? "L" : "M"}${xOf(i)} ${yOf(altitudeFt[i]!)}`;
-      floor += `L${xOf(i)} ${yOf(groundFt[i]!)}`;
-    }
+    let floor = "";
+    routes.replaceChildren();
+    const names: string[] = [];
+    const runs = legs.length ? legs : [{ first: 0, last: count - 1 }];
+    runs.forEach(({ first, last }, k) => {
+      floor += `M${xOf(first)} ${VIEW_H}`;
+      for (let i = first; i <= last; i++) {
+        path += `${i > first ? "L" : "M"}${xOf(i)} ${yOf(altitudeFt[i]!)}`;
+        floor += `L${xOf(i)} ${yOf(groundFt[i]!)}`;
+      }
+      floor += `L${xOf(last)} ${VIEW_H}Z`;
+      if (!legs.length) return;
+      // Its route over it, from the middle of the gap before it to the
+      // middle of the one after, the gaps marked by its edges
+      const from = k ? (x[runs[k - 1]!.last]! + x[first]!) / 2 : x0;
+      const to = runs[k + 1] ? (x[last]! + x[runs[k + 1]!.first]!) / 2 : x1;
+      const route = element("span", "profile-leg", routes);
+      route.style.left = `${chartX(from) / (VIEW_W / 100)}%`;
+      route.style.width = `${(chartX(to) - chartX(from)) / (VIEW_W / 100)}%`;
+      route.textContent = flightRoute(
+        datasetIndex(data!).pathInfoById.get(pathIds[k]!)!,
+      );
+      names.push(route.textContent);
+    });
     line.setAttribute("d", path);
-    ground.setAttribute("d", `${floor}L${xOf(count - 1)} ${VIEW_H}Z`);
+    ground.setAttribute("d", floor);
 
     const unit = " " + heightUnit(profile);
     // Above sea level, where the lowest is above the ground: said so
@@ -306,12 +371,16 @@ export function followFlightProfile(app: MapApp): HTMLElement {
       stat.append(" ", value!);
     }
     const start = formatX(profile, x0);
-    const end = formatX(profile, x1);
+    // Several flights end with how many, the gaps between them being no
+    // time or distance of theirs
+    const end = legs.length ? pluralFlights(legs.length) : formatX(profile, x1);
     axisStart.textContent = start;
     axisEnd.textContent = end;
+    // The routes over the chart are hidden from a screen reader, which
+    // hears them here, in their order
     plot.setAttribute(
       "aria-label",
-      `Altitude over ${profile.timed ? "time" : "distance"}, ${start} to ${end}, highest ${highest}`,
+      `Altitude over ${profile.timed ? "time" : "distance"}, ${legs.length ? `${end}: ${names.join(", ")}` : `${start} to ${end}`}, highest ${highest}`,
     );
   };
 
@@ -322,6 +391,8 @@ export function followFlightProfile(app: MapApp): HTMLElement {
     const shown = !!profile && !collapsed && !app.wrappedVisible && !away;
     const replay = replaying();
     root.hidden = !shown;
+    // A click opens the replay of a flight with times; of several, as
+    // the pointer moves over theirs (see the pointermove below)
     root.classList.toggle("is-timed", !!profile?.timed);
     toggle.hidden = !profile || away;
     toggle.setAttribute("aria-expanded", String(!collapsed));
@@ -335,25 +406,36 @@ export function followFlightProfile(app: MapApp): HTMLElement {
     if (!shown) leave();
   };
 
-  /** Build the profile again when the flight or the dataset changed */
+  /** Build the profile again when the flights or the dataset changed */
   const refresh = (): void => {
     const current = app.currentData;
-    const ids = app.selectedPathIds;
-    const id = ids.size === 1 ? ids.values().next().value! : null;
-    if (id !== pathId || current !== data) {
-      pathId = id;
+    const selected = app.selectedPathIds;
+    const ids =
+      current && selected.size <= DAY_MAX_FLIGHTS
+        ? flightOrder(current.path_info, selected)
+        : [];
+    if (ids.join() !== drawnFor || current !== data) {
+      drawnFor = ids.join();
       data = current;
-      profile =
-        id === null || !current
-          ? null
-          : flightProfile(
-              profileSegments(current, id),
-              (siteData.airports ?? []).map((airport): Coordinate => [
-                airport.lat,
-                airport.lon,
-              ]),
-              current.path_info.find((path) => path.id === id)?.max_altitude_ft,
-            );
+      const byId = current && datasetIndex(current).pathInfoById;
+      const fields = (siteData.airports ?? []).map((airport): Coordinate => [
+        airport.lat,
+        airport.lon,
+      ]);
+      // A flight of fewer than two segments has none, and is left out
+      const parts = ids.flatMap((id) => {
+        const part = flightProfile(
+          profileSegments(current!, id),
+          fields,
+          byId!.get(id)?.max_altitude_ft,
+        );
+        return part ? [{ id, part }] : [];
+      });
+      pathIds = parts.map(({ id }) => id);
+      const joined =
+        parts.length > 1 ? joinProfiles(parts.map(({ part }) => part)) : null;
+      legs = joined?.legs ?? [];
+      profile = joined ?? parts[0]?.part ?? null;
       draw();
     }
     sync();
@@ -395,13 +477,6 @@ export function followFlightProfile(app: MapApp): HTMLElement {
 
   const seekWith = (manager: ReplayManager, point: ProfilePoint): void => {
     if (!app.replayActive) {
-      if (!app.canReplay()) return;
-      // Not while a mode holds the replay control, as its click says
-      const held = heldReason(domCache.get("replay-btn"));
-      if (held !== null) {
-        showToast(held);
-        return;
-      }
       // Where the map is: the seek below brings the airplane into view
       manager.toggleReplay(false);
       if (!app.replayActive) return;
@@ -418,10 +493,34 @@ export function followFlightProfile(app: MapApp): HTMLElement {
 
   /**
    * Show the replay at a point of the profile: opened there, paused, if it
-   * is not running yet. A flight without times has no replay.
+   * is not running yet. A flight without times has no replay, alone or
+   * among several, which a click (`click`) there says; those with times
+   * open theirs on a profile along the distance as well.
    */
-  const seek = (point: ProfilePoint): void => {
-    if (!profile?.timed || app.wrappedVisible || replayingAll()) return;
+  const seek = (point: ProfilePoint, click = false): void => {
+    if (!profile || app.wrappedVisible || replayingAll()) return;
+    if (!timedAt(point)) {
+      if (click) showToast(NO_TIMES_MESSAGE);
+      return;
+    }
+    if (!app.replayActive) {
+      if (!app.canReplay()) return;
+      // Not while a mode holds the replay control, as its click says
+      const held = heldReason(domCache.get("replay-btn"));
+      if (held !== null) {
+        showToast(held);
+        return;
+      }
+      if (app.playsInSequence()) {
+        // Several flights play one after another, in the panel of the
+        // replay of all flights, which puts the strip away
+        toggleSequence(app, {
+          segment: profile.segments[point.index]!,
+          fraction: point.fraction,
+        });
+        return;
+      }
+    }
     const manager = app.replayManager;
     if (manager) {
       seekWith(manager, point);
@@ -440,7 +539,8 @@ export function followFlightProfile(app: MapApp): HTMLElement {
     const seeks = drag.mouse || replaying();
     // Where the replay seeks to, the airplane marks the place
     showPoint(point, !seeks);
-    if (seeks) seek(point);
+    // Said once for a press, not for every move of a drag
+    if (seeks) seek(point, !drag.moved);
   };
 
   const stopDragging = (): void => {
@@ -456,7 +556,7 @@ export function followFlightProfile(app: MapApp): HTMLElement {
     // A tap opens replay there; a finger that moved only read
     const tap = ended && !ended.mouse && !ended.moved;
     if (tap && profile && event.type === "pointerup") {
-      seek(pointAt(event.clientX));
+      seek(pointAt(event.clientX), true);
     }
     // A finger that lifted points at nothing; the chart's pointerleave came
     // during the drag, which kept the values, or not at all, as a tap
@@ -469,7 +569,10 @@ export function followFlightProfile(app: MapApp): HTMLElement {
     "pointermove",
     (event) => {
       if (!drag && event.pointerType === "mouse" && profile) {
-        showPoint(pointAt(event.clientX), true);
+        const point = pointAt(event.clientX);
+        // A click replays a flight with times, wherever it is pointed at
+        root.classList.toggle("is-timed", timedAt(point));
+        showPoint(point, true);
       }
     },
     lifetime,
@@ -524,13 +627,18 @@ export function followFlightProfile(app: MapApp): HTMLElement {
   store.subscribeKeys(["wrappedVisible"], sync);
   followCrossSection(app, sync, app.signal);
   // The flight under the pointer on the map: the cursor goes to the middle
-  // of the segment, which runs from its start to the next one's
+  // of the segment, which runs from its start to the next one's, and to the
+  // end of the last of a flight of several, rather than into the gap after
+  // it, as on the chart (snapToLegs)
   const pathHover = app.layerManager.pathHover;
   pathHover.onHover = (segment) => {
     if (!profile || root.hidden || drag) return;
     const index = segment ? profile.segments.indexOf(segment) : -1;
     if (index < 0) leave();
-    else showPoint({ index, fraction: 0.5 }, false);
+    else {
+      const last = legs.some((leg) => leg.last === index);
+      showPoint({ index, fraction: last ? 0 : 0.5 }, false);
+    }
   };
   // The chrome goes with the app (see MapApp.destroy)
   app.signal.addEventListener(

@@ -8,8 +8,8 @@
  * flight and of all of them at once), the relief, the heat cloud and the
  * ribbons of the 3D view, of every flight and of a selection, which the
  * layer manager fetches as they are first wanted, the satellite imagery,
- * which its switch fetches, the profile of a single selected flight, which
- * the app fetches as one is first selected, the cross-section, which its
+ * which its switch fetches, the profile of the selected flights, which the
+ * app fetches as a few are first selected, the cross-section, which its
  * control fetches, and the hotspot tour with the camera moves it shares
  * with Wrapped's intro.
  * Wrapped has a bundle of its own (wrapped.ts) and fetches this one only
@@ -43,7 +43,7 @@ export {
   releaseGroundProfiles,
 } from "./calculations/groundProfile";
 export { ReplayAllPlayer } from "./ui/replayAllPlayer";
-export { toggleReplayAll } from "./ui/replayAll";
+export { toggleReplayAll, toggleSequence } from "./ui/replayAll";
 export { followFlightProfile } from "./ui/flightProfile";
 export { toggleCrossSection } from "./ui/crossSection";
 export {

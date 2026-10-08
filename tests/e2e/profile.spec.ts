@@ -2,6 +2,7 @@ import { test, expect, type Page } from "./fixtures";
 import {
   expectNoA11yViolations,
   gotoApp,
+  selectFlightsForReplay,
   selectPathForReplay,
 } from "./helpers";
 
@@ -57,6 +58,39 @@ test.describe("Flight profile", () => {
     await expect(toggle).toHaveAttribute("aria-expanded", "false");
     await toggle.click();
     await expect(profile).toBeVisible();
+  });
+
+  test("draws two selected flights one after another, and opens their replay there", async ({
+    page,
+  }) => {
+    await selectFlightsForReplay(page, 2);
+
+    const profile = page.locator("#flight-profile");
+    await expect(profile).toBeVisible();
+    // Each flight named by its route over its part of the chart
+    await expect(profile.locator(".profile-leg")).toHaveCount(2);
+    await expect(profile.locator(".profile-leg").first()).toContainText("→");
+    await expect(profile.locator(".profile-axis")).toContainText("2 flights");
+
+    // Pointing reads the time into the flight there
+    const box = (await plot(page).boundingBox())!;
+    await page.mouse.move(box.x + box.width * 0.995, box.y + box.height / 2);
+    await expect(profile.locator(".profile-readout")).toContainText(" ft");
+
+    // A click near the end opens the replay of both, paused in the second
+    await page.mouse.down();
+    await page.mouse.up();
+    const panel = page.locator("#replay-all-controls");
+    await expect(panel).toBeVisible({ timeout: 10000 });
+    await expect(page.locator("#replay-all-clock")).toHaveText(
+      /^2 of 2, .+: \d+:\d{2} in$/,
+    );
+    await expect(page.locator("#replay-all-play-btn")).toHaveAttribute(
+      "aria-label",
+      "Play the replay of the selected flights",
+    );
+    // The strip steps aside for its panel
+    await expect(profile).toBeHidden();
   });
 
   test("a drag on the profile opens replay there and moves the airplane", async ({

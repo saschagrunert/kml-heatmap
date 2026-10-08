@@ -12,6 +12,13 @@ export const CRUISE_ALTITUDE_THRESHOLD_FT = 1000;
 export const MOBILE_BREAKPOINT_PX = 768;
 
 /**
+ * The most selected flights the profile draws and Replay plays one after
+ * another: a day of them, each with room for its route at the profile's
+ * width (ui/flightProfile.ts, ui/replayAll.ts). Replay all plays more.
+ */
+export const DAY_MAX_FLIGHTS = 8;
+
+/**
  * Heights up to this get the phone layout too, whatever the width: a phone
  * held sideways, or a window as short, has no room for the control
  * columns (matches styles.css)

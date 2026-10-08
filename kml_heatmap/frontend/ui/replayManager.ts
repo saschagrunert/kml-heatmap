@@ -297,12 +297,14 @@ export class ReplayManager {
   /**
    * Open replay, or close it. `moveCamera` false opens it where the map
    * is: the flight profile opens it at a moment of the flight, and seeks
-   * there right after (ui/flightProfile.ts).
+   * there right after (ui/flightProfile.ts). Several selected flights
+   * play one after another without it (MapApp.playsInSequence).
    */
   toggleReplay(moveCamera = true): void {
     const panel = domCache.get("replay-controls");
     if (!panel) return;
 
+    const app = this.app;
     if (this.app.replayActive) {
       this.deactivateReplay(panel);
       return;
@@ -314,12 +316,11 @@ export class ReplayManager {
     if (!this.app.canReplay()) {
       // Paths are picked on the map only in a colour layer: with nothing
       // selected, the list of the flights to pick one from opens with it
-      const app = this.app;
       if (app.selectedPathIds.size === 0) {
         // The list first, so the panel opens on it
         app.statsPanelVisible = app.flightListVisible = true;
       }
-      showToast(REPLAY_PRECONDITION_MESSAGE, "info");
+      showToast(app.replayHint()!, "info");
       return;
     }
 

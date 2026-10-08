@@ -383,10 +383,15 @@ const BUDGET_APP = { raw: 155.5 * 1024, gzip: 53.5 * 1024 };
 // The feature bundle: replay and Replay all, the 3D view (relief, ribbons,
 // heat cloud), the imagery, the flight profile, the cross-section and the
 // hotspot tour. Fetched only when one of them is first used, so no part of
-// a first visit, but budgeted so it cannot grow unnoticed. About 54.2 KB
-// gzipped in CI when it was last set, raised for the ribbons that came from
-// the first visit.
-const BUDGET_FEATURES = { raw: 147.25 * 1024, gzip: 55.25 * 1024 };
+// a first visit, but budgeted so it cannot grow unnoticed. About 56.8 KB
+// gzipped in CI when it was last set (56.39 KB in a local build, some
+// 0.8 % smaller than CI's), raised for the profile and the replay of
+// several selected flights one after another. Of the last raise, some
+// 110 B raw are code (the cursor and the hint over a flight without
+// times, the hover kept inside a flight); the rest of the 0.36 KB gzipped
+// came with the replay manager no longer importing ui/replayAll, which
+// moved that module and its own imports elsewhere in the bundle.
+const BUDGET_FEATURES = { raw: 149.5 * 1024, gzip: 57 * 1024 };
 // The Wrapped bundle: the Wrapped dialog with its intro, and the statistics
 // rail, fetched the first time either opens. It shares nothing with the
 // feature bundle that the app does not have as well. About 14.1 KB gzipped

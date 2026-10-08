@@ -353,8 +353,12 @@ export function followHeatCloud(app: MapApp): void {
   let restZoom = map.getZoom();
   /** The relief level the cloud is cut for and lifted as */
   const level = (): number => (app.threeDVisible ? app.reliefLevel : atRest);
-  /** Whether the replay of all flights draws the heat up to its clock */
-  const growing = (): boolean => app.replayActive && app.replayState.all;
+  /**
+   * Whether the replay of all flights draws the heat up to its clock: not
+   * while it plays the selected flights one after another
+   */
+  const growing = (): boolean =>
+    app.replayActive && replayAllTime(app) !== null;
 
   /** Whether the layer is on the map */
   const wanted = (): boolean =>
@@ -393,7 +397,7 @@ export function followHeatCloud(app: MapApp): void {
         ? Math.max(1 - (performance.now() - leaving) / CLOUD_HANDOVER_MS, 0)
         : 1,
       flow: !app.replayActive,
-      until: growing() ? (replayAllTime(app) ?? 0) : undefined,
+      until: growing() ? replayAllTime(app)! : undefined,
     };
   };
 

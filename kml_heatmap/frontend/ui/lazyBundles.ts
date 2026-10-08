@@ -46,7 +46,10 @@ export const CROSS_SECTION_UNAVAILABLE_MESSAGE =
 /** What a control starts in the feature bundle once it has arrived */
 export type FeatureToggle = keyof Pick<
   FeatureModule,
-  "toggleReplayAll" | "toggleHotspotTour" | "toggleCrossSection"
+  | "toggleReplayAll"
+  | "toggleSequence"
+  | "toggleHotspotTour"
+  | "toggleCrossSection"
 >;
 
 /** The messages of the one file that carries Wrapped and the statistics */

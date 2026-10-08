@@ -38,7 +38,7 @@ this repository.
   their height, with a time slider and the heat building up behind them
 - A hotspot tour: a short flight in the 3D view over the busiest places of the
   heat, each named and captioned with the time spent there
-- An altitude profile of a single selected flight, over the ground it flew over,
+- An altitude profile of the selected flights, over the ground they flew over,
   linked to the map and to the replay
 - A cross-section along a line drawn on the map: where the time was spent within
   a corridor either side of it, by distance and height above the ground or sea

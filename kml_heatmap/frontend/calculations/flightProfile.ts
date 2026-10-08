@@ -9,7 +9,7 @@
  */
 import { heightsAboveGround, segmentDistance } from "./statistics";
 import { calculateDistance, type Coordinate } from "../utils/geometry";
-import type { PathSegment } from "../types";
+import type { PathInfo, PathSegment } from "../types";
 
 /**
  * How far around each field the en-route figures leave the flight out, in
@@ -167,4 +167,120 @@ export function valueAt(
   return index + 1 < count
     ? start + (valueOf(index + 1) - start) * fraction
     : start;
+}
+
+/**
+ * The flights `pathIds` in the order of the flight files: by year, and
+ * within a year in the order `pathInfo` lists them, which is the order the
+ * files were read in. The profile and the replay of several flights go by
+ * it, and never by a date or an hour (see doc/privacy.md).
+ */
+export function flightOrder(
+  pathInfo: readonly PathInfo[],
+  pathIds: ReadonlySet<number>,
+): number[] {
+  // A stable sort: within a year, the order of the files stays
+  return pathInfo
+    .filter((path) => pathIds.has(path.id))
+    .sort((a, b) => (a.year ?? 0) - (b.year ?? 0))
+    .map((path) => path.id);
+}
+
+/** Share of the flights' own span the gap between two of them takes */
+export const LEG_GAP_SHARE = 0.03;
+
+/** A flight of a joined profile, see joinProfiles */
+export interface ProfileLeg {
+  /** Its first and its last segment in the joined profile */
+  first: number;
+  last: number;
+  /** Whether it has times, and can be replayed */
+  timed: boolean;
+}
+
+/** The profile of several flights one after another, see joinProfiles */
+export interface JoinedProfile extends FlightProfile {
+  legs: ProfileLeg[];
+}
+
+/**
+ * The profiles `parts` of several flights as one, each after the one
+ * before with a gap of LEG_GAP_SHARE of all their spans between them: a
+ * gap of the same width each time rather than the time on the ground,
+ * which would say how the day went. It runs along the time where every
+ * flight has times, and along the distance flown otherwise, each flight
+ * from 0. The figures are those of all of them: the highest altitude, the
+ * lowest height en route, and the time spent low added up.
+ */
+export function joinProfiles(parts: readonly FlightProfile[]): JoinedProfile {
+  const timed = parts.every((part) => part.timed);
+  // Each flight's own x, from 0: its seconds, or the km flown
+  const spans = parts.map((part) => {
+    const own = new Float64Array(part.x.length);
+    let along = 0;
+    part.segments.forEach((segment, i) => {
+      own[i] = timed ? part.x[i]! - part.x[0]! : along;
+      along += segmentDistance(segment);
+    });
+    return own;
+  });
+  const total = spans.reduce((sum, own) => sum + own[own.length - 1]!, 0);
+  const gap = (total || 1) * LEG_GAP_SHARE;
+  const count = spans.reduce((sum, own) => sum + own.length, 0);
+  const x = new Float64Array(count);
+  const altitudeFt = new Float64Array(count);
+  const groundFt = new Float64Array(count);
+  const segments: PathSegment[] = [];
+  const legs: ProfileLeg[] = [];
+  let lowest: number | null = null;
+  let start = 0;
+  parts.forEach((part, k) => {
+    const own = spans[k]!;
+    const first = segments.length;
+    for (let i = 0; i < own.length; i++) x[first + i] = start + own[i]!;
+    altitudeFt.set(part.altitudeFt, first);
+    groundFt.set(part.groundFt, first);
+    segments.push(...part.segments);
+    legs.push({ first, last: segments.length - 1, timed: part.timed });
+    start += own[own.length - 1]! + gap;
+    const low = part.lowestEnRouteFt;
+    if (low !== null && (lowest === null || low < lowest)) lowest = low;
+  });
+  return {
+    segments,
+    timed,
+    x,
+    altitudeFt,
+    groundFt,
+    fromTerrain: parts.every((part) => part.fromTerrain),
+    maxAltitudeFt: Math.max(...parts.map((part) => part.maxAltitudeFt)),
+    lowestEnRouteFt: lowest,
+    lowSeconds: timed
+      ? parts.reduce((sum, part) => sum + part.lowSeconds!, 0)
+      : null,
+    legs,
+  };
+}
+
+/**
+ * Where `value` along the x of a joined profile is on one of its `legs`:
+ * itself where it is on one, and the nearer end of the two around it where
+ * it is in the gap between them, which has no flight to read
+ */
+export function snapToLegs(
+  x: Float64Array,
+  legs: readonly ProfileLeg[],
+  value: number,
+): number {
+  let snapped = x[legs[0]!.first]!;
+  for (const { first, last } of legs) {
+    const from = x[first]!;
+    const to = x[last]!;
+    if (value < from) {
+      // In the gap before this flight, or before the first
+      return from - value < value - snapped ? from : snapped;
+    }
+    snapped = Math.min(value, to);
+  }
+  return snapped;
 }

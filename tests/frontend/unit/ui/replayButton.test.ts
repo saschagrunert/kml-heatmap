@@ -19,11 +19,11 @@ function button(): HTMLButtonElement {
 describe("updateReplayButtonState", () => {
   beforeEach(() => {
     document.body.innerHTML =
-      '<button id="replay-btn" aria-label="Replay selected flight"></button>';
+      '<button id="replay-btn" aria-label="Replay selected flights"></button>';
   });
 
   it("dims the button and says what is missing when replay is not possible", () => {
-    updateReplayButtonState(false);
+    updateReplayButtonState(REPLAY_PRECONDITION_MESSAGE);
 
     // aria-disabled, which the stylesheet dims; no style of its own
     expect(button().getAttribute("aria-disabled")).toBe("true");
@@ -32,7 +32,7 @@ describe("updateReplayButtonState", () => {
   });
 
   it("brings it to full strength once replay is possible", () => {
-    updateReplayButtonState(true);
+    updateReplayButtonState(null);
 
     expect(button().getAttribute("aria-disabled")).toBe("false");
     expect(button().style.opacity).toBe("");
@@ -42,12 +42,12 @@ describe("updateReplayButtonState", () => {
   it("leaves the button clickable either way", () => {
     // Clicking it is how the user learns why replay is unavailable, so it
     // must not be disabled: aria-disabled says so and keeps it focusable
-    updateReplayButtonState(false);
+    updateReplayButtonState(REPLAY_PRECONDITION_MESSAGE);
 
     expect(button().disabled).toBe(false);
     expect(button().getAttribute("aria-disabled")).toBe("true");
 
-    updateReplayButtonState(true);
+    updateReplayButtonState(null);
 
     expect(button().getAttribute("aria-disabled")).toBe("false");
   });
@@ -55,6 +55,6 @@ describe("updateReplayButtonState", () => {
   it("does nothing when the control is not on the page", () => {
     document.body.innerHTML = "";
 
-    expect(() => updateReplayButtonState(true)).not.toThrow();
+    expect(() => updateReplayButtonState(null)).not.toThrow();
   });
 });

@@ -2,10 +2,10 @@
  * The flights of an airport, listed in its popup.
  *
  * A click on a path is the only other way to select a single flight, and a
- * keyboard cannot click a path, so without this list replay, which needs
- * exactly one flight, was out of a keyboard's reach. Each flight is named by
- * its route, aircraft and year only: a date or a time of day would say when
- * somebody flew.
+ * keyboard cannot click a path, so without this list replay, which plays
+ * the selected flights, was out of a keyboard's reach. Each flight is
+ * named by its route, aircraft and year only: a date or a time of day
+ * would say when somebody flew.
  *
  * AirportManager adds it whenever the popup is open with new content (see
  * listPopupFlights), and lays the popup out again afterwards. The runways
