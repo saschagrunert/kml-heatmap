@@ -34,6 +34,17 @@ let holdCount = 0;
 let listening = false;
 
 /**
+ * The controls that change the selection or share mode, which a replay
+ * plays and the hotspot tour tours: both hold them (see PathSelection.held)
+ */
+export const SELECTION_CONTROL_IDS = [
+  "isolate-btn",
+  "selection-clear-btn",
+  "selection-share-btn",
+  "selection-exit-btn",
+] as const;
+
+/**
  * Controls held by the replay of one flight and of all of them alike: the
  * filters, the selection and Wrapped would change or take the map under
  * either, and so would the other modes and the search, which moves it.
@@ -46,8 +57,7 @@ export const REPLAY_HELD_CONTROL_IDS = [
   "wrapped-btn",
   "year-select",
   "aircraft-select",
-  "isolate-btn",
-  "selection-clear-btn",
+  ...SELECTION_CONTROL_IDS,
   "reset-view-btn",
   "cross-section-btn",
   "hotspot-tour-btn",

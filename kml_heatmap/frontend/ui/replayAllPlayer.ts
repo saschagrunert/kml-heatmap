@@ -72,7 +72,7 @@ const REPLAY_ALL_BEFORE = MAP_LAYERS.pathsAltitudeRibbons;
 
 /** What to play, see ReplayAllPlayer.start */
 export interface ReplayAllRun {
-  /** The flights to play; by default those the filters and Isolate keep */
+  /** The flights to play; by default those the filters and share mode keep */
   pathIds?: Iterable<number>;
   /** Seconds of flight a second; REPLAY_ALL_SPEED by default */
   speed?: number;
@@ -590,10 +590,9 @@ function keepOf(
     const chosen = new Set(pathIds);
     return (pathId) => chosen.has(pathId);
   }
-  const selected = app.selectedPathIds;
   return keptFlights(
     app,
     data,
-    app.isolateSelection && selected.size > 0 ? selected : null,
+    app.isolateSelection ? app.selectedPathIds : null,
   );
 }

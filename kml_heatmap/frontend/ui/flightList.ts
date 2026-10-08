@@ -25,7 +25,8 @@ import { domCache } from "../utils/domCache";
 import { formatNumber } from "../utils/formatters";
 import { formatFlightTime } from "../utils/statsFormat";
 import { escapeHtml, pluralFlights } from "../utils/htmlGenerators";
-import { flightRoute } from "./airportFlights";
+import { flightLabel, flightRoute, pickBox } from "./airportFlights";
+import type { PickList } from "./pathSelection";
 import { setStatsTitle } from "./statsPanel";
 
 /** The tab panel the list is written into (templates/map_template.html) */
@@ -225,7 +226,10 @@ export function nextSort(sort: ListSort | null, key: string): ListSort | null {
   return sort.descending ? null : { key, descending: true };
 }
 
-/** The table's rows: the first cell is the flight's button */
+/**
+ * The table's rows: the first cell is the flight's checkbox, which adds it
+ * to the selection or takes it out, and its button
+ */
 function rowsHtml(rows: FlightRow[]): string {
   let html = "";
   for (const row of rows) {
@@ -236,7 +240,9 @@ function rowsHtml(rows: FlightRow[]): string {
       const detail = column.detail?.(row);
       html +=
         i === 0
-          ? '<th scope="row"><button type="button" class="kh-flight" data-path-id="' +
+          ? '<th scope="row">' +
+            pickBox(id, escapeHtml(flightLabel(row.path))) +
+            '<button type="button" class="kh-flight" data-path-id="' +
             id +
             '" aria-pressed="false">' +
             text +
@@ -280,6 +286,11 @@ export class FlightList {
   /** The filter the rows were made for; another one makes them again */
   private view: FilterView | null = null;
   private rows: FlightRow[] = [];
+  /**
+   * The flights of the rows shown, in their order, and the row of a Shift
+   * range's start, made afresh with the rows and as the list closes
+   */
+  private picks: PickList = { order: [], anchor: null };
   private sort: ListSort | null = null;
   private readonly unsubscribe: (() => void)[] = [];
   /** Removes the listeners on the page's own elements */
@@ -403,11 +414,18 @@ export class FlightList {
     if (tablist) tablist.hidden = false;
   }
 
-  /** Write the rows again if the list is open and its filter changed */
+  /**
+   * Write the rows again if the list is open and its filter changed.
+   * Closed, a Shift range starts afresh: the click it began at is out of
+   * mind.
+   */
   private update(): void {
     const app = this.app;
     const data = app.currentData;
-    if (!app.statsPanelVisible || !app.flightListVisible || !this.body) return;
+    if (!app.statsPanelVisible || !app.flightListVisible || !this.body) {
+      this.picks.anchor = null;
+      return;
+    }
     const view = data
       ? datasetIndex(data).filter(app.selectedYear, app.selectedAircraft)
       : null;
@@ -422,6 +440,7 @@ export class FlightList {
     if (!this.body) return;
     const query = this.search?.value ?? "";
     const shown = sortRows(searchRows(this.rows, query), this.sort);
+    this.picks = { order: shown.map((row) => row.path.id), anchor: null };
     const total = this.rows.length;
     this.body.innerHTML =
       shown.length > 0
@@ -468,17 +487,19 @@ export class FlightList {
   }
 
   /**
-   * A click anywhere on a row picks its flight; with Ctrl, Cmd or Shift it
-   * is added to the selection (or taken out of it)
+   * A click anywhere on a row picks its flight; its checkbox, Ctrl or Cmd
+   * add it to the selection (or take it out of it), and Shift the flights
+   * from the row clicked last to this one (PathSelection.pickFromList)
    */
   private onRowClick(event: MouseEvent): void {
-    const button = (event.target as Element)
+    const row = (event.target as Element)
       .closest("tr")
       ?.querySelector<HTMLElement>("[data-path-id]");
-    if (!button) return;
-    this.app.pathSelection.selectFlight(
-      Number(button.dataset["pathId"]),
-      event.ctrlKey || event.metaKey || event.shiftKey,
+    if (!row) return;
+    this.app.pathSelection.pickFromList(
+      Number(row.dataset["pathId"]),
+      event,
+      this.picks,
     );
   }
 }

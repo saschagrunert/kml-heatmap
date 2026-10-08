@@ -760,7 +760,6 @@ export class DataManager {
       drawn.aircraft === aircraft;
     this.drawn = { data, year, aircraft, isolate: this.app.isolateSelection };
 
-    const selected = this.app.selectedPathIds;
     // What the year/aircraft filter keeps: a year filter over that year's
     // own file keeps every path
     const view = datasetIndex(data).filter(year, aircraft);
@@ -772,9 +771,7 @@ export class DataManager {
       same && this.heat ? this.heat : heatOf(segments, segments, keep);
     this.setHeatmapPoints(
       heat,
-      this.app.isolateSelection && selected.size > 0
-        ? this.isolatedHeat(data, keep)
-        : null,
+      this.app.isolateSelection ? this.isolatedHeat(data, keep) : null,
     );
   }
 

@@ -164,14 +164,25 @@ describe("StatsManager", () => {
       expect(statsPanel.textContent).not.toContain("EDDF");
     });
 
-    it("ignores year/aircraft filters for a selection", () => {
-      mockApp.selectedYear = "2025";
+    it("counts the selected flights the filter shows, as the map and the chip do", () => {
+      // Share mode keeps a flight the filter hides, which is not drawn
+      mockApp.selectedPathIds.add(1);
       mockApp.selectedPathIds.add(2); // path 2 is from 2024
+      mockApp.isolateSelection = true;
 
       statsManager.updateStatsForSelection();
+      expect(leadValue(statsPanel, "Flights")).toBe("2");
 
+      mockApp.selectedYear = "2025";
+      statsManager.updateStatsForSelection();
       expect(leadValue(statsPanel, "Flights")).toBe("1");
-      expect(statsPanel.textContent).toContain("D-EFGH");
+      expect(statsPanel.textContent).not.toContain("D-EFGH");
+
+      // All of them hidden: the statistics of the selection, of nothing
+      mockApp.selectedPathIds.delete(1);
+      mockApp.store.notifyMutation("selectedPathIds");
+      statsManager.updateStatsForSelection();
+      expect(leadValue(statsPanel, "Flights")).toBe("0");
     });
 
     it("renders an empty selection instead of the previous flight", () => {
@@ -738,6 +749,12 @@ describe("StatsManager", () => {
 
   describe("store subscriptions", () => {
     beforeEach(() => {
+      // The figures of a filter in one task, however loaded the machine:
+      // a first slice that ran past its time handed back a promise, and
+      // the panel said it was loading where these read its figures
+      vi.spyOn(panelStats, "filterStatisticsInSlices").mockImplementation(
+        (view) => panelStats.filterStatistics(view),
+      );
       mockApp.store.set("statsPanelVisible", true);
     });
 

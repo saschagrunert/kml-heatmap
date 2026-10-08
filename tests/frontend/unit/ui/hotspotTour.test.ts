@@ -26,6 +26,7 @@ import type {
   PathSegment,
 } from "../../../../kml_heatmap/frontend/types";
 import { REPLAY_CAMERA_MOVE } from "../../../../kml_heatmap/frontend/utils/mapHelpers";
+import { SELECTION_CONTROL_IDS } from "../../../../kml_heatmap/frontend/ui/heldControls";
 import { LIVE_REGION_DELAY_MS } from "../../../../kml_heatmap/frontend/utils/toast";
 import * as crossSection from "../../../../kml_heatmap/frontend/ui/crossSection";
 import * as motion from "../../../../kml_heatmap/frontend/utils/motion";
@@ -86,12 +87,15 @@ function flights() {
   return createDataset(info, [...stay(1, HOME, 61), ...stay(2, AWAY, 21)]);
 }
 
-/** The controls the tour holds, and its own */
+/**
+ * The controls the tour holds, and its own: every one of the selection,
+ * from the list a replay holds them by as well
+ */
 const HELD = [
   "heatmap-btn",
   "three-d-btn",
   "year-select",
-  "isolate-btn",
+  ...SELECTION_CONTROL_IDS,
   "replay-all-btn",
   "wrapped-btn",
   "cross-section-btn",

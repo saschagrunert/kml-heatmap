@@ -476,7 +476,7 @@ describe("LayerManager hitTest", () => {
       expect(project).toHaveBeenCalledTimes(5);
     });
 
-    it("ignores the main runs of other paths in isolate mode", async () => {
+    it("ignores the main runs of other paths in share mode", async () => {
       addSecondPath();
       mockApp.altitudeLayer.setVisible(true);
       mockApp.selectedPathIds.add(1);

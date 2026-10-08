@@ -4,7 +4,7 @@
 import type { MapApp } from "../mapApp";
 import type { KMLDataset } from "../types";
 import { aggregateAircraft, filterPaths } from "../calculations/statistics";
-import { datasetIndex } from "../calculations/datasetIndex";
+import { datasetIndex, shownPathIds } from "../calculations/datasetIndex";
 import { calculateAirspeedRange } from "../features/layers";
 import { domCache } from "../utils/domCache";
 import { pluralFlights } from "../utils/htmlGenerators";
@@ -271,12 +271,10 @@ export class FilterManager {
       also?.();
       if (aircraft !== null) this.app.selectedAircraft = aircraft;
       this.updateAircraftDropdown();
-      if (keepSelection && aircraft === null) {
-        // A Retry of the first year: what its link named is said there
-        dropUnknownPathIds(this.app, data, true);
-      } else {
-        this.clearSelectionUnlessInitializing();
-      }
+      // The first load and its Retry fit the selection a link or a saved
+      // state named, which nothing has checked yet
+      if (keepSelection) fitSelection(this.app, data);
+      else this.keepShownSelection();
     });
     announceDataset(requestedYear);
     return true;
@@ -299,22 +297,88 @@ export class FilterManager {
   private applyAircraft(aircraft: string): void {
     this.app.store.batch(() => {
       this.app.selectedAircraft = aircraft;
-      this.clearSelectionUnlessInitializing();
+      this.keepShownSelection();
     });
   }
 
   /**
-   * A filter change drops the selection, except while restoring state.
-   * Isolate mode goes with it: left on over an empty selection, the button
-   * stays pressed but cannot be released, and the next click on a flight
-   * would hide every other flight at once.
+   * Fit the selection to a filter change (see fitSelection). It dropped
+   * every selected flight: the two flights of a day in share mode went with
+   * a switch from all years to theirs, and so did share mode. The first
+   * load fits a restored selection itself.
    */
-  private clearSelectionUnlessInitializing(): void {
-    if (this.app.isInitializing) return;
-    this.app.selectedPathIds.clear();
-    this.app.store.notifyMutation("selectedPathIds");
-    this.app.isolateSelection = false;
+  private keepShownSelection(): void {
+    const data = this.app.currentData;
+    if (data && !this.app.isInitializing) fitSelection(this.app, data);
   }
+}
+
+/**
+ * Fit the selection to the dataset and the filter the page shows, and say
+ * what it took out: after a filter change, a restored selection's first
+ * load (or its Retry) and the Exit of share mode (PathSelection).
+ *
+ * Ids are derived from the flights, so a link or a saved state keeps
+ * pointing at the same flight after a re-export. Only a dataset of every
+ * year can tell one whose flight is gone: it is left out, shared or not. A
+ * dataset of one year has none of the others, and cannot tell a flight of
+ * another year from a deleted one; nothing short of loading every year
+ * would (the metadata lists the years and their file sizes, no flights),
+ * so it is said as it is: "not in 2024". The aircraft filter hides
+ * flights the dataset has.
+ *
+ * Share mode keeps the flights the filter hides or the year lacks: what
+ * it shares is fixed, its link hands them all on, and the chip says how
+ * many are not shown (ui/pathSelection.ts). Outside it they are
+ * deselected. A dataset missing a year that failed to load keeps the
+ * flights it lacks: one may well be shown, and a Retry brings it back.
+ * @param app - The MapApp instance to operate on
+ * @param data - The dataset the page shows
+ */
+export function fitSelection(app: MapApp, data: KMLDataset): void {
+  if (app.selectedPathIds.size === 0) return;
+  const year = app.selectedYear;
+  const everyYear = year === "all";
+  const known = datasetIndex(data).pathInfoById;
+  const shown = shownPathIds(app, data);
+  app.store.batch(() => {
+    const gone = deselect(
+      app,
+      (pathId) => everyYear && !data.incomplete && !known.has(pathId),
+    );
+    if (gone > 0) showToast(`Left out ${pluralFlights(gone)} not on this site`);
+    if (app.isolateSelection) return;
+    sayDeselected(
+      deselect(app, (pathId) => !everyYear && !known.has(pathId)),
+      "not in " + year,
+    );
+    sayDeselected(
+      deselect(app, (pathId) => known.has(pathId) && !shown.has(pathId)),
+      "hidden by the filter",
+    );
+  });
+}
+
+/** Say how many selected flights were deselected, and why */
+function sayDeselected(count: number, why: string): void {
+  if (count === 1) {
+    showToast(`1 selected flight is ${why} and was deselected`);
+  } else if (count > 1) {
+    showToast(`${count} selected flights are ${why} and were deselected`);
+  }
+}
+
+/**
+ * Take the selected flights `drop` names out of the selection, in one
+ * update; share mode ends with the last (AppStore.settle). Returns how
+ * many went.
+ */
+function deselect(app: MapApp, drop: (pathId: number) => boolean): number {
+  const selected = app.selectedPathIds;
+  const dropped = [...selected].filter(drop);
+  for (const pathId of dropped) selected.delete(pathId);
+  if (dropped.length > 0) app.store.notifyMutation("selectedPathIds");
+  return dropped.length;
 }
 
 /**
@@ -350,40 +414,4 @@ export function publishDataset(app: MapApp, data: KMLDataset): void {
  */
 function announceDataset(year: string): void {
   announceStatus("Showing " + (year === "all" ? "all years" : year));
-}
-
-/**
- * Drop the restored path ids that are not in the loaded dataset.
- *
- * Ids are derived from the flights, so a shared link or a saved state keeps
- * pointing at the same flight after a re-export; one whose flight is gone
- * is dropped, which `say` tells the visitor (the first load, of the link
- * they opened). Isolation goes with the last id: the controls cannot leave
- * isolate mode on over an empty selection. A dataset missing a year that
- * failed to load cannot tell a deleted flight from an unloaded one, so it
- * drops nothing.
- * @param app - The MapApp instance to operate on
- * @param data - The dataset the selection has to refer to
- * @param say - Whether a toast says how many were left out
- */
-export function dropUnknownPathIds(
-  app: MapApp,
-  data: KMLDataset,
-  say = false,
-): void {
-  const selected = app.selectedPathIds;
-  if (selected.size === 0 || data.incomplete) return;
-
-  const known = datasetIndex(data).pathInfoById;
-  const unknown = [...selected].filter((pathId) => !known.has(pathId));
-  if (unknown.length === 0) return;
-
-  app.store.batch(() => {
-    for (const pathId of unknown) selected.delete(pathId);
-    app.store.notifyMutation("selectedPathIds");
-    if (selected.size === 0) app.isolateSelection = false;
-  });
-  if (say) {
-    showToast(`Left out ${pluralFlights(unknown.length)} not on this site`);
-  }
 }

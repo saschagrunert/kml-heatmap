@@ -14,7 +14,7 @@ it.
 The Heatmap switch shows where the time was spent: every logged position counts
 for the seconds until the next one, so a flight logged every 2 seconds weighs as
 much as one logged every 5. Its brightness follows what it draws: the busiest
-routes and circuits of a year, of one aircraft or of an isolated flight come out
+routes and circuits of a year, of one aircraft or of a shared flight come out
 alike, and a logbook of many years does not wash out to white. The busiest
 places are rolled off before they are coloured, so a home field flown hundreds
 of times keeps its circuit, final and runway apart in the lightest colours
@@ -57,10 +57,10 @@ time there was flown one way: a runway or a circuit flown both ways, or a route
 flown out and back, shows none. They fade out from `z` 10 to `z` 8.5, where the
 routes of a region run together.
 
-The cloud follows the same switch, filters and Isolate as the heatmap, and steps
-back under the Aviation layer and the lines of a selection as it does, but not
-under the ribbons of a colour layer, which are drawn in front of it; during a
-replay it stays at a quarter of its strength and without its pulses, so the
+The cloud follows the same switch, filters and share mode as the heatmap, and
+steps back under the Aviation layer and the lines of a selection as it does, but
+not under the ribbons of a colour layer, which are drawn in front of it; during
+a replay it stays at a quarter of its strength and without its pulses, so the
 chase view flies through the flights of before, and the Heatmap switch shows as
 on. Hovering and clicking still go to the flights, and resting the pointer on
 the cloud tells what it is made of as well (see
@@ -154,19 +154,26 @@ well when the pointer rests on it, and flights without timestamps have no
 landings. The rows start in the order of the flight files; a column header sorts
 by it, up, down and back. The search keeps the flights whose airports (code or
 name), registration or type match every word typed. A click on a row selects
-that flight alone, and Ctrl or Shift adds it to the selection or takes it out;
-during a replay the selection stays as it is. A flight picked alone, here or
-from an airport's popup, is brought into view clear of the panels and of its
-altitude profile, unless all of it is in view already, the map was moved
-meanwhile, or the hotspot tour or Wrapped has it; a flight in view that spans
-less than a quarter of the map between the panels either way, such as a circuit
-round the home field, is framed as well, no closer than a replay follows a
-flight. A click on a flight on the map leaves the map where it is. The arrow
-keys move between the two tabs. On a phone the same tabs are inside the
-statistics sheet, which Escape closes as well as its tab (not an Escape for a
-popup, a marker, the readout of the heat cloud or the search of the flights); a
-flight picked alone there, or from an airport's popup, closes the sheet and the
-popup, which stood over the map it is shown on.
+that flight alone; its checkbox, or a click with Ctrl or Cmd held, adds it to
+the selection or takes it out, which is also how a phone puts several flights
+together. Shift sets every flight from the row clicked last in that list to this
+one, in the order the list shows, to what this row's checkbox goes to: in, or
+out where it was ticked. A sort, a search or a closed list starts the range
+afresh. In share mode only the checkbox adds or removes a flight (with Shift for
+a range): a click on the rest of a row brings a shared flight into view, and
+says how to add one that is not shared. During a replay or the hotspot tour the
+selection stays as it is. A flight picked alone, here or from an airport's
+popup, is brought into view clear of the panels and of its altitude profile,
+unless all of it is in view already, the map was moved meanwhile, or the hotspot
+tour or Wrapped has it; a flight in view that spans less than a quarter of the
+map between the panels either way, such as a circuit round the home field, is
+framed as well, no closer than a replay follows a flight. A click on a flight on
+the map leaves the map where it is. The arrow keys move between the two tabs. On
+a phone the same tabs are inside the statistics sheet, which Escape closes as
+well as its tab (not an Escape for a popup, a marker, the readout of the heat
+cloud or the search of the flights); a flight picked alone there, or from an
+airport's popup, closes the sheet and the popup, which stood over the map it is
+shown on.
 
 ### Export image
 
@@ -185,14 +192,15 @@ starts with the map filling the dialog and the title of the year over the globe,
 and, in an intro of about ten seconds, a flight down towards your home base, two
 zoom levels closer than the overview, so the routes of the year show around it,
 over the heat cloud of the year (every flight the year and aircraft filters
-keep, at full strength, whatever the Heatmap switch, Isolate or a colour layer
-say), while the flights of the summary play underneath at 300x, as in Replay all
-(at their height in the heat) but drawn larger; then the cloud fades into the
-heatmap, back on the map's own projection, and it settles on the overview as the
-cards come in one after another and the map draws back into its panel beside
-them (below 1024 px wide, where the cards are stacked, it fades from over them
-instead); Skip intro, or a press, wheel or key on the map, goes straight to the
-summary, and the flight does not play while the system asks for reduced motion.
+keep, at full strength, whatever the Heatmap switch, share mode or a colour
+layer say), while the flights of the summary play underneath at 300x, as in
+Replay all (at their height in the heat) but drawn larger; then the cloud fades
+into the heatmap, back on the map's own projection, and it settles on the
+overview as the cards come in one after another and the map draws back into its
+panel beside them (below 1024 px wide, where the cards are stacked, it fades
+from over them instead); Skip intro, or a press, wheel or key on the map, goes
+straight to the summary, and the flight does not play while the system asks for
+reduced motion.
 
 Beside the map the cards scroll in a column of their own, each as tall as its
 content, and **More below** at the foot of the first takes the column to the
@@ -232,12 +240,12 @@ reduced motion, and a toast says why.
 
 ### Replay all
 
-Play every flight the filters and Isolate keep at once, each from its own first
-fix, at 100x to 1000x (default 200x): each flight is a bright head with a trail
-that fades behind it (over at most 25 minutes of flight), at its height as in
-the 3D view, on the flat map as well. Behind the heads the heat builds up as far
-as they have flown, in the heatmap's colours, and ends as the whole heat of the
-flights; it is the heat cloud's glow at the height of the flights, with its
+Play every flight the filters and share mode keep at once, each from its own
+first fix, at 100x to 1000x (default 200x): each flight is a bright head with a
+trail that fades behind it (over at most 25 minutes of flight), at its height as
+in the 3D view, on the flat map as well. Behind the heads the heat builds up as
+far as they have flown, in the heatmap's colours, and ends as the whole heat of
+the flights; it is the heat cloud's glow at the height of the flights, with its
 shadow on the ground, and none is drawn while the Heatmap switch is off.
 
 The clock reads the time into every flight ("0:42 into every flight"), never a
@@ -277,10 +285,10 @@ button; Replay all is held meanwhile.
 
 Fly over the busiest places of what the heatmap shows, in the 3D view with the
 heat cloud: up to five places, where the heat of the flights the filters and
-Isolate keep is strongest (weighed as the heatmap is, and the neighbouring cells
-of a place taken together, at least 8 km apart). Each is named after its airport
-("Home field EDAQ Halle-Oppin" for the home base), or by its distance and
-direction from the nearest one ("18 km south-east of EDAQ Halle-Oppin"), and
+share mode keep is strongest (weighed as the heatmap is, and the neighbouring
+cells of a place taken together, at least 8 km apart). Each is named after its
+airport ("Home field EDAQ Halle-Oppin" for the home base), or by its distance
+and direction from the nearest one ("18 km south-east of EDAQ Halle-Oppin"), and
 captioned with the time spent there ("4 h 58 min") and its share of the view's
 time; never a date or an hour. The camera flies to each place, tilted, and turns
 slowly over it for a few seconds before it moves on.
@@ -454,19 +462,19 @@ the ground most of it was in, for example "About 42 min within 1 km" over "17
 flights · mostly 800 to 1,200 ft AGL". It is counted as the cloud counts it (the
 seconds between the logged positions, at most two minutes each; a track without
 times at a cruise), and never from the brightness, which the cloud scales to its
-busiest places; it follows the filters and Isolate, and says no date or time of
-day.
+busiest places; it follows the filters and share mode, and says no date or time
+of day.
 
 There is none over the sky of a steeply tilted map, or beside the globe. In a
 tilted view it counts every flight the line of sight through the pointer passes
 near, at whatever height the cloud draws it, since the glow under the pointer
 adds all of them up. Over a flight's ribbon its values show as well, and the box
 goes beside them rather than over them, and clear of the panels over the map
-where there is room; a tap on a flight selects it and shows both. Markers,
-airport codes and dragging come first, and Escape puts the box away until the
-pointer moves on, before it closes anything else. A click or a tap on the cloud
-is read out to screen readers, unless it selected a flight or cleared the
-selection, which is read out instead; a hover is not. The flat heatmap has no
+where there is room; a tap on a flight shows both. Markers, airport codes and
+dragging come first, and Escape puts the box away until the pointer moves on,
+before it closes anything else. A click or a tap on the cloud is read out to
+screen readers, unless it selected a flight, which is read out instead; a hover
+is not. A click there never clears the selection. The flat heatmap has no
 readout: its code comes with the 3D view, not with the first visit.
 
 ### Satellite
@@ -504,7 +512,7 @@ sheet; during a replay it is disabled like the filters.
   map has focus
 - A toggle that is off is drawn at full strength without the blue accent; only a
   control that cannot act right now (Replay without one timed flight selected,
-  Isolate without a selection, North up and Reset view with nothing to reset,
+  Share mode without a selection, North up and Reset view with nothing to reset,
   and what a replay disables, whose title then says to end the replay, the
   replay of all flights or the hotspot tour to change it) is dimmed. While
   Replay, Replay all or the hotspot tour runs, its control is drawn pressed with
@@ -586,7 +594,7 @@ the page groups the digits the same way.
 | An end of the cross-section (A or B), once focused                | Arrow keys                    | Move the end by 10 px on the screen, by 50 px with Shift                                                                     |
 | The tabs of the statistics panel                                  | Left and Right                | The other tab (Statistics or Flights)                                                                                        |
 |                                                                   | Home and End                  | The first and the last tab                                                                                                   |
-| A row of the flight list                                          | Click, or Enter on its button | Selects that flight alone; with Ctrl, Cmd or Shift held, a click adds it to the selection or takes it out                    |
+| A row of the flight list                                          | Click, or Enter on its button | Selects that flight alone; with Ctrl or Cmd held, or on its checkbox, adds it or takes it out; Shift sets a range            |
 | An airport marker                                                 | Enter                         | Opens its popup and moves focus into it, where Escape closes it again                                                        |
 
 Escape closes the innermost thing first: the readout of the heat cloud, the
@@ -604,27 +612,61 @@ replay has no Escape: its close button or a click on the map closes it.
 - **Aircraft filter** - Filter by aircraft registration to see flights per
   aircraft
 - **Path selection** - Click paths to highlight and view detailed statistics. A
-  chip at the top of the map says how many flights are selected and clears them
-  again; on a phone it also replays the selected flights, up to eight, when one
-  of them has timing data, and while the statistics sheet is open it moves into
-  the sheet's header without its count. With neither colour layer on, the
-  selected flights are drawn as thin light lines over the heatmap, which steps
-  back while they show, at every zoom level, and the lines are fainter the more
-  flights are selected; in the 3D view they are lifted to their height with the
-  heat cloud
-- **Airport selection** - Click an airport marker to select all flights that
-  visited it; click the map beside every flight to clear the selection, with
-  Altitude or Groundspeed on, where the flights can be clicked (over the heat
-  alone a click on a flight would be one beside them, and the chip's Clear
-  clears it). The airport popup shows how the flights of the filter used its
-  runways ("RWY 29 · 65%, RWY 11 · 35%") and lists those flights (route,
-  aircraft and year), each a button that selects that one flight (the rows are
-  marked as selected once the selection is not all of them, and a lone flight
-  always), so a single flight and Replay are reachable from the keyboard: Tab to
-  a marker, Enter opens the popup and moves focus into it, Escape closes it and
-  returns focus to the marker
-- **Isolate** - Show only the selected flights, and their heat alone, hiding all
-  other flights
+  mouse click on a flight selects it or takes it out. A tap shows the values of
+  the flight with a Select (or Remove) button instead, so that looking at a
+  flight on a phone does not change the selection; a touch laptop tells its
+  mouse from its screen by each click. A click on the map beside every flight
+  closes the popups and leaves the selection alone. A chip at the top of the map
+  says how many flights are selected and clears them again (Clear), or puts them
+  into share mode (Share); on a phone it also replays the selected flights, up
+  to eight, when one of them has timing data, and while the statistics sheet is
+  open it moves into the sheet's header without its count. With neither colour
+  layer on, the selected flights are drawn as thin light lines over the heatmap,
+  which steps back while they show, at every zoom level, and the lines are
+  fainter the more flights are selected; in the 3D view they are lifted to their
+  height with the heat cloud
+- **Airport selection** - With nothing selected, click an airport marker to
+  select all flights that visited it; with a selection, or in share mode, the
+  click only opens its popup. The airport popup shows how the flights of the
+  filter used its runways ("RWY 29 · 65%, RWY 11 · 35%") and lists those flights
+  (route, aircraft and year), each a button that selects that one flight and a
+  checkbox that adds it to the selection or takes it out, with Shift, Ctrl and
+  share mode as in the flight list (the rows are marked as selected once the
+  selection is not all of them, and a lone flight always), so a single flight
+  and Replay are reachable from the keyboard: Tab to a marker, Enter opens the
+  popup and moves focus into it, Escape closes it and returns focus to the
+  marker
+- **Year and aircraft filter with a selection** - A change of the filter keeps
+  the selected flights it still shows and deselects the others, which a toast
+  says: "1 selected flight is hidden by the filter and was deselected" for one
+  the aircraft filter hides, "not in 2024" for one the year's flights lack (one
+  year's file cannot tell another year's flight from one the site no longer has,
+  and the metadata lists no flights). A dataset of every year leaves out a
+  flight the site no longer has ("Left out 1 flight not on this site"). Share
+  mode keeps every shared flight instead (see below), and its Exit deselects the
+  ones the filter hides as a filter change does
+- **Share mode** - For showing a few flights, the two or three of a day, to
+  someone else: the map shows only the selected flights, and their heat alone,
+  and the selection holds still. Turn it on with Share in the chip or Share mode
+  in the Share group (More on a phone); the chip then says "Sharing 3 flights"
+  and offers the link (Copy link) and Exit, which leaves the mode and keeps the
+  flights selected. On a phone the chip shows share mode's mark and a blue
+  border in place of "Sharing", and the link (Share link) and Exit as icons, so
+  that it fits a 360 px screen beside Replay. While it is on, a click or a tap
+  on a flight shows its values with a Remove button, a click on an airport opens
+  its popup, and a click on a row of a list shows its flight, but none of them
+  adds or removes a flight by itself; a flight joins or leaves with that Remove
+  or its checkbox in a list, and the mode ends with Exit or the last flight. The
+  shared flights are fixed under a change of the year or the aircraft as well:
+  the ones the filter hides stay shared and in the link, and the chip says so
+  ("Sharing 3 flights, 1 hidden by the filter", "3 flights, 1 hidden" on a
+  phone, "all hidden" where it hides every one, "1 not in 2024" or "none in
+  2024" for flights the year's file lacks, "1 not shown" for both). The map, its
+  lines and ribbons, the airports, the statistics, the frame of Share, Replay
+  and the altitude profile are of the shared flights the filter shows. A link
+  opened in share mode shows the same flights the same way, with the same words
+  for the others. Only a link to every year can tell a flight the site no longer
+  has, which it leaves out and says so
 
 ## Shareable URLs
 
@@ -644,11 +686,11 @@ browser's address bar or use the copy-link button:
 - Layer visibility (9 flags: heatmap, altitude, speed, airports, aviation,
   stats, wrapped, an unused legacy slot, isolateSelection). The 8th slot
   belonged to a control-visibility toggle that no longer exists; it is always
-  written as `0` and not read, and kept so shared links still read their isolate
-  flag from the 9th. The shorter strings of the releases before the isolate flag
-  (6 to 8 flags) are no longer read; such a link opens with the layers of a
-  first visit. The slots and parameters of every toggle are listed in
-  `kml_heatmap/frontend/state/toggles.ts`
+  written as `0` and not read, and kept so shared links still read their share
+  mode flag from the 9th (once called Isolate, hence the name). The shorter
+  strings of the releases before that flag (6 to 8 flags) are no longer read;
+  such a link opens with the layers of a first visit. The slots and parameters
+  of every toggle are listed in `kml_heatmap/frontend/state/toggles.ts`
   - Example: `?v=100100000`
 - Map position (`?lat=51.5&lng=13.4&z=10`). A centre without `z` opens at
   zoom 10. `z` counts in 256 pixel tiles, as links always did, which is one more

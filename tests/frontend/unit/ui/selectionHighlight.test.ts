@@ -113,6 +113,17 @@ describe("selection highlight", () => {
     expect(lines()).toEqual([]);
   });
 
+  it("draws no line on a selected flight the filter hides, and draws it as the filter shows it", () => {
+    // Share mode keeps it, which the map does not draw: a line stood alone
+    // where the filter hid the flight
+    app.selectedAircraft = "D-NONE";
+    select(2);
+    expect(lines()).toEqual([]);
+
+    app.selectedAircraft = "all";
+    expect(lines()).toHaveLength(1);
+  });
+
   it("follows another dataset with the same selection", () => {
     select(1);
     const source = app.map!.source(MAP_SOURCES.selectionHighlight);

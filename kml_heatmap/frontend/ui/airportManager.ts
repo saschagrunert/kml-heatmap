@@ -12,7 +12,7 @@ import {
 import type { MapApp } from "../mapApp";
 import { calculateVisibleAirports, findHomeBase } from "../features/airports";
 import type { AirportCounts } from "../features/airports";
-import { datasetIndex } from "../calculations/datasetIndex";
+import { datasetIndex, shownSelection } from "../calculations/datasetIndex";
 import type { Airport, KMLDataset } from "../types";
 import {
   AIRPORT_HIDE_MARKERS_BELOW_ZOOM,
@@ -266,16 +266,23 @@ export class AirportManager {
 
   /**
    * What a click on an airport's marker or on its label does: open its
-   * popup and select its flights, or close the popup it has open already.
-   * No flights are selected during a replay, which shows the one flight.
+   * popup, or close the popup it has open already. With nothing selected
+   * it selects the airport's flights as well. Over a selection it only
+   * opens: the home base's hundreds of flights were added to the two or
+   * three somebody had picked, and share mode, which holds its flights
+   * still, would have shown them all. The popup's list adds one by one
+   * instead (ui/airportFlights.ts). Nothing is selected during a replay,
+   * which shows the one flight, or the hotspot tour, which tours them.
    */
   activateAirport(name: string): void {
     if (this.isPopupOpen(name)) {
       this.closePopup(name);
       return;
     }
-    if (!this.app.replayActive) {
-      this.app.pathSelection.selectPathsByAirport(name);
+    const app = this.app;
+    // Share mode always has a selection, so it never selects here
+    if (!app.pathSelection.held() && app.selectedPathIds.size === 0) {
+      app.pathSelection.selectPathsByAirport(name);
     }
     this.openPopup(name);
   }
@@ -433,7 +440,7 @@ export class AirportManager {
 
   /**
    * Show the airports of the data, the filter and the selection. A click
-   * on a flight changes the selection alone, which outside isolation shows
+   * on a flight changes the selection alone, which outside share mode shows
    * no airport the filter does not: unless `always` (the default, for the
    * markers just made), the markers and the labels stay as they are while
    * neither the airports nor their counts change.
@@ -468,7 +475,7 @@ export class AirportManager {
       year === "all" && aircraft === "all"
         ? null
         : index.filter(year, aircraft).paths,
-      this.app.selectedPathIds,
+      shownSelection(this.app),
       this.app.isolateSelection,
       index.pathInfoById,
     );

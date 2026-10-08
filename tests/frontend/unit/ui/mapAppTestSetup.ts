@@ -182,7 +182,7 @@ export function setupDOM(): void {
       </div>
       <div class="control-row">
         <button id="isolate-btn" data-icon="isolate">
-          <span class="control-label">Isolate</span>
+          <span class="control-label">Share mode</span>
         </button>
       </div>
     </div>

@@ -21,6 +21,7 @@ import { airplaneLiftPx, heightAtZoomFt } from "../calculations/airplaneLift";
 import { liftExaggeration, reliefLevel } from "../calculations/lift";
 import type { SmoothedFlights } from "../calculations/smoothing";
 import { groundProfilesFt } from "../calculations/groundProfile";
+import { shownSelection } from "../calculations/datasetIndex";
 import { appendCurve } from "../calculations/curves";
 import {
   isPageEscape,
@@ -69,7 +70,7 @@ export const CHASE_REDUCED_MOTION_MESSAGE =
  * Controls that stay disabled while replay runs. Wrapped is one of them: it
  * takes the map into its dialog, where the running replay kept panning it
  * with no way to pause, and the end of the replay zoomed the overview to
- * the single flight. Isolate and the selection chip's clear button would
+ * the single flight. Share mode and the selection chip's buttons would
  * change the selection the replay is playing (PathSelection ignores them
  * then as well), and so would Reset view (MapApp.resetView). The Heatmap
  * switch as well: the replay hides the heat, and the 3D view's faint cloud
@@ -600,7 +601,9 @@ export class ReplayManager {
       return false;
     }
 
-    const selectedPathId = Array.from(this.app.selectedPathIds)[0];
+    // The one the filter shows, as canReplay asks: share mode keeps the
+    // flights a filter hides
+    const selectedPathId = Array.from(shownSelection(this.app))[0];
     if (selectedPathId === undefined) return false;
     if (!this.filterAndSortSegments(selectedPathId)) {
       showToast(REPLAY_PRECONDITION_MESSAGE, "info");

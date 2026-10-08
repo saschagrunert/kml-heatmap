@@ -47,6 +47,7 @@ import {
 } from "../../../../kml_heatmap/frontend/utils/mapHelpers";
 import * as motion from "../../../../kml_heatmap/frontend/utils/motion";
 import { segmentOf } from "../../testHelpers";
+import type { KMLDataset } from "../../../../kml_heatmap/frontend/types";
 
 // The instances the mocked manager constructors hand out live in the setup
 // module, which is loaded before the mocks are registered
@@ -202,6 +203,55 @@ async function holdNextLoad<T>(
       }),
   );
   return { bundle, deliver: () => deliver() };
+}
+
+/**
+ * The default data with a second flight, of another aircraft: the flights
+ * of a selection count where the filter shows them (shownSelection)
+ */
+/** The numbers from `from` up to `to`, without it */
+function range(from: number, to: number): number[] {
+  return Array.from({ length: to - from }, (_, i) => from + i);
+}
+
+/**
+ * The timed flight of the default dataset and the flights `ids` beside it,
+ * without times: what the replay counts are the flights the filter shows
+ * (shownSelection), of the dataset
+ */
+function withFlights(ids: number[]): KMLDataset {
+  const [first, second] = m.defaultData.path_segments;
+  return {
+    ...m.defaultData,
+    path_segments: [
+      ...m.defaultData.path_segments,
+      ...ids.flatMap((id) => [
+        { ...first!, path_id: id, time: undefined },
+        { ...second!, path_id: id, time: undefined },
+      ]),
+    ],
+    path_info: [
+      ...m.defaultData.path_info,
+      ...ids.map((id) => ({ id, year: 2025, aircraft_registration: "D-ABCD" })),
+    ],
+  };
+}
+
+function twoFlights(): KMLDataset {
+  const [first, second] = m.defaultData.path_segments;
+  return {
+    ...m.defaultData,
+    path_segments: [
+      first!,
+      second!,
+      { ...first!, path_id: 2 },
+      { ...second!, path_id: 2 },
+    ],
+    path_info: [
+      m.defaultData.path_info[0]!,
+      { id: 2, year: 2025, aircraft_registration: "D-EFGH" },
+    ],
+  };
 }
 
 describe("MapApp controls and map", () => {
@@ -816,7 +866,14 @@ describe("MapApp controls and map", () => {
     });
 
     it("plays up to a day of flights, and says why not more", async () => {
-      await initializeApp(app);
+      // One timed flight and nine without times, of the dataset: the
+      // flights the filter shows are the ones counted (shownSelection)
+      await initializeApp(
+        app,
+        m.defaultAirports,
+        m.defaultMetadata,
+        withFlights([...range(100, 108), 200]),
+      );
       const chip = document.getElementById("selection-replay-btn")!;
       // One timed flight among eight
       app.selectedPathIds.add(1);
@@ -840,7 +897,12 @@ describe("MapApp controls and map", () => {
     });
 
     it("says first that no flight has times, which fewer would not mend", async () => {
-      await initializeApp(app);
+      await initializeApp(
+        app,
+        m.defaultAirports,
+        m.defaultMetadata,
+        withFlights(range(100, 109)),
+      );
       for (let id = 100; app.selectedPathIds.size <= DAY_MAX_FLIGHTS; id++) {
         app.selectedPathIds.add(id);
       }
@@ -848,6 +910,37 @@ describe("MapApp controls and map", () => {
 
       expect(app.replayHint()).toBe(REPLAY_PRECONDITION_MESSAGE);
       expect(replayButton().title).toBe(REPLAY_PRECONDITION_MESSAGE);
+    });
+
+    it("counts and plays the selected flights the filter shows", async () => {
+      await initializeApp(
+        app,
+        m.defaultAirports,
+        m.defaultMetadata,
+        twoFlights(),
+      );
+      // Share mode keeps the flights a filter hides
+      app.store.batch(() => {
+        app.selectedPathIds.add(1).add(2);
+        app.store.notifyMutation("selectedPathIds");
+        app.isolateSelection = true;
+      });
+      expect(app.canReplay()).toBe(true);
+      expect(app.playsInSequence()).toBe(true);
+
+      // One shown: the replay of that flight, not a sequence of one
+      app.selectedAircraft = "D-ABCD";
+      expect(app.canReplay()).toBe(true);
+      expect(app.playsInSequence()).toBe(false);
+      expect(replayButton().getAttribute("aria-disabled")).toBe("false");
+
+      // None shown: no flight the map does not draw is replayed
+      app.store.batch(() => {
+        app.selectedPathIds.delete(1);
+        app.store.notifyMutation("selectedPathIds");
+      });
+      expect(app.canReplay()).toBe(false);
+      expect(replayButton().getAttribute("aria-disabled")).toBe("true");
     });
 
     it("leaves the button to a running replay", async () => {
@@ -898,7 +991,12 @@ describe("MapApp controls and map", () => {
     }
 
     it("fetches the feature bundle as up to eight flights are first selected", async () => {
-      await initializeApp(app);
+      await initializeApp(
+        app,
+        m.defaultAirports,
+        m.defaultMetadata,
+        withFlights(range(2, 10)),
+      );
       const bundle = await nextBundle();
 
       // More than the profile draws
@@ -917,7 +1015,12 @@ describe("MapApp controls and map", () => {
     });
 
     it("tries again with the next single selection after a failure", async () => {
-      await initializeApp(app);
+      await initializeApp(
+        app,
+        m.defaultAirports,
+        m.defaultMetadata,
+        twoFlights(),
+      );
       const bundle = (await loadFeatures())!;
       vi.mocked(loadFeatures).mockClear();
       vi.mocked(loadFeatures)
@@ -1072,7 +1175,13 @@ describe("MapApp controls and map", () => {
     });
 
     it("plays several selected flights one after another, without a replay manager", async () => {
-      await initializeApp(app);
+      // Flights of the dataset: the replay counts those the filter shows
+      await initializeApp(
+        app,
+        m.defaultAirports,
+        m.defaultMetadata,
+        withFlights([100]),
+      );
       m.toggleSequence.mockClear();
       app.selectedPathIds.add(1);
       app.selectedPathIds.add(100);
@@ -1097,7 +1206,12 @@ describe("MapApp controls and map", () => {
     });
 
     it("plays a flight selected while the bundle loads with the one before", async () => {
-      await initializeApp(app);
+      await initializeApp(
+        app,
+        m.defaultAirports,
+        m.defaultMetadata,
+        withFlights([100]),
+      );
       const { deliver } = await holdNextLoad(loadFeatures);
       m.mockReplayManagerInstance.toggleReplay.mockClear();
       m.toggleSequence.mockClear();
@@ -1518,7 +1632,10 @@ describe("MapApp controls and map", () => {
       canvas.remove();
     });
 
-    it("clears the selection on map click outside replay, in a colour layer", async () => {
+    it("keeps the selection on a click beside every flight, in a colour layer and in share mode", async () => {
+      // A click that missed a flight by a few pixels, or one that read the
+      // heat cloud, threw away the flights someone had put together, and
+      // ended share mode with them
       await initializeApp(app);
       app.selectedPathIds.add(1);
       app.altitudeVisible = true;
@@ -1528,12 +1645,16 @@ describe("MapApp controls and map", () => {
       expect(mockLayerManagerInstance.hitTest).toHaveBeenCalledWith(
         click.point,
       );
-      expect(mockPathSelectionInstance.clearSelection).toHaveBeenCalledTimes(1);
+      expect(mockPathSelectionInstance.clearSelection).not.toHaveBeenCalled();
+      expect(mockLayerManagerInstance.closeSegmentPopup).toHaveBeenCalledOnce();
 
       app.altitudeVisible = false;
       app.airspeedVisible = true;
+      app.isolateSelection = true;
       mockMap(app).emit("click", click);
-      expect(mockPathSelectionInstance.clearSelection).toHaveBeenCalledTimes(2);
+      expect(mockPathSelectionInstance.clearSelection).not.toHaveBeenCalled();
+      expect(app.isolateSelection).toBe(true);
+      expect(mockAirportManagerInstance.closePopup).toHaveBeenCalledTimes(2);
     });
 
     it("keeps the selection on a click over the heat alone, where no flight can be clicked", async () => {
@@ -1605,7 +1726,7 @@ describe("MapApp controls and map", () => {
         originalEvent: { detail: 1, timeStamp: 1000 + DOUBLE_TAP_MS - 1 },
       });
       expect(mockAirportManagerInstance.closePopup).not.toHaveBeenCalled();
-      expect(mockPathSelectionInstance.clearSelection).not.toHaveBeenCalled();
+      expect(mockLayerManagerInstance.closeSegmentPopup).not.toHaveBeenCalled();
 
       // A tap of its own
       mockMap(app).emit("click", {
@@ -1613,7 +1734,7 @@ describe("MapApp controls and map", () => {
         originalEvent: { detail: 1, timeStamp: 1000 + DOUBLE_TAP_MS },
       });
       expect(mockAirportManagerInstance.closePopup).toHaveBeenCalledOnce();
-      expect(mockPathSelectionInstance.clearSelection).toHaveBeenCalledOnce();
+      expect(mockLayerManagerInstance.closeSegmentPopup).toHaveBeenCalledOnce();
     });
 
     it("does not clear an empty selection", async () => {
@@ -1630,13 +1751,65 @@ describe("MapApp controls and map", () => {
       const hit = { pathId: 2, segment: { path_id: 2 } };
       mockLayerManagerInstance.hitTest.mockReturnValue(hit);
 
-      mockMap(app).emit("click", click);
+      mockMap(app).emit("click", {
+        ...click,
+        originalEvent: { ...click.originalEvent, pointerType: "mouse" },
+      });
 
       expect(mockLayerManagerInstance.onPathClick).toHaveBeenCalledWith(
         hit,
         click.lngLat,
+        false,
       );
       expect(mockPathSelectionInstance.clearSelection).not.toHaveBeenCalled();
+    });
+
+    it("tells the layer manager a finger's click from a mouse's by the click", async () => {
+      await initializeApp(app);
+      const hit = { pathId: 2, segment: { path_id: 2 } };
+      mockLayerManagerInstance.hitTest.mockReturnValue(hit);
+      // A touch laptop: a device that can touch, and a mouse beside it
+      (window as { ontouchstart?: unknown }).ontouchstart = null;
+      const tap = (pointerType?: string) =>
+        mockMap(app).emit("click", {
+          ...click,
+          originalEvent: { ...click.originalEvent, pointerType },
+        });
+
+      tap("touch");
+      tap("mouse");
+      // A click that does not say, with no touch before it, is a mouse's
+      // or a trackpad's, whatever the device can do
+      tap();
+      delete (window as { ontouchstart?: unknown }).ontouchstart;
+
+      expect(
+        (mockLayerManagerInstance.onPathClick.mock.calls as unknown[][]).map(
+          (call) => call[2],
+        ),
+      ).toEqual([true, false, false]);
+    });
+
+    it("takes a click just after a touch on the map for a tap, as WebKit's says mouse", async () => {
+      await initializeApp(app);
+      const hit = { pathId: 2, segment: { path_id: 2 } };
+      mockLayerManagerInstance.hitTest.mockReturnValue(hit);
+      const tap = (timeStamp: number) =>
+        mockMap(app).emit("click", {
+          ...click,
+          originalEvent: { detail: 1, timeStamp, pointerType: "mouse" },
+        });
+
+      mockMap(app).emit("touchstart", { originalEvent: { timeStamp: 5000 } });
+      tap(5100);
+      // A mouse's click well after it
+      tap(9000);
+
+      expect(
+        (mockLayerManagerInstance.onPathClick.mock.calls as unknown[][]).map(
+          (call) => call[2],
+        ),
+      ).toEqual([true, false]);
     });
 
     it("leaves the selection alone while the tiles cannot tell what was clicked", async () => {

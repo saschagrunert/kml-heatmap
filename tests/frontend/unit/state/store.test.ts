@@ -668,4 +668,75 @@ describe("AppStore", () => {
       }
     });
   });
+
+  describe("share mode and the selection", () => {
+    /** Each listener's view of both keys as it is told of a change */
+    function watch(store: AppStore): [string, number, boolean][] {
+      const seen: [string, number, boolean][] = [];
+      for (const key of ["isolateSelection", "selectedPathIds"] as const) {
+        store.subscribe(key, () => {
+          seen.push([
+            key,
+            store.get("selectedPathIds").size,
+            store.get("isolateSelection"),
+          ]);
+        });
+      }
+      return seen;
+    }
+
+    it("ends share mode with the last flight before any listener hears of either", () => {
+      const store = new AppStore({
+        selectedPathIds: new Set([1]),
+        isolateSelection: true,
+      });
+      const seen = watch(store);
+
+      store.get("selectedPathIds").clear();
+      store.notifyMutation("selectedPathIds");
+
+      expect(store.get("isolateSelection")).toBe(false);
+      // Never an empty selection still shared
+      expect(seen).toEqual([
+        ["isolateSelection", 0, false],
+        ["selectedPathIds", 0, false],
+      ]);
+    });
+
+    it("keeps that in a batch whose keys come in any order", () => {
+      const store = new AppStore({
+        selectedPathIds: new Set([1]),
+        isolateSelection: false,
+      });
+      const seen = watch(store);
+
+      store.batch(() => {
+        // Share mode first, then the flight it shared goes
+        store.set("isolateSelection", true);
+        store.set("selectedPathIds", new Set());
+      });
+
+      expect(seen).toEqual([["selectedPathIds", 0, false]]);
+    });
+
+    it("keeps share mode while a flight is left, and has no word for a mode already off", () => {
+      const store = new AppStore({
+        selectedPathIds: new Set([1, 2]),
+        isolateSelection: true,
+      });
+      const seen = watch(store);
+
+      store.get("selectedPathIds").delete(1);
+      store.notifyMutation("selectedPathIds");
+      expect(store.get("isolateSelection")).toBe(true);
+
+      store.set("isolateSelection", false);
+      store.set("selectedPathIds", new Set());
+      expect(seen).toEqual([
+        ["selectedPathIds", 1, true],
+        ["isolateSelection", 1, false],
+        ["selectedPathIds", 0, false],
+      ]);
+    });
+  });
 });

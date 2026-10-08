@@ -380,7 +380,11 @@ function compareBundles(before, after, names) {
 // a panel or a mode shows can. About 52.6 KB gzipped in CI when it was last
 // set, raised for the safe area of the home screen app (the popups and the
 // start view clear of the status bar, the island and the home indicator).
-const BUDGET_APP = { raw: 155.5 * 1024, gzip: 53.5 * 1024 };
+// Raised for share mode on top of the replay of a day and the search
+// (159.35 KB and 54.22 KB gzipped in a local build after): the selection
+// it holds still, its chip, the flights a filter hides and a tap told from
+// a click.
+const BUDGET_APP = { raw: 161.5 * 1024, gzip: 55.25 * 1024 };
 // The feature bundle: replay and Replay all, the 3D view (relief, ribbons,
 // heat cloud), the imagery, the flight profile, the cross-section and the
 // hotspot tour. Fetched only when one of them is first used, so no part of

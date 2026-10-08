@@ -8,7 +8,10 @@ import {
   isPhoneLayout,
   isSmallDevice,
   isTouchDevice,
+  followPhoneLayout,
   matchesMedia,
+  shareLinkLabel,
+  TouchClock,
 } from "../../../../kml_heatmap/frontend/utils/device";
 import { MOBILE_BREAKPOINT_PX } from "../../../../kml_heatmap/frontend/utils/constants";
 import { readFileSync } from "node:fs";
@@ -171,6 +174,89 @@ describe("device", () => {
       stubMedia("(prefers-contrast: more)");
       expect(matchesMedia("(prefers-contrast: more)")).toBe(true);
       expect(matchesMedia("(hover: none)")).toBe(false);
+    });
+  });
+
+  describe("the touch clock", () => {
+    const at = (timeStamp: number, pointerType?: string): Event =>
+      ({ timeStamp, pointerType }) as unknown as Event;
+
+    it("takes a click's own word for its pointer", () => {
+      const clock = new TouchClock();
+      stubMedia("(hover: none)");
+
+      expect(clock.isTouchClick(at(100, "touch"))).toBe(true);
+      expect(clock.isTouchClick(at(100, "mouse"))).toBe(false);
+    });
+
+    it("takes a click a touch came just before for a tap, whatever it says", () => {
+      // WebKit's click for a tap says nothing of its pointer, or "mouse",
+      // on a page that can hover
+      const clock = new TouchClock();
+      stubMedia();
+      clock.note(at(1000));
+
+      expect(clock.isTouchClick(at(1100))).toBe(true);
+      expect(clock.isTouchClick(at(1100, "mouse"))).toBe(true);
+      // A mouse's click a while later, and nothing from before the touch
+      expect(clock.isTouchClick(at(2500))).toBe(false);
+      expect(clock.isTouchClick(at(900))).toBe(false);
+      expect(clock.follows(at(1500))).toBe(true);
+      expect(clock.follows(at(2500))).toBe(false);
+    });
+
+    it("takes a click with no touch before for a mouse's, on any device", () => {
+      // An iPad's trackpad: a page that cannot hover, clicked by a pointer
+      // whose click toggles a flight
+      const clock = new TouchClock();
+      stubMedia("(hover: none)");
+
+      expect(clock.isTouchClick(at(100))).toBe(false);
+      expect(clock.isTouchClick(at(100, "mouse"))).toBe(false);
+    });
+  });
+
+  describe("the phone layout's one listener", () => {
+    it("tells of a change until stopped, and names the link to go with it", () => {
+      let phone = false;
+      const listeners = new Set<(event: { matches: boolean }) => void>();
+      Object.defineProperty(window, "matchMedia", {
+        value: vi.fn(() => ({
+          get matches() {
+            return phone;
+          },
+          addEventListener: (
+            _: string,
+            listener: (event: { matches: boolean }) => void,
+          ) => listeners.add(listener),
+          removeEventListener: (
+            _: string,
+            listener: (event: { matches: boolean }) => void,
+          ) => listeners.delete(listener),
+        })),
+        configurable: true,
+        writable: true,
+      });
+      Object.defineProperty(navigator, "share", {
+        value: vi.fn(),
+        configurable: true,
+      });
+      try {
+        const seen: [boolean, string][] = [];
+        const stop = followPhoneLayout((matches) =>
+          seen.push([matches, shareLinkLabel()]),
+        );
+        expect(shareLinkLabel()).toBe("Copy link");
+
+        phone = true;
+        for (const listener of listeners) listener({ matches: true });
+        stop();
+
+        expect(seen).toEqual([[true, "Share link"]]);
+        expect(listeners.size).toBe(0);
+      } finally {
+        Reflect.deleteProperty(navigator, "share");
+      }
     });
   });
 });

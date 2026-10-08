@@ -195,7 +195,7 @@ describe("airports feature", () => {
       expect([...visible!].sort()).toEqual(["EDAV", "EDDF", "EDDK", "EDDM"]);
     });
 
-    it("only returns airports of selected paths in isolate mode", () => {
+    it("only returns airports of selected paths in share mode", () => {
       const visible = visibleAirports({
         pathInfo: mockPathInfo,
         selectedYear: "2025",
@@ -205,13 +205,15 @@ describe("airports feature", () => {
       expect([...visible!].sort()).toEqual(["EDDK", "EDDM"]);
     });
 
-    it("ignores isolate mode without a selection", () => {
+    it("shows no airport in share mode whose shown flights are none", () => {
+      // The store ends share mode with its last flight; a filter that hides
+      // every shared flight leaves nothing of them on the map
       const visible = visibleAirports({
         pathInfo: mockPathInfo,
         selectedYear: "2024",
         isolateSelection: true,
       });
-      expect([...visible!].sort()).toEqual(["EDDK", "EDDM"]);
+      expect([...visible!]).toEqual([]);
     });
 
     it("keeps every airport for a selection without a filter (regression)", () => {

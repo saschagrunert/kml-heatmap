@@ -8,6 +8,7 @@ import {
   runwayUse,
 } from "../../../../kml_heatmap/frontend/ui/airportFlights";
 import type { PathInfo } from "../../../../kml_heatmap/frontend/types";
+import type { PickList } from "../../../../kml_heatmap/frontend/ui/pathSelection";
 import {
   asMapApp,
   createDataset,
@@ -106,7 +107,17 @@ describe("listFlights", () => {
     expect(container.querySelector(".kh-popup-flight b")).toBeNull();
     const list = container.querySelector(".kh-popup-flights")!;
     expect(list.getAttribute("role")).toBe("group");
-    expect(list.getAttribute("aria-label")).toBe("Select a flight");
+    expect(list.getAttribute("aria-label")).toBe("Flights");
+    // Each with the checkbox that adds it, named after it
+    expect(
+      [...container.querySelectorAll(".kh-pick")].map((box) =>
+        box.getAttribute("aria-label"),
+      ),
+    ).toEqual([
+      "Select EDAQ → EDDP · D-EAGJ · 2025",
+      "Select EDDP → EDAQ · D-ESST · 2024",
+      "Select EDDP → Somewhere <b>odd</b> · 2025",
+    ]);
   });
 
   it("lists only the flights the filter keeps", () => {
@@ -158,16 +169,24 @@ describe("listFlights", () => {
     expect(container.querySelector(".kh-popup-flights")).toBeNull();
   });
 
-  it("selects just the flight that is clicked", () => {
+  it("hands a click on a row or its checkbox to the selection, with the list's order", () => {
     const { popup, container } = openPopup();
     listFlights(asMapApp(mockApp), popup, "EDDP Leipzig");
+    const pick = mockApp.pathSelection.pickFromList;
 
     buttons(container)[1]!.click();
+    container.querySelectorAll<HTMLElement>(".kh-pick")[2]!.click();
 
-    // What that means, and during a replay, is PathSelection's to say
-    expect(mockApp.pathSelection.selectFlight).toHaveBeenCalledExactlyOnceWith(
-      12,
-    );
+    // What that means, with Shift, in share mode and during a replay, is
+    // PathSelection's to say
+    expect(
+      (pick.mock.calls as [number, MouseEvent, PickList][]).map(
+        ([id, event, list]) => [id, event.target, list.order],
+      ),
+    ).toEqual([
+      [12, buttons(container)[1], [11, 12, 13]],
+      [13, container.querySelectorAll(".kh-pick")[2], [11, 12, 13]],
+    ]);
   });
 
   it("marks the selected flights and follows the selection", () => {
@@ -178,11 +197,17 @@ describe("listFlights", () => {
 
     const pressed = (): (string | null)[] =>
       buttons(container).map((b) => b.getAttribute("aria-pressed"));
+    const ticked = (): boolean[] =>
+      [...container.querySelectorAll<HTMLInputElement>(".kh-pick")].map(
+        (box) => box.checked,
+      );
     expect(pressed()).toEqual(["true", "true", "false"]);
+    expect(ticked()).toEqual([true, true, false]);
 
     mockApp.selectedPathIds = new Set([13]);
 
     expect(pressed()).toEqual(["false", "false", "true"]);
+    expect(ticked()).toEqual([false, false, true]);
   });
 
   it("draws every row unpressed while all of them are, as opening leaves them", () => {
@@ -236,7 +261,7 @@ describe("listFlights", () => {
     const labels = [...container.querySelectorAll(".popup-section-label")];
     expect(labels.map((label) => label.textContent)).toEqual([
       "Runways",
-      "Select a flight",
+      "Flights",
     ]);
     const runways = labels[0]!.nextElementSibling!;
     expect(runways.className).toBe("kh-popup-runways");

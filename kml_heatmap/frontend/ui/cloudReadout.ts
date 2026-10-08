@@ -6,7 +6,7 @@
  * tap on it) shows a small box beside the pointer: "About 42 min within
  * 1 km" over "17 flights · mostly 800 to 1,200 ft AGL". It says what the
  * cloud there is made of: the flights the cloud draws (the filters,
- * Isolate), along the line of sight through the pointer (see
+ * Share mode), along the line of sight through the pointer (see
  * calculations/cloudReadout.ts). It speaks of time, never of the
  * brightness, which the exposure of the cloud scales, and of no date or
  * hour.
@@ -17,10 +17,10 @@
  * them in sight, on the other side of the pointer or beside them. It steps
  * aside over a marker, while the map is dragged or turned, and after
  * Escape until the pointer moves on. A tap or a click on a marker or an
- * airport's code is theirs. One on the map, a flight included (which it
- * selects, and a tap opens its values), shows the readout by it, above a
- * finger, and reads it out once to a screen reader, unless it selected a
- * flight or cleared the selection, which the app reads out. A hover is not
+ * airport's code is theirs. One on the map, a flight included (which a
+ * mouse selects, and a tap opens its values), shows the readout by it,
+ * above a finger, and reads it out once to a screen reader, unless it
+ * selected a flight, which the app reads out. A hover is not
  * read out, which would speak at every move. The box takes no pointer
  * events, so the map under it keeps its hover, clicks and drags.
  *
@@ -39,7 +39,7 @@
  * readout: its code would have to come with the first visit, or this
  * bundle with every one.
  */
-import type { LngLat, MapMouseEvent, MapTouchEvent, Point } from "maplibre-gl";
+import type { LngLat, MapMouseEvent, Point } from "maplibre-gl";
 import type { MapApp } from "../mapApp";
 import type { StoreState } from "../state/store";
 import type { PathSegment } from "../types";
@@ -113,12 +113,6 @@ const READOUT_SLACK_PX = 3;
  */
 const PANELS_TTL_MS = 250;
 
-/**
- * Milliseconds after a touch in which a click or a move of the mouse is
- * the browser's for the tap, not one of a mouse
- */
-const TAP_MS = 1000;
-
 /** What the readout follows */
 const READOUT_KEYS: readonly (keyof StoreState)[] = [
   "threeDVisible",
@@ -183,8 +177,6 @@ export function followCloudReadout(app: MapApp): void {
    * takes the box along with it
    */
   let tapped: LngLat | null = null;
-  /** When the map was last touched, by the clock of its events */
-  let touchedAt = -Infinity;
   /** How often the selection changed, and how often as a button went down */
   let selectionChanges = 0;
   let changesAtPress = 0;
@@ -499,7 +491,7 @@ export function followCloudReadout(app: MapApp): void {
 
   const onMove = (e: MapMouseEvent): void => {
     // The browser's own move for a tap; a click follows (onClick)
-    if (e.originalEvent.timeStamp - touchedAt < TAP_MS) return;
+    if (app.touchClock.follows(e.originalEvent)) return;
     // A drag moves the map, and a marker lies on top of the cloud
     if (e.originalEvent.buttons || !onCanvas(e)) return leave();
     if (
@@ -532,8 +524,8 @@ export function followCloudReadout(app: MapApp): void {
     changesAtPress = selectionChanges;
   };
 
-  const onTouch = (e: MapTouchEvent): void => {
-    touchedAt = e.originalEvent.timeStamp;
+  // The app notes the touch on its clock (MapApp.touchClock)
+  const onTouch = (): void => {
     tapped = null;
     onPress();
     onMoveStart();
@@ -542,10 +534,11 @@ export function followCloudReadout(app: MapApp): void {
   /**
    * A click or a tap on the map beside a marker and an airport's code,
    * which the app's click handler (registered before) has answered: on a
-   * flight it selected it, and a tap opened its values in a popup, which
-   * the box stands clear of. Read out unless the click selected a flight
-   * or cleared the selection, which the app reads out itself (the last
-   * word in the page's status region is the one heard).
+   * flight a mouse selected it, and a tap opened its values in a popup,
+   * which the box stands clear of. Beside every flight it left the
+   * selection alone. Read out unless the click selected a flight, which
+   * the app reads out itself (the last word in the page's status region
+   * is the one heard).
    */
   const onClick = (e: MapMouseEvent): void => {
     const readout =
@@ -558,7 +551,8 @@ export function followCloudReadout(app: MapApp): void {
       tapped = null;
       return hide();
     }
-    const finger = e.originalEvent.timeStamp - touchedAt < TAP_MS;
+    // A tap as the app's click dispatcher tells it, which answered first
+    const finger = app.touchClock.isTouchClick(e.originalEvent);
     dismissedAt = null;
     tapped = finger ? e.lngLat : null;
     show(readout, e.point, finger);
@@ -622,10 +616,7 @@ export function followCloudReadout(app: MapApp): void {
   const sync = (): void => {
     const on = active();
     if (!app.threeDVisible) releaseReadoutData();
-    const isolated =
-      app.isolateSelection && app.selectedPathIds.size > 0
-        ? app.selectedPathIds
-        : null;
+    const isolated = app.isolateSelection ? app.selectedPathIds : null;
     const inputs = [
       on,
       app.currentData,
@@ -635,8 +626,8 @@ export function followCloudReadout(app: MapApp): void {
       app.terrainActive,
       app.reliefLevel,
     ];
-    // A selection that is not isolated changes nothing the readout says:
-    // the click that clears one keeps the readout it showed
+    // A selection outside share mode changes nothing the readout says:
+    // the click that selects a flight keeps the readout it showed
     if (inputs.some((value, i) => value !== made[i])) {
       made = inputs;
       hide();

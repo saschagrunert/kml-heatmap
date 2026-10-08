@@ -917,6 +917,7 @@ describe("ReplayManager activation", () => {
     });
 
     it("returns false with a toast if no segments match the selected path", () => {
+      mockApp.currentData!.path_info.push({ id: 999 });
       mockApp.selectedPathIds = new Set([999]);
 
       const result = replayManager.initializeReplay();

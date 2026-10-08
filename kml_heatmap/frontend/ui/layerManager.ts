@@ -20,7 +20,7 @@
  * - A selection rebuilds only the selection's source, whose runs follow the
  *   selection's colour range. The main source stays as it is: its layer is
  *   dimmed with one paint property and filtered to leave the selected
- *   flights (in isolate mode: everything) out.
+ *   flights (in share mode: everything) out.
  * - In the 3D view (calculations/lift.ts) each run is written as a ribbon
  *   at its height instead of its line, at every zoom, to a source of
  *   ribbons of its own. The ribbon climbs and descends with the flight, in
@@ -154,7 +154,7 @@ export class LayerManager implements PathHitTester {
       for (const set of RUN_SETS) {
         const table = state.tables[set];
         if (table.widthZoom === null || table.widthZoom === level) continue;
-        // Out of sight in isolate mode: written as it shows again
+        // Out of sight in share mode: written as it shows again
         if (isolatedOut(state, set)) {
           table.behind = true;
           continue;
@@ -189,7 +189,7 @@ export class LayerManager implements PathHitTester {
         const table = state.tables[set];
         const { box, runs } = table;
         // Written again once the view reaches past one of its edges, or as
-        // they show again when isolate mode hides them. Only ribbons, cut
+        // they show again when share mode hides them. Only ribbons, cut
         // by the feature bundle, have a box.
         if (box && this.features?.viewLeaves(this.app, map, box)) {
           if (isolatedOut(state, set)) table.behind = true;
@@ -216,6 +216,12 @@ export class LayerManager implements PathHitTester {
     app.store.subscribe("globeVisible", () => {
       if (this.syncTerrain()) this.redrawVisibleModes();
     });
+    // The Select or Remove under the values of a tap says what it does now
+    // (see onPathClick)
+    app.store.subscribeKeys(
+      ["selectedPathIds", "isolateSelection", "replayActive", "tourView"],
+      () => this.pathHover.refreshTapped(),
+    );
     // Out of sight while they settle on another ground (ui/terrain.ts)
     // Without its WebGL context the map has no style to write to: the
     // restore styles the modes as they are then (see restoreModes)
@@ -378,14 +384,41 @@ export class LayerManager implements PathHitTester {
   }
 
   /**
-   * What a click on a flight does: toggle its selection and, on touch, show
-   * the segment's values. Part of the contract with MapApp's click dispatcher.
+   * What a click on a flight does. A mouse toggles its selection, as it
+   * always has, and has the hover tooltip for its values. A finger has no
+   * hover: a tap shows the segment's values in a popup instead, with a
+   * button to select the flight or take it out, so that looking at a
+   * flight does not change the selection. Share mode holds the selection
+   * still for a mouse as well: a click there shows the values with a
+   * Remove (see ui/pathSelection.ts), and so does the hotspot tour, with
+   * no button. Part of the contract with MapApp's click dispatcher, which
+   * tells a finger by the click (TouchClock).
    */
-  onPathClick(hit: PathHit, lngLat: LngLat): void {
-    this.pathHover.showTapped(hit, lngLat);
-    // Selecting rebuilds the runs of the path, the hovered one included;
-    // `updateSelectionStyles` hands the tooltip over to its replacement
-    this.app.pathSelection.togglePathSelection(hit.pathId);
+  onPathClick(hit: PathHit, lngLat: LngLat, touch = false): void {
+    const app = this.app;
+    const selection = app.pathSelection;
+    if (!touch && !app.isolateSelection && !selection.held()) {
+      // The values a tap left open said what the flight was before
+      this.pathHover.closeTapped();
+      // Selecting rebuilds the runs of the path, the hovered one included;
+      // `updateSelectionStyles` hands the tooltip over to its replacement
+      selection.togglePathSelection(hit.pathId);
+      return;
+    }
+    // Asked again as the selection, share mode, a replay or the tour
+    // change (see the constructor). The button acts on the state it says:
+    // a toggle, of the selection the label was made from. No button while
+    // a replay or the hotspot tour holds the selection, where it did
+    // nothing.
+    this.pathHover.showTapped(hit, lngLat, {
+      label: () =>
+        selection.held()
+          ? null
+          : app.selectedPathIds.has(hit.pathId)
+            ? "Remove flight"
+            : "Select flight",
+      run: () => selection.togglePathSelection(hit.pathId),
+    });
   }
 
   /**
@@ -793,7 +826,7 @@ export class LayerManager implements PathHitTester {
   /**
    * Follow a change of the selection on the visible layers: only the
    * selection's source is rebuilt, the main one keeps its runs and is
-   * dimmed and filtered instead. Isolate mode alone changes neither: the
+   * dimmed and filtered instead. Share mode alone changes neither: the
    * layers are styled again, and the selection keeps the runs it has, and
    * with them the features the tiles hold. Rewritten under a new
    * generation, a click on the map would count as stale until they landed.

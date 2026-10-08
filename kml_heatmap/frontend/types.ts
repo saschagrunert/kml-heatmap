@@ -314,8 +314,11 @@ export type PathHitResult = PathHit | "stale" | null;
 export interface PathHitTester {
   /** The flight drawn at `point` (container pixels), null or "stale" */
   hitTest(point: Point): PathHitResult;
-  /** Act on a click that hit a flight; `lngLat` is where it landed */
-  onPathClick(hit: PathHit, lngLat: LngLat): void;
+  /**
+   * Act on a click that hit a flight; `lngLat` is where it landed, and
+   * `touch` whether a finger made it
+   */
+  onPathClick(hit: PathHit, lngLat: LngLat, touch?: boolean): void;
 }
 
 /** Anything on the map that owns a popup the app may have to close */

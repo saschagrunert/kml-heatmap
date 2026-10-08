@@ -26,7 +26,7 @@ import {
   setZoom,
 } from "./map";
 
-/** Select a path and return the isolate button locator */
+/** Select a path and return the share mode button locator */
 async function selectPathAndGetIsolateBtn(page: Page) {
   const pathId = await firstPathId(page);
   await togglePathSelection(page, pathId, 1);
@@ -165,21 +165,32 @@ test.describe("Path Selection", () => {
     expect(hasPath).toBe(true);
   });
 
-  test("clicking empty map area clears path selection", async ({ page }) => {
+  test("clicking empty map area keeps the selection", async ({ page }) => {
     await selectPathForReplay(page);
     expect(await selectedCount(page)).toBe(1);
 
     // Zoom out so the bottom-left corner of the map shows open sea
     await setZoom(page, 3);
 
+    // A click the map hears of, not one a panel over it takes
+    await page.evaluate(() =>
+      window.mapApp!.map!.once("click", () =>
+        document.body.setAttribute("data-map-clicked", ""),
+      ),
+    );
     const mapBox = (await page.locator("#map").boundingBox())!;
     await page.mouse.click(mapBox.x + 10, mapBox.y + mapBox.height - 10);
-
-    await page.waitForFunction(
-      () => window.mapApp!.selectedPathIds.size === 0,
-      undefined,
-      { timeout: 5000 },
+    await expect(page.locator("body")).toHaveAttribute("data-map-clicked");
+    // Past the frame the click is handled in
+    await page.evaluate(
+      () =>
+        new Promise((resolve) =>
+          requestAnimationFrame(() => requestAnimationFrame(resolve)),
+        ),
     );
+
+    // A click that missed a flight threw the selection away; Clear clears
+    expect(await selectedCount(page)).toBe(1);
   });
 
   test("clicking the map over the heat alone keeps the selection", async ({
@@ -344,31 +355,30 @@ test.describe("Path Selection", () => {
   });
 });
 
-test.describe("Solo Mode", () => {
+test.describe("Share Mode", () => {
   test.beforeEach(async ({ page }) => {
     await gotoApp(page);
   });
 
-  test("solo button is always visible but dimmed when no paths are selected", async ({
+  test("share mode button is always visible but dimmed when no paths are selected", async ({
     page,
   }) => {
-    // Scoped to the View group: isolate belongs with the other controls
-    // that change what the map shows, not with the layers
+    // Scoped to the Share group: share mode is there for the link beside it
     const isolateBtn = page.locator(
-      '#left-buttons .control-group[aria-labelledby="view-group-title"] #isolate-btn',
+      '#left-buttons .control-group[aria-labelledby="share-group-title"] #isolate-btn',
     );
     await expect(isolateBtn).toBeVisible();
     await expect(isolateBtn).toHaveCSS("opacity", "0.5");
     // Saying why it is dimmed, as the phone's sheet does
     await expect(isolateBtn).toHaveAttribute(
       "title",
-      "Select flights to isolate",
+      "Select flights to share",
     );
     await expect(isolateBtn.locator("svg.icon")).toHaveCount(1);
-    await expect(isolateBtn.locator(".control-label")).toHaveText("Isolate");
+    await expect(isolateBtn.locator(".control-label")).toHaveText("Share mode");
   });
 
-  test("solo button becomes active when a path is selected", async ({
+  test("share mode button becomes active when a path is selected", async ({
     page,
   }) => {
     const { isolateBtn } = await selectPathAndGetIsolateBtn(page);
@@ -376,7 +386,7 @@ test.describe("Solo Mode", () => {
     await expect(isolateBtn).toHaveCSS("opacity", "1");
   });
 
-  test("clicking solo button activates isolate mode", async ({ page }) => {
+  test("clicking share mode button activates share mode", async ({ page }) => {
     const { isolateBtn } = await selectPathAndGetIsolateBtn(page);
 
     await isolateBtn.click();
@@ -387,7 +397,7 @@ test.describe("Solo Mode", () => {
       .toBe(true);
   });
 
-  test("clicking solo button again deactivates isolate mode", async ({
+  test("clicking share mode button again deactivates share mode", async ({
     page,
   }) => {
     const { isolateBtn } = await selectPathAndGetIsolateBtn(page);
@@ -404,7 +414,7 @@ test.describe("Solo Mode", () => {
       .toBe(false);
   });
 
-  test("clearing selection disables isolate mode", async ({ page }) => {
+  test("clearing selection disables share mode", async ({ page }) => {
     const { pathId, isolateBtn } = await selectPathAndGetIsolateBtn(page);
 
     await isolateBtn.click();
@@ -420,7 +430,7 @@ test.describe("Solo Mode", () => {
     await expect(isolateBtn).toHaveCSS("opacity", "0.5");
   });
 
-  test("isolate mode persists in localStorage", async ({ page }) => {
+  test("share mode persists in localStorage", async ({ page }) => {
     const { isolateBtn } = await selectPathAndGetIsolateBtn(page);
     await isolateBtn.click();
 
@@ -436,7 +446,7 @@ test.describe("Solo Mode", () => {
     );
   });
 
-  test("isolate mode via URL parameter", async ({ page }) => {
+  test("share mode via URL parameter", async ({ page }) => {
     const pathId = await firstPathId(page);
 
     // 9th flag is isolateSelection
@@ -449,10 +459,10 @@ test.describe("Solo Mode", () => {
     await expect(page.locator("#isolate-btn")).toHaveCSS("opacity", "1");
   });
 
-  test("selected paths use normal weight in solo mode", async ({ page }) => {
+  test("selected paths use normal weight in share mode", async ({ page }) => {
     const { isolateBtn } = await selectPathAndGetIsolateBtn(page);
 
-    // Before solo: the selected path is drawn with weight 6
+    // Before share mode: the selected path is drawn with weight 6
     expect(await pathWeights(page, "altitude")).toContain(6);
 
     await isolateBtn.click();
@@ -460,7 +470,7 @@ test.describe("Solo Mode", () => {
       .poll(() => page.evaluate(() => window.mapApp!.isolateSelection))
       .toBe(true);
 
-    // In solo: only the selected path is visible with the normal weight
+    // In share mode: only the selected path is visible with the normal weight
     await expect
       .poll(() => pathWeights(page, "altitude"), PATH_POLL)
       .not.toContain(6);
@@ -480,7 +490,48 @@ test.describe("Solo Mode", () => {
       .toContain(6);
   });
 
-  test("solo mode hides unselected paths from altitude layer", async ({
+  test("share mode holds the selection: a click on a flight shows it, Remove and Exit act", async ({
+    page,
+  }) => {
+    await waitForPathData(page);
+    const pos = await findSegmentFarFromAirports(page, {
+      includePathId: true,
+    });
+    expect(pos).not.toBeNull();
+    await togglePathSelection(page, pos!.pathId!, 1);
+
+    // Entered from the chip, which then offers the link and the way out
+    await page.locator("#selection-share-btn").click();
+    await expect(page.locator("#selection-chip-count")).toHaveText(
+      "Sharing 1 flight",
+    );
+    await expect(page.locator("#selection-link-btn")).toBeVisible();
+    await expect(page.locator("#selection-clear-btn")).toBeHidden();
+
+    // A click on the shared flight took it out of the selection, and it
+    // vanished from the map; now it shows its values and a Remove. Share
+    // mode framed the flight, so where it is drawn is asked again.
+    await expect
+      .poll(() => page.evaluate(() => window.mapApp!.isolateSelection))
+      .toBe(true);
+    const shared = (await findSegmentFarFromAirports(page))!;
+    await page.mouse.click(shared.x, shared.y);
+    const remove = page.locator(".segment-popup .segment-action");
+    await expect(remove).toHaveText("Remove flight");
+    expect(await selectedCount(page)).toBe(1);
+
+    // Exit leaves the mode and keeps the flight
+    await page.locator("#selection-exit-btn").click();
+    await expect
+      .poll(() => page.evaluate(() => window.mapApp!.isolateSelection))
+      .toBe(false);
+    expect(await selectedCount(page)).toBe(1);
+    await expect(page.locator("#selection-chip-count")).toHaveText(
+      "1 flight selected",
+    );
+  });
+
+  test("share mode hides unselected paths from altitude layer", async ({
     page,
   }) => {
     const { isolateBtn } = await selectPathAndGetIsolateBtn(page);

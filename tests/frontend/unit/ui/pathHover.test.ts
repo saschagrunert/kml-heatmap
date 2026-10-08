@@ -292,6 +292,13 @@ describe("PathHover through the LayerManager", () => {
     });
 
     it("works the selection's colour ranges out once, not for every segment it shows", () => {
+      // A second flight of the year, as a new dataset: the views of the
+      // filter are kept per dataset
+      const data = mockApp.currentData!;
+      mockApp.currentData = {
+        ...data,
+        path_info: [...data.path_info, { id: 2, year: 2025 }],
+      };
       const slices = vi.spyOn(statistics, "segmentsForPathIds");
       mockApp.selectedPathIds.add(1);
       layerManager.updateSelectionStyles();
@@ -309,6 +316,23 @@ describe("PathHover through the LayerManager", () => {
       mockApp.selectedPathIds.add(2);
       layerManager.updateSelectionStyles();
       expect(slices).toHaveBeenCalledTimes(3);
+    });
+
+    it("works the colour range out of the selected flights the filter shows", () => {
+      // Share mode keeps a flight the filter hides, which no layer draws
+      const data = mockApp.currentData!;
+      mockApp.currentData = {
+        ...data,
+        path_info: [...data.path_info, { id: 2, year: 2024 }],
+      };
+      mockApp.selectedYear = "2025";
+      mockApp.selectedPathIds.add(2);
+      const slices = vi.spyOn(statistics, "segmentsForPathIds");
+
+      layerManager.updateSelectionStyles();
+
+      // The full range: nothing of the selection is drawn
+      expect(slices).not.toHaveBeenCalled();
     });
 
     it("sets the content only when the nearest segment changes", () => {

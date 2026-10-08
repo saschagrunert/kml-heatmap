@@ -166,6 +166,19 @@ describe("the ribbons of a selection", () => {
     expect(ribbons().every((f) => f.properties!["l"] === 9)).toBe(true);
   });
 
+  it("draw no ribbon of a shared flight the filter hides, and draw it as the filter shows it again", async () => {
+    await follow();
+    enter3D(9);
+    // Share mode keeps it under a filter that hides it, where nothing of
+    // it is drawn: its ribbon stood alone on the map
+    app.selectedYear = "2025";
+    select(2);
+    expect(ribbons()).toEqual([]);
+
+    app.selectedYear = "all";
+    expect(ribbons()).toEqual(expected(2, true, 9, 9));
+  });
+
   it("smooth the selected flights alone, unless they are most of the dataset or every flight is smoothed for the level already", async () => {
     await follow();
     enter3D(9);

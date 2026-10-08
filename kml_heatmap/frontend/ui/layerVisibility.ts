@@ -33,7 +33,7 @@ const LAYER_KEYS: readonly (keyof StoreState)[] = [
  * Whether the selected flights are drawn as lines over the heatmap (see
  * ui/selectionHighlight.ts): while there are any and nothing else draws
  * them. A colour layer draws them on its own, and a replay its route.
- * Isolate does not matter: it narrows the heatmap, the lines still say
+ * Share mode does not matter: it narrows the heatmap, the lines still say
  * which flights are the selected ones.
  */
 export function highlightsSelection(app: MapApp): boolean {

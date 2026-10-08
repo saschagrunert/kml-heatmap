@@ -1,5 +1,16 @@
 /**
- * Path Selection - Handles path selection logic
+ * Path Selection - Handles path selection logic, and share mode
+ *
+ * Share mode (the store's `isolateSelection`, the name links have carried
+ * it under from the start) is for showing a few flights to someone else:
+ * the map draws the selected flights alone, and the selection holds still.
+ * A click on a flight, an airport or a row of a list then only shows what
+ * it is; a flight joins or leaves the shared ones by an explicit Remove
+ * (the values of a flight on the map) or a list's checkbox, and the mode
+ * ends with the chip's Exit or once no flight is left. Outside it a click
+ * with a mouse still toggles a flight, while a tap shows its values with
+ * an explicit Select, as a finger has no hover to look with (see
+ * LayerManager.onPathClick).
  */
 import type { Map as MapLibreMap, PaddingOptions, Point } from "maplibre-gl";
 import type { MapApp } from "../mapApp";
@@ -9,7 +20,17 @@ import {
   applyToggleButtonState,
   setUnavailableFor,
 } from "../utils/buttonState";
-import { isPhoneLayout } from "../utils/device";
+import {
+  followPhoneLayout,
+  isPhoneLayout,
+  shareLinkLabel,
+} from "../utils/device";
+import {
+  datasetIndex,
+  shownPathIds,
+  shownSelection,
+} from "../calculations/datasetIndex";
+import { fitSelection } from "./filterManager";
 import { NO_SELECTION_MESSAGE } from "./actions";
 import { AUTO_ZOOM_FOLLOW } from "../utils/constants";
 import { domCache } from "../utils/domCache";
@@ -20,10 +41,17 @@ import { prefersReducedMotion } from "../utils/motion";
 import { safeAreaInsets } from "../utils/safeArea";
 import { announceStatus, showToast } from "../utils/toast";
 
-/** Said for a press on Isolate with nothing selected */
+/**
+ * Said for a flight picked from a list in share mode that is not one of the
+ * shared flights, which the map does not draw (see PathSelection.inspect)
+ */
+export const NOT_SHARED_HINT =
+  "Not one of the shared flights: tick its box to add it";
+
+/** Said for a press on Share mode with nothing selected */
 export const ISOLATE_HINT =
   NO_SELECTION_MESSAGE +
-  ": click one on the map, or pick one under Statistics, Flights";
+  ": pick one on the map, or tick one under Statistics, Flights";
 
 /** The control columns, which the phone's bar replaces */
 export const CONTROL_COLUMNS = "#left-buttons, #right-buttons";
@@ -56,7 +84,7 @@ const FRAME_MARGIN_PX = 24;
  */
 const SEEN_SPAN = 0.25;
 
-/** Time the view takes to frame the isolated flights (ms) */
+/** Time the view takes to frame the shared flights (ms) */
 const FRAME_MS = 800;
 
 type Edge = "top" | "right" | "bottom" | "left";
@@ -141,20 +169,47 @@ export function mapChromePadding(
   };
 }
 
+/**
+ * The rows of a list of flights as they are shown, and the flight of the
+ * row last clicked, where a Shift click's range starts (see
+ * PathSelection.pickFromList). Each list keeps its own, and starts afresh
+ * as it is sorted, searched, filtered or closed: the airport popup's list
+ * and the flight list are in different orders, and a range from a row of
+ * the one ran through the other.
+ */
+export interface PickList {
+  readonly order: readonly number[];
+  anchor: number | null;
+}
+
 export class PathSelection {
   private app: MapApp;
 
   constructor(app: MapApp) {
     this.app = app;
 
-    // The isolate button reads two keys, so it cannot use syncToggleButton;
-    // this is its only writer
+    // The share mode button reads two keys, so it cannot use
+    // syncToggleButton; this is its only writer
     const refresh = (): void => {
       this.updateIsolateButton();
       this.updateSelectionChip();
     };
-    app.store.subscribeKeys(["selectedPathIds", "isolateSelection"], refresh);
+    // The filters too: the chip says how many shared flights they hide
+    app.store.subscribeKeys(
+      [
+        "selectedPathIds",
+        "isolateSelection",
+        "currentData",
+        "selectedYear",
+        "selectedAircraft",
+      ],
+      refresh,
+    );
     refresh();
+    // The link says "Share link" in the phone layout alone, which a turn of
+    // the phone or a narrower window can change with nothing selected anew
+    const unfollow = followPhoneLayout(() => this.updateLinkLabel());
+    app.signal.addEventListener("abort", unfollow, { once: true });
 
     domCache.get("selection-clear-btn")?.addEventListener(
       "click",
@@ -168,21 +223,29 @@ export class PathSelection {
     );
   }
 
-  togglePathSelection(pathId: number): void {
-    // Both changes land in one flush so no listener sees a selection that is
-    // empty while isolate mode is still on
-    this.app.store.batch(() => {
-      if (this.app.selectedPathIds.has(pathId)) {
-        this.app.selectedPathIds.delete(pathId);
-      } else {
-        this.app.selectedPathIds.add(pathId);
-      }
-      this.app.store.notifyMutation("selectedPathIds");
+  /**
+   * Whether the selection is to be left alone: a replay plays the one
+   * selected flight, and the hotspot tour tours what the selection and
+   * share mode keep. Both hold the chip's controls and Share mode as well
+   * (ui/heldControls.ts), but a list, an airport or the values of a flight
+   * left open on the map could still change it. The one check for all of
+   * them (ui/airportManager.ts and ui/layerManager.ts ask it too).
+   */
+  held(): boolean {
+    return this.app.replayActive || this.app.tourView !== null;
+  }
 
-      // If no paths remain selected, disable isolate mode
-      if (this.app.selectedPathIds.size === 0 && this.app.isolateSelection) {
-        this.app.isolateSelection = false;
-      }
+  /**
+   * Add a flight to the selection or take it out. Share mode ends with the
+   * last flight it shared, which the store sees to (AppStore.settle), in
+   * the same update as the selection.
+   */
+  togglePathSelection(pathId: number): void {
+    if (this.held()) return;
+    const selected = this.app.selectedPathIds;
+    this.app.store.batch(() => {
+      if (!selected.delete(pathId)) selected.add(pathId);
+      this.app.store.notifyMutation("selectedPathIds");
     });
   }
 
@@ -191,30 +254,50 @@ export class PathSelection {
    * select just this flight, or nothing when it already is the whole
    * selection. Opening an airport's popup with a click or Enter selected
    * every flight of the airport, so a plain toggle would leave the others
-   * selected. With `add` (Ctrl or Shift on the flight list) it is added to
-   * the selection, or taken out of it. Ignored while replay runs.
+   * selected. With `add` (a list's checkbox, Ctrl or Cmd) it is added to
+   * the selection, or taken out of it. Share mode holds its flights still:
+   * a pick there only shows the flight (see inspect). Ignored while replay
+   * or the hotspot tour runs.
    *
    * One flush for the clear and the pick: two had the chip announce
    * "Selection cleared" before every flight and drew the paths and the
    * statistics of the empty selection in between.
    */
   selectFlight(pathId: number, add = false): void {
-    if (this.app.replayActive) return;
+    if (this.held()) return;
+    if (add) {
+      this.togglePathSelection(pathId);
+      return;
+    }
+    if (this.app.isolateSelection) {
+      this.inspect(pathId);
+      return;
+    }
     const selected = this.app.selectedPathIds;
     const alone = selected.size === 1 && selected.has(pathId);
     this.app.store.batch(() => {
-      if (!add) this.clearSelection();
-      if (add || !alone) this.togglePathSelection(pathId);
+      this.clearSelection();
+      if (!alone) this.togglePathSelection(pathId);
     });
-    if (add || alone) return;
-    // On a phone the statistics sheet or an airport's popup it was picked
-    // from covers the map it is to be seen on, the popup together with the
-    // profile strip that opens under it
-    if (this.app.mobileBar?.isVisible()) {
-      this.app.statsPanelVisible = false;
-      this.app.airportManager.closePopup();
+    if (alone) return;
+    this.bringIntoView(pathId, () => this.app.selectedPathIds.size === 1);
+  }
+
+  /**
+   * A flight picked from a list in share mode: shown, not selected. A pick
+   * added it to the shared flights or took it out, and a tap on a row to
+   * see a flight changed what the link hands on. A shared flight is
+   * brought into view as a pick brings it, on a phone from under the sheet
+   * or the popup it was picked from; one that is not shared is not drawn,
+   * and a hint says how to add it.
+   */
+  private inspect(pathId: number): void {
+    const app = this.app;
+    if (!app.selectedPathIds.has(pathId)) {
+      showToast(NOT_SHARED_HINT);
+      return;
     }
-    this.bringIntoView(pathId);
+    this.bringIntoView(pathId, () => app.isolateSelection);
   }
 
   /**
@@ -227,10 +310,21 @@ export class PathSelection {
    * the flight clear of the panels unless all of it is in view already. A
    * flight clicked on the map is where the user is looking, and that path
    * does not come here; nor is the map taken back from a user who moved it
-   * meanwhile, or from the hotspot tour or Wrapped, which fly it.
+   * meanwhile, or from the hotspot tour or Wrapped, which fly it, nor for
+   * a flight no longer selected or no longer `still` what was picked (one
+   * picked alone, or one looked at in share mode, see inspect).
+   *
+   * On a phone the statistics sheet or an airport's popup it was picked
+   * from covers the map it is to be seen on, the popup together with the
+   * profile strip that opens under it: both close.
    */
-  private bringIntoView(pathId: number): void {
-    const map = this.app.map;
+  private bringIntoView(pathId: number, still: () => boolean): void {
+    const app = this.app;
+    if (app.mobileBar?.isVisible()) {
+      app.statsPanelVisible = false;
+      app.airportManager.closePopup();
+    }
+    const map = app.map;
     if (!map) return;
     let moved = false;
     const onMoveStart = (event: { originalEvent?: unknown }): void => {
@@ -241,25 +335,86 @@ export class PathSelection {
       .then(afterLayout)
       .then(() => {
         map.off("movestart", onMoveStart);
-        const app = this.app;
         // Unless the selection moved on while the bundle loaded
-        const selected = app.selectedPathIds;
-        const still = selected.size === 1 && selected.has(pathId);
-        if (still && !moved && !app.mapHeld) this.frameSelection(true);
+        const wanted = app.selectedPathIds.has(pathId) && still();
+        if (wanted && !moved && !app.mapHeld)
+          this.frame(new Set([pathId]), true);
       });
   }
 
-  /** Mark the listed flights' buttons that are part of the selection */
-  markSelected(buttons: Iterable<HTMLElement>): void {
-    for (const button of buttons) {
-      const selected = this.app.selectedPathIds.has(
-        Number(button.dataset["pathId"]),
+  /**
+   * A click on a row of a list of flights (see PickList). The row's
+   * checkbox adds the flight or takes it out, as Ctrl and Cmd do, and is
+   * how a finger, which has neither, puts several together. Shift sets
+   * every flight from the row clicked last to this one, in the order of
+   * the list, to what this row's checkbox goes to: in, or out where it was
+   * ticked; on that row itself it is a plain toggle. A plain click picks
+   * the flight (see selectFlight). In share mode the checkbox alone changes
+   * the shared flights, with Shift for a range: the rest of a row only
+   * shows its flight, whatever key is held, and leaves the start of the
+   * range where it was, as a click ignored during a replay or the tour
+   * does.
+   */
+  pickFromList(pathId: number, event: MouseEvent, list: PickList): void {
+    const box = event.target instanceof HTMLInputElement ? event.target : null;
+    const sharing = this.app.isolateSelection;
+    const held = this.held();
+    const order = list.order;
+    const from = list.anchor === null ? -1 : order.indexOf(list.anchor);
+    const to = order.indexOf(pathId);
+    // Only a click that changes the selection starts a range: a look at a
+    // flight in share mode made a later Shift tick take flights in that
+    // were never chosen
+    if (!held && (box || !sharing)) list.anchor = pathId;
+    if (event.shiftKey && (box || !sharing) && from >= 0 && to >= 0 && !held) {
+      const selected = this.app.selectedPathIds;
+      // The box is ticked or unticked by the click already
+      const on = box ? box.checked : !selected.has(pathId);
+      this.setRange(
+        order.slice(Math.min(from, to), Math.max(from, to) + 1),
+        on,
       );
-      button.setAttribute("aria-pressed", String(selected));
+    } else {
+      this.selectFlight(
+        pathId,
+        !!box ||
+          (!sharing && (event.ctrlKey || event.metaKey || event.shiftKey)),
+      );
+    }
+    // The click has ticked or unticked the box already, also where the
+    // selection stayed as it was
+    if (box) box.checked = this.app.selectedPathIds.has(pathId);
+  }
+
+  /** Put the flights of a Shift range in the selection, or all of them out */
+  private setRange(pathIds: readonly number[], on: boolean): void {
+    const selected = this.app.selectedPathIds;
+    for (const id of pathIds) {
+      if (on) selected.add(id);
+      else selected.delete(id);
+    }
+    // In one update with the end of share mode it may bring
+    this.app.store.batch(() =>
+      this.app.store.notifyMutation("selectedPathIds"),
+    );
+  }
+
+  /**
+   * Mark the listed flights that are part of the selection: a row's
+   * button is pressed, and its checkbox ticked
+   */
+  markSelected(rows: Iterable<HTMLElement>): void {
+    for (const row of rows) {
+      const selected = this.app.selectedPathIds.has(
+        Number(row.dataset["pathId"]),
+      );
+      if (row instanceof HTMLInputElement) row.checked = selected;
+      else row.setAttribute("aria-pressed", String(selected));
     }
   }
 
   selectPathsByAirport(airportName: string): void {
+    if (this.held()) return;
     const pathIds = this.app.airportToPaths[airportName];
     if (pathIds) {
       pathIds.forEach((pathId) => {
@@ -270,41 +425,48 @@ export class PathSelection {
   }
 
   /**
-   * Clearing and Isolate leave the selection alone while replay runs: it
+   * Clearing and Share mode leave the selection alone while replay runs: it
    * plays the selected flights, and a change dimmed the replay's own
    * Stop button and switched the statistics to another view mid-flight.
-   * Their controls are disabled then as well.
+   * So does the hotspot tour (see held). Their controls are disabled then
+   * as well.
    */
   clearSelection(): void {
-    if (this.app.replayActive) return;
-
+    if (this.held()) return;
+    // Share mode goes with what it shared (AppStore.settle), in one update
     this.app.store.batch(() => {
       this.app.selectedPathIds.clear();
       this.app.store.notifyMutation("selectedPathIds");
-
-      // Disable isolate mode when selection is cleared
-      if (this.app.isolateSelection) {
-        this.app.isolateSelection = false;
-      }
     });
   }
 
+  /** Share the selection, or leave share mode and keep the flights */
   toggleIsolateSelection(): void {
-    if (this.app.replayActive) return;
+    if (this.held()) return;
     // Dimmed, and a press said nothing of how to get a selection
     if (this.app.selectedPathIds.size === 0) {
       showToast(ISOLATE_HINT);
       return;
     }
 
-    this.app.isolateSelection = !this.app.isolateSelection;
-    if (this.app.isolateSelection) this.frameSelection();
+    const app = this.app;
+    const sharing = !app.isolateSelection;
+    app.store.batch(() => {
+      app.isolateSelection = sharing;
+      // Out of share mode, the flights the filter hides or the year lacks
+      // are deselected, as a filter change outside it does: they stayed
+      // under a chip that counted them, with nothing drawn
+      if (!sharing && app.currentData) fitSelection(app, app.currentData);
+    });
+    // What is drawn of them: one the filter hides would widen the frame
+    if (sharing) this.frame(shownSelection(app));
   }
 
   /**
-   * Bring the selected flights into view, clear of the panels: isolated,
-   * they are all the map shows, and one could stay half off the screen or
-   * under the chip that says it is selected. The map keeps its bearing.
+   * Bring flights into view, the selected ones or one of them, clear of
+   * the panels: shared, they are all the map shows, and one could stay
+   * half off the screen or under the chip that says it is selected. The
+   * map keeps its bearing.
    * With `unlessInView` the map stays where it is when every point of them
    * is on it and clear of the panels already, and they span a quarter of
    * the map between the panels either way: a circuit round the home field
@@ -312,14 +474,11 @@ export class PathSelection {
    * closer than a replay follows a flight: a few fixes on a field were
    * framed at the map's deepest zoom.
    */
-  private frameSelection(unlessInView = false): void {
+  private frame(pathIds: ReadonlySet<number>, unlessInView = false): void {
     const map = this.app.map;
     const data = this.app.currentData;
     if (!map || !data) return;
-    const segments = segmentsForPathIds(
-      data.path_segments,
-      this.app.selectedPathIds,
-    );
+    const segments = segmentsForPathIds(data.path_segments, pathIds);
     const bounds = segmentBounds(segments);
     if (!bounds) return;
     const padding = mapChromePadding(map);
@@ -365,19 +524,89 @@ export class PathSelection {
    * The selection is drawn on the paths, and the paths are only drawn once
    * the map is zoomed in far enough for them, so at the zoom levels that
    * show the heat bloom alone a selection was invisible. It is also what
-   * Isolate, Replay and a shared link all act on, and none of them said how
-   * much that was.
+   * Share mode, Replay and a shared link all act on, and none of them said
+   * how much that was. Share mode is entered (Share) and left (Exit) here
+   * too, next to the link that hands the flights on: while it is on, Exit
+   * and the link take the place of Share and Clear, so the flights being
+   * shown to someone are not cleared away by a slip.
    */
   private updateSelectionChip(): void {
     const chip = domCache.get("selection-chip");
     const count = domCache.get("selection-chip-count");
     if (!chip || !count) return;
 
-    const selected = this.app.selectedPathIds.size;
-    const text = selected > 0 ? pluralFlights(selected) + " selected" : "";
+    const app = this.app;
+    const selected = app.selectedPathIds.size;
+    // The store ends share mode with the last flight (AppStore.settle)
+    const sharing = app.isolateSelection;
+    const flights = pluralFlights(selected);
+    // Share mode keeps the flights the filter hides or the year's dataset
+    // lacks, which the map cannot draw; the chip says how many, and why as
+    // far as it can tell (see fitSelection): "hidden by the filter" for an
+    // aircraft, "not in 2024" for a year's flights that may be another
+    // year's or gone from the site
+    const data = app.currentData;
+    const shown = sharing && data ? shownPathIds(app, data) : null;
+    const missing = shown
+      ? [...app.selectedPathIds].filter((pathId) => !shown.has(pathId))
+      : [];
+    const hidden = missing.length;
+    const known = data ? datasetIndex(data).pathInfoById : null;
+    const lacking = missing.filter((pathId) => !known?.has(pathId)).length;
+    const year = app.selectedYear;
+    const every = hidden === selected;
+    let hiddenText = "";
+    let filterWords = "";
+    if (hidden && !lacking) {
+      hiddenText = ", " + (every ? "all" : hidden) + " hidden";
+      filterWords = " by the filter";
+    } else if (hidden && lacking === hidden && year !== "all") {
+      hiddenText = every ? ", none in " + year : `, ${hidden} not in ${year}`;
+    } else if (hidden) {
+      hiddenText = every ? ", none shown" : `, ${hidden} not shown`;
+    }
+    const text =
+      selected === 0
+        ? ""
+        : sharing
+          ? "Sharing " + flights + hiddenText + filterWords
+          : flights + " selected";
     const changed = count.textContent !== text;
-    count.textContent = text;
+    if (changed && sharing) {
+      // The words in a .selection-chip-word go on a phone, where the
+      // chip's mark says it is shared (styles.css): "3 flights, 1 hidden"
+      const word = (words: string): HTMLElement => {
+        const span = document.createElement("span");
+        span.className = "selection-chip-word";
+        span.textContent = words;
+        return span;
+      };
+      count.replaceChildren(word("Sharing "), flights + hiddenText);
+      if (filterWords) count.append(word(filterWords));
+    } else if (changed) {
+      count.textContent = text;
+    }
     chip.hidden = selected === 0;
+    chip.classList.toggle("is-sharing", sharing);
+
+    // A button hidden under the focus would drop it to <body>: it goes to
+    // the one that takes its place
+    const share = domCache.get("selection-share-btn");
+    const exit = domCache.get("selection-exit-btn");
+    const link = domCache.get("selection-link-btn");
+    let lost = false;
+    for (const [button, shown] of [
+      [share, !sharing],
+      [domCache.get("selection-clear-btn"), !sharing],
+      [link, sharing],
+      [exit, sharing],
+    ] as const) {
+      if (!button) continue;
+      lost ||= !shown && button === document.activeElement;
+      button.hidden = !shown;
+    }
+    if (lost) (sharing ? exit : share)?.focus();
+    this.updateLinkLabel();
 
     // The polite region rather than a live chip: the count changes on every
     // click on a path, and a live region that replaces its own text is read
@@ -387,8 +616,22 @@ export class PathSelection {
   }
 
   /**
-   * Isolate is a toggle that also needs a selection: `active` carries the
-   * mode, aria-disabled "nothing to isolate yet", which the stylesheet dims.
+   * Say what the chip's link does: the share sheet, where the phone has
+   * one. Named by what it says, for speech input (WCAG 2.5.3).
+   */
+  private updateLinkLabel(): void {
+    const link = domCache.get("selection-link-btn");
+    const label = link?.querySelector(".control-label");
+    if (!link || !label) return;
+    label.textContent = shareLinkLabel();
+    link.title = label.textContent + " to these flights";
+    link.setAttribute("aria-label", link.title);
+  }
+
+  /**
+   * Share mode is a toggle that also needs a selection: `active` carries
+   * the mode, aria-disabled "nothing to share yet", which the stylesheet
+   * dims.
    */
   updateIsolateButton(): void {
     const btn = domCache.get("isolate-btn");

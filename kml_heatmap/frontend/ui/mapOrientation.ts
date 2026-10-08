@@ -441,7 +441,7 @@ export class MapOrientation {
     }
     const upright = bearing === 0 && pitch === 0;
     // With nothing to reset the button in the column is shown unavailable,
-    // like Isolate and Replay: still focusable, so a keyboard user who just
+    // like Share mode and Replay: still focusable, so a keyboard user who just
     // pressed it keeps their place
     const compass = domCache.get(COMPASS_ID);
     if (compass) setUnavailable(compass, upright);

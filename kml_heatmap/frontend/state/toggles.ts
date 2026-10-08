@@ -39,7 +39,7 @@ export interface ToggleSpec {
   /**
    * Whether the button shows the key alone (syncToggleButton). The heatmap's
    * also says whether a replay hides it, the altitude's whether a replay
-   * colours its trail by altitude (ui/layerVisibility.ts), Isolate's
+   * colours its trail by altitude (ui/layerVisibility.ts), Share mode's
    * whether there is a selection (ui/pathSelection.ts), and the statistics
    * button is a disclosure (setupStatsRail in ui/appChrome.ts).
    */
@@ -158,8 +158,10 @@ export const TOGGLES = [
     action: "toggleIsolateSelection",
     button: "isolate-btn",
     icon: "isolate",
-    label: "Isolate",
-    sheet: { group: "more", id: "isolate", label: "Isolate selection" },
+    // Share mode (ui/pathSelection.ts); key, action, button and row keep
+    // the name it had before, which links and saved states carry
+    label: "Share mode",
+    sheet: { group: "more", id: "isolate" },
   },
   {
     key: "statsPanelVisible",

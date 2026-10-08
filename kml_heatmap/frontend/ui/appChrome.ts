@@ -89,8 +89,17 @@ export function followReplayAvailability(app: MapApp): void {
     const chipReplay = domCache.get("selection-replay-btn");
     if (chipReplay) chipReplay.hidden = hint !== null || app.replayActive;
   };
+  // The filters too: Replay plays the one selected flight they show
+  // (MapApp.canReplay)
   app.store.subscribeKeys(
-    ["selectedPathIds", "hasTimingData", "currentData", "replayActive"],
+    [
+      "selectedPathIds",
+      "hasTimingData",
+      "currentData",
+      "selectedYear",
+      "selectedAircraft",
+      "replayActive",
+    ],
     refresh,
   );
   refresh();

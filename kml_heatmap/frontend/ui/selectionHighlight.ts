@@ -3,7 +3,7 @@
  *
  * The colour layers draw a selection on layers of their own. With neither
  * of them on, the heatmap is all there is, and it does not follow the
- * selection on purpose (only Isolate narrows it), so a selected flight was
+ * selection on purpose (only Share mode narrows it), so a selected flight was
  * nowhere to be seen. These lines mark it instead. Whether they show is
  * worked out with the other layers (see ui/layerVisibility.ts); this module
  * keeps their data in step with the selection and the dataset. Where the
@@ -14,6 +14,7 @@ import type { GeoJSONSource } from "maplibre-gl";
 import type { MapApp } from "../mapApp";
 import type { PathSegment } from "../types";
 import { segmentsForPathIds } from "../calculations/statistics";
+import { shownSelection } from "../calculations/datasetIndex";
 import { appendCurve, flatCurves } from "../calculations/curves";
 import { MAP_LAYERS, MAP_SOURCES } from "../utils/constants";
 import { highlightsSelection } from "./layerVisibility";
@@ -76,9 +77,10 @@ export function selectionOpacity(count: number): number {
  * they show (see highlightsSelection), and bring them up to date as they
  * come to show: under a colour layer, which draws the selection itself,
  * the lines of the busiest airport's hundreds of flights took a fifth of
- * the click that selected them, for nobody to see. The year and aircraft
- * filter need not be asked: a change of either clears the selection, and
- * a click selects only flights it keeps. While the 3D view draws the
+ * the click that selected them, for nobody to see. Of the selected
+ * flights the year and aircraft filters show (shownSelection): share mode
+ * keeps the ones they hide, which no line is drawn on. While the 3D view
+ * draws the
  * selection as ribbons (selectionRibbons), the lines are of no flight.
  * After a lost WebGL context the source is back with the data of the
  * moment of the loss, and gets them again.
@@ -103,7 +105,7 @@ export function followSelectionHighlight(app: MapApp): void {
   const update = (): void => {
     const selected = app.selectionRibbons
       ? new Set<number>()
-      : app.selectedPathIds;
+      : shownSelection(app);
     // Taken away as the selection is cleared, whether they show or not
     if (!stale || (selected.size > 0 && !highlightsSelection(app))) return;
     stale = false;
@@ -115,7 +117,13 @@ export function followSelectionHighlight(app: MapApp): void {
     );
     write();
   };
-  const keys = ["currentData", "selectedPathIds", "selectionRibbons"] as const;
+  const keys = [
+    "currentData",
+    "selectedPathIds",
+    "selectedYear",
+    "selectedAircraft",
+    "selectionRibbons",
+  ] as const;
   app.store.subscribeKeys(keys, () => {
     stale = true;
     update();

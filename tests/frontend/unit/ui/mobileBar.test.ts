@@ -468,9 +468,10 @@ describe("MobileBar", () => {
         "replay-all",
         "hotspot-tour",
         "cross-section",
-        "isolate",
         "reset-view",
         "export",
+        // Share mode next to the link it is for
+        "isolate",
         "share",
         "github",
       ]);
@@ -621,7 +622,7 @@ describe("MobileBar", () => {
       const row =
         document.querySelector<HTMLButtonElement>('[data-row="speed"]')!;
 
-      // Unavailable like Isolate: announced, reachable, and says why
+      // Unavailable like Share mode: announced, reachable, and says why
       expect(row.getAttribute("aria-disabled")).toBe("true");
       expect(row.disabled).toBe(false);
       expect(row.querySelector(".sheet-row-hint")!.textContent).toBe(
@@ -747,11 +748,11 @@ describe("MobileBar", () => {
       expect(app.toggleHotspotTour).toHaveBeenCalledTimes(1);
     });
 
-    it("keeps isolate unavailable without a selection, as on the desktop", () => {
+    it("keeps share mode unavailable without a selection, as on the desktop", () => {
       const row = document.querySelector<HTMLButtonElement>(
         '[data-row="isolate"]',
       )!;
-      // aria-disabled and in the tab order, like the desktop Isolate button,
+      // aria-disabled and in the tab order, like the desktop button,
       // rather than `disabled` in the sheet alone
       expect(row.getAttribute("aria-disabled")).toBe("true");
       expect(row.disabled).toBe(false);

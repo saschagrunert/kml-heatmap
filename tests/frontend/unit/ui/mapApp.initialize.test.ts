@@ -141,6 +141,7 @@ const {
   mockFilterManagerInstance,
   mockLayerManagerInstance,
   mockMap,
+  mockPathSelectionInstance,
   mockReplayManagerInstance,
   mockStateManagerInstance,
   mockStatsManagerInstance,
@@ -468,16 +469,15 @@ describe("MapApp.initialize", () => {
   describe("resetView", () => {
     /**
      * The year switch as FilterManager does it, reduced to what resetView
-     * relies on: the year and whatever `also` sets land in one batch
+     * relies on: the year and whatever `also` sets land in one batch. It
+     * keeps the selected flights the year shows, so the selection is
+     * `also`'s to clear.
      */
     function switchYearsInOneBatch(): void {
       mockFilterManagerInstance.filterByYear.mockImplementation(
         (year: string, also?: () => void) => {
           app.store.batch(() => {
             app.selectedYear = year;
-            app.selectedPathIds.clear();
-            app.store.notifyMutation("selectedPathIds");
-            app.isolateSelection = false;
             also?.();
           });
           return Promise.resolve(true);
@@ -510,6 +510,11 @@ describe("MapApp.initialize", () => {
       await initializeApp(app);
       switchYearsInOneBatch();
       changeEverything();
+      // As PathSelection clears it
+      mockPathSelectionInstance.clearSelection.mockImplementationOnce(() => {
+        app.selectedPathIds.clear();
+        app.store.notifyMutation("selectedPathIds");
+      });
       const defaults = createDefaultState();
       const keys = [
         "selectedAircraft",
@@ -538,6 +543,8 @@ describe("MapApp.initialize", () => {
       for (const key of keys) {
         expect(app.store.get(key), key).toBe(defaults[key]);
       }
+      // Through the one way to clear it, inside the same batch
+      expect(mockPathSelectionInstance.clearSelection).toHaveBeenCalledTimes(1);
       expect(app.selectedPathIds.size).toBe(0);
       expect(listener).toHaveBeenCalledTimes(1);
     });
@@ -633,7 +640,7 @@ describe("MapApp.initialize", () => {
       document.getElementById("reset-view-btn")!;
 
     /**
-     * Unavailable like Isolate and Replay: announced, which the stylesheet
+     * Unavailable like Share mode and Replay: announced, which the stylesheet
      * dims; nothing is written into the button's own style
      */
     function expectAvailable(available: boolean): void {
@@ -652,7 +659,7 @@ describe("MapApp.initialize", () => {
 
       expectAvailable(false);
       expect(app.isReset()).toBe(true);
-      // It says why, as Isolate does, and so does a press
+      // It says why, as Share mode does, and so does a press
       expect(button().title).toBe(RESET_VIEW_DONE_MESSAGE);
       await app.resetView();
       expect(toastMock.showToast).toHaveBeenCalledWith(RESET_VIEW_DONE_MESSAGE);
@@ -980,7 +987,7 @@ describe("MapApp.initialize", () => {
       ).toBe(false);
     });
 
-    it("restores selected paths and isolate mode into the store", async () => {
+    it("restores selected paths and share mode into the store", async () => {
       mockStateManagerInstance.loadState.mockReturnValue({
         selectedPathIds: [1, 2],
         isolateSelection: true,

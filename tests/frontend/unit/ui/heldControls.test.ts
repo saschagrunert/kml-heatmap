@@ -6,6 +6,8 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
   heldReason,
   holdControls,
+  REPLAY_HELD_CONTROL_IDS,
+  SELECTION_CONTROL_IDS,
 } from "../../../../kml_heatmap/frontend/ui/heldControls";
 import { setUnavailable } from "../../../../kml_heatmap/frontend/utils/buttonState";
 
@@ -217,5 +219,18 @@ describe("holdControls", () => {
     // Already over: nothing is held at all
     holdControls(["heatmap-btn"], WHY, lifetime.signal);
     expect(heldReason(control("heatmap-btn"))).toBeNull();
+  });
+
+  it("has a replay hold every control of the selection, from the list the tour holds as well", () => {
+    // Two copies of the chip's buttons had to be kept alike
+    expect(REPLAY_HELD_CONTROL_IDS).toEqual(
+      expect.arrayContaining([...SELECTION_CONTROL_IDS]),
+    );
+    expect(SELECTION_CONTROL_IDS).toEqual([
+      "isolate-btn",
+      "selection-clear-btn",
+      "selection-share-btn",
+      "selection-exit-btn",
+    ]);
   });
 });

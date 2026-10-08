@@ -70,12 +70,73 @@ export function isTouchDevice(): boolean {
 }
 
 /**
+ * Milliseconds after a touch in which a click or a move of the mouse is
+ * the browser's for the tap, not one of a mouse
+ */
+const TAP_MS = 1000;
+
+/**
+ * Tells a finger's clicks from a mouse's, one for the app (MapApp's
+ * `touchClock`), which the map's touches are noted on. The click
+ * dispatcher and the readout of the heat cloud told them apart each in a
+ * way of their own, by the click's pointerType and by the time since a
+ * touch, and on a touch laptop whose clicks carry no pointerType the two
+ * could disagree about one click.
+ */
+export class TouchClock {
+  /** When the map was last touched, by the clock of its events */
+  private touchedAt = -Infinity;
+
+  /** A touch on the map */
+  note(event: Event): void {
+    this.touchedAt = event.timeStamp;
+  }
+
+  /** Whether an event of the mouse is the browser's for a touch just before */
+  follows(event: Event): boolean {
+    const since = event.timeStamp - this.touchedAt;
+    return since >= 0 && since < TAP_MS;
+  }
+
+  /**
+   * Whether a click was a finger's, by the evidence of a touch: a click
+   * that says so itself (a pointer event, in the browsers that make a
+   * click one), or one a touch came just before, which a tap always has:
+   * WebKit's click for a tap may say nothing of its pointer, or "mouse".
+   * Never by the device: a page that cannot hover (an iPad) may still be
+   * clicked with a trackpad, whose click toggles a flight as a mouse's.
+   */
+  isTouchClick(event: Event): boolean {
+    const type = (event as Partial<PointerEvent>).pointerType;
+    return type === "touch" || this.follows(event);
+  }
+}
+
+/**
  * Whether a link goes to the native share sheet rather than the clipboard:
  * in the phone layout alone. A tablet or a touch laptop has the control
  * columns, whose control says "Copy link".
  */
 export function canShareLink(): boolean {
   return isPhoneLayout() && typeof navigator.share === "function";
+}
+
+/** What a control that hands the link on says (see canShareLink) */
+export function shareLinkLabel(): string {
+  return canShareLink() ? "Share link" : "Copy link";
+}
+
+/**
+ * Call `fn` whenever the page goes into the phone layout or out of it,
+ * with whether it has it now; returns the way to stop. The one listener
+ * for the bar that takes the place of the columns and for the labels that
+ * change with it, such as shareLinkLabel's.
+ */
+export function followPhoneLayout(fn: (phone: boolean) => void): () => void {
+  const list = mediaList(PHONE_LAYOUT_QUERY);
+  const listener = (event: MediaQueryListEvent): void => fn(event.matches);
+  list?.addEventListener("change", listener);
+  return () => list?.removeEventListener("change", listener);
 }
 
 /**

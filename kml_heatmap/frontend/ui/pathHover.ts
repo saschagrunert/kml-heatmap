@@ -81,11 +81,23 @@ export interface RunsOnLayer {
     | ((map: MapLibreMap, properties: Partial<PathRunProperties>) => number)
     | null;
   /**
-   * The only paths the layer shows, null for every one: an isolated
-   * selection filters the others out, which tiles cut before the filter
+   * The only paths the layer shows, null for every one: a selection in
+   * share mode filters the others out, which tiles cut before the filter
    * still have
    */
   only: ReadonlySet<number> | null;
+}
+
+/**
+ * A button under the values of a tapped segment (see showTapped). Its label
+ * is asked again whenever the owner says the state it reads changed
+ * (refreshTapped), null for no button: one that kept the label it opened
+ * with offered "Select flight" for a flight ticked in a list since, and
+ * took it out.
+ */
+export interface TapAction {
+  label(): string | null;
+  run(): void;
 }
 
 /** The layers to look in, by id */
@@ -171,6 +183,11 @@ export class PathHover {
   private hovered: PathSegment | null = null;
   /** The popup a tap opened; a tap elsewhere replaces it */
   private touchPopup: Popup | null = null;
+  /** The flight of that popup, whose tooltip it stands in for */
+  private tappedPathId: number | null = null;
+  /** The button under its values and what it does, if it has one */
+  private tapButton: { button: HTMLButtonElement; action: TapAction } | null =
+    null;
   /**
    * Told the segment the tooltip comes to describe, and null as it closes:
    * the flight profile moves its cursor along (ui/flightProfile.ts)
@@ -216,8 +233,7 @@ export class PathHover {
     this.hoverFrame.cancel();
     this.lastMove = null;
     this.hideTooltip();
-    this.touchPopup?.remove();
-    this.touchPopup = null;
+    this.closeTapped();
   }
 
   /**
@@ -232,14 +248,19 @@ export class PathHover {
   }
 
   /**
-   * On touch, show the values of the segment a tap hit where the finger
-   * was, until the next tap on the map closes them. A pointer that hovers
-   * has the tooltip for that.
+   * Show the values of the segment a tap hit where the finger was, until
+   * the next tap on the map closes them: a pointer that hovers has the
+   * tooltip for that, and share mode holds them for a click as well (see
+   * LayerManager.onPathClick). `action` is a button under the values, to
+   * select the flight or take it out, which closes them. The hover's
+   * tooltip of the same flight steps aside while they show: a mouse in
+   * share mode had both, and the tooltip could cover the button.
    */
-  showTapped(hit: PathHit, lngLat: LngLat): void {
+  showTapped(hit: PathHit, lngLat: LngLat, action?: TapAction): void {
     const map = this.app.map;
-    if (!map || !isTouchDevice()) return;
-    this.touchPopup?.remove();
+    if (!map) return;
+    this.closeTapped();
+    if (this.hovered?.path_id === hit.pathId) this.hideTooltip();
     const popup = (this.touchPopup = new Popup({
       // Not the tooltip's class: that one takes no pointer events, and
       // this popup has a close button to press
@@ -258,13 +279,51 @@ export class PathHover {
       .setLngLat(lngLat)
       .setHTML(this.paths.describe(hit.segment))
       .addTo(map);
+    this.tappedPathId = hit.pathId;
+    // Closed by its own button as well, which MapLibre does by itself
+    popup.on("close", () => {
+      if (this.touchPopup !== popup) return;
+      this.touchPopup = null;
+      this.tappedPathId = null;
+      this.tapButton = null;
+    });
+    if (!action) return;
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "segment-action";
+    button.onclick = () => {
+      popup.remove();
+      action.run();
+    };
+    popup.getElement()?.querySelector(".popup-container")?.append(button);
+    this.tapButton = { button, action };
+    this.refreshTapped();
+  }
+
+  /**
+   * Label the button under the values of a tap anew, or hide it, for the
+   * state it reads now (see TapAction)
+   */
+  refreshTapped(): void {
+    if (!this.tapButton) return;
+    const { button, action } = this.tapButton;
+    const label = action.label();
+    button.hidden = label === null;
+    if (label !== null) button.textContent = label;
+  }
+
+  /** Put away the values a tap left on the map */
+  closeTapped(): void {
+    this.touchPopup?.remove();
+    this.touchPopup = null;
+    this.tappedPathId = null;
+    this.tapButton = null;
   }
 
   /** Put away the values a hover or a tap left on the map */
   closeSegmentPopup(): void {
     this.hideTooltip();
-    this.touchPopup?.remove();
-    this.touchPopup = null;
+    this.closeTapped();
   }
 
   /**
@@ -321,7 +380,7 @@ export class PathHover {
         continue;
       }
       // A run crossing a tile border comes back once per tile. Left out by
-      // the isolate filter, but still in tiles cut before it: a selected
+      // the filter of share mode, but still in tiles cut before it: a selected
       // path's main runs are not, they are the same flight, and they bridge
       // the moment until the selection's tiles are there.
       if (!run || seen.has(run) || drawn.only?.has(run.pathId) === false) {
@@ -437,7 +496,15 @@ export class PathHover {
       this.rehoverOnIdle();
       if (found) return;
     }
-    if (!map || !point || !hit || hit === "stale") {
+    // Over the flight whose values a tap or a click holds open, the
+    // tooltip would only cover them
+    if (
+      !map ||
+      !point ||
+      !hit ||
+      hit === "stale" ||
+      hit.pathId === this.tappedPathId
+    ) {
       this.hideTooltip();
       return;
     }

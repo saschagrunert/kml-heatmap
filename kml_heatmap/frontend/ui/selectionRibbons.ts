@@ -29,6 +29,7 @@ import {
   segmentsForPathIds,
 } from "../calculations/statistics";
 import type { SmoothedFlights } from "../calculations/smoothing";
+import { shownSelection } from "../calculations/datasetIndex";
 import { MAP_SOURCES } from "../utils/constants";
 import { isReplayCameraMove, whenContextRestored } from "../utils/mapHelpers";
 import {
@@ -50,6 +51,9 @@ import { highlightsSelection } from "./layerVisibility";
 const CUT_KEYS: readonly (keyof StoreState)[] = [
   "currentData",
   "selectedPathIds",
+  // The filter: share mode keeps the flights it hides (shownSelection)
+  "selectedYear",
+  "selectedAircraft",
 ];
 
 /**
@@ -115,7 +119,7 @@ export function selectionRibbons(
   box: Box | null = null,
 ): GeoJSON.Feature<GeoJSON.MultiPolygon>[] {
   const data = app.currentData;
-  const selected = app.selectedPathIds;
+  const selected = shownSelection(app);
   if (!data || selected.size === 0) return [];
   const level = app.reliefLevel;
   const sampled = app.terrainActive;

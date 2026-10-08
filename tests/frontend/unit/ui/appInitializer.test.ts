@@ -1119,13 +1119,29 @@ describe("appInitializer", () => {
     });
 
     it("drops a restored path whose flight is gone, and isolation with the last", async () => {
+      // A link to every year: only their dataset knows every flight
+      app.selectedYear = "all";
+      (app as { restoredYearFromState: boolean }).restoredYearFromState = true;
       app.selectedPathIds = new Set([840108108563]);
       app.isolateSelection = true;
 
       await loadInitialData(asMapApp(app));
 
+      expect(app.selectedYear).toBe("all");
       expect(app.selectedPathIds.size).toBe(0);
       expect(app.isolateSelection).toBe(false);
+    });
+
+    it("keeps a shared flight a year's dataset does not have, which another year may", async () => {
+      app.selectedPathIds = new Set([840108108563]);
+      app.isolateSelection = true;
+
+      await loadInitialData(asMapApp(app));
+
+      // The chip says the filter hides it; the link still hands it on
+      expect(app.selectedYear).not.toBe("all");
+      expect([...app.selectedPathIds]).toEqual([840108108563]);
+      expect(app.isolateSelection).toBe(true);
     });
 
     it("keeps no restored path the dataset does not have", async () => {

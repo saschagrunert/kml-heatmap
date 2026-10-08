@@ -1007,7 +1007,7 @@ describe("DataManager", () => {
       expect(heatPoints()).toEqual([[10.0, 52.0]]);
     });
 
-    it("filters heatmap coordinates by selection in isolate mode", async () => {
+    it("filters heatmap coordinates by selection in share mode", async () => {
       publish(baseData());
       await answered();
 
@@ -1038,7 +1038,7 @@ describe("DataManager", () => {
       expect(drawnHeatPoints()).toEqual([[10.0, 52.0]]);
     });
 
-    it("only restyles the paths for a selection outside isolate mode", async () => {
+    it("only restyles the paths for a selection outside share mode", async () => {
       publish(baseData());
       await answered();
       vi.mocked(mockApp.layerManager.syncModes).mockClear();
@@ -1054,7 +1054,7 @@ describe("DataManager", () => {
       expect(heatSource().setData).toHaveBeenCalledTimes(1);
     });
 
-    it("gives the heatmap its points for a selection in isolate mode, and restyles the paths", async () => {
+    it("gives the heatmap its points for a selection in share mode, and restyles the paths", async () => {
       mockApp.selectedPathIds.add(1);
       mockApp.isolateSelection = true;
       publish(baseData());

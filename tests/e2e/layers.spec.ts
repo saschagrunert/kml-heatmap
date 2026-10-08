@@ -451,7 +451,8 @@ test.describe("Layers", () => {
     const pos = await findSegmentFarFromAirports(page);
     expect(pos).not.toBeNull();
 
-    await page.locator("#map").click({ position: { x: pos!.x, y: pos!.y } });
+    // A tap: a click with the mouse of a touch laptop toggles the flight
+    await page.locator("#map").tap({ position: { x: pos!.x, y: pos!.y } });
 
     await expectSegmentDetails(mapPopupContent(page).first());
   });
@@ -464,20 +465,41 @@ test.describe("Layers", () => {
     await waitForPathData(page);
     const pos = await findSegmentFarFromAirports(page);
     expect(pos).not.toBeNull();
-    await page.locator("#map").click({ position: { x: pos!.x, y: pos!.y } });
+    await page.locator("#map").tap({ position: { x: pos!.x, y: pos!.y } });
     await expectSegmentDetails(mapPopupContent(page).first());
     const selected = (): Promise<number> =>
       page.evaluate(() => window.mapApp!.selectedPathIds.size);
-    expect(await selected()).toBe(1);
+    // Looking at a flight does not select it
+    expect(await selected()).toBe(0);
 
     // The popup stands on the flight that was tapped. It shared the hover
     // tooltip's rule of taking no pointer events, so a tap on its close
-    // button went through to that flight and toggled the selection off,
+    // button went through to that flight and toggled the selection,
     // and the button itself could not be pressed at all.
     await mapPopupCloseButton(page).click();
 
     await expect(mapPopup(page)).toHaveCount(0);
-    expect(await selected()).toBe(1);
+    expect(await selected()).toBe(0);
+  });
+
+  test("a tapped path is selected with the button of its popup @touch", async ({
+    page,
+    isMobile,
+  }) => {
+    test.skip(!isMobile, "Pointer devices select with a click");
+    await waitForPathData(page);
+    const pos = await findSegmentFarFromAirports(page);
+    expect(pos).not.toBeNull();
+    await page.locator("#map").tap({ position: { x: pos!.x, y: pos!.y } });
+
+    const select = mapPopup(page).locator(".segment-action");
+    await expect(select).toHaveText("Select flight");
+    await select.tap();
+
+    await expect(mapPopup(page)).toHaveCount(0);
+    await expect
+      .poll(() => page.evaluate(() => window.mapApp!.selectedPathIds.size))
+      .toBe(1);
   });
 
   test("airport labels are drawn by the map, and none zoomed out", async ({

@@ -11,6 +11,7 @@ import {
   sortRows,
 } from "../../../../kml_heatmap/frontend/ui/flightList";
 import type { PathInfo } from "../../../../kml_heatmap/frontend/types";
+import type { PickList } from "../../../../kml_heatmap/frontend/ui/pathSelection";
 import {
   resetSiteData,
   siteData,
@@ -261,25 +262,89 @@ describe("FlightList", () => {
     expect(header("time").getAttribute("aria-sort")).toBe("ascending");
   });
 
-  it("selects the flight of a row alone, or adds it with Ctrl or Shift", () => {
+  it("hands a click anywhere on a row to the selection, with the rows' order", () => {
     const [first, second, third] = rows();
-    const select = mockApp.pathSelection.selectFlight;
+    const pick = mockApp.pathSelection.pickFromList;
 
     first!.querySelector("button")!.click();
     second!.querySelector("td")!.click();
-    third!.dispatchEvent(
-      new MouseEvent("click", { bubbles: true, ctrlKey: true }),
+    third!.querySelector<HTMLElement>(".kh-pick")!.click();
+
+    // A plain pick, Ctrl, Shift and the checkbox are PathSelection's
+    expect(
+      (pick.mock.calls as [number, MouseEvent, PickList][]).map(
+        ([id, event, list]) => [
+          id,
+          (event.target as Element).tagName,
+          list.order,
+        ],
+      ),
+    ).toEqual([
+      [11, "BUTTON", [11, 12, 13]],
+      [12, "TD", [11, 12, 13]],
+      [13, "INPUT", [11, 12, 13]],
+    ]);
+    // One list for all of them, whose start of a range PathSelection moves
+    const lists = new Set(
+      (pick.mock.calls as [number, MouseEvent, PickList][]).map(
+        ([, , list]) => list,
+      ),
     );
-    first!.dispatchEvent(
-      new MouseEvent("click", { bubbles: true, shiftKey: true }),
+    expect(lists.size).toBe(1);
+  });
+
+  it("names a checkbox by the route, the aircraft and the year", () => {
+    // Several circuits of the home field all read "Select EDAQ → EDAQ"
+    expect(
+      rows().map((row) =>
+        row.querySelector(".kh-pick")!.getAttribute("aria-label"),
+      ),
+    ).toEqual([
+      "Select EDAQ → EDDP · D-EAGJ · 2025",
+      "Select EDDP → EDAQ · D-ESST · 2024",
+      "Select EDDP → Somewhere <b>odd</b> · 2025",
+    ]);
+  });
+
+  it("starts a Shift range afresh as the rows are sorted, searched or closed", () => {
+    const pick = mockApp.pathSelection.pickFromList;
+    const listOf = (): PickList => pick.mock.calls.at(-1)![2] as PickList;
+    rows()[0]!.querySelector("td")!.click();
+    listOf().anchor = 11;
+
+    header("altitude").querySelector("button")!.click();
+    rows()[0]!.querySelector("td")!.click();
+    expect(listOf().anchor).toBeNull();
+    listOf().anchor = 11;
+
+    const search = panel().querySelector<HTMLInputElement>("input")!;
+    search.value = "EDAQ";
+    search.dispatchEvent(new Event("input"));
+    rows()[0]!.querySelector("td")!.click();
+    expect(listOf().anchor).toBeNull();
+    listOf().anchor = 11;
+
+    mockApp.statsPanelVisible = false;
+    expect(listOf().anchor).toBeNull();
+  });
+
+  it("gives a Shift click the order the rows are shown in", () => {
+    const header = panel().querySelector<HTMLElement>(
+      'th[data-sort="altitude"] button',
+    )!;
+    header.click();
+    header.click();
+    const shown = rows().map((row) =>
+      Number(row.querySelector("button")!.dataset["pathId"]),
     );
 
-    expect(select.mock.calls).toEqual([
-      [11, false],
-      [12, false],
-      [13, true],
-      [11, true],
-    ]);
+    rows()[0]!.querySelector("td")!.click();
+
+    // Highest first, the flight without an altitude last
+    expect(shown).toEqual([12, 11, 13]);
+    expect(
+      (mockApp.pathSelection.pickFromList.mock.calls[0]![2] as PickList).order,
+    ).toEqual(shown);
   });
 
   it("marks the selected flights and follows the selection", () => {
@@ -287,14 +352,20 @@ describe("FlightList", () => {
       rows().map((row) =>
         row.querySelector("button")!.getAttribute("aria-pressed"),
       );
+    const ticked = (): boolean[] =>
+      rows().map(
+        (row) => row.querySelector<HTMLInputElement>(".kh-pick")!.checked,
+      );
     expect(pressed()).toEqual(["false", "false", "false"]);
 
     mockApp.selectedPathIds = new Set([12, 13]);
     expect(pressed()).toEqual(["false", "true", "true"]);
+    expect(ticked()).toEqual([false, true, true]);
 
     // And on rows written again
     search("edd");
     expect(pressed()).toEqual(["false", "true", "true"]);
+    expect(ticked()).toEqual([false, true, true]);
   });
 
   it("writes nothing while its tab or the rail is closed", () => {

@@ -27,7 +27,7 @@ import {
 import { icon, type IconName } from "../utils/icons";
 import { domCache } from "../utils/domCache";
 import { countryHeading } from "../utils/wrappedHtml";
-import { datasetIndex } from "../calculations/datasetIndex";
+import { datasetIndex, shownSelection } from "../calculations/datasetIndex";
 import { watchScrollEnd, type ScrollEndWatcher } from "../utils/scrollFade";
 import {
   LOADING_HTML,
@@ -528,16 +528,17 @@ export class StatsManager {
 
   /** The inputs of the current state, in a shape that compares cheaply */
   private currentInputs(): StatsInputs {
-    const selected = this.app.selectedPathIds;
     return {
       pathInfo: this.app.fullPathInfo ?? [],
       segments: this.app.fullPathSegments ?? [],
       year: this.app.selectedYear,
       aircraft: this.app.selectedAircraft,
+      // Of the flights the filter shows, apart from no selection at all
       selection:
-        selected.size === 0
+        this.app.selectedPathIds.size === 0
           ? ""
-          : Array.from(selected)
+          : "#" +
+            Array.from(shownSelection(this.app))
               .sort((a, b) => a - b)
               .join(","),
     };
@@ -614,9 +615,11 @@ export class StatsManager {
       return;
     }
 
-    // Calculate stats for selected paths only
-    const selectedPathInfo = pathInfo.filter((path) => selected.has(path.id));
-    const selectedSegments = segmentsForPathIds(segments, selected);
+    // The selected flights the filter shows, as the map and the chip count
+    // them: share mode keeps the ones it hides, which are of no figure
+    const shown = shownSelection(this.app);
+    const selectedPathInfo = pathInfo.filter((path) => shown.has(path.id));
+    const selectedSegments = segmentsForPathIds(segments, shown);
 
     // A selection without segments still gets rendered: leaving the previous
     // flight's numbers under the title of a selection would be worse
