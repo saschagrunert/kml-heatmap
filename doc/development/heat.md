@@ -780,6 +780,35 @@ for the level the cloud takes as a zoom ends, so the cloud's listener is added
 as it is followed, ahead of the player's, and like the cloud and the ribbons
 they are handed to the flat lines at `LIFT_MAX_ZOOM` as the zoom ends.
 
+The trails take the colours of the colour layer that is on as a run starts
+(`ReplayAllRun.colour`), on the range its legend shows (the shown selection's,
+as `resolveColorRange` takes it): each point carries the colour of the stretch
+that ends at it as its three bytes in one float, which the vertex shader hands
+the fragment shader flat, 0 for the trail's own amber. Wrapped's intro asks for
+none, its year is no colour layer's. A trail glows round its line, out to three
+times its half width, where the glow is below what the fragment shader keeps; it
+is pulled towards the camera for the depth test by the reach of the line only.
+Six times as wide, every stretch was four times the pixels of the line, and
+pulled by the glow's reach, the trails showed through ridges and ribbons. Where
+the Groundspeed layer draws no line, at no speed, the trail draws no stretch
+either (its colour negated), while the head is drawn in the ramp's low end.
+
+The intro of a link to shared flights (`ui/shareIntro.ts`) plays its flights one
+after another on a player of its own, whose clock it moves itself, with no
+replay of the app (`replayActive`) to hold the controls. It builds the heat up
+by that clock (`growHeatCloud`): the cloud is cut with each flight's times
+starting where it starts on the clock (`cloudPoints` with `starts`), for the
+zoom the camera goes to, and drawn at full strength up to the clock, on the flat
+map in place of the heatmap. At the end, and when a replay, the tour or Wrapped
+takes the map, it is let go: on the flat map the cloud fades out over the
+heatmap as Wrapped's does, in the 3D view it eases to the strength it is drawn
+at there. The camera is the tilted fit above, turned by the map's bearing,
+measured at every fix of the shared flights (`fixPoints`), those without a clock
+as well, and worked out before a player starts, so reduced motion jumps there
+without one. Measured at the points of the run, cut for the zoom the link opens
+at, a point every 18 km or so far out, the turn of a short out-and-back flight
+was a fifth short and ran out of the frame.
+
 The panel offers 100 to 1000 times (`REPLAY_ALL_SPEEDS`). A trail fades over 3 s
 on the screen (`TRAIL_FADE_S`), but over no more than 25 minutes of flight
 (`TRAIL_MOST_S`): at a thousand times a trail of 3 s was 50 minutes of flight,

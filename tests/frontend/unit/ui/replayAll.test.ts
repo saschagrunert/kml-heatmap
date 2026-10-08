@@ -43,6 +43,11 @@ import {
 } from "../../../../kml_heatmap/frontend/calculations/lift";
 import type { PathSegment } from "../../../../kml_heatmap/frontend/types";
 import {
+  getColorForAirspeed,
+  getColorForAltitude,
+} from "../../../../kml_heatmap/frontend/utils/colors";
+import { calculateAirspeedRange } from "../../../../kml_heatmap/frontend/features/layers";
+import {
   asMapApp,
   createDataset,
   createMockApp,
@@ -55,11 +60,15 @@ const toast = vi.hoisted(() => ({
   showToast: vi.fn(),
   announceStatus: vi.fn(),
 }));
-/** Every cut of the curves, counted, and the zoom and relief levels of the last */
+/**
+ * Every cut of the curves, counted, and the zoom and relief levels and the
+ * colours of the last
+ */
 const cuts = vi.hoisted(() => ({
   count: 0,
   detail: null as number | null,
   level: null as number | null,
+  colourOf: undefined as ((segment: PathSegment) => number) | undefined,
 }));
 vi.mock(
   "../../../../kml_heatmap/frontend/calculations/replayAll",
@@ -74,6 +83,7 @@ vi.mock(
         cuts.count++;
         cuts.detail = args[4];
         cuts.level = args[5];
+        cuts.colourOf = args[7];
         return module.replayAllPoints(...args);
       },
     };
@@ -150,6 +160,12 @@ const HELD = [
   "wrapped-btn",
   "replay-btn",
 ];
+
+/** The three bytes of an `rgb(...)` colour in one number */
+function packed(rgb: string): number {
+  const [r, g, b] = rgb.match(/\d+/g)!.map(Number);
+  return (r! << 16) | (g! << 8) | b!;
+}
 
 describe("the replay of all flights", () => {
   let app: MockApp;
@@ -525,6 +541,96 @@ describe("the replay of all flights", () => {
       expect(drawn).not.toHaveBeenCalled();
       map().emit("zoomend");
       expect(drawn).toHaveBeenCalledOnce();
+    });
+
+    it("cuts the curves for a zoom it is aimed at once it has started, now or near it", () => {
+      map().setZoom(1);
+      void player.start();
+      const drawn = vi.spyOn(layer()!, "setPoints");
+      cuts.count = 0;
+
+      // Cut ahead of the camera, drawn from two levels short of it
+      player.aim(11);
+      expect(cuts.count).toBe(1);
+      expect(cuts.detail).toBe(11);
+      expect(drawn).not.toHaveBeenCalled();
+      map().setZoom(9.2);
+      map().emit("zoom");
+      expect(drawn).toHaveBeenCalledOnce();
+      expect(cuts.count).toBe(1);
+
+      // Or at once
+      player.stop();
+      map().setZoom(1);
+      void player.start();
+      cuts.count = 0;
+      player.aim(12, true);
+      expect(cuts.count).toBe(1);
+      expect(cuts.detail).toBe(12);
+      // The map's own zoom from the end of a zoom on
+      map().setZoom(12.3);
+      map().emit("zoomend");
+      expect(cuts.detail).toBe(12);
+    });
+
+    it("colours the trails as the colour layer that is on colours the flights, on the range of its legend, and in their own amber without one or unasked", () => {
+      const segment = DATA.path_segments.find((s) => s.path_id === 2)!;
+      app.altitudeVisible = true;
+      void player.start({ colour: true });
+      const range = app.altitudeRange;
+      expect(cuts.colourOf?.(segment)).toBe(
+        packed(getColorForAltitude(3000, range.min, range.max, range.ranks)),
+      );
+
+      // The selection's range where one is shown, as its legend names it
+      player.stop();
+      app.store.batch(() => {
+        app.altitudeVisible = false;
+        app.airspeedVisible = true;
+        app.selectedPathIds.add(2);
+        app.store.notifyMutation("selectedPathIds");
+        app.isolateSelection = true;
+      });
+      void player.start({ colour: true });
+      const speeds = calculateAirspeedRange(
+        DATA.path_segments.filter((s) => s.path_id === 2),
+        app.airspeedRange,
+      );
+      expect(cuts.colourOf?.(segment)).toBe(
+        packed(getColorForAirspeed(100, speeds.min, speeds.max, speeds.ranks)),
+      );
+
+      player.stop();
+      void player.start();
+      expect(cuts.colourOf).toBeUndefined();
+      player.stop();
+      app.airspeedVisible = false;
+      void player.start({ colour: true });
+      expect(cuts.colourOf).toBeUndefined();
+    });
+
+    it("leaves the trail out where the Groundspeed layer draws no line, at no speed, as the altitude layer does not", () => {
+      const segment = DATA.path_segments.find((s) => s.path_id === 2)!;
+      const taxiing = { ...segment, groundspeed_knots: 0 };
+      app.airspeedVisible = true;
+      void player.start({ colour: true });
+
+      // Negated: the stretch is not drawn, its head in the ramp's low end
+      expect(cuts.colourOf!(segment)).toBeGreaterThan(0);
+      const low = cuts.colourOf!(taxiing);
+      expect(low).toBeLessThan(0);
+      const range = app.airspeedRange;
+      expect(-low).toBe(
+        packed(getColorForAirspeed(0, range.min, range.max, range.ranks)),
+      );
+
+      player.stop();
+      app.store.batch(() => {
+        app.airspeedVisible = false;
+        app.altitudeVisible = true;
+      });
+      void player.start({ colour: true });
+      expect(cuts.colourOf!(taxiing)).toBeGreaterThan(0);
     });
 
     it("draws the flights at their height without the 3D view too, on the relief only where it is drawn", async () => {
@@ -1013,6 +1119,13 @@ describe("the replay of all flights", () => {
       slider.dispatchEvent(new Event("pointerdown"));
       window.dispatchEvent(new Event("pointerup"));
       expect(controls.player.playing).toBe(false);
+    });
+
+    it("colours its trails as the colour layer that is on", () => {
+      cuts.colourOf = undefined;
+      app.altitudeVisible = true;
+      toggleReplayAll(asMapApp(app));
+      expect(cuts.colourOf).toBeDefined();
     });
 
     it("tells the heat its clock only while it is open", () => {

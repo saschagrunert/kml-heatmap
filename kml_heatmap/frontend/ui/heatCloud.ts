@@ -18,7 +18,11 @@
  * map as well, at its height as the flights are there, where it stands in
  * for the heatmap, whose colours it glows in, until the replay closes.
  * Left on the ground, it lay beside the trails by their height and read
- * as other flights than theirs. The flat heatmap
+ * as other flights than theirs. The intro of a link to shared flights
+ * (ui/shareIntro.ts) builds it up the same way behind the flights it draws
+ * one after another, by the clock of its own player (growHeatCloud), and
+ * on the flat map hands it over to the heatmap as Wrapped's cloud does
+ * (see sync). The flat heatmap
  * steps aside for it (heatCloud in the store, see
  * ui/layerVisibility.ts) from the moment the cloud's layer is on the map
  * until the 3D view is turned off,
@@ -258,13 +262,27 @@ function cloudDetail(level: number, zoom: number): number {
 export const CLOUD_IDLE_MS = 15_000;
 
 /**
+ * The clock of a player of flights played one after another, which the
+ * cloud is built up to (see growHeatCloud): the time on it, and where each
+ * flight starts on it (see sequenceStarts in calculations/replayAll.ts)
+ */
+interface HeatClock {
+  readonly time: number;
+  readonly legs: ReadonlyMap<number, number> | null;
+}
+
+/**
  * The apps whose cloud is followed, each with what cuts its points ahead
- * of time (see prepareHeatCloud) and the relief level it is lifted as
- * (see heatCloudLevel)
+ * of time (see prepareHeatCloud), the relief level it is lifted as (see
+ * heatCloudLevel) and what builds it up by a clock (see growHeatCloud)
  */
 const followed = new WeakMap<
   MapApp,
-  { prepare: (levels: readonly number[]) => void; level: () => number }
+  {
+    prepare: (levels: readonly number[]) => void;
+    level: () => number;
+    grow: (clock: HeatClock | null, zoom: number) => void;
+  }
 >();
 
 /**
@@ -289,6 +307,23 @@ export function heatCloudLevel(app: MapApp): number | null {
  */
 export function prepareHeatCloud(app: MapApp, zooms: readonly number[]): void {
   followed.get(app)?.prepare(zooms);
+}
+
+/**
+ * Build the cloud of `app` up to the time of `clock`, as the replay of all
+ * flights does, with each flight's heat timed on that clock, on the flat
+ * map as well, where it stands in for the heatmap; or with null no longer.
+ * Once followHeatCloud follows it: the intro of a link to shared flights
+ * (ui/shareIntro.ts) does, which is no replay of the app's (replayActive).
+ * It is cut for the zoom `zoom` the camera is on its way to, at least: for
+ * the zoom it set out from, it was spokes as the camera came down.
+ */
+export function growHeatCloud(
+  app: MapApp,
+  clock: HeatClock | null,
+  zoom = 0,
+): void {
+  followed.get(app)?.grow(clock, zoom);
 }
 
 /**
@@ -354,12 +389,26 @@ export function followHeatCloud(app: MapApp): void {
   let restZoom = map.getZoom();
   /** The relief level the cloud is cut for and lifted as */
   const level = (): number => (app.threeDVisible ? app.reliefLevel : atRest);
+  /** The clock the cloud is built up to by growHeatCloud, and its zoom */
+  let clock: HeatClock | null = null;
+  let aimed = 0;
   /**
-   * Whether the replay of all flights draws the heat up to its clock: not
-   * while it plays the selected flights one after another
+   * Whether that ended on the flat map since the last sync, where the
+   * cloud hands over to the heatmap (see sync), and when it ended in the
+   * 3D view, where the cloud eases from full strength to the one it is
+   * drawn at, dimmed for the lines that come back (0 while it does not):
+   * both over CLOUD_HANDOVER_MS
    */
-  const growing = (): boolean =>
-    app.replayActive && replayAllTime(app) !== null;
+  let handing = false;
+  let easing = 0;
+  /**
+   * The time the heat is drawn up to: the clock of growHeatCloud, or the
+   * replay of all flights' while it is open; null while neither builds it
+   * up
+   */
+  const until = (): number | null =>
+    clock ? clock.time : app.replayActive ? replayAllTime(app) : null;
+  const growing = (): boolean => until() !== null;
 
   /** Whether the layer is on the map */
   const wanted = (): boolean =>
@@ -382,6 +431,11 @@ export function followHeatCloud(app: MapApp): void {
 
   const style = (): HeatCloudStyle | null => {
     if (!shown() && !leaving) return null;
+    const eased = easing
+      ? Math.max(1 - (performance.now() - easing) / CLOUD_HANDOVER_MS, 0)
+      : 0;
+    if (eased > 0) map.triggerRepaint();
+    else easing = 0;
     const forced = app.forcedHeatCloud || !!leaving;
     // The relief's own exaggeration, which it switches as a zoom ends (see
     // ui/terrain.ts), or the level's where the map draws none
@@ -393,12 +447,12 @@ export function followHeatCloud(app: MapApp): void {
       // At their height on the flat map too while the replay of all
       // flights builds it up, where its trails fly in it
       liftM: lifted && (app.threeDVisible || forced || growing()) ? metres : 0,
-      opacity,
+      opacity: opacity + (1 - opacity) * eased,
       fade: leaving
         ? Math.max(1 - (performance.now() - leaving) / CLOUD_HANDOVER_MS, 0)
         : 1,
-      flow: !app.replayActive,
-      until: growing() ? replayAllTime(app)! : undefined,
+      flow: !app.replayActive && !clock,
+      until: until() ?? undefined,
     };
   };
 
@@ -464,7 +518,11 @@ export function followHeatCloud(app: MapApp): void {
     around = false,
   ): CloudPoints | null => {
     const data = app.currentData;
-    const key = pointsKey(app, forced);
+    // With the flights timed on the clock it is built up to
+    const key = [
+      ...pointsKey(app, forced),
+      forced ? null : (clock?.legs ?? null),
+    ];
     const cloud = keptOf(forced);
     if (!sameKey(cloud.made, key)) {
       forget(forced);
@@ -513,8 +571,8 @@ export function followHeatCloud(app: MapApp): void {
   const updatePoints = (): void => {
     const at = level();
     const forced = app.forcedHeatCloud;
-    if (app.replayActive) {
-      draw(pointsAt(at, forced));
+    if (app.replayActive || clock) {
+      draw(pointsAt(at, forced, clock ? Math.max(at, reliefLevel(aimed)) : at));
       return;
     }
     const zoom = app.threeDVisible ? map.getZoom() : restZoom;
@@ -530,6 +588,15 @@ export function followHeatCloud(app: MapApp): void {
       release();
     },
     level,
+    grow: (to, zoom) => {
+      if (!to && clock) {
+        if (app.threeDVisible) easing = performance.now();
+        else handing = true;
+      }
+      clock = to;
+      aimed = zoom;
+      sync();
+    },
   });
 
   /**
@@ -588,6 +655,7 @@ export function followHeatCloud(app: MapApp): void {
       exposure,
       heatWeight,
       (busiest) => gain * cloudExposure(busiest * gain),
+      forced ? undefined : (clock?.legs ?? undefined),
     );
   };
 
@@ -613,13 +681,14 @@ export function followHeatCloud(app: MapApp): void {
     if (app.signal.aborted) return;
     // Wrapped's cloud hands its map over to the flat heatmap as its intro
     // ends (ui/wrappedIntro.ts), fading out over it, unless the 3D view
-    // keeps a cloud there. A close takes it off at once: the page's map
-    // shows the user's own heat.
+    // keeps a cloud there, and so does the cloud of the intro of a link
+    // to shared flights on the flat map. A close takes it off at once:
+    // the page's map shows the user's own heat.
     const forced = app.forcedHeatCloud;
-    if (forced || wanted() || !app.wrappedVisible) {
+    if (forced || wanted() || !(app.wrappedVisible || handing)) {
       clearTimeout(left);
       leaving = 0;
-    } else if (wasForced && drawn) {
+    } else if ((wasForced || handing) && drawn) {
       leaving = performance.now();
       left = setTimeout(() => {
         leaving = 0;
@@ -627,6 +696,7 @@ export function followHeatCloud(app: MapApp): void {
       }, CLOUD_HANDOVER_MS);
     }
     wasForced = forced;
+    handing = false;
     place();
     // The flat heatmap steps aside while the layer is there to draw
     app.heatCloud = wanted();

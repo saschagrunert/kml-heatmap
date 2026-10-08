@@ -2,7 +2,8 @@
  * Replay of all flights: every flight the filters keep starts from its own
  * first fix at once and plays at a hundred to a thousand times its speed,
  * each a bright head with a trail fading behind it at its height, so the
- * year blooms out of the home field. The only clock is the one each flight
+ * year blooms out of the home field, in the colours of the colour layer
+ * that is on as it opens, if one is. The only clock is the one each flight
  * carries (see calculations/flightClock.ts): the panel reads "0:42 into
  * every flight", and its slider moves along the same clock, never a date
  * or an hour.
@@ -64,8 +65,8 @@ export const REPLAY_ALL_ORBIT_REDUCED_MOTION_MESSAGE =
  * Controls held while every flight replays, as for the replay of one
  * (REPLAY_DISABLED_CONTROL_IDS in ui/replayManager.ts): the filters, the
  * selection and Wrapped would change or take the map under it. The colour
- * layers too, which colour the trail of one flight and nothing here, and
- * the Heatmap switch, which says as the replay opens whether the heat
+ * layers too, whose colours the trails are drawn in as the replay opens,
+ * and the Heatmap switch, which says as the replay opens whether the heat
  * builds up behind the flights.
  */
 const HELD_CONTROL_IDS = [
@@ -185,7 +186,7 @@ export class ReplayAllControls {
     const speed = Number(
       panel.querySelector<HTMLSelectElement>("select")?.value,
     );
-    void this.player.start({ speed });
+    void this.player.start({ speed, colour: true });
     if (this.player.flights === 0) {
       if (this.player.unavailable) {
         showToast(REPLAY_ALL_UNAVAILABLE_MESSAGE, "error");

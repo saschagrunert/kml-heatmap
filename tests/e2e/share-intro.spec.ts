@@ -11,30 +11,59 @@ import { gotoApp, waitForAppReady } from "./helpers";
 /** The id of the intro's layer on the map */
 const LAYER = "share-intro";
 
+/** What the intro was seen to draw, see watchIntro */
+interface IntroSeen {
+  /** The most frames its layer has drawn */
+  introFrames: number;
+  /**
+   * Whether its trails stood on the relief at some point (the ground was
+   * drawn at its height), and the most time the heat was built up to
+   * while they were on the map, the heat cloud in for the heatmap; -1
+   * while it was not
+   */
+  onRelief: boolean;
+  heatUntil: number;
+}
+
 /**
- * Note from the start of every page load the most frames the intro's layer
- * has drawn, in `window.introFrames`: the intro may well be over by the time
- * the app says it is ready in software WebGL
+ * Note from the start of every page load what the intro draws, in
+ * `window` (see IntroSeen): the intro may well be over by the time the app
+ * says it is ready in software WebGL
  */
 async function watchIntro(page: Page): Promise<void> {
   await page.addInitScript((layer) => {
-    const w = window as unknown as { introFrames: number };
+    type Style = { groundM: number; until?: number } | null;
+    const w = window as unknown as IntroSeen;
     w.introFrames = 0;
+    w.onRelief = false;
+    w.heatUntil = -1;
     setInterval(() => {
-      const drawn = window.mapApp?.map?.getLayer(layer) as
-        { implementation?: { frames: number } } | undefined;
-      w.introFrames = Math.max(
-        w.introFrames,
-        drawn?.implementation?.frames ?? 0,
-      );
+      const app = window.mapApp;
+      const drawn = app?.map?.getLayer(layer) as
+        { implementation?: { frames: number; style: () => Style } } | undefined;
+      const intro = drawn?.implementation;
+      if (!app || !intro) return;
+      w.introFrames = Math.max(w.introFrames, intro.frames);
+      if ((intro.style()?.groundM ?? 0) > 0) w.onRelief = true;
+      const cloud = app.map!.getLayer("heat-cloud") as
+        { implementation?: { style: () => Style } } | undefined;
+      const until = cloud?.implementation?.style()?.until;
+      if (app.store.get("heatCloud") && typeof until === "number") {
+        w.heatUntil = Math.max(w.heatUntil, until);
+      }
     }, 50);
   }, LAYER);
 }
 
+function introSeen(page: Page): Promise<IntroSeen> {
+  return page.evaluate(() => {
+    const { introFrames, onRelief, heatUntil } = window as unknown as IntroSeen;
+    return { introFrames, onRelief, heatUntil };
+  });
+}
+
 function introFrames(page: Page): Promise<number> {
-  return page.evaluate(
-    () => (window as unknown as { introFrames: number }).introFrames,
-  );
+  return introSeen(page).then((seen) => seen.introFrames);
 }
 
 /** Whether every fix of the shared flights is on the map */
@@ -58,10 +87,11 @@ function sharedFlightsFramed(page: Page): Promise<boolean> {
 
 /**
  * Share the first two flights, move the view off them, as a link may be
- * copied from anywhere, and hand on the link Copy link copies
+ * copied from anywhere, and hand on the link Copy link copies; with
+ * `threeD`, in the 3D view, tilted as its control tilts it
  */
-async function copyShareLink(page: Page): Promise<string> {
-  await page.evaluate(() => {
+async function copyShareLink(page: Page, threeD = false): Promise<string> {
+  await page.evaluate((threeD) => {
     const app = window.mapApp!;
     app.store.batch(() => {
       for (const path of app.fullPathInfo!.slice(0, 2)) {
@@ -69,8 +99,9 @@ async function copyShareLink(page: Page): Promise<string> {
       }
       app.store.notifyMutation("selectedPathIds");
       app.isolateSelection = true;
+      app.threeDVisible = threeD;
     });
-    app.map!.jumpTo({ zoom: 3 });
+    app.map!.jumpTo({ zoom: 3, pitch: threeD ? 50 : 0 });
     const w = window as unknown as { copied: string };
     Object.defineProperty(navigator.clipboard, "writeText", {
       value: (text: string) => {
@@ -78,7 +109,7 @@ async function copyShareLink(page: Page): Promise<string> {
         return Promise.resolve();
       },
     });
-  });
+  }, threeD);
   await page.locator("#selection-link-btn").click();
   return page.evaluate(() => (window as unknown as { copied: string }).copied);
 }
@@ -155,6 +186,72 @@ test.describe("The intro of a link to shared flights", () => {
     await page.waitForTimeout(1000);
     expect(await introFrames(page)).toBe(0);
     expect(new URL(page.url()).searchParams.has("i")).toBe(false);
+  });
+
+  test("builds the heat up behind the flights by its clock, and hands it back to the heatmap at the end @desktop", async ({
+    page,
+  }) => {
+    test.slow();
+    await watchIntro(page);
+    await gotoApp(page);
+    expect(await page.evaluate(() => window.mapApp!.heatmapVisible)).toBe(true);
+    const link = await copyShareLink(page);
+
+    await page.goto(link);
+    await expect
+      .poll(() => introFrames(page), { timeout: 20000 })
+      .toBeGreaterThan(0);
+    // The heat cloud stood in for the heatmap, built up as far as the
+    // intro's clock had come: no replay of the map, which holds controls
+    await expect
+      .poll(async () => (await introSeen(page)).heatUntil, { timeout: 20000 })
+      .toBeGreaterThanOrEqual(0);
+    expect(await page.evaluate(() => window.mapApp!.replayActive)).toBe(false);
+    // Played to the end, the heatmap is back and the cloud gone
+    await expect
+      .poll(
+        () =>
+          page.evaluate((layer) => {
+            const app = window.mapApp!;
+            return (
+              !app.map!.getLayer(layer) &&
+              !app.map!.getLayer("heat-cloud") &&
+              !app.store.get("heatCloud")
+            );
+          }, LAYER),
+        { timeout: 20000 },
+      )
+      .toBe(true);
+  });
+
+  test("keeps the tilt of the 3D view, the flights drawn on the relief and framed @desktop @heavy", async ({
+    page,
+  }) => {
+    test.slow();
+    await watchIntro(page);
+    await gotoApp(page);
+    const link = await copyShareLink(page, true);
+    expect(new URL(link).searchParams.get("d")).toBe("1");
+
+    await page.goto(link);
+    await expect
+      .poll(() => introFrames(page), { timeout: 60000 })
+      .toBeGreaterThan(0);
+    // Played to the end, the camera where it framed the flights and the
+    // trails gone: on a map that draws a frame in seconds, the intro may
+    // be over in a few of them, so the relief under the trails is what the
+    // watch saw in any frame (see watchIntro)
+    await expect
+      .poll(
+        () =>
+          page.evaluate((layer) => !window.mapApp!.map!.getLayer(layer), LAYER),
+        { timeout: 60000 },
+      )
+      .toBe(true);
+    expect((await introSeen(page)).onRelief).toBe(true);
+    const [, , , , pitch] = await camera(page);
+    expect(pitch).toBeCloseTo(50, 0);
+    expect(await sharedFlightsFramed(page)).toBe(true);
   });
 
   test("does not play over a view the visitor moved before it could start @desktop", async ({

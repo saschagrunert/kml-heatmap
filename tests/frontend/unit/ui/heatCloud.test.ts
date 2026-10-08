@@ -16,6 +16,7 @@ import type { StyleSpecification } from "maplibre-gl";
 import {
   CLOUD_IDLE_MS,
   followHeatCloud,
+  growHeatCloud,
   heatCloudLevel,
   prepareHeatCloud,
 } from "../../../../kml_heatmap/frontend/ui/heatCloud";
@@ -915,6 +916,123 @@ describe("the heat cloud", () => {
 
       expect(style()).toMatchObject({ opacity: 1, flow: true });
       expect(style()!.until).toBeUndefined();
+    });
+  });
+
+  describe("built up by the clock of the intro of a link to shared flights", () => {
+    /** The flights 1 and 2 one after another, the second 100 s on */
+    const clock = {
+      time: 0,
+      legs: new Map([
+        [1, 0],
+        [2, 100],
+      ]),
+    };
+    /** The times of the points of the flight at `lat` */
+    const timesAt = (cloud: CloudPoints | null, lat: number): number[] => {
+      const times: number[] = [];
+      const [, y] = mercatorOf([lat, 11]);
+      for (let k = 0; cloud && k < cloud.count; k++) {
+        const at = k * CLOUD_POINT_FLOATS;
+        if (Math.abs(cloud.points[at + 1]! + cloud.origin[1] - y) < 1e-6) {
+          times.push(cloud.points[at + 5]!);
+        }
+      }
+      return times;
+    };
+
+    beforeEach(() => {
+      clock.time = 0;
+      map().setZoom(5.4);
+      cuts.count = 0;
+    });
+
+    it("builds the heat up on the flat map by the clock, each flight timed where it starts on it, cut for the zoom the camera goes to", async () => {
+      await follow();
+      growHeatCloud(asMapApp(app), clock, 10.6);
+
+      expect(map().getLayer(HEAT_CLOUD_LAYER)).toBeDefined();
+      expect(app.store.get("heatCloud")).toBe(true);
+      expect(app.replayActive).toBe(false);
+      expect(style()).toMatchObject({ opacity: 1, flow: false, until: 0 });
+      expect(style()!.liftM).toBeGreaterThan(0);
+      clock.time = 120;
+      expect(style()!.until).toBe(120);
+      // All of the map, at the relief level of the zoom it set out from and
+      // as closely as the one it goes to, the legs handed on
+      expect(cuts.last[0]).toBe(5);
+      expect(cuts.last[1]).toBe(10);
+      expect(cuts.last[2]).toBeNull();
+      expect(cuts.last[6]).toBe(clock.legs);
+      const first = timesAt(drawn(), 47);
+      const second = timesAt(drawn(), 48);
+      expect(Math.min(...first)).toBe(0);
+      expect(Math.min(...second)).toBe(100);
+      expect(Math.max(...second)).toBeGreaterThan(100);
+    });
+
+    it("hands the flat map over to the heatmap as it ends, the cloud fading out over it", async () => {
+      vi.useFakeTimers();
+      const now = vi.spyOn(performance, "now").mockReturnValue(1000);
+      try {
+        await follow();
+        growHeatCloud(asMapApp(app), clock, 10.6);
+        const cloud = drawn();
+
+        growHeatCloud(asMapApp(app), null);
+
+        // The heatmap shows at once, under the cloud, whole and drawn as
+        // it was, which fades out
+        expect(app.store.get("heatCloud")).toBe(false);
+        expect(map().getLayer(HEAT_CLOUD_LAYER)).toBeDefined();
+        expect(drawn()).toBe(cloud);
+        expect(style()!.until).toBeUndefined();
+        expect(style()!.fade).toBe(1);
+        now.mockReturnValue(1500);
+        expect(style()!.fade).toBeCloseTo(0.5, 9);
+        vi.advanceTimersByTime(1000);
+        expect(map().getLayer(HEAT_CLOUD_LAYER)).toBeUndefined();
+        expect(drawn()).toBeNull();
+      } finally {
+        now.mockRestore();
+        vi.useRealTimers();
+      }
+    });
+
+    it("eases the 3D view's cloud from full strength to the one it is drawn at as it ends, cut without the clock again", async () => {
+      const now = vi.spyOn(performance, "now").mockReturnValue(1000);
+      try {
+        app.store.batch(() => {
+          app.threeDVisible = true;
+          app.selectedPathIds = new Set([1, 2]);
+        });
+        await follow();
+        const dimmed = style()!.opacity;
+        expect(dimmed).toBeLessThan(1);
+
+        growHeatCloud(asMapApp(app), clock, 10.6);
+        expect(style()).toMatchObject({ opacity: 1, flow: false, until: 0 });
+        expect(cuts.last[6]).toBe(clock.legs);
+
+        growHeatCloud(asMapApp(app), null);
+        expect(cuts.last[6]).toBeUndefined();
+        expect(style()).toMatchObject({ flow: true, fade: 1 });
+        expect(style()!.until).toBeUndefined();
+        expect(style()!.opacity).toBeCloseTo(1, 9);
+        now.mockReturnValue(1500);
+        expect(style()!.opacity).toBeCloseTo((1 + dimmed) / 2, 9);
+        now.mockReturnValue(2500);
+        expect(style()!.opacity).toBe(dimmed);
+        expect(map().getLayer(HEAT_CLOUD_LAYER)).toBeDefined();
+      } finally {
+        now.mockRestore();
+      }
+    });
+
+    it("builds nothing up before it is followed", () => {
+      growHeatCloud(asMapApp(app), clock, 10.6);
+      expect(map().getLayer(HEAT_CLOUD_LAYER)).toBeUndefined();
+      expect(app.store.get("heatCloud")).toBe(false);
     });
   });
 

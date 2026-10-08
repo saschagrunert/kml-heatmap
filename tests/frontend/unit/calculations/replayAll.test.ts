@@ -7,6 +7,7 @@
 import { describe, it, expect, vi } from "vitest";
 import {
   fitTilted,
+  fixPoints,
   LEG_PAUSE_S,
   REPLAY_ALL_POINT_FLOATS,
   replayAllPoints,
@@ -50,11 +51,13 @@ function build(
     detail = 12,
     level = 6,
     starts,
+    colourOf,
   }: {
     keep?: (pathId: number) => boolean;
     detail?: number;
     level?: number;
     starts?: ReadonlyMap<number, number>;
+    colourOf?: (segment: PathSegment) => number;
   } = {},
 ): ReplayAllPoints {
   const flights = smoothFlights(segments, (i) => segments[i]!.altitude_ft, {
@@ -68,6 +71,7 @@ function build(
     detail,
     level,
     starts,
+    colourOf,
   );
 }
 
@@ -117,6 +121,29 @@ describe("replayAllPoints", () => {
     expect(joins[second - 1]).toBe(0);
     expect(joins[joins.length - 1]).toBe(0);
     expect(joins.filter((join) => join === 0)).toHaveLength(2);
+  });
+
+  it("colours each point as the segment the stretch up to it lies along, and none without colours", () => {
+    // A climb of 100 ft a segment, the colour of each its altitude
+    const segments = flight(1, 47).map((segment, i) => ({
+      ...segment,
+      altitude_ft: 1000 + 100 * i,
+    }));
+    const points = build(segments, { colourOf: (s) => s.altitude_ft });
+    const times = column(points, 4);
+    const colours = column(points, 6);
+
+    // The first point is the first segment's, and each after it the one
+    // of the segment its time falls in: segment i is flown from 5 i s on
+    expect(colours[0]).toBe(1000);
+    for (let k = 1; k < colours.length; k++) {
+      const segment = Math.min(Math.ceil(times[k]! / 5 - 1e-6) - 1, 39);
+      expect(colours[k]).toBe(1000 + 100 * segment);
+    }
+    expect(colours[colours.length - 1]).toBe(1000 + 100 * 39);
+    expect(column(build(segments), 6).every((colour) => colour === 0)).toBe(
+      true,
+    );
   });
 
   it("thins the curves for the zoom, more closely the closer in", () => {
@@ -332,6 +359,25 @@ describe("sequenceStarts", () => {
   });
 });
 
+describe("fixPoints", () => {
+  it("puts both ends of every segment where they are, as a run's points", () => {
+    const segments = flight(1, 47);
+    const fixes = fixPoints(segments);
+
+    expect(fixes.count).toBe(2 * segments.length);
+    expect(fixes.points).toHaveLength(fixes.count * REPLAY_ALL_POINT_FLOATS);
+    segments.forEach(({ coords }, i) => {
+      coords.forEach((fix, end) => {
+        const k = (2 * i + end) * REPLAY_ALL_POINT_FLOATS;
+        const [x, y] = mercatorOf(fix);
+        expect(fixes.points[k]! + fixes.origin[0]).toBeCloseTo(x, 9);
+        expect(fixes.points[k + 1]! + fixes.origin[1]).toBeCloseTo(y, 9);
+      });
+    });
+    expect(fixPoints([]).count).toBe(0);
+  });
+});
+
 describe("the fit of the flights on a tilted map", () => {
   /** A desktop map, the panel of the replay along its bottom */
   const MAP: FitMap = {
@@ -358,7 +404,7 @@ describe("the fit of the flights on a tilted map", () => {
     points: Float32Array.from(
       spread.flatMap(([lng, lat]) => {
         const [x, y] = mercatorOf([lat, lng]);
-        return [x - RUN.origin[0], y - RUN.origin[1], 0, 0, 0, 1];
+        return [x - RUN.origin[0], y - RUN.origin[1], 0, 0, 0, 1, 0];
       }),
     ),
     count: spread.length,
@@ -366,9 +412,10 @@ describe("the fit of the flights on a tilted map", () => {
 
   /**
    * Where MapLibre draws `[lng, lat]` on the flat map of `map` with the
-   * camera `camera`, north up, worked out anew: the camera at the distance
-   * of the field of view from the middle of the map, turned down by the
-   * tilt, and a perspective division by the depth along its view
+   * camera `camera`, worked out anew: the map turned by its bearing (east
+   * up at 90), the camera at the distance of the field of view from the
+   * middle of the map, turned down by the tilt, and a perspective division
+   * by the depth along its view
    */
   function project(
     [lng, lat]: [number, number],
@@ -384,9 +431,14 @@ describe("the fit of the flights on a tilted map", () => {
     const eye = [0, distance * Math.sin(pitch), distance * Math.cos(pitch)];
     const ahead = eye.map((v) => -v / distance);
     const up = [0, -Math.cos(pitch), Math.sin(pitch)];
-    const to = [(x - cx) * world, (y - cy) * world, 0].map(
-      (v, i) => v - eye[i]!,
-    );
+    const turn = ((map.bearing ?? 0) * Math.PI) / 180;
+    const east = (x - cx) * world;
+    const south = (y - cy) * world;
+    const to = [
+      east * Math.cos(turn) + south * Math.sin(turn),
+      south * Math.cos(turn) - east * Math.sin(turn),
+      0,
+    ].map((v, i) => v - eye[i]!);
     const dot = (a: number[], b: number[]) =>
       a.reduce((sum, v, i) => sum + v * b[i]!, 0);
     const depth = dot(to, ahead);
@@ -426,6 +478,37 @@ describe("the fit of the flights on a tilted map", () => {
     const north = project([14, 54], camera)[0] - project([8, 54], camera)[0];
     const south = project([14, 46], camera)[0] - project([8, 46], camera)[0];
     expect(north).toBeLessThan(south);
+  });
+
+  it("fills the room of a turned map as well", () => {
+    for (const bearing of [90, -35, 180]) {
+      const turned = { ...MAP, bearing };
+
+      const camera = fitTilted(run, { center: [11, 50], zoom: 5 }, turned, 22);
+
+      const [left, top, right, bottom] = box(camera, turned);
+      const { padding } = MAP;
+      expect(left).toBeGreaterThanOrEqual(padding.left - 2);
+      expect(right).toBeLessThanOrEqual(MAP.width - padding.right + 2);
+      expect(top).toBeGreaterThanOrEqual(padding.top - 2);
+      expect(bottom).toBeLessThanOrEqual(MAP.height - padding.bottom + 2);
+      const fill = Math.max(
+        (right - left) / (MAP.width - padding.left - padding.right),
+        (bottom - top) / (MAP.height - padding.top - padding.bottom),
+      );
+      expect(fill).toBeGreaterThan(0.98);
+    }
+    // Taller than wide, the flights lie along the wide flat map with east
+    // up, which comes closer in than north up
+    const flat = { ...MAP, pitch: 0 };
+    const north = fitTilted(run, { center: [11, 50], zoom: 5 }, flat, 22);
+    const east = fitTilted(
+      run,
+      { center: [11, 50], zoom: 5 },
+      { ...flat, bearing: 90 },
+      22,
+    );
+    expect(east.zoom).toBeGreaterThan(north.zoom + 0.2);
   });
 
   it("fits a flat map as a fit of the bounds does", () => {

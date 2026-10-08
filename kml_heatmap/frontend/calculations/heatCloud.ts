@@ -344,7 +344,10 @@ function reaches(box: Box, points: readonly Readonly<Coordinate>[]): boolean {
  * busiest heat per metre (see cloudExposure in ui/heatCloudShaders.ts), and
  * with it the heat of the stretches written is rolled off by that of the
  * cells they pass (see markStretches); without it the heat is left as it
- * is.
+ * is. With `starts`, the time of each flight's points begins where it
+ * gives (see sequenceStarts in calculations/replayAll.ts) rather than at
+ * 0, as the replay of flights played one after another times them, so
+ * the heat builds up behind each in turn.
  */
 export function cloudPoints(
   segments: readonly PathSegment[],
@@ -356,6 +359,7 @@ export function cloudPoints(
   busiest?: number,
   weigh: SegmentWeight = heatWeight,
   scaleOf?: (busiest: number) => number,
+  starts?: ReadonlyMap<number, number>,
 ): CloudPoints {
   const exaggeration = liftExaggeration(level);
   const values: number[] = [];
@@ -408,6 +412,7 @@ export function cloudPoints(
       );
       const groundAt = (j: number): number => (ground ? ground[j]! : 0);
       const heightAt = (j: number): number => groundAt(j) + heights[j]!;
+      const start = starts?.get(segments[i]!.path_id) ?? 0;
 
       // The point the last step ended at, `prev`: whether it is in the
       // box, and where it is, its height and the ground under it in
@@ -438,7 +443,7 @@ export function cloudPoints(
         east = Math.max(east, x);
         north = Math.min(north, y);
         south = Math.max(south, y);
-        values.push(x, y, groundAt(j), heights[j]!, heat, times[j]!, 0);
+        values.push(x, y, groundAt(j), heights[j]!, heat, start + times[j]!, 0);
       };
       /** Write the stretch merged so far, which ends at `prev` */
       const flush = (): void => {

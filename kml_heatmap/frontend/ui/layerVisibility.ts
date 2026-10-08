@@ -96,7 +96,7 @@ export function dimsHeatCloud(app: MapApp): boolean {
 /**
  * Whether paths are coloured by altitude: the altitude layer, or a replay
  * trail, which takes altitude colours unless the speed layer is on. The
- * trails of the replay of every flight take none.
+ * trails of the replay of every flight take the layer's that is on, if any.
  */
 export function altitudeColours(app: MapApp): boolean {
   return (

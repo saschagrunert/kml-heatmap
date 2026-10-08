@@ -11,11 +11,19 @@ import {
   SHARE_INTRO_LEAST_MS,
   SHARE_INTRO_MS,
 } from "../../../../kml_heatmap/frontend/ui/shareIntro";
-import { LEG_PAUSE_S } from "../../../../kml_heatmap/frontend/calculations/replayAll";
+import * as replayAll from "../../../../kml_heatmap/frontend/calculations/replayAll";
+import {
+  LEG_PAUSE_S,
+  REPLAY_ALL_POINT_FLOATS,
+  type ReplayAllPoints,
+} from "../../../../kml_heatmap/frontend/calculations/replayAll";
+import { ReplayAllPlayer } from "../../../../kml_heatmap/frontend/ui/replayAllPlayer";
 import { flightClockOf } from "../../../../kml_heatmap/frontend/calculations/flightClock";
 import { MAP_LAYERS } from "../../../../kml_heatmap/frontend/utils/constants";
 import * as motion from "../../../../kml_heatmap/frontend/utils/motion";
+import * as pathSelection from "../../../../kml_heatmap/frontend/ui/pathSelection";
 import type { PathSegment } from "../../../../kml_heatmap/frontend/types";
+import { mercatorOf } from "../../../../kml_heatmap/frontend/utils/mercator";
 import {
   asMapApp,
   createDataset,
@@ -25,6 +33,17 @@ import {
 
 /** The id of the intro's layer on the map */
 const LAYER = "share-intro";
+
+vi.mock(
+  "../../../../kml_heatmap/frontend/calculations/replayAll",
+  async (original) => {
+    const module =
+      await original<
+        typeof import("../../../../kml_heatmap/frontend/calculations/replayAll")
+      >();
+    return { ...module, fitTilted: vi.fn(module.fitTilted) };
+  },
+);
 
 /** A flight of `path_id` along the latitude `lat`, `fixes` fixes 30 s apart */
 function flight(path_id: number, lat: number, fixes = 5): PathSegment[] {
@@ -52,8 +71,27 @@ function untimed(path_id: number, lat: number): PathSegment[] {
 }
 
 /**
- * Three flights of 2025, the second the longest, the third of D-EBBB, and
- * a fourth and a fifth with no clock
+ * The flight of `path_id` along the latitude `lat` out to 0.42 degrees
+ * east and back, 30 s a fix: some 30 km out, which cut for a map far out
+ * keeps a point every 18 km or so of
+ */
+function outAndBack(path_id: number, lat: number): PathSegment[] {
+  const lngAt = (i: number): number => 11 + 0.021 * (i <= 20 ? i : 40 - i);
+  return Array.from({ length: 40 }, (_, i) => ({
+    path_id,
+    coords: [
+      [lat, lngAt(i)],
+      [lat, lngAt(i + 1)],
+    ],
+    altitude_ft: 3000,
+    groundspeed_knots: 100,
+    time: i * 30,
+  }));
+}
+
+/**
+ * Three flights of 2025, the second the longest, the third of D-EBBB, a
+ * fourth and a fifth with no clock, and a sixth out and back
  */
 const DATA = createDataset(
   [
@@ -62,6 +100,7 @@ const DATA = createDataset(
     { id: 3, year: 2025, aircraft_registration: "D-EBBB" },
     { id: 4, year: 2025, aircraft_registration: "D-EAAA" },
     { id: 5, year: 2025, aircraft_registration: "D-EAAA" },
+    { id: 6, year: 2025, aircraft_registration: "D-EAAA" },
   ] as never,
   [
     ...flight(1, 47),
@@ -69,6 +108,7 @@ const DATA = createDataset(
     ...flight(3, 49),
     ...untimed(4, 50),
     ...untimed(5, 51),
+    ...outAndBack(6, 52),
   ],
 );
 
@@ -201,6 +241,15 @@ describe("playShareIntro", () => {
     ).style().time;
   const lines = (): unknown =>
     map().getLayoutProperty(MAP_LAYERS.selectionHighlight, "visibility");
+  /** The points the intro's layer was last handed */
+  const points = (): ReplayAllPoints =>
+    (
+      map()
+        .addLayer.mock.calls.filter(
+          ([spec]) => (spec as { id: string }).id === LAYER,
+        )
+        .pop()![0] as unknown as { flights: ReplayAllPoints }
+    ).flights;
 
   /** Share the flights `pathIds` */
   function share(...pathIds: number[]): void {
@@ -258,6 +307,127 @@ describe("playShareIntro", () => {
     frames.run(first! / 2 + 1);
     expect(time()).toBeGreaterThan(one + LEG_PAUSE_S);
     expect(lines()).toBe("none");
+  });
+
+  it("fits the camera to the flights at the tilt and the bearing of the map, as the replay of all flights does, and cuts the trails for it from the start", () => {
+    share(1, 2);
+    map().jumpTo({ pitch: 60, bearing: 30, zoom: 3 });
+    map().easeTo.mockClear();
+    const fit = vi.mocked(replayAll.fitTilted);
+    fit.mockClear();
+    const aim = vi.spyOn(ReplayAllPlayer.prototype, "aim");
+
+    playShareIntro(asMapApp(app));
+
+    expect(fit).toHaveBeenCalledTimes(1);
+    const [, , fitMap] = fit.mock.calls[0]!;
+    expect(fitMap).toMatchObject({ pitch: 60, bearing: 30 });
+    const camera = fit.mock.results[0]!.value as replayAll.FitCamera;
+    const ease = map().easeTo.mock.calls[0]![0] as Record<string, unknown>;
+    // The tilt kept, which the map has
+    expect(ease).toMatchObject({ ...camera, bearing: 30 });
+    expect(ease).not.toHaveProperty("pitch");
+    expect(aim).toHaveBeenCalledWith(camera.zoom, true);
+  });
+
+  it("fits every fix of the shared flights, of one with no clock as well, which the trails leave out", () => {
+    share(1, 4);
+    const fit = vi.mocked(replayAll.fitTilted);
+    fit.mockClear();
+
+    playShareIntro(asMapApp(app));
+
+    const [fixes] = fit.mock.calls[0]!;
+    const segments = DATA.path_segments.filter((s) =>
+      [1, 4].includes(s.path_id),
+    );
+    expect(fixes.count).toBe(2 * segments.length);
+    const ys = Array.from(
+      { length: fixes.count },
+      (_, k) =>
+        Number(fixes.points[k * REPLAY_ALL_POINT_FLOATS + 1]) + fixes.origin[1],
+    );
+    expect(Math.min(...ys)).toBeCloseTo(mercatorOf([50, 11])[1], 6);
+  });
+
+  it("frames a flight from a link opened far out as from its own zoom, its turn as well", () => {
+    /** The camera the intro eases to from the view `zoom` */
+    const framed = (
+      zoom: number,
+    ): { center: [number, number]; zoom: number } => {
+      lifetime.abort();
+      lifetime = new AbortController();
+      app = createMockApp({
+        signal: lifetime.signal,
+        currentData: DATA,
+        selectedYear: "all",
+      });
+      share(6);
+      // A map of 1280x720 with a margin of 24 px, whose fit of the bounds
+      // comes to zoom 9
+      vi.spyOn(map().getContainer(), "getBoundingClientRect").mockReturnValue(
+        new DOMRect(0, 0, 1280, 720),
+      );
+      vi.spyOn(pathSelection, "mapChromePadding").mockReturnValue({
+        top: 24,
+        right: 24,
+        bottom: 24,
+        left: 24,
+      });
+      const fit = map().cameraForBounds.getMockImplementation()!;
+      map().cameraForBounds.mockImplementation((bounds, options) => ({
+        ...fit(bounds, options),
+        zoom: 9,
+      }));
+      map().jumpTo({ zoom, pitch: 50, center: [11.2, 52] });
+      map().easeTo.mockClear();
+      playShareIntro(asMapApp(app));
+      return map().easeTo.mock.calls[0]![0] as never;
+    };
+
+    const near = framed(11);
+    const far = framed(3);
+
+    expect(far.zoom).toBeCloseTo(near.zoom, 2);
+    expect(far.center[0]).toBeCloseTo(near.center[0], 4);
+    expect(far.center[1]).toBeCloseTo(near.center[1], 4);
+  });
+
+  it("draws the trails in the colours of the colour layer that is on", () => {
+    share(1, 2);
+    app.altitudeVisible = true;
+    playShareIntro(asMapApp(app));
+
+    const run = points();
+    for (let k = 0; k < run.count; k++) {
+      expect(run.points[k * REPLAY_ALL_POINT_FLOATS + 6]).toBeGreaterThan(0);
+    }
+  });
+
+  it("draws the trails in their own colour without a colour layer", () => {
+    share(1, 2);
+    playShareIntro(asMapApp(app));
+
+    const run = points();
+    expect(run.count).toBeGreaterThan(0);
+    for (let k = 0; k < run.count; k++) {
+      expect(run.points[k * REPLAY_ALL_POINT_FLOATS + 6]).toBe(0);
+    }
+  });
+
+  it("builds the heat up behind the flights meanwhile, and hands it back at the end", () => {
+    share(1, 2);
+    app.heatmapVisible = true;
+    playShareIntro(asMapApp(app));
+    frames.run();
+
+    // The cloud steps in for the heatmap on the flat map, no replay of the
+    // map that would hold the controls
+    expect(app.store.get("heatCloud")).toBe(true);
+    expect(app.replayActive).toBe(false);
+
+    frames.run(SHARE_INTRO_MS);
+    expect(app.store.get("heatCloud")).toBe(false);
   });
 
   it("hands over to the lines at the end, and takes the trails away once they are drawn", async () => {
@@ -357,8 +527,10 @@ describe("playShareIntro", () => {
 
   it("leaves the camera to what the app opened when the map is taken", () => {
     share(1, 2);
+    app.heatmapVisible = true;
     playShareIntro(asMapApp(app));
     frames.run();
+    expect(app.store.get("heatCloud")).toBe(true);
     map().isMoving.mockReturnValue(true);
     map().jumpTo.mockClear();
 
@@ -367,8 +539,10 @@ describe("playShareIntro", () => {
     expect(frames.pending()).toBe(0);
     expect(map().jumpTo).not.toHaveBeenCalled();
     expect(lines()).toBe("visible");
-    // Its trails do not stand over what the replay draws
+    // Its trails do not stand over what the replay draws, nor its heat,
+    // built up by its clock, over the heatmap
     expect(onMap()).toBe(false);
+    expect(app.store.get("heatCloud")).toBe(false);
   });
 
   it("takes the trails away at once when the map is taken as the lines are drawn", async () => {
@@ -414,6 +588,7 @@ describe("playShareIntro", () => {
 
   it("only frames the flights under reduced motion", () => {
     vi.mocked(motion.prefersReducedMotion).mockReturnValue(true);
+    vi.mocked(replayAll.fitTilted).mockClear();
     share(1, 2);
     map().easeTo.mockClear();
 
@@ -424,6 +599,13 @@ describe("playShareIntro", () => {
     expect(onMap()).toBe(false);
     expect(frames.pending()).toBe(0);
     expect(lines()).toBe("visible");
+    // Fitted without a player: no trails cut, and no layer put on the map
+    // for a moment
+    expect(replayAll.fitTilted).toHaveBeenCalledTimes(1);
+    const added = map().addLayer.mock.calls.filter(
+      ([spec]) => (spec as { id: string }).id === LAYER,
+    );
+    expect(added).toHaveLength(0);
   });
 
   it("does not play while a replay, the tour or Wrapped holds the map", () => {

@@ -4,9 +4,16 @@
  * (ui/replayAllLayer.ts), and nothing else.
  */
 import type { MapApp } from "../mapApp";
-import type { KMLDataset } from "../types";
+import type { KMLDataset, PathSegment } from "../types";
 import { keptFlights } from "./keptFlights";
+import { shownSelection } from "../calculations/datasetIndex";
 import { flightClockOf } from "../calculations/flightClock";
+import { segmentsForPathIds } from "../calculations/statistics";
+import {
+  calculateAirspeedRange,
+  calculateAltitudeRange,
+} from "../features/layers";
+import { getColorForAirspeed, getColorForAltitude } from "../utils/colors";
 import {
   groundedFlights,
   releaseGroundedFlights,
@@ -100,6 +107,12 @@ export interface ReplayAllRun {
    * (ui/shareIntro.ts), which hands them over to the lines of the flights
    */
   lasting?: boolean;
+  /**
+   * Whether the trails are drawn in the colours of the colour layer that
+   * is on as the run starts (see colourOf), rather than in their own
+   * amber: not under Wrapped's intro, whose year is no colour layer's
+   */
+  colour?: boolean;
 }
 
 /**
@@ -143,6 +156,8 @@ export class ReplayAllPlayer {
   private readonly layer: ReplayAllLayer;
   private points: ReplayAllPoints | null = null;
   private keep: ((pathId: number) => boolean) | null = null;
+  /** The colour of each segment of the run (ReplayAllRun.colour) */
+  private colours: ((segment: PathSegment) => number) | null = null;
   /**
    * Where each flight starts on the clock of a run played one after
    * another, in the order played (see sequenceStarts); null for one that
@@ -266,11 +281,12 @@ export class ReplayAllPlayer {
     this.keep = legs
       ? (pathId) => legs.has(pathId)
       : keepOf(app, data, run.pathIds);
+    this.colours = run.colour ? colourOf(app, data) : null;
     this.speed = run.speed ?? REPLAY_ALL_SPEED;
     this.scale = run.scale ?? 1;
     this.lasting = !!run.lasting;
-    this.zoomAhead = run.zoom ?? null;
     this.levelsOut = 0;
+    this.zoomAhead = run.zoom ?? null;
     this.aheadDrawn = this.nearAhead();
     this.lifted = isLiftedAt(map.getZoom());
     this.time = 0;
@@ -280,19 +296,7 @@ export class ReplayAllPlayer {
       return Promise.resolve(false);
     }
     const { signal } = (this.following = new AbortController());
-    const ahead = this.zoomAhead;
-    if (ahead !== null && !this.aheadDrawn) {
-      // Cut now, so that the camera's frames do not wait for it
-      this.pointsFor(ahead);
-      const zooming = map.on("zoom", () => {
-        if (this.zoomAhead === null || this.aheadDrawn || !this.nearAhead()) {
-          return;
-        }
-        this.aheadDrawn = true;
-        this.cut();
-      });
-      signal.addEventListener("abort", () => zooming.unsubscribe());
-    }
+    if (this.zoomAhead !== null && !this.aheadDrawn) this.aim(this.zoomAhead);
     const store = app.store;
     store.subscribeKeys(
       ["threeDVisible", "terrainActive", "reliefLevel"],
@@ -319,6 +323,37 @@ export class ReplayAllPlayer {
     });
     this.resume();
     return ended;
+  }
+
+  /**
+   * Cut the curves for the zoom `zoom` a camera on its way sets out for
+   * (see ReplayAllRun.zoom), from ZOOM_AHEAD_LEVELS short of it on, or
+   * from `now` on, until the map first comes to the end of a zoom: once a
+   * run has started, for a camera fitted to its flights. The intro of a
+   * link to shared flights (ui/shareIntro.ts) draws them so from the
+   * start: they are few, and the first of them flies as the camera comes
+   * down, where those cut for the zoom it set out from were spokes.
+   */
+  aim(zoom: number, now = false): void {
+    const map = this.app.map;
+    const signal = this.following?.signal;
+    if (!map || !signal) return;
+    this.zoomAhead = zoom;
+    this.aheadDrawn = now || this.nearAhead();
+    if (this.aheadDrawn) {
+      this.cut();
+      return;
+    }
+    // Cut now, so that the camera's frames do not wait for it
+    this.pointsFor(zoom);
+    const zooming = map.on("zoom", () => {
+      if (this.zoomAhead === null || this.aheadDrawn || !this.nearAhead()) {
+        return;
+      }
+      this.aheadDrawn = true;
+      this.cut();
+    });
+    signal.addEventListener("abort", () => zooming.unsubscribe());
   }
 
   /**
@@ -361,6 +396,7 @@ export class ReplayAllPlayer {
     this.following?.abort();
     this.following = null;
     this.keep = null;
+    this.colours = null;
     this.legs = null;
     this.zoomAhead = null;
     this.aheadDrawn = false;
@@ -393,19 +429,6 @@ export class ReplayAllPlayer {
    */
   private end(): number {
     return this.duration + (this.legs ? 0 : this.fade());
-  }
-
-  /**
-   * The time on the clock of a run played one after another that is
-   * `seconds` into the flight `pathId` on its own clock (FlightClock), its
-   * landing at most and by default; 0 for a flight it does not play
-   */
-  legTime(pathId: number, seconds = Infinity): number {
-    const start = this.legs?.get(pathId);
-    const data = this.app.currentData;
-    if (start === undefined || !data) return 0;
-    const duration = flightClockOf(data.path_segments).duration.get(pathId);
-    return start + Math.min(seconds, duration ?? 0);
   }
 
   /**
@@ -585,6 +608,7 @@ export class ReplayAllPlayer {
         detail,
         level,
         this.legs ?? undefined,
+        this.colours ?? undefined,
       );
       const oldest = this.cuts.keys().next();
       if (!oldest.done && this.cuts.size >= CUTS_KEPT) {
@@ -608,6 +632,53 @@ export class ReplayAllPlayer {
       REPLAY_ALL_BEFORE,
     ]);
   }
+}
+
+/**
+ * The colour of a segment of `data` as the colour layer that is on draws
+ * it, as the three bytes the points of a run carry (see replayAllPoints),
+ * or null while neither is on. Its range is the one the layer and its
+ * legend use (resolveColorRange in ui/pathLook.ts): the shown selection's
+ * if there is one, else all of it, the colours spread by its values. A
+ * segment the Groundspeed layer draws no line along, with no speed
+ * (filterSegment in ui/pathRuns.ts), has its colour negated: its trail
+ * is not drawn either, and its head is drawn in it.
+ */
+function colourOf(
+  app: MapApp,
+  data: KMLDataset,
+): ((segment: PathSegment) => number) | null {
+  const altitude = app.altitudeVisible;
+  if (!altitude && !app.airspeedVisible) return null;
+  const selected = shownSelection(app);
+  const segments =
+    selected.size > 0 ? segmentsForPathIds(data.path_segments, selected) : [];
+  const range = altitude
+    ? calculateAltitudeRange(segments, app.altitudeRange, data.path_info)
+    : calculateAirspeedRange(segments, app.airspeedRange);
+  const bytes = new Map<string, number>();
+  return (segment) => {
+    const colour = altitude
+      ? getColorForAltitude(
+          segment.altitude_ft,
+          range.min,
+          range.max,
+          range.ranks,
+        )
+      : getColorForAirspeed(
+          segment.groundspeed_knots,
+          range.min,
+          range.max,
+          range.ranks,
+        );
+    let packed = bytes.get(colour);
+    if (packed === undefined) {
+      const [r, g, b] = colour.match(/\d+/g)!.map(Number);
+      packed = (r! << 16) | (g! << 8) | b!;
+      bytes.set(colour, packed);
+    }
+    return altitude || segment.groundspeed_knots > 0 ? packed : -packed;
+  };
 }
 
 /**
