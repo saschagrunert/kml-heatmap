@@ -77,20 +77,24 @@ test.describe("Flight profile", () => {
     await page.mouse.move(box.x + box.width * 0.995, box.y + box.height / 2);
     await expect(profile.locator(".profile-readout")).toContainText(" ft");
 
-    // A click near the end opens the replay of both, paused in the second
+    // A click near the end opens the replay of both, paused in the second,
+    // in the panel of the replay of one flight with the strip as its
+    // timeline
     await page.mouse.down();
     await page.mouse.up();
-    const panel = page.locator("#replay-all-controls");
-    await expect(panel).toBeVisible({ timeout: 10000 });
-    await expect(page.locator("#replay-all-clock")).toHaveText(
-      /^2 of 2, .+: \d+:\d{2} in$/,
+    await expect(page.locator("#replay-controls")).toBeVisible({
+      timeout: 10000,
+    });
+    await expect(page.locator("#replay-time-display")).toHaveText(
+      /^2 of 2, .+ → .+: \d+:\d{2}(:\d{2})? in$/,
     );
-    await expect(page.locator("#replay-all-play-btn")).toHaveAttribute(
-      "aria-label",
-      "Play the replay of the selected flights",
-    );
-    // The strip steps aside for its panel
-    await expect(profile).toBeHidden();
+    await expect(page.locator("#replay-play-btn")).toBeVisible();
+    await expect(
+      page.locator("#replay-controls #flight-profile"),
+    ).toBeVisible();
+    await expect(
+      page.locator("#replay-controls #flight-profile .profile-cursor"),
+    ).toHaveAttribute("visibility", "visible");
   });
 
   test("a drag on the profile opens replay there and moves the airplane", async ({

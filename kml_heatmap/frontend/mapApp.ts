@@ -1024,7 +1024,7 @@ export class MapApp {
    * flight whose times are all 0 (a single timed segment, or points logged
    * at the same second) finished the moment it started and drew nothing.
    * More than one, up to DAY_MAX_FLIGHTS, play one after another, those
-   * without times left out (ui/replayAll.ts). Share mode keeps the flights
+   * without times left out (ui/replayManager.ts). Share mode keeps the flights
    * a filter hides, which the map does not draw: they are neither played
    * nor counted.
    */
@@ -1064,35 +1064,16 @@ export class MapApp {
   }
 
   /**
-   * Whether Replay plays the selection one after another, in the panel of
-   * the replay of all flights (toggleSequence in ui/replayAll.ts), rather
-   * than the replay of one flight: with more than one selected that the
-   * filter shows (shownSelection). Replay and a click on the flight profile
-   * both go by it.
-   */
-  playsInSequence(): boolean {
-    return shownSelection(this).size > 1;
-  }
-
-  /**
    * Open or close replay, fetching the feature bundle on first use. Clicks
    * that land while the bundle is still on its way are dropped: each one
    * queued a toggle of its own, and two quick ones opened replay and closed
    * it again the moment the bundle arrived. What opened meanwhile, Replay
    * all or Wrapped waiting on the same bundle, is not closed by the late
-   * click, nor covered by a replay. Several flights play one after another
-   * (playsInSequence), without the replay manager, and the Replay control
-   * closes them as well.
+   * click, nor covered by a replay. One flight or several, the replay
+   * manager plays them; the replay of every flight holds the control.
    */
   toggleReplay(): void {
-    if (
-      this.replayActive
-        ? this.replayState.all
-        : this.playsInSequence() && this.canReplay() && !this.tourView
-    ) {
-      this.toggleFeature("toggleSequence", REPLAY_UNAVAILABLE_MESSAGE);
-      return;
-    }
+    if (this.replayActive && this.replayState.all) return;
     if (this.replayManager) {
       this.replayManager.toggleReplay();
       return;
@@ -1101,8 +1082,8 @@ export class MapApp {
       .then((manager) => {
         this.pendingReplayToggle = null;
         if (this.destroyed || this.replayActive || this.wrappedVisible) return;
-        // Decided again: a flight selected meanwhile makes it a replay of
-        // several, which the manager would have played the first of
+        // Decided again: the replay of every flight may have opened, and
+        // the selection changed, meanwhile
         if (manager) this.toggleReplay();
       })
       .catch((error) => {

@@ -52,10 +52,7 @@ export const SEARCH_UNAVAILABLE_MESSAGE =
 /** What a control starts in the feature bundle once it has arrived */
 export type FeatureToggle = keyof Pick<
   FeatureModule,
-  | "toggleReplayAll"
-  | "toggleSequence"
-  | "toggleHotspotTour"
-  | "toggleCrossSection"
+  "toggleReplayAll" | "toggleHotspotTour" | "toggleCrossSection"
 >;
 
 /** The messages of the one file that carries Wrapped and the statistics */

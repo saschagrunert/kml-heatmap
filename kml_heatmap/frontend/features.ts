@@ -45,7 +45,7 @@ export {
   releaseGroundProfiles,
 } from "./calculations/groundProfile";
 export { ReplayAllPlayer } from "./ui/replayAllPlayer";
-export { toggleReplayAll, toggleSequence } from "./ui/replayAll";
+export { toggleReplayAll } from "./ui/replayAll";
 export { followFlightProfile } from "./ui/flightProfile";
 export { toggleCrossSection } from "./ui/crossSection";
 export {

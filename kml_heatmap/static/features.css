@@ -121,6 +121,10 @@
   text-align: center;
   min-width: 120px;
   white-space: nowrap;
+  /* The time of several flights, as wide as the longest (ReplayManager),
+     cut short where the panel has less room */
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 #replay-slider-container {
   display: flex;

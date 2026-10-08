@@ -3,7 +3,6 @@
  * once on the map, and the control and panel that make it a replay of the
  * map, holding the filters and the selection meanwhile.
  */
-import { REPLAY_PRECONDITION_MESSAGE } from "../../../../kml_heatmap/frontend/ui/replayButton";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
   REPLAY_ALL_NOTHING_MESSAGE,
@@ -13,7 +12,6 @@ import {
   replayAllClock,
   replayAllTime,
   toggleReplayAll,
-  toggleSequence,
 } from "../../../../kml_heatmap/frontend/ui/replayAll";
 import { flightClock } from "../../../../kml_heatmap/frontend/calculations/flightClock";
 import {
@@ -26,7 +24,6 @@ import {
 } from "../../../../kml_heatmap/frontend/ui/replayAllLayer";
 import * as motion from "../../../../kml_heatmap/frontend/utils/motion";
 import {
-  DAY_MAX_FLIGHTS,
   FEET_TO_METERS,
   MAP_LAYERS,
 } from "../../../../kml_heatmap/frontend/utils/constants";
@@ -1291,7 +1288,7 @@ describe("the replay of all flights", () => {
     });
   });
 
-  describe("the selected flights one after another", () => {
+  describe("a player of flights one after another, the share intro's", () => {
     /**
      * A day of four flights, read in the order 2, 1, 4, 5: 2 and 1 timed,
      * 4 without times, and 5 logged 1,000 s apart standing still, which
@@ -1322,81 +1319,30 @@ describe("the replay of all flights", () => {
     );
     const seconds = (pathId: number): number =>
       flightClock(DAY.path_segments).duration.get(pathId)!;
-    const clock = (): string =>
-      document.getElementById("replay-all-clock")!.textContent ?? "";
-    const held = (id: string): boolean => isHeld(document.getElementById(id));
-    const replay = (): HTMLElement => document.getElementById("replay-btn")!;
-    const open = (...ids: number[]): ReplayAllPlayer => {
+    const start = (...ids: number[]): ReplayAllPlayer => {
       app.currentData = DAY;
-      app.selectedPathIds = new Set(ids);
-      toggleSequence(asMapApp(app));
-      return controlsOfApp()!;
-    };
-    /** The player of the app's controls: the last one started */
-    const controlsOfApp = (): ReplayAllPlayer | null => {
-      const players = vi.mocked(ReplayAllPlayer.prototype.start).mock.contexts;
-      return (players.at(-1) as ReplayAllPlayer | undefined) ?? null;
+      const player = new ReplayAllPlayer(asMapApp(app));
+      void player.start({ pathIds: ids, sequence: true });
+      return player;
     };
 
-    beforeEach(() => {
-      vi.spyOn(ReplayAllPlayer.prototype, "start");
-      // Timed flights, which the Replay control asks for (canReplay)
-      app.hasTimingData = true;
-    });
+    it("plays them in the order given, each after the one before has landed", () => {
+      const player = start(2, 1, 5);
 
-    it("plays them in the order of their files, from the Replay control", () => {
-      const player = open(1, 2);
-
-      expect(app.replayActive).toBe(true);
-      expect(app.replayState.all).toBe(true);
-      // Every flight given a slot is drawn: each segment is on a curve of
-      // two points at least (smoothFlights), so only the clock leaves one
-      // out (sequenceStarts), before the slots are laid out
-      expect(player.flights).toBe(player.legs!.size);
+      // The clock of 5 is too short to play by (sequenceStarts)
       expect([...player.legs!]).toEqual([
         [2, 0],
         [1, seconds(2) + LEG_PAUSE_S],
       ]);
+      expect(player.flights).toBe(2);
       expect(player.duration).toBeCloseTo(
         seconds(2) + LEG_PAUSE_S + seconds(1),
         3,
       );
-      expect(clock()).toBe("1 of 2, EDDS → EDTF: 0:00 in");
-      // Replay is its control, and Replay all held with the rest
-      expect(replay().getAttribute("aria-pressed")).toBe("true");
-      expect(replay().dataset["icon"]).toBe("stop");
-      expect(held("replay-btn")).toBe(false);
-      expect(held("replay-all-btn")).toBe(true);
-      expect(held("year-select")).toBe(true);
-      const panel = document.getElementById("replay-all-controls")!;
-      expect(panel.getAttribute("aria-label")).toBe(
-        "Replay of the selected flights",
-      );
-      expect(
-        document.getElementById("replay-all-time")!.getAttribute("aria-label"),
-      ).toBe("Time into the selected flights");
-      // No heat builds up behind them: it would be of every flight at once
-      expect(replayAllTime(asMapApp(app))).toBeNull();
-      expect(toast.showToast).not.toHaveBeenCalled();
-    });
-
-    it("reads which flight flies, and the time into it, through the pause after it", () => {
-      const player = open(1, 2);
-      const second = seconds(2) + LEG_PAUSE_S;
-
-      player.seek(seconds(2) + 100);
-      expect(clock()).toBe("1 of 2, EDDS → EDTF: 0:01 in");
-      player.seek(second + 61);
-      expect(clock()).toBe("2 of 2, EDTF → EDDS: 0:01 in");
-      expect(player.legTime(1, 20)).toBeCloseTo(second + 20, 6);
-      // Its landing, at most
-      expect(player.legTime(1)).toBeCloseTo(second + seconds(1), 6);
-      expect(player.legTime(1, 1e6)).toBeCloseTo(second + seconds(1), 6);
-      expect(player.legTime(4, 20)).toBe(0);
     });
 
     it("ends as the last of them lands, with every trail still drawn", () => {
-      const player = open(1, 2);
+      const player = start(2, 1);
 
       frames.run();
       frames.run(100, 60);
@@ -1408,202 +1354,6 @@ describe("the replay of all flights", () => {
         layer() as unknown as { style: () => { fade: number } | null }
       ).style()!;
       expect(style.fade).toBeCloseTo(2 * player.duration, 6);
-    });
-
-    it("stays at the end, paused, where its slider is dragged or clicked to", () => {
-      const player = open(1, 2);
-      const slider = document.getElementById(
-        "replay-all-time",
-      ) as HTMLInputElement;
-
-      slider.dispatchEvent(new Event("pointerdown"));
-      slider.value = slider.max;
-      slider.dispatchEvent(new Event("input"));
-      window.dispatchEvent(new Event("pointerup"));
-
-      // Not from the first flight again
-      expect(player.playing).toBe(false);
-      expect(player.time).toBeCloseTo(player.duration, 6);
-      expect(player.finished).toBe(true);
-      // Play starts them from the first flight again
-      player.resume();
-      expect(player.time).toBe(0);
-      expect(player.finished).toBe(false);
-    });
-
-    it("says every flight has landed when its slider is dragged to the end", () => {
-      // It stays there, paused, and the landing it never played went
-      // without a word
-      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
-      try {
-        const player = open(1, 2);
-        const landed = vi.fn();
-        const said = player.onLanded!;
-        player.onLanded = () => {
-          landed();
-          said();
-        };
-        const slider = document.getElementById(
-          "replay-all-time",
-        ) as HTMLInputElement;
-        const live = document.getElementById("replay-all-live")!;
-
-        slider.dispatchEvent(new Event("pointerdown"));
-        slider.value = slider.max;
-        slider.dispatchEvent(new Event("input"));
-        // Held there, once
-        slider.dispatchEvent(new Event("input"));
-        window.dispatchEvent(new Event("pointerup"));
-        vi.runAllTimers();
-
-        expect(live.textContent).toBe("Every flight has landed");
-        expect(landed).toHaveBeenCalledTimes(1);
-        // Back, and to the end again, is a landing again
-        player.seek(10);
-        player.seek(player.duration);
-        expect(landed).toHaveBeenCalledTimes(2);
-      } finally {
-        vi.useRealTimers();
-      }
-    });
-
-    it("leaves out a flight without times, and says so", () => {
-      const player = open(4, 1, 2);
-
-      expect(player.flights).toBe(2);
-      expect([...player.legs!.keys()]).toEqual([2, 1]);
-      expect(toast.showToast).toHaveBeenCalledWith(
-        "Left out 1 of the 3 selected flights: not enough timing data",
-        "info",
-      );
-    });
-
-    it("says how many play, one of them as one", () => {
-      // Flight 4 has no times
-      open(4, 1);
-
-      expect(toast.announceStatus).toHaveBeenLastCalledWith(
-        "Replaying 1 flight one after another at 200 times their speed",
-      );
-    });
-
-    it("counts a flight its clock leaves out among those left out", () => {
-      const player = open(5, 1, 2);
-
-      expect([...player.legs!.keys()]).toEqual([2, 1]);
-      expect(toast.showToast).toHaveBeenCalledWith(
-        "Left out 1 of the 3 selected flights: not enough timing data",
-        "info",
-      );
-    });
-
-    it("says why when none of them can be played", () => {
-      // Flight 5's clock is too short to play by, and 4 has no times
-      open(5, 4);
-
-      expect(app.replayActive).toBe(false);
-      expect(toast.showToast).toHaveBeenCalledWith(
-        REPLAY_PRECONDITION_MESSAGE,
-        "info",
-      );
-    });
-
-    it("opens paused at a moment of one of them", () => {
-      app.currentData = DAY;
-      app.selectedPathIds = new Set([1, 2]);
-
-      // Halfway through flight 1's third segment, 60 s into it
-      toggleSequence(asMapApp(app), {
-        segment: DAY.path_segments[2]!,
-        fraction: 0.5,
-      });
-
-      const player = controlsOfApp()!;
-      expect(player.playing).toBe(false);
-      expect(player.time).toBeCloseTo(seconds(2) + LEG_PAUSE_S + 75, 6);
-    });
-
-    it("plays the shared flights the filter shows, not the ones it hides", () => {
-      // Share mode keeps flights a filter hides, which the map does not draw
-      app.currentData = {
-        ...DAY,
-        path_info: DAY.path_info.map((info) => ({
-          ...info,
-          aircraft_registration: info.id === 2 ? "D-BBBB" : "D-AAAA",
-        })),
-      };
-      app.selectedAircraft = "D-AAAA";
-      app.selectedPathIds = new Set([1, 2]);
-
-      toggleSequence(asMapApp(app));
-
-      expect([...controlsOfApp()!.legs!.keys()]).toEqual([1]);
-    });
-
-    it("leaves a selection that changed under a late click to Replay", () => {
-      // A Replay click that waited for the bundle: by then one flight, or
-      // more than play one after another, were selected
-      app.currentData = DAY;
-      app.selectedPathIds = new Set([1]);
-      toggleSequence(asMapApp(app));
-
-      expect(app.toggleReplay).toHaveBeenCalledOnce();
-      expect(app.replayActive).toBe(false);
-      expect(ReplayAllPlayer.prototype.start).not.toHaveBeenCalled();
-
-      app.selectedPathIds = new Set(
-        Array.from({ length: DAY_MAX_FLIGHTS + 1 }, (_, i) => i + 1),
-      );
-      toggleSequence(asMapApp(app));
-
-      expect(app.toggleReplay).toHaveBeenCalledTimes(2);
-      expect(ReplayAllPlayer.prototype.start).not.toHaveBeenCalled();
-    });
-
-    it("puts away the popups left open on the map before it plays", () => {
-      app.airportManager.closePopup.mockImplementation(() => {
-        expect(app.replayActive).toBe(false);
-      });
-
-      open(1, 2);
-
-      expect(app.airportManager.closePopup).toHaveBeenCalled();
-      expect(app.layerManager.closeSegmentPopup).toHaveBeenCalled();
-      expect(app.replayActive).toBe(true);
-    });
-
-    it("closes from the Replay control, and gives it back", () => {
-      open(1, 2);
-
-      toggleSequence(asMapApp(app));
-
-      expect(app.replayActive).toBe(false);
-      expect(app.replayState.all).toBe(false);
-      expect(replay().getAttribute("aria-pressed")).toBe("false");
-      expect(replay().dataset["icon"]).toBe("play");
-      expect(held("replay-all-btn")).toBe(false);
-      expect(held("year-select")).toBe(false);
-    });
-
-    it("leaves the other open to a click whose bundle came late", () => {
-      app.currentData = DAY;
-      app.selectedPathIds = new Set([1, 2]);
-      // Replay all, then a Replay that waited for the bundle: it closed
-      // the replay of all flights the moment it opened
-      toggleReplayAll(asMapApp(app));
-      toggleSequence(asMapApp(app));
-
-      expect(app.replayActive).toBe(true);
-      expect(controlsOfApp()!.legs).toBeNull();
-      toggleReplayAll(asMapApp(app));
-      expect(app.replayActive).toBe(false);
-
-      // And the other way round
-      const player = open(1, 2);
-      toggleReplayAll(asMapApp(app));
-
-      expect(app.replayActive).toBe(true);
-      expect(player.legs!.size).toBe(2);
     });
   });
 });

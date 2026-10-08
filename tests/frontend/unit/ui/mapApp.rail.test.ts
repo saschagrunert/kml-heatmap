@@ -126,7 +126,6 @@ vi.mock("../../../../kml_heatmap/frontend/services/featureLoader", () => ({
       // The satellite switch hands itself over to the bundle
       followSatellite: vi.fn(),
       toggleReplayAll: m.toggleReplayAll,
-      toggleSequence: m.toggleSequence,
       toggleCrossSection: m.toggleCrossSection,
       toggleHotspotTour: m.toggleHotspotTour,
       // And the selected flights to their profile
@@ -952,12 +951,10 @@ describe("MapApp controls and map", () => {
         app.isolateSelection = true;
       });
       expect(app.canReplay()).toBe(true);
-      expect(app.playsInSequence()).toBe(true);
 
-      // One shown: the replay of that flight, not a sequence of one
+      // One shown: the replay of that flight
       app.selectedAircraft = "D-ABCD";
       expect(app.canReplay()).toBe(true);
-      expect(app.playsInSequence()).toBe(false);
       expect(replayButton().getAttribute("aria-disabled")).toBe("false");
 
       // None shown: no flight the map does not draw is replayed
@@ -1206,35 +1203,29 @@ describe("MapApp controls and map", () => {
       expect(app.replayManager).toBeUndefined();
     });
 
-    it("plays several selected flights one after another, without a replay manager", async () => {
-      // Flights of the dataset: the replay counts those the filter shows
+    it("plays several selected flights in the replay manager", async () => {
       await initializeApp(
         app,
         m.defaultAirports,
         m.defaultMetadata,
         withFlights([100]),
       );
-      m.toggleSequence.mockClear();
+      m.mockReplayManagerInstance.toggleReplay.mockClear();
       app.selectedPathIds.add(1);
       app.selectedPathIds.add(100);
-      expect(app.playsInSequence()).toBe(true);
 
       app.toggleReplay();
 
       await vi.waitFor(() =>
-        expect(m.toggleSequence).toHaveBeenCalledWith(app),
+        expect(m.mockReplayManagerInstance.toggleReplay).toHaveBeenCalledOnce(),
       );
-      expect(app.replayManager).toBeUndefined();
 
-      // And Replay closes them again, as it would the replay of all
-      m.toggleSequence.mockClear();
+      // Not while the replay of every flight holds the control
+      m.mockReplayManagerInstance.toggleReplay.mockClear();
       app.replayState.all = true;
       app.replayActive = true;
       app.toggleReplay();
-      await vi.waitFor(() =>
-        expect(m.toggleSequence).toHaveBeenCalledWith(app),
-      );
-      expect(app.replayManager).toBeUndefined();
+      expect(m.mockReplayManagerInstance.toggleReplay).not.toHaveBeenCalled();
     });
 
     it("plays a flight selected while the bundle loads with the one before", async () => {
@@ -1246,19 +1237,17 @@ describe("MapApp controls and map", () => {
       );
       const { deliver } = await holdNextLoad(loadFeatures);
       m.mockReplayManagerInstance.toggleReplay.mockClear();
-      m.toggleSequence.mockClear();
       app.selectedPathIds.add(1);
 
       app.toggleReplay();
-      // A second one picked before the bundle came: the manager replayed
-      // the first of them alone
+      // A second one picked before the bundle came: the manager decides
+      // once it is there, and plays both
       app.selectedPathIds.add(100);
       deliver();
 
       await vi.waitFor(() =>
-        expect(m.toggleSequence).toHaveBeenCalledWith(app),
+        expect(m.mockReplayManagerInstance.toggleReplay).toHaveBeenCalledOnce(),
       );
-      expect(m.mockReplayManagerInstance.toggleReplay).not.toHaveBeenCalled();
     });
 
     it("opens Replay all once for quick clicks while the bundle loads", async () => {

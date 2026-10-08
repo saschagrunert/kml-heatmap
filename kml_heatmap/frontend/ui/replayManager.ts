@@ -34,12 +34,15 @@ import {
 } from "../utils/mapHelpers";
 import { prefersReducedMotion } from "../utils/motion";
 import {
+  legAt,
+  type ReplayLeg,
   liftReplayCurve,
   prepareReplaySegments,
   replayCurve,
 } from "../features/replay";
 import { segmentBounds } from "../utils/geometry";
 import { segmentsForPathIds } from "../calculations/statistics";
+import { flightOrder } from "../calculations/flightProfile";
 
 import { AirplaneMarker, ReplayRenderer } from "./replayRenderer";
 import { appendTrailSegment, speedColouredTrail } from "./replayTrail";
@@ -158,6 +161,14 @@ function sliderTarget(
  */
 const AUTO_ZOOM_PAN_MS = 800;
 
+/**
+ * Seconds of the replay's clock between the landing of one selected flight
+ * and the start of the next, where several play one after another: a
+ * second at 60 times their speed, six in the chase view. Never the time
+ * the aircraft stood on the ground, which would say how the day went.
+ */
+export const REPLAY_LEG_PAUSE_S = 60;
+
 /** Time the view takes back to the start when a finished replay restarts (ms) */
 const RESTART_PAN_MS = 500;
 
@@ -173,6 +184,38 @@ const FIT_BOUNDS_PADDING = 50;
  * otherwise jump the replay ahead by the whole stall times the speed.
  */
 export const MAX_FRAME_DELTA_MS = MAX_FRAME_S * 1000;
+
+/** The least share of the timeline the pause between two flights takes (%) */
+const LEG_GAP_PCT = 1;
+
+/**
+ * The track of the timeline of the flights `legs` over `maxTime` seconds,
+ * as a background image: each flight's part drawn, the pause between two
+ * left out, at least LEG_GAP_PCT wide so it shows. Empty for one flight,
+ * whose track the stylesheet draws.
+ */
+export function legTrack(legs: readonly ReplayLeg[], maxTime: number): string {
+  if (legs.length < 2 || !(maxTime > 0)) return "";
+  const part = "var(--color-text-dim) ";
+  const pct = (seconds: number): string =>
+    ((seconds / maxTime) * 100).toFixed(2) + "%";
+  const stops: string[] = [];
+  let at = 0;
+  for (let k = 1; k < legs.length; k++) {
+    const middle = (legs[k - 1]!.finish + legs[k]!.start) / 2;
+    const half = Math.max(
+      legs[k]!.start - middle,
+      (LEG_GAP_PCT / 200) * maxTime,
+    );
+    stops.push(
+      part + pct(at) + " " + pct(middle - half),
+      "transparent 0 " + pct(middle + half),
+    );
+    at = middle + half;
+  }
+  stops.push(part + pct(at) + " 100%");
+  return `linear-gradient(to right,${stops.join()})`;
+}
 
 export class ReplayManager {
   private app: MapApp;
@@ -235,7 +278,7 @@ export class ReplayManager {
     if (slider) {
       slider.addEventListener(
         "change",
-        () => this.announce("Moved to " + formatTime(this.state.currentTime)),
+        () => this.announce("Moved to " + this.spokenTime()),
         // The slider outlives this manager; the app's signal ends with it
         { signal: app.signal },
       );
@@ -302,8 +345,9 @@ export class ReplayManager {
   /**
    * Open replay, or close it. `moveCamera` false opens it where the map
    * is: the flight profile opens it at a moment of the flight, and seeks
-   * there right after (ui/flightProfile.ts). Several selected flights
-   * play one after another without it (MapApp.playsInSequence).
+   * there right after (ui/flightProfile.ts). Several selected flights, up
+   * to DAY_MAX_FLIGHTS, play one after another on one clock, in the order
+   * of their files (see initializeReplay).
    */
   toggleReplay(moveCamera = true): void {
     const panel = domCache.get("replay-controls");
@@ -576,6 +620,16 @@ export class ReplayManager {
     if (autoZoomBtn) applyToggleButtonState(autoZoomBtn, this.state.autoZoom);
   }
 
+  /**
+   * The time as the live region says it: of several flights, which flies
+   * and how far into it (see ReplayRenderer.legClock)
+   */
+  private spokenTime(): string {
+    return (
+      this.renderer.legClock(this.state) ?? formatTime(this.state.currentTime)
+    );
+  }
+
   /** Write to the polite live region (play/pause/seek end announcements) */
   private announce(message: string): void {
     const live = domCache.get("replay-live");
@@ -605,16 +659,27 @@ export class ReplayManager {
       return false;
     }
 
-    // The one the filter shows, as canReplay asks: share mode keeps the
-    // flights a filter hides
-    const selectedPathId = Array.from(shownSelection(this.app))[0];
-    if (selectedPathId === undefined) return false;
-    if (!this.filterAndSortSegments(selectedPathId)) {
+    // Those the filter shows, as canReplay asks: share mode keeps the
+    // flights a filter hides. Several play one after another in the order
+    // of their files, as the profile draws them (flightOrder).
+    const shown = shownSelection(this.app);
+    const data = this.app.currentData;
+    const order = data ? flightOrder(data.path_info, shown) : [...shown];
+    if (order.length === 0) return false;
+    const pathIds = this.filterAndSortSegments(order);
+    if (pathIds.length === 0) {
       showToast(REPLAY_PRECONDITION_MESSAGE, "info");
       return false;
     }
+    const left = order.length - pathIds.length;
+    if (left > 0) {
+      showToast(
+        `Left out ${left} of the ${order.length} selected flights: not enough timing data`,
+        "info",
+      );
+    }
 
-    this.calculateColorRanges(selectedPathId);
+    this.calculateColorRanges(pathIds);
     const state = this.state;
     state.onTerrain = this.app.terrainActive;
     state.groundLevel = this.app.reliefLevel;
@@ -627,12 +692,14 @@ export class ReplayManager {
     // The flight's curve, timed, and at its height for the 3D view: once
     // per replay, flat or lifted, and on the ground of the view (see
     // setLifted). The replay goes by the times the curve has smoothed, on
-    // copies of the segments: the dataset keeps its own.
+    // copies of the segments: the dataset keeps its own. Several flights
+    // are on one clock, REPLAY_LEG_PAUSE_S apart.
     const curve = (state.smoothed = replayCurve(
       state.segments,
       (i) => state.segments[i]!.altitude_ft,
       (i) => ground[i]!,
       offsets,
+      REPLAY_LEG_PAUSE_S,
     ));
     state.segments = state.segments.map((segment, i) => ({
       ...segment,
@@ -653,24 +720,30 @@ export class ReplayManager {
     return true;
   }
 
-  private filterAndSortSegments(pathId: number): boolean {
-    if (!this.app.fullPathSegments) return false;
-    this.state.segments = prepareReplaySegments(
-      this.app.fullPathSegments,
-      pathId,
-    );
-    // A flight whose times are all 0 would finish the moment it started
-    // without drawing anything (see MapApp.canReplay)
-    const last = this.state.segments[this.state.segments.length - 1];
-    return (last?.time ?? 0) > 0;
+  /**
+   * The segments of the flights `pathIds` one after another, each sorted
+   * by its times, into the state; returns the flights kept. A flight whose
+   * times are all 0 would finish the moment it started without drawing
+   * anything (see MapApp.canReplay), and is left out.
+   */
+  private filterAndSortSegments(pathIds: readonly number[]): number[] {
+    const all = this.app.fullPathSegments!;
+    const kept: number[] = [];
+    this.state.segments = pathIds.flatMap((pathId) => {
+      const segments = prepareReplaySegments(all, pathId);
+      if (!((segments[segments.length - 1]?.time ?? 0) > 0)) return [];
+      kept.push(pathId);
+      return segments;
+    });
+    return kept;
   }
 
-  private calculateColorRanges(pathId: number): void {
+  private calculateColorRanges(pathIds: number[]): void {
     if (!this.app.currentData?.path_segments) return;
 
     const currentResSegments = segmentsForPathIds(
       this.app.currentData.path_segments,
-      [pathId],
+      pathIds,
     );
 
     const sourceSegments =
@@ -695,7 +768,35 @@ export class ReplayManager {
     this.state.maxTime = this.state.smoothed?.end ?? lastSegment?.time ?? 0;
 
     const slider = domCache.get("replay-slider", HTMLInputElement);
-    if (slider) slider.max = this.state.maxTime.toString();
+    if (slider) {
+      slider.max = this.state.maxTime.toString();
+      // Several flights: where each is on the timeline, and the pauses
+      const track = legTrack(
+        this.state.smoothed?.legs ?? [],
+        this.state.maxTime,
+      );
+      slider.style.backgroundImage = track;
+      slider.style.backgroundColor = track && "transparent";
+    }
+    // Of several flights the time is as wide as that of the one with the
+    // longest route, in characters of its monospaced font, so the panel,
+    // as wide as its row, and the profile in it keep their width as the
+    // next starts; a character more for the arrow, which a fallback font
+    // may draw wider
+    const legs = this.state.smoothed?.legs ?? [];
+    const display = domCache.get("replay-time-display");
+    if (display) {
+      display.style.width =
+        legs.length > 1
+          ? Math.max(
+              ...legs.map(
+                (_, k) => this.renderer.legClock(this.state, k)!.length,
+              ),
+            ) +
+            1 +
+            "ch"
+          : "";
+    }
 
     // The two ends of the timeline. The current time is in the transport
     // row above; repeated at the start of the slider it read as a second
@@ -735,21 +836,28 @@ export class ReplayManager {
 
   /** The route of the flight replayed, see startReplayLayer */
   private writeRoute(): void {
-    const coordinates = routeCoordinates(
-      this.state.segments,
-      this.state.smoothed!,
-    );
+    const curve = this.state.smoothed!;
+    // A line of its own for each flight, rather than one from the landing
+    // of one to the start of the next
     this.setReplaySource(
       MAP_SOURCES.replayRoute,
-      coordinates.length < 2
-        ? []
-        : [
-            {
-              type: "Feature",
-              properties: {},
-              geometry: { type: "LineString", coordinates },
-            },
-          ],
+      curve.legs.flatMap(({ first, end }): Feature[] => {
+        const coordinates = routeCoordinates(
+          this.state.segments,
+          curve,
+          first,
+          end,
+        );
+        return coordinates.length < 2
+          ? []
+          : [
+              {
+                type: "Feature",
+                properties: {},
+                geometry: { type: "LineString", coordinates },
+              },
+            ];
+      }),
     );
   }
 
@@ -857,7 +965,16 @@ export class ReplayManager {
       this.state.lastFrameTime = timestamp;
 
       const deltaTime = (deltaMs / 1000) * this.state.speed;
-      this.state.currentTime += deltaTime;
+      const legs = this.state.smoothed?.legs ?? [];
+      const leg = legAt(legs, this.state.currentTime);
+      // A frame stops at the start of the next of several flights: at
+      // 1000x one of MAX_FRAME_S is 100 s, longer than the pause, and
+      // passed a short flight by without saying it
+      this.state.currentTime = Math.min(
+        this.state.currentTime + deltaTime,
+        legs[leg + 1]?.start ?? Infinity,
+      );
+      const next = legAt(legs, this.state.currentTime);
 
       if (this.state.currentTime >= this.state.maxTime) {
         this.state.currentTime = this.state.maxTime;
@@ -868,7 +985,21 @@ export class ReplayManager {
         this.state.animationFrameId = requestAnimationFrame(animateReplay);
       }
 
+      // The next of several flights: the camera goes over to its start
+      // rather than chase the airplane there (see movesToLeg), and the
+      // follow is held for that move alone, which reduced motion makes a
+      // jump. Held without one, it let the airplane fly off the map: 800
+      // ms are 13 minutes of the flight at 1000x.
+      // The airplane has gone on to it: said, and the camera taken there
+      const moves = next !== leg && this.movesToLeg(next);
+      if (moves && !prefersReducedMotion()) {
+        this.renderer.camera.hold(AUTO_ZOOM_PAN_MS);
+      }
       this.updateReplayDisplay();
+      if (next !== leg && this.state.playing) {
+        this.announce("Flight " + this.renderer.legName(this.state, next));
+        if (moves) this.zoomToAircraft();
+      }
     };
 
     this.state.animationFrameId = requestAnimationFrame(animateReplay);
@@ -906,7 +1037,7 @@ export class ReplayManager {
     this.state.lastFrameTime = null;
 
     if (wasPlaying && announce) {
-      this.announce("Replay paused at " + formatTime(this.state.currentTime));
+      this.announce("Replay paused at " + this.spokenTime());
     }
   }
 
@@ -1012,6 +1143,8 @@ export class ReplayManager {
     const position = this.state.airplaneMarker?.getLatLng();
     const map = this.app.map;
     if (!position || !map) return;
+    // Without auto-zoom, to the next of several flights (see movesToLeg)
+    const zoom = this.state.autoZoom ? AUTO_ZOOM_FOLLOW : map.getZoom();
     // In the 3D view the airplane is drawn up at its height: the ground
     // under it goes as far below the middle as it is drawn above it at the
     // zoom this ends at, which brings the airplane itself to the middle,
@@ -1019,17 +1152,40 @@ export class ReplayManager {
     const lift = airplaneLiftPx(
       map,
       position[0],
-      heightAtZoomFt(this.state.airplaneHeight(), AUTO_ZOOM_FOLLOW),
-      liftExaggeration(reliefLevel(AUTO_ZOOM_FOLLOW)),
-      AUTO_ZOOM_FOLLOW,
+      heightAtZoomFt(this.state.airplaneHeight(), zoom),
+      liftExaggeration(reliefLevel(zoom)),
+      zoom,
     );
     map.easeTo({
       center: toLngLat(position),
-      zoom: AUTO_ZOOM_FOLLOW,
+      zoom,
       offset: [0, lift],
       duration: AUTO_ZOOM_PAN_MS,
       animate: !prefersReducedMotion(),
     });
+  }
+
+  /**
+   * Whether the camera goes over to the start of the flight `leg` of
+   * several as the airplane goes on to it, rather than the follow jump
+   * there, auto-zoom zooming out as it found the airplane off the map:
+   * with auto-zoom on, at its zoom, and without at the map's, only where
+   * that start is out of view. Not while the
+   * chase flies over on its own, nor under the user's hand on the map,
+   * nor where the last of them has landed in the same frame: the end has
+   * said so and shows them all.
+   */
+  private movesToLeg(leg: number): boolean {
+    const state = this.state;
+    const map = this.app.map;
+    const start = state.segments[state.smoothed!.legs[leg]!.first]!.coords[0];
+    return (
+      !!map &&
+      state.playing &&
+      !state.chase &&
+      !this.renderer.camera.userMoving() &&
+      (state.autoZoom || !map.getBounds().contains(toLngLat(start)))
+    );
   }
 
   redrawReplayPath(mode: "altitude" | "airspeed"): void {
@@ -1089,15 +1245,18 @@ function setTransportState(playing: boolean): void {
 
 /**
  * The flight's whole track as one list of `[lng, lat]` points: along its
- * curve (see smoothing.ts), where the trail will run
+ * curve (see smoothing.ts), where the trail will run. Of the segments from
+ * `first` to `end` (exclusive) only: one flight of several.
  */
 export function routeCoordinates(
   segments: PathSegment[],
   curves: SmoothedFlights,
+  first = 0,
+  end = segments.length,
 ): LngLatTuple[] {
   const coords: LngLatTuple[] = [];
-  segments.forEach((segment, index) => {
-    const start = segment.coords[0];
+  for (let index = first; index < end; index++) {
+    const start = segments[index]!.coords[0];
     // A segment that starts a curve (the first, or the first after a break
     // in the flight) adds its start: appendCurve continues from the point
     // before it
@@ -1106,6 +1265,6 @@ export function routeCoordinates(
       coords.push(previous ? toLngLatAfter(start, previous) : toLngLat(start));
     }
     appendCurve(coords, curves, index);
-  });
+  }
   return coords;
 }
