@@ -590,7 +590,7 @@ export class StatsManager {
       this.statsAbort = controller;
       const panel = domCache.get(PANEL_ID);
       if (panel) {
-        setStatsTitle(false);
+        this.titleRail(false);
         panel.innerHTML = LOADING_HTML;
         panel.setAttribute("aria-busy", "true");
         this.lastHtml = null;
@@ -633,15 +633,23 @@ export class StatsManager {
     this.updateStatsPanel(selectedStats, true);
   }
 
+  /**
+   * Title the rail for the statistics, but not over the Flights tab, which
+   * titles it itself: the statistics worked out in slices land after a
+   * switch to it, and the loading state and the figures both named the
+   * rail "Statistics" there
+   */
+  private titleRail(isSelection: boolean): void {
+    if (!this.app.flightListVisible) setStatsTitle(isSelection);
+  }
+
   updateStatsPanel(stats: FilteredStatistics, isSelection: boolean): void {
     const panel = domCache.get(PANEL_ID);
     if (!panel) return;
     // The wait for the statistics, or for this code, is over
     panel.removeAttribute("aria-busy");
 
-    // Not over the Flights tab: the statistics worked out in slices land
-    // after a switch to it as well, and named the rail "Statistics" there
-    if (!this.app.flightListVisible) setStatsTitle(isSelection);
+    this.titleRail(isSelection);
 
     let html = '<div class="kh-stats">';
 

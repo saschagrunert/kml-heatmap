@@ -355,6 +355,50 @@ function heatmapColor(): ExpressionSpecification {
 }
 
 /**
+ * The opacity `curve` gives by zoom, `[zoom, opacity]` stops of numbers
+ * joined linearly, times `by` at the zooms of `band`: one interpolation by
+ * zoom, as the paint of a layer takes the zoom once, at the top. The step
+ * at each end of the band is a ramp a thousandth of a zoom long. It follows
+ * the zoom in every frame of a pinch, where an opacity set when the map
+ * came to rest lagged behind.
+ */
+export function dimmedWithin(
+  curve: ExpressionSpecification,
+  by: number,
+  [from, to]: readonly [number, number],
+): ExpressionSpecification {
+  const stops = curve.slice(3) as number[];
+  /** The opacity of `curve` at `zoom` */
+  const at = (zoom: number): number => {
+    // The first stop at `zoom` or after it
+    const i = stops.findIndex((value, j) => j % 2 < 1 && value >= zoom);
+    // Before the first stop its opacity, after the last that one's
+    if (i < 1) return stops.at(i || 1)!;
+    const t = (zoom - stops[i - 2]!) / (stops[i]! - stops[i - 2]!);
+    return stops[i - 1]! + t * (stops[i + 1]! - stops[i - 1]!);
+  };
+  return [
+    "interpolate",
+    ["linear"],
+    ["zoom"],
+    ...[
+      ...new Set([
+        ...stops.filter((_, j) => j % 2 < 1),
+        from - 1e-3,
+        from,
+        to - 1e-3,
+        to,
+      ]),
+    ]
+      .sort((a, b) => a - b)
+      .flatMap((zoom) => [
+        zoom,
+        at(zoom) * (zoom >= from && zoom < to ? by : 1),
+      ]),
+  ] as ExpressionSpecification;
+}
+
+/**
  * Opacity by zoom across the hand-over to the heat lines: `opacity` on the
  * heatmap's side of it, nothing on the other
  */

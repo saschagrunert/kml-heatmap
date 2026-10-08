@@ -159,6 +159,29 @@ class TestCheck:
         assert "data/2.kml" in err
         assert "--no-verify" in err
 
+    def test_the_hint_says_what_was_checked(self, repo, capsys, monkeypatch):
+        """Not the whole history: the remote's side of a ref did not count.
+
+        Whether the remote has tracking branches is asked once a push.
+        """
+        commit(repo, {"data/2.kml": CLEAN_KML})
+        before = commit(repo, {"data/3.kml": CLEAN_KML})
+        git(repo, "update-ref", "-d", "refs/remotes/origin/main")
+        sha = commit(repo, {"data/4.kml": REAL_KML})
+        asked = []
+        is_tracked = pre_push._is_tracked
+
+        def counted(*args):
+            asked.append(args)
+            return is_tracked(*args)
+
+        monkeypatch.setattr(pre_push, "_is_tracked", counted)
+        assert run_check(repo, push_of(sha, before)) == 1
+        err = capsys.readouterr().err
+        assert "whole history" not in err
+        assert "the refs pushed to there do not already have" in err
+        assert len(asked) == 1
+
     def test_a_remote_without_tracking_branches_passes_clean_history(self, repo):
         git(repo, "update-ref", "-d", "refs/remotes/origin/main")
         sha = commit(repo, {"data/2.kml": CLEAN_KML})

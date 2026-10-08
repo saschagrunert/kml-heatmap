@@ -35,7 +35,7 @@ from .logger import logger
 if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
-    from typing import IO
+    from typing import IO, BinaryIO
 
 # Pre-compiled pattern for ICAO code extraction. VIII is no code but August
 # in Roman numerals, as a date in Poland or Hungary has it ("16.VIII.2026"),
@@ -161,15 +161,22 @@ def _runways_csv() -> _CsvDatabase:
 def _is_valid_csv_file(path: Path, columns: tuple[str, ...] = REQUIRED_COLUMNS) -> bool:
     """Check that a CSV file is non-empty, complete and has the required header."""
     try:
-        if path.stat().st_size == 0:
-            return False
         with open(path, "rb") as f:
-            header_line = f.readline()
-            f.seek(-1, os.SEEK_END)
-            last_byte = f.read(1)
+            return _is_valid_open_csv(f, columns)
     except OSError:
         return False
-    return _is_valid_csv(header_line, last_byte, columns)
+
+
+def _is_valid_open_csv(f: BinaryIO, columns: tuple[str, ...]) -> bool:
+    """``_is_valid_csv`` of an open file, read from its first byte to its last.
+
+    An empty file has no line break at its end and fails it.
+    """
+    f.seek(0)
+    header_line = f.readline()
+    size = f.seek(0, os.SEEK_END)
+    f.seek(max(size - 1, 0))
+    return _is_valid_csv(header_line, f.read(1), columns)
 
 
 def _is_valid_csv(
@@ -383,12 +390,6 @@ def _airport_rows(text: IO[str]) -> dict[str, AirportRecord]:
     return airports
 
 
-def _read_airport_csv(path: Path) -> dict[str, AirportRecord]:
-    """The airports of a CSV file (see ``_airport_rows``)."""
-    with open(path, encoding="utf-8") as f:
-        return _airport_rows(f)
-
-
 def _read_database[T](
     path: Path, rows: Callable[[IO[str]], T], columns: tuple[str, ...] | None
 ) -> tuple[T, bytes] | None:
@@ -404,13 +405,8 @@ def _read_database[T](
     """
     with open(path, "rb") as f:
         digest = hashlib.file_digest(f, "sha256").digest()
-        if columns is not None:
-            f.seek(0)
-            header_line = f.readline()
-            size = f.seek(0, os.SEEK_END)
-            f.seek(max(size - 1, 0))
-            if not _is_valid_csv(header_line, f.read(1), columns):
-                return None
+        if columns is not None and not _is_valid_open_csv(f, columns):
+            return None
         f.seek(0)
         with io.TextIOWrapper(f, encoding="utf-8") as text:
             return rows(text), digest
@@ -543,12 +539,6 @@ def _runway_rows(text: IO[str]) -> dict[str, tuple[RunwayEnd, ...]]:
         if ends:
             runways.setdefault(ident, []).extend(ends)
     return {ident: tuple(ends) for ident, ends in runways.items()}
-
-
-def _read_runway_csv(path: Path) -> dict[str, tuple[RunwayEnd, ...]]:
-    """The runways of a CSV file (see ``_runway_rows``)."""
-    with open(path, encoding="utf-8") as f:
-        return _runway_rows(f)
 
 
 class AirportDatabases:

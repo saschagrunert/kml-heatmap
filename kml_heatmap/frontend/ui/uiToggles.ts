@@ -150,12 +150,24 @@ function downloadBlob(blob: Blob, fallbackHref: string, filename: string) {
 type DeliveryOutcome = "shared" | "downloaded" | "cancelled";
 
 /**
- * How long an export that goes to the share sheet waits for the map to be
- * complete (ms). `navigator.share` needs the tap on Export to be recent,
- * which the full MAP_COMPLETE_TIMEOUT_MS outlasted on a slow phone: the
- * share failed and the image was downloaded instead.
+ * How long an export that goes to the share sheet waits in all, from the
+ * tap on Export, before the image is taken (ms): for the library and for
+ * the map to be complete. `navigator.share` needs the tap to be recent,
+ * and the full MAP_COMPLETE_TIMEOUT_MS outlasted that on a slow phone, as
+ * did two seconds for the map after the library: the share failed with
+ * NotAllowedError and the image was downloaded instead.
  */
-export const EXPORT_SHARE_WAIT_MS = 2000;
+export const EXPORT_SHARE_WAIT_MS = 1000;
+
+/**
+ * Of EXPORT_SHARE_WAIT_MS, what the wait for the map leaves to the frame
+ * of the still (ms): a map that draws at all draws within a frame or two,
+ * and one heavy frame of a slow phone fits as well. The frame itself is
+ * waited for as long as ever (MAP_STILL_TIMEOUT_MS): one that comes late
+ * still makes the image, which is downloaded where the share sheet no
+ * longer opens, where giving up on it failed the export.
+ */
+export const EXPORT_SHARE_FRAME_MS = 400;
 
 /** Whether the export goes to the share sheet of a phone (see deliverImage) */
 function sharesFiles(): boolean {
@@ -299,6 +311,8 @@ export class UIToggles {
   }
 
   private async runExport(mapContainer: HTMLElement): Promise<void> {
+    // The share sheet's deadline, which counts from the tap
+    const shareBy = sharesFiles() ? Date.now() + EXPORT_SHARE_WAIT_MS : null;
     const htmlToImage = await loadHtmlToImage();
     if (!htmlToImage) {
       showToast(EXPORT_UNAVAILABLE_MESSAGE, "error");
@@ -329,15 +343,17 @@ export class UIToggles {
     // the map stands still as an image of itself while it is captured,
     // drawn at the scale of the export so it is as sharp as the page on it.
     // Not as long on the way to the share sheet, which needs the tap on
-    // Export to be recent (see EXPORT_SHARE_WAIT_MS); a download follows
-    // when it is not.
+    // Export to be recent: the waits keep within one deadline (see
+    // EXPORT_SHARE_WAIT_MS), where a download follows that is not.
     const map = this.app.map;
     if (map) {
       await whenMapComplete(
         map,
         () => !this.app.dataManager.heatRequests,
         [MAP_SOURCES.heat, MAP_SOURCES.heatIsolated, MAP_SOURCES.heatLines],
-        sharesFiles() ? EXPORT_SHARE_WAIT_MS : MAP_COMPLETE_TIMEOUT_MS,
+        shareBy === null
+          ? MAP_COMPLETE_TIMEOUT_MS
+          : shareBy - EXPORT_SHARE_FRAME_MS - Date.now(),
       );
     }
     const capture = (): Promise<string> =>

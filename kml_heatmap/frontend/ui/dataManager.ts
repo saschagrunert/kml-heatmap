@@ -1,7 +1,7 @@
 /**
  * Data Manager - Handles data loading and layer refresh
  */
-import type { GeoJSONSource } from "maplibre-gl";
+import type { ExpressionSpecification, GeoJSONSource } from "maplibre-gl";
 import type { MapApp } from "../mapApp";
 import type { StoreState } from "../state/store";
 import type {
@@ -27,9 +27,11 @@ import { frameCoalescer } from "../utils/frameCoalescer";
 import { logError } from "../utils/logger";
 import { cssVar, whenContextRestored } from "../utils/mapHelpers";
 import { dismissToast, showToast, type ToastAction } from "../utils/toast";
-import { dimsHeatmap } from "./layerVisibility";
+import { dimsHeatmap, dimsHeatmapAtAnyZoom } from "./layerVisibility";
+import { AVIATION_BAND } from "../mapLayers";
 import {
   HEATMAP_OPACITY,
+  dimmedWithin,
   fadeOutToLines,
   heatLineOpacities,
   heatLineTone,
@@ -329,43 +331,56 @@ export class DataManager {
   }
 
   /**
-   * Fade the heatmap back while a colour layer or the selection's lines are
-   * drawn over it (see dimsHeatmap).
+   * Fade the heatmap back while a colour layer, the selection's lines or
+   * the aviation chart are drawn over it (see dimsHeatmap).
    *
    * Both are on by default, and the heatmap's cyan bloom under the altitude
    * or speed gradient washes out exactly the scale the user just switched on.
    * A thin line of a selection is lost in its white as well. The layer stays
    * visible and its toggle still owns whether it is there at all; this only
-   * settles which reads first.
+   * settles which reads first. The chart draws at a band of zooms only,
+   * which the opacity follows by zoom (dimmedWithin): in every frame of a
+   * pinch, where an opacity set once the map came to rest lagged behind.
+   * Not so the cores of the heat lines, whose opacity follows the heat of
+   * each line as well: MapLibre works such a paint out at whole zooms
+   * only, and blends between them, so the end of the band just past zoom
+   * 13 dimmed them up to 14, at rest. They step back where the map comes
+   * to rest (dimsHeatmap).
    */
   applyHeatmapEmphasis(): void {
     const map = this.app.map;
     // The store may change before the style, and with it the layer, is there
     if (!map?.getLayer(MAP_LAYERS.heat)) return;
-    const opacity = dimsHeatmap(this.app)
-      ? (this.dimmedOpacity ??= dimmedHeatmapOpacity())
-      : HEATMAP_OPACITY;
+    const always = dimsHeatmapAtAnyZoom(this.app);
+    const dimmed =
+      (this.dimmedOpacity ??= dimmedHeatmapOpacity()) / HEATMAP_OPACITY;
+    const strength = always ? dimmed : 1;
+    const lines = heatLineOpacities(strength);
+    // As strong as that, and dimmed across the chart's band while it is on
+    const byZoom = (curve: ExpressionSpecification): ExpressionSpecification =>
+      always || !this.app.aviationVisible
+        ? curve
+        : dimmedWithin(curve, dimmed, AVIATION_BAND);
     // One of the two heatmaps is drawn, the one of an isolated selection
     // while there is one; at no opacity the map leaves the other out. The
     // isolated one once its source was given the selection's heat (see
     // writeHeat): until the year worker has drawn it, its source still
     // holds the selection isolated before, and the heat of before is shown
     const isolated = !!this.isolated && this.isolatedWritten === this.isolated;
+    const heat = byZoom(fadeOutToLines(HEATMAP_OPACITY * strength));
     for (const [id, drawn] of [
       [MAP_LAYERS.heat, !isolated],
       [MAP_LAYERS.heatIsolated, isolated],
     ] as const) {
-      map.setPaintProperty(
-        id,
-        "heatmap-opacity",
-        drawn ? fadeOutToLines(opacity) : 0,
-      );
+      map.setPaintProperty(id, "heatmap-opacity", drawn ? heat : 0);
     }
     // The lines it hands over to step back as far
-    const lines = heatLineOpacities(opacity / HEATMAP_OPACITY);
     for (const [id, lineOpacity] of [
-      [MAP_LAYERS.heatLinesGlow, lines.glow],
-      [MAP_LAYERS.heatLinesCore, lines.core],
+      [MAP_LAYERS.heatLinesGlow, byZoom(lines.glow)],
+      [
+        MAP_LAYERS.heatLinesCore,
+        heatLineOpacities(dimsHeatmap(this.app) ? dimmed : 1).core,
+      ],
     ] as const) {
       if (map.getLayer(id))
         map.setPaintProperty(id, "line-opacity", lineOpacity);

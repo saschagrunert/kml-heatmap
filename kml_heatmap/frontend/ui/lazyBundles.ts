@@ -24,6 +24,7 @@ import {
 } from "../services/featureLoader";
 import { TRY_AGAIN } from "../services/lazyImport";
 import { logError } from "../utils/logger";
+import { KEYED_FIELDS } from "../utils/mapHelpers";
 import { runAction } from "./actions";
 import { prefersReducedMotion } from "../utils/motion";
 import { dismissToast, showToast } from "../utils/toast";
@@ -126,8 +127,9 @@ export function prepareWrappedOnIntent(app: MapApp): void {
 /**
  * Open the search with `/`, as many sites do, from anywhere but a field
  * that takes text (the flight list's search, the search itself) or a
- * select, and without a modifier. A checkbox or a radio button takes no
- * text: the key works from a list's checkbox too. Ctrl or Alt with it is
+ * select (KEYED_FIELDS, the fields that keep Escape as well), and without
+ * a modifier. A checkbox, a radio button or a slider takes no text: the
+ * key works from a list's checkbox and a slider too. Ctrl or Alt with it is
  * the browser's or the system's. The key is the browser's quick find in
  * Firefox otherwise, which the page takes over. Not while a modal is open
  * (a sheet of the phone's bar, which a tablet with a keyboard may have, or
@@ -150,11 +152,7 @@ export function followSearchKey(app: MapApp): void {
         event.defaultPrevented ||
         app.mapHeld ||
         document.querySelector('[aria-modal="true"]:not([hidden])') ||
-        (target instanceof HTMLElement &&
-          (target.isContentEditable ||
-            target.matches(
-              "input:not([type=checkbox], [type=radio]), textarea, select",
-            )))
+        (target instanceof Element && target.matches(KEYED_FIELDS))
       ) {
         return;
       }

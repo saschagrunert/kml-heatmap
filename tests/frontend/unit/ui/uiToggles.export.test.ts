@@ -4,6 +4,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
   EXPORT_FAILED_MESSAGE,
+  EXPORT_SHARE_FRAME_MS,
   EXPORT_SHARE_WAIT_MS,
   EXPORT_UNAVAILABLE_MESSAGE,
   MAX_CANVAS_PIXELS,
@@ -365,8 +366,8 @@ describe("UIToggles export and share", () => {
       expect(toJpeg).toHaveBeenCalledTimes(1);
     });
 
-    it("waits no longer than the share sheet allows on a phone", async () => {
-      // navigator.share needs the tap on Export to be recent
+    /** A phone whose share sheet takes files; returns navigator.share */
+    function shareSheet(): AnyMock {
       setInnerWidth(500);
       const share = vi.fn().mockResolvedValue(undefined);
       defineNavigatorProperty("share", share);
@@ -374,16 +375,83 @@ describe("UIToggles export and share", () => {
         "canShare",
         vi.fn(() => true),
       );
+      return share;
+    }
+
+    it("waits no longer than the share sheet allows on a phone", async () => {
+      // navigator.share needs the tap on Export to be recent
+      const share = shareSheet();
       const toJpeg = installHtmlToImage();
       app.map!.areTilesLoaded.mockReturnValue(false);
 
       uiToggles.exportMap();
-      await vi.advanceTimersByTimeAsync(EXPORT_SHARE_WAIT_MS - 1);
+      const mapWait = EXPORT_SHARE_WAIT_MS - EXPORT_SHARE_FRAME_MS;
+      await vi.advanceTimersByTimeAsync(mapWait - 1);
       expect(toJpeg).not.toHaveBeenCalled();
       await vi.advanceTimersByTimeAsync(1);
-      await finishExport();
+      await vi.advanceTimersByTimeAsync(0);
       expect(toJpeg).toHaveBeenCalledTimes(1);
       expect(share).toHaveBeenCalledTimes(1);
+    });
+
+    it("waits for the map within one deadline from the tap, the library's load counted", async () => {
+      // Two seconds for the map after the library outlasted the tap's
+      // activation: the share threw NotAllowedError and the image was
+      // downloaded instead
+      const share = shareSheet();
+      const toJpeg = vi
+        .fn()
+        .mockResolvedValue("data:image/jpeg;base64,aGVsbG8=");
+      resetHtmlToImageLoader(
+        () =>
+          new Promise((resolve) => setTimeout(() => resolve({ toJpeg }), 300)),
+      );
+      app.map!.areTilesLoaded.mockReturnValue(false);
+
+      uiToggles.exportMap();
+      await vi.advanceTimersByTimeAsync(
+        EXPORT_SHARE_WAIT_MS - EXPORT_SHARE_FRAME_MS,
+      );
+
+      expect(toJpeg).toHaveBeenCalledTimes(1);
+      expect(share).toHaveBeenCalledTimes(1);
+    });
+
+    it("still takes the image when the frame of the still comes late", async () => {
+      // Given up on at the share sheet's deadline, the frame failed the
+      // export: one that comes late makes the image, downloaded where the
+      // share sheet no longer opens
+      const share = shareSheet();
+      share.mockRejectedValue(new DOMException("late", "NotAllowedError"));
+      const toJpeg = installHtmlToImage();
+      const map = app.map!;
+      map.triggerRepaint.mockImplementation(() => {
+        setTimeout(() => map.emit("render"), 2 * EXPORT_SHARE_WAIT_MS);
+      });
+
+      uiToggles.exportMap();
+      await vi.advanceTimersByTimeAsync(2 * EXPORT_SHARE_WAIT_MS);
+      await finishExport();
+
+      expect(toJpeg).toHaveBeenCalledTimes(1);
+      expect(share).toHaveBeenCalledTimes(1);
+      expect(clickedLink().download).toBe("heatmap_all.jpg");
+      expect(toast()?.textContent).not.toBe(EXPORT_FAILED_MESSAGE);
+    });
+
+    it("waits for the frame as long as ever on the way to a download", async () => {
+      const toJpeg = installHtmlToImage();
+      const map = app.map!;
+      map.triggerRepaint.mockImplementation(() => {
+        setTimeout(() => map.emit("render"), 2500);
+      });
+
+      uiToggles.exportMap();
+      await vi.advanceTimersByTimeAsync(2500);
+      await finishExport();
+
+      expect(toJpeg).toHaveBeenCalledTimes(1);
+      expect(clickedLink().download).toBe("heatmap_all.jpg");
     });
 
     it("captures what there is once the map has taken too long", async () => {

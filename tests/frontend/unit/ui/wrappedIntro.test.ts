@@ -283,11 +283,14 @@ describe("Wrapped's intro", () => {
     expect(mapPanel().classList.contains("is-awaiting-map")).toBe(true);
 
     map().emit("render");
+    await Promise.resolve();
     expect(mapPanel().classList.contains("is-awaiting-map")).toBe(true);
     expect(map().flyTo).not.toHaveBeenCalled();
 
     map().areTilesLoaded.mockReturnValue(true);
     map().emit("render");
+    // The wait settles (whenMapComplete), and the reveal follows it
+    await Promise.resolve();
     expect(mapPanel().classList.contains("is-awaiting-map")).toBe(false);
     expect(map().flyTo).toHaveBeenCalledOnce();
     expect(map().listenerCount("render")).toBe(renders - 1);

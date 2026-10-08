@@ -117,16 +117,25 @@ the base style an opacity of 0.78 and a halo of the base map's colour 1.6 px
 wide at 0.9 (`labelOverHeat`, only where the style gives the halo as a single
 value) while the global state `heatShown` (`HEAT_SHOWN_STATE`) is set, which
 `followLayerVisibility` sets while the heat is drawn at full strength (the
-Heatmap switch on, the flat heatmap or the cloud, no replay, and no colour
-layer, aviation chart or selection's lines over it, `dimsHeatmap`), and again on
-every `style.load`: a style built anew (a base style whose difference failed, or
-after a lost WebGL context) starts from a state of its own. With the heat off or
-stepping back, the labels are as the base style has them. Faded to half on their
-thin halo the names read as smudged over the glow; the darker halo keeps them
-legible and cuts only a thin outline out of the heat. The wide grey band CARTO
-draws along a country's border (`boundary_country_outline`, 8 px at 0.5) read as
-one more flight track, over the heat and without it, and is drawn at 0.2; the
-thin line of the border itself is left alone.
+Heatmap switch on, the flat heatmap or the cloud, no replay, and no colour layer
+or selection's lines over it, `dimsHeatmapAtAnyZoom`), and again on every
+`style.load`: a style built anew (a base style whose difference failed, or after
+a lost WebGL context) starts from a state of its own. The aviation chart draws
+at a band of zooms only (`AVIATION_BAND`), so it has a global state of its own,
+`aviationShown`, which the labels' paint reads in a `step` by zoom across that
+band; the heatmap's and the heat lines' glow dim across it the same way
+(`dimmedWithin` in `DataManager.applyHeatmapEmphasis`). The paint follows the
+zoom in every frame of a pinch. The heat's legend, the cloud, which is drawn by
+the app, and the cores of the heat lines follow it once the map comes to rest
+(`aviationInView`): the cores' opacity follows the heat of each line as well,
+and MapLibre works such a paint out at whole zooms only, blending between them,
+so the band's end just past zoom 13 dimmed them up to 14 by zoom. With the heat
+off or stepping back, the labels are as the base style has them. Faded to half
+on their thin halo the names read as smudged over the glow; the darker halo
+keeps them legible and cuts only a thin outline out of the heat. The wide grey
+band CARTO draws along a country's border (`boundary_country_outline`, 8 px at
+0.5) read as one more flight track, over the heat and without it, and is drawn
+at 0.2; the thin line of the border itself is left alone.
 
 ## The heat sources and the year worker
 

@@ -573,7 +573,12 @@ class TestRunwayDatabase:
         path = tmp_path / "runways.csv"
         path.write_text(header + "\n".join(rows) + "\n", encoding="utf-8")
 
-        runways = lookup_module._read_runway_csv(path)
+        # Read as the cache is (see AirportDatabases.load_runways)
+        loaded = lookup_module._read_database(
+            path, lookup_module._runway_rows, lookup_module.RUNWAY_COLUMNS
+        )
+        assert loaded is not None
+        runways = loaded[0]
 
         assert runways["AAAA"] == (RunwayEnd("08L", 84.0), RunwayEnd("26R", 264.0))
         (low, high) = runways["BBBB"]

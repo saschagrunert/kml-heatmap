@@ -214,14 +214,18 @@ export function isInMarker(target: EventTarget | null | undefined): boolean {
 }
 
 /**
- * For the `besides` of isPageEscape: the fields that take an Escape of
- * their own. A text field, where it clears what was typed (the search of
- * the flights), and a select, whose own list it closes. Not a slider or a
- * box to tick, which have no use for it.
+ * The fields that take keys of their own: a text field, where Escape
+ * clears what was typed (the search of the flights) and `/` is typed, and
+ * a select, whose own list Escape closes and whose options a key picks.
+ * Not a slider or a box to tick, which have no use for either: the page's
+ * Escape and its `/` (followSearchKey) work there.
  */
-export const FIELDS =
-  ",input:not([type=range]):not([type=checkbox]):not([type=radio])," +
+export const KEYED_FIELDS =
+  "input:not([type=range]):not([type=checkbox]):not([type=radio])," +
   "textarea,select,[contenteditable]";
+
+/** KEYED_FIELDS for the `besides` of isPageEscape */
+export const FIELDS = "," + KEYED_FIELDS;
 
 /**
  * Whether `event` is an Escape for what the page has open: not one a
@@ -579,21 +583,30 @@ export const MAP_COMPLETE_TIMEOUT_MS = 5000;
  * year worker still works on (see DataManager.heatRequests). The sources
  * as well: `areTilesLoaded` asks only about the tiles in view, which are
  * all there while the GeoJSON worker still cuts the data `setData` handed
- * it. Checked at every frame, which a tile or a heat that lands asks for:
- * `render` and not `idle`, which a map whose heat cloud pulses never
- * reaches. After `timeoutMs` at the latest: a tile that does not load,
- * offline, must not hold the caller for good.
+ * it. Checked at once and at every frame, which a tile or a heat that
+ * lands asks for. At once only with `loaded` as well: right after a
+ * `jumpTo` or an unanimated fit the sources of the new view are only marked
+ * to be updated, and the tiles still held are the old view's, all loaded,
+ * while `loaded` stays false until a frame has asked for the new ones. In a
+ * frame that is done, and `loaded` waits on more than the tiles (the
+ * labels' glyphs), which the reveal of Wrapped's far globe is not to wait
+ * for. The frames are `render`s, not `idle`, which a map whose heat cloud
+ * pulses never reaches. After `timeoutMs` at the latest: a tile that does not load,
+ * offline, must not hold the caller for good. At once when `signal` aborts,
+ * as for a caller that no longer waits (the close of Wrapped).
  */
 export function whenMapComplete(
   map: MapLibreMap,
   drawn: () => boolean,
   sources: readonly string[] = [],
   timeoutMs = MAP_COMPLETE_TIMEOUT_MS,
+  signal?: AbortSignal,
 ): Promise<void> {
   return new Promise((resolve) => {
-    const check = (): void => {
+    const check = (now?: unknown): void => {
       if (
         drawn() &&
+        (now !== true || map.loaded()) &&
         map.areTilesLoaded() &&
         sources.every((id) => !map.getSource(id) || map.isSourceLoaded(id))
       ) {
@@ -603,11 +616,14 @@ export function whenMapComplete(
     const done = (): void => {
       clearTimeout(timer);
       map.off("render", check);
+      signal?.removeEventListener("abort", done);
       resolve();
     };
     const timer = setTimeout(done, timeoutMs);
     map.on("render", check);
-    check();
+    signal?.addEventListener("abort", done);
+    if (signal?.aborted) done();
+    else check(true);
   });
 }
 

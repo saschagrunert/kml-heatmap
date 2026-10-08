@@ -703,17 +703,24 @@ _COMPACT_TIME = re.compile(
 # digit has a time right after it. The hyphenated form ("T14-30-00Z" too,
 # whose hour alone left "30-00Z") is no time before a unit or a runway: the
 # "18-24 kt" of a wind, the "11-22 km" of a leg, the "14-30 min" of a wait
-# and the "07-25 RWY" of a runway after a date are no times.
+# and the "07-25 RWY" of a runway after a date are no times. A bare "h",
+# "m" or "s" is the time's own, as "hrs" is: hours and minutes of the
+# clock after a date are the time of the flight ("2026-08-16 14-30h",
+# "14-30 h", "_14-30m"), and read as a unit they were left in the name and
+# passed the check. A range that is no time of the clock ("18-75 m") never
+# matched the hours and minutes and stays.
 _RANGE_AFTER = (
-    r"\s*(?i:kts?|kn|km|nm|mi|mph|ft|m|kg|lbs?|gal|%|mins?|h|s|secs?)"
+    r"\s*(?i:kts?|kn|km|nm|mi|mph|ft|kg|lbs?|gal|%|mins?|secs?)"
     r"(?![A-Za-z])|\s*(?i:rwys?|rw|runways?|piste|(?:lande)?bahn)\b"
 )
+# The letter of the clock after hyphenated hours and minutes ("14-30h")
+_CLOCK_LETTER = r"\s*(?i:[hms])(?![A-Za-z])"
 _TIME_AFTER_DATE = re.compile(
     rf"(?:(?:[-_]|,?\s+|T|(?<=\d))(?:{_HHMM}|"
     r"(?:[01]?\d|2[0-3])(?P<tsep>[:.])[0-5]\d(?:(?P=tsep)[0-5]\d)?"
     rf"(?:{_TIME_JOIN}(?:[01]?\d|2[0-3])(?P=tsep)[0-5]\d(?:(?P=tsep)[0-5]\d)?)?)|"
     r"(?:[-_T]|,?\s+)(?:[01]\d|2[0-3])(?P<dsep>[-_])[0-5]\d(?:(?P=dsep)[0-5]\d)?"
-    rf"(?!{_RANGE_AFTER})|"
+    rf"(?:{_CLOCK_LETTER}|(?!{_RANGE_AFTER}))|"
     r"T(?:[01]\d|2[0-3]))"
     r"(?:[.,]\d+)?(?:(?:\s*(?:[AP]\.?M\.?|[ap]\.m\.|pm)|am)(?![A-Za-z]))?"
     rf"{_HOURS}?(?:{_ZONE}|{_OFFSET}|\s*Uhr)?"

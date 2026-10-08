@@ -10,7 +10,11 @@ import {
 import { domCache } from "../utils/domCache";
 import { loadFeatures } from "../services/featureLoader";
 import { TRY_AGAIN } from "../services/lazyImport";
-import { aviationDrawsAt, HEAT_SHOWN_STATE } from "../mapLayers";
+import {
+  AVIATION_SHOWN_STATE,
+  aviationDrawsAt,
+  HEAT_SHOWN_STATE,
+} from "../mapLayers";
 import { dismissToast, showToast } from "../utils/toast";
 
 /** Said when the imagery's code cannot be fetched and the switch goes off */
@@ -59,15 +63,23 @@ function showsAviation(app: MapApp): boolean {
  * Whether the heatmap steps back for what is drawn over it: a colour layer,
  * the selection's lines, or the aviation chart, whose airspace outlines and
  * labels drowned under the bloom at full strength. Worked out here with the
- * lines themselves, so the two cannot disagree.
+ * lines themselves, so the two cannot disagree. The heat's legend follows
+ * it; the paint of the heat and the base map's labels follows the chart's
+ * band by zoom itself (see dimsHeatmapAtAnyZoom).
  */
 export function dimsHeatmap(app: MapApp): boolean {
-  return (
-    app.altitudeVisible ||
-    app.airspeedVisible ||
-    showsAviation(app) ||
-    highlightsSelection(app)
-  );
+  return dimsHeatmapAtAnyZoom(app) || showsAviation(app);
+}
+
+/**
+ * Whether the heatmap steps back at every zoom: for a colour layer or the
+ * selection's lines, which draw at all of them. The aviation chart draws
+ * at a band of zooms only, which the paint of the heat and of the base
+ * map's labels follows in every frame of a pinch (DataManager's
+ * applyHeatmapEmphasis, AVIATION_SHOWN_STATE).
+ */
+export function dimsHeatmapAtAnyZoom(app: MapApp): boolean {
+  return app.altitudeVisible || app.airspeedVisible || highlightsSelection(app);
 }
 
 /**
@@ -165,8 +177,11 @@ export function followLayerVisibility(app: MapApp): void {
         try {
           map.setGlobalStateProperty(
             HEAT_SHOWN_STATE,
-            app.heatmapVisible && !app.replayActive && !dimsHeatmap(app),
+            app.heatmapVisible &&
+              !app.replayActive &&
+              !dimsHeatmapAtAnyZoom(app),
           );
+          map.setGlobalStateProperty(AVIATION_SHOWN_STATE, app.aviationVisible);
         } catch {
           // A style still loading: it is set when it has loaded
         }
@@ -174,8 +189,10 @@ export function followLayerVisibility(app: MapApp): void {
       app.store.subscribeKeys(LAYER_KEYS, labels);
       map.on("style.load", labels);
       labels();
-      // Where the map comes to rest, which the dimming follows: the store
-      // only tells when the zoom crosses into or out of the chart's band
+      // Where the map comes to rest, which the heat's legend and the heat
+      // cloud follow (the paint of the heat follows the zoom itself): the
+      // store only tells when the zoom crosses into or out of the chart's
+      // band
       const zoomed = (): void => {
         app.aviationInView = aviationDrawsAt(map.getZoom());
       };

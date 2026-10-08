@@ -6,7 +6,7 @@ import type { MapApp } from "../mapApp";
 import type { Airport, MapCenter } from "../types";
 import { domCache } from "../utils/domCache";
 import { hideControls, restoreControls } from "./wrappedChrome";
-import { toLngLat } from "../utils/mapHelpers";
+import { toLngLat, whenMapComplete } from "../utils/mapHelpers";
 import { prefersReducedMotion } from "../utils/motion";
 import {
   TOAST_ALERT_ID,
@@ -125,7 +125,6 @@ export class WrappedManager {
   private mapMoveTimer: ReturnType<typeof setTimeout> | null = null;
   private mapResizeTimer: ReturnType<typeof setTimeout> | null = null;
   private mapRestoreTimer: ReturnType<typeof setTimeout> | null = null;
-  private mapRevealTimer: ReturnType<typeof setTimeout> | null = null;
   /** Drops the map panel's placeholder; held so a close can run it early */
   private revealMap: (() => void) | null = null;
   private cardsScroll: ScrollEndWatcher | null = null;
@@ -262,43 +261,37 @@ export class WrappedManager {
     revealed?: () => void,
   ): void {
     const map = this.app.map;
-    // The intro's far globe (`revealed`) once its tiles are drawn: `idle`
-    // waited for its labels to fade in as well, a third of a second more
-    // of the dialog with the title alone (see ui/wrappedIntro.ts)
-    const event = revealed ? "render" : "idle";
-    // Nor before the heat of the flights is on it: the year worker draws
-    // it (see DataManager.drawHeat), and the map is at rest meanwhile, with
-    // the heat of what it showed before
-    const heatDrawn = (): boolean => !this.app.dataManager.heatRequests;
-    const ready = (): void => {
-      if (heatDrawn() && (!revealed || map?.areTilesLoaded())) reveal();
-    };
+    // Taken down early by a close, which aborts the wait with it
+    const waiting = new AbortController();
     const reveal = (): void => {
-      if (this.mapRevealTimer !== null) {
-        clearTimeout(this.mapRevealTimer);
-        this.mapRevealTimer = null;
-      }
-      map?.off(event, ready);
+      if (waiting.signal.aborted) return;
+      waiting.abort();
       this.revealMap = null;
       container.classList.remove("is-awaiting-map");
       revealed?.();
     };
-
-    // Nothing in flight and nothing moving: no `idle` is coming, because the
-    // map only fires it at the end of a frame and has no reason to draw one
-    if (!map || (map.loaded() && !map.isMoving() && heatDrawn())) {
+    this.revealMap = reveal;
+    if (!map) {
       reveal();
       return;
     }
-
-    // `idle` lands when the fit has come to rest and the last tile of the
-    // fitted view is drawn, which is the first moment the panel has anything
-    // to show. It is the one to wait for rather than `load`, which fires once
-    // in the life of the map, or `moveend`, which does not wait for tiles.
-    this.revealMap = reveal;
-    // `reveal` takes `ready` off, whichever of the three ways it is reached
-    map.on(event, ready);
-    this.mapRevealTimer = setTimeout(reveal, MAP_REVEAL_TIMEOUT_MS);
+    // The fitted view at rest with its tiles drawn, the first moment the
+    // panel has anything to show (whenMapComplete, at every frame; a map
+    // already at rest is complete at once). The intro's far globe
+    // (`revealed`) as soon as its tiles are drawn: it waited for its labels
+    // to fade in as well, a third of a second more of the dialog with the
+    // title alone (see ui/wrappedIntro.ts). Nor before the heat of the
+    // flights is on it: the year worker draws it (see DataManager.drawHeat),
+    // and the map is at rest meanwhile, with the heat of what it showed
+    // before.
+    void whenMapComplete(
+      map,
+      () =>
+        !this.app.dataManager.heatRequests && (!!revealed || !map.isMoving()),
+      [],
+      MAP_REVEAL_TIMEOUT_MS,
+      waiting.signal,
+    ).then(reveal);
   }
 
   /**
@@ -830,7 +823,8 @@ export class WrappedManager {
       clearTimeout(this.mapRestoreTimer);
       this.mapRestoreTimer = null;
     }
-    // Takes the placeholder down and drops the idle listener with it
+    // Takes the placeholder down and ends its wait for the map
+    // (whenMapComplete) with it
     this.revealMap?.();
   }
 

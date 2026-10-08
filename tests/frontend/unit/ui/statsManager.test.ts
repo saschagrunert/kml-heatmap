@@ -169,6 +169,24 @@ describe("StatsManager", () => {
       spy.mockRestore();
     });
 
+    it("keeps the title of the Flights tab while the statistics load", () => {
+      // The loading state titled the rail "Statistics" over the list
+      const spy = vi
+        .spyOn(panelStats, "filterStatisticsInSlices")
+        .mockImplementation(() => new Promise<FilteredStatistics>(() => {}));
+      const title = document.querySelector(
+        "#stats-rail-title .kh-stats-title-text",
+      )!;
+      mockApp.flightListVisible = true;
+      title.textContent = "Flights";
+
+      statsManager.updateStatsForSelection();
+
+      expect(statsPanel.getAttribute("aria-busy")).toBe("true");
+      expect(title.textContent).toBe("Flights");
+      spy.mockRestore();
+    });
+
     it("shows filtered statistics for all paths when nothing is selected", () => {
       mockApp.selectedYear = "2025";
 

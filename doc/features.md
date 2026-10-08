@@ -114,19 +114,19 @@ says the charts show once zoomed in.
 ### Search
 
 Find an airport or a place and take the map there: **Search** at the top of the
-View group, `/` anywhere but in a text field (a checkbox is none) or an open
-sheet or dialog, or the Search row of the More sheet on a phone. The field lists
-the airports of this map first, found as you type by their ICAO code, name or
-country (without regard to case or accents), and then the places Photon finds in
-OpenStreetMap, each with a short line under it (the country, or the kind of
-place and its region). Places are searched from three characters on, once you
-pause typing or press Enter with nothing listed, and the answers to the last 50
-texts are kept for the visit, so none of them is asked again; the line under the
-list says while it searches, when nothing was found, and when Photon cannot be
-reached, takes longer than 10 seconds or the browser is offline, where the
-airports are still found. Photon is asked for what you type and nothing else
-(see [Privacy](privacy.md#requests-to-other-servers)); the panel credits it and
-OpenStreetMap.
+View group, `/` anywhere but in a text field or a dropdown (a checkbox or a
+slider is none) or an open sheet or dialog, or the Search row of the More sheet
+on a phone. The field lists the airports of this map first, found as you type by
+their ICAO code, name or country (without regard to case or accents), and then
+the places Photon finds in OpenStreetMap, each with a short line under it (the
+country, or the kind of place and its region). Places are searched from three
+characters on, once you pause typing or press Enter with nothing listed, and the
+answers to the last 50 texts are kept for the visit, so none of them is asked
+again; the line under the list says while it searches, when nothing was found,
+and when Photon cannot be reached, takes longer than 10 seconds or the browser
+is offline, where the airports are still found. Photon is asked for what you
+type and nothing else (see [Privacy](privacy.md#requests-to-other-servers)); the
+panel credits it and OpenStreetMap.
 
 The arrow keys move through the list, Enter takes the option they are on, or the
 first one, and Escape, a press beside the panel or Tab out of it closes it. An
