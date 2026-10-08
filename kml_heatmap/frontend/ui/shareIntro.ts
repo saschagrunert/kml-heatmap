@@ -2,9 +2,9 @@
  * The intro of a link to shared flights: as someone opens a link that Copy
  * link handed on in share mode, the camera eases from the view the link
  * opens on to frame the shared flights, while their lines draw in one after
- * another, in the order of their files, as the replay of the selected
- * flights plays them (toggleSequence in ui/replayAll.ts), but in
- * SHARE_INTRO_MS all told. It plays once: the link carries a mark
+ * another, in the order of their files (flightOrder), as the replay of the
+ * selected flights plays them (ui/replayManager.ts), but in SHARE_INTRO_MS
+ * all told. It plays once: the link carries a mark
  * (SHARE_INTRO_PARAM), which the app takes off the address bar as it reads
  * it (takeShareIntro in state/urlState.ts), so neither a reload nor a link
  * copied from the address bar plays it again.
@@ -20,11 +20,22 @@
  *
  * The trails are drawn by a player of the replay of all flights
  * (ui/replayAllPlayer.ts), whose clock the intro moves itself: no panel,
- * no replay of the map (replayActive), the trails lasting to the end. The
- * lines of the flights, flat or as ribbons, step aside meanwhile and come
- * back under the trails at the end, which go once the map has drawn them.
+ * no replay of the map (replayActive), the trails lasting to the end, in
+ * the colours of the colour layer that is on. The lines of the flights,
+ * flat or as ribbons, step aside meanwhile and come back under the trails
+ * at the end, which go once the map has drawn them. The heat builds up
+ * behind the flights by the same clock, as in the replay of all flights
+ * (growHeatCloud in ui/heatCloud.ts), and is the heatmap again at the end.
+ *
+ * The camera frames the flights as the replay of all flights fits them,
+ * tilted as the map is (fitTilted), measured at every fix (fixPoints): in
+ * the 3D view a fit of their bounds took no account of the tilt, and left
+ * them in the far part of the map.
+ * The player cuts the curves for the zoom it is on its way to (aim): cut
+ * for the zoom the link opens at, they were straight spokes until the
+ * camera came to rest.
  */
-import type { Map as MapLibreMap } from "maplibre-gl";
+import type { LngLat, Map as MapLibreMap } from "maplibre-gl";
 import type { MapApp } from "../mapApp";
 import { shownSelection } from "../calculations/datasetIndex";
 import { flightClockOf } from "../calculations/flightClock";
@@ -32,6 +43,8 @@ import { flightOrder } from "../calculations/flightProfile";
 import { segmentsForPathIds } from "../calculations/statistics";
 import { AUTO_ZOOM_FOLLOW, INPUT_EVENTS } from "../utils/constants";
 import { segmentBounds } from "../utils/geometry";
+import { fitTilted, fixPoints } from "../calculations/replayAll";
+import { growHeatCloud } from "./heatCloud";
 import { toBounds, whenMapComplete } from "../utils/mapHelpers";
 import { prefersReducedMotion } from "../utils/motion";
 import { mapChromePadding } from "./pathSelection";
@@ -133,16 +146,39 @@ export function playShareIntro(app: MapApp): void {
   ) {
     return;
   }
-  const bounds = segmentBounds(segmentsForPathIds(data.path_segments, shown));
+  const segments = segmentsForPathIds(data.path_segments, shown);
+  const bounds = segmentBounds(segments);
+  const padding = mapChromePadding(map);
   // As the selection is framed (PathSelection.frame), the bearing kept
-  const camera = bounds
+  const bearing = map.getBearing();
+  const flat = bounds
     ? map.cameraForBounds(toBounds(bounds), {
-        padding: mapChromePadding(map),
+        padding,
         maxZoom: AUTO_ZOOM_FOLLOW,
-        bearing: map.getBearing(),
+        bearing,
       })
     : undefined;
-  if (!camera) return;
+  if (!flat) return;
+  // Fitted to every fix of the flights at the tilt of the map, from the fit
+  // of their bounds, which it is on a flat map
+  const { width, height } = map.getContainer().getBoundingClientRect();
+  const { lng, lat } = flat.center as LngLat;
+  const camera = {
+    ...fitTilted(
+      fixPoints(segments),
+      { center: [lng, lat], zoom: flat.zoom! },
+      {
+        width,
+        height,
+        padding,
+        pitch: map.getPitch(),
+        fov: map.getVerticalFieldOfView(),
+        bearing,
+      },
+      AUTO_ZOOM_FOLLOW,
+    ),
+    bearing,
+  };
   if (prefersReducedMotion()) {
     map.jumpTo(camera);
     return;
@@ -152,12 +188,15 @@ export function playShareIntro(app: MapApp): void {
     pathIds: flightOrder(data.path_info, shown),
     sequence: true,
     lasting: true,
+    colour: true,
   });
   map.easeTo({ ...camera, duration: CAMERA_MS });
   // None of them has a clock to be drawn along
   const legs = player.legs;
   if (!legs) return;
+  player.aim(camera.zoom, true);
   player.pause();
+  growHeatCloud(app, player, camera.zoom);
   const durations = flightClockOf(data.path_segments).duration;
   let begun: number | null = null;
   let frame = 0;
@@ -176,6 +215,7 @@ export function playShareIntro(app: MapApp): void {
     if (skipped && map.isMoving()) map.jumpTo(camera);
     player.seek(player.duration);
     showLines(app, map, true);
+    growHeatCloud(app, null);
     // Their tiles are made anew as they show again, and until the map has
     // drawn them the trails stand in for them
     map.once("render", () => {

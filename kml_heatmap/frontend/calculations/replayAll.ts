@@ -77,10 +77,10 @@ export function sequenceStarts(
 
 /**
  * The floats of a point: x, y, ground, lift, the seconds into its flight,
- * and 1 where the stretch to the next point is drawn (0 at the last point
- * of a curve)
+ * 1 where the stretch to the next point is drawn (0 at the last point of a
+ * curve), and the colour of the stretch up to it (see replayAllPoints)
  */
-export const REPLAY_ALL_POINT_FLOATS = 6;
+export const REPLAY_ALL_POINT_FLOATS = 7;
 
 /** The points of the replay of all flights, see replayAllPoints */
 export interface ReplayAllPoints {
@@ -89,7 +89,8 @@ export interface ReplayAllPoints {
    * x and y in Mercator units from `origin`, the ground under the point
    * and the height above it in feet (as for the heat cloud, see
    * CloudPoints), the seconds into its flight (on the clock of the run,
-   * see sequenceStarts), and whether it joins the next point
+   * see sequenceStarts), whether it joins the next point, and the colour
+   * of the stretch that ends at it
    */
   points: Float32Array;
   /** The number of points */
@@ -144,7 +145,11 @@ export function worldShifts(starts: readonly number[]): number[] {
  * and at either end of a curve. A flight whose clock is shorter than
  * MIN_FLIGHT_S (no times and no speeds) sits out. With `starts`, each
  * flight's clock begins where it gives (see sequenceStarts) rather than
- * at 0, so the flights play one after another.
+ * at 0, so the flights play one after another. With `colourOf`, each point
+ * carries the colour of the segment the stretch up to it lies along, its
+ * red, green and blue bytes in one number (`(r << 16) | (g << 8) | b`,
+ * which a float holds exactly), and 0 without, for the trail's own; a
+ * negative colour is that of a stretch the trail leaves out.
  */
 export function replayAllPoints(
   segments: readonly PathSegment[],
@@ -154,6 +159,7 @@ export function replayAllPoints(
   detail: number,
   level: number,
   starts?: ReadonlyMap<number, number>,
+  colourOf?: (segment: PathSegment) => number,
 ): ReplayAllPoints {
   const exaggeration = liftExaggeration(level);
   // The points are picked first, and the bounds with them, which the
@@ -166,6 +172,8 @@ export function replayAllPoints(
   const curves: {
     line: SmoothedLine;
     times: Float64Array;
+    /** The colour of the stretch up to each point (see colourOf) */
+    colours: number[];
     /** When its flight starts on the clock of the run */
     start: number;
     end: number;
@@ -174,7 +182,7 @@ export function replayAllPoints(
   }[] = [];
   const played = new Set<number>();
   let duration = 0;
-  const { chains, chainOf } = flights;
+  const { chains, chainOf, from, to } = flights;
   const count = segments.length;
   let i = 0;
   while (i < count) {
@@ -210,6 +218,15 @@ export function replayAllPoints(
       const heightStepFt =
         (HEIGHT_STEP_PX * pixelM) / exaggeration / FEET_TO_METERS;
       const heightAt = (j: number): number => (ground?.[j] ?? 0) + heights[j]!;
+      // The pieces of a segment end at its points after its first, and the
+      // first point of the curve takes the first segment's
+      const colours: number[] = [];
+      for (let m = i; colourOf && m < end; m++) {
+        const colour = colourOf(segments[m]!);
+        for (let j = from[m]! + (m > i ? 1 : 0); j <= to[m]!; j++) {
+          colours[j] = colour;
+        }
+      }
       let keptFt = heightAt(0);
       let along = 0;
       const box: [number, number, number, number] = [
@@ -243,6 +260,7 @@ export function replayAllPoints(
       curves.push({
         line: chain,
         times,
+        colours,
         start,
         end: kept.length,
         box,
@@ -273,7 +291,7 @@ export function replayAllPoints(
   }
   const points = new Float32Array(total * size);
   let n = 0;
-  for (const { line, times, start, end, shift } of curves) {
+  for (const { line, times, colours, start, end, shift } of curves) {
     const { ground, heights } = line;
     // Every point joins the next but the last of its curve
     for (; n < end; n++) {
@@ -286,6 +304,7 @@ export function replayAllPoints(
       points[k + 3] = heights[j]!;
       points[k + 4] = start + times[j]!;
       points[k + 5] = n < end - 1 ? 1 : 0;
+      points[k + 6] = colours[j] ?? 0;
     }
   }
   return {
@@ -299,6 +318,32 @@ export function replayAllPoints(
   };
 }
 
+/** What a fit measures of the flights, see fitTilted and fixPoints */
+export type FitPoints = Pick<ReplayAllPoints, "points" | "count" | "origin">;
+
+/**
+ * Both ends of every one of `segments`, where they are, as the points of a
+ * run for a fit of them (see fitTilted): the curves of a run are thinned
+ * for the zoom they were cut for, and cut for a map far out, a point every
+ * 18 km or so, they cut the turn of a short flight short of the frame
+ */
+export function fixPoints(segments: readonly PathSegment[]): FitPoints {
+  const count = segments.length * 2;
+  const points = new Float32Array(count * REPLAY_ALL_POINT_FLOATS);
+  const first = segments[0]?.coords[0];
+  const origin = first ? mercatorOf(first) : ([0, 0] as [number, number]);
+  let k = 0;
+  for (const { coords } of segments) {
+    for (const fix of coords) {
+      const [x, y] = mercatorOf(fix);
+      points[k] = x - origin[0];
+      points[k + 1] = y - origin[1];
+      k += REPLAY_ALL_POINT_FLOATS;
+    }
+  }
+  return { points, count, origin };
+}
+
 /** A camera of the fit of the flights: its centre, `[lng, lat]`, and zoom */
 export interface FitCamera {
   center: [number, number];
@@ -306,8 +351,9 @@ export interface FitCamera {
 }
 
 /**
- * The map a fit is for, north up: its size in pixels, the pixels kept free
- * along each edge, its tilt and its vertical field of view in degrees
+ * The map a fit is for: its size in pixels, the pixels kept free along
+ * each edge, its tilt and its vertical field of view in degrees, and the
+ * compass direction that is up, north (0) by default
  */
 export interface FitMap {
   width: number;
@@ -315,6 +361,7 @@ export interface FitMap {
   padding: { top: number; right: number; bottom: number; left: number };
   pitch: number;
   fov: number;
+  bearing?: number;
 }
 
 /** How often the fit measures the flights on the screen and moves */
@@ -335,14 +382,15 @@ const FIT_STEP_ZOOM = 2;
  * than the flights. Each round measures their points on the screen of the
  * camera, as MapLibre draws the flat map in Mercator (the camera
  * looks at the middle of the map from the distance its field of view puts
- * it at, tilted towards the north, and a point south of the middle comes
- * nearer and lower on the screen; the globe is taken for the flat map),
+ * it at, tilted towards the top of the screen, which the bearing turns
+ * from the north, and a point below the middle comes nearer and lower on
+ * the screen; the globe is taken for the flat map),
  * moves their middle to the middle of the room and zooms by how much more
  * room there is. The tilt makes the next measure differ a little, and
  * FIT_ROUNDS fill the room to a hundredth. No closer in than `maxZoom`.
  */
 export function fitTilted(
-  run: ReplayAllPoints,
+  run: FitPoints,
   camera: FitCamera,
   map: FitMap,
   maxZoom: number,
@@ -355,6 +403,11 @@ export function fitTilted(
   const distance = focalLengthPx(height, map.fov * DEGREES_TO_RADIANS);
   const sin = Math.sin(map.pitch * DEGREES_TO_RADIANS);
   const cos = Math.cos(map.pitch * DEGREES_TO_RADIANS);
+  // The bearing turns the map under the camera: what is east and south of
+  // the middle is that far right of it and below it on a map north up
+  const turn = (map.bearing ?? 0) * DEGREES_TO_RADIANS;
+  const c = Math.cos(turn);
+  const s = Math.sin(turn);
   // The centre in Mercator units from the origin of the points
   const [mx, my] = mercatorOf([camera.center[1], camera.center[0]]);
   let x = mx - origin[0];
@@ -365,13 +418,16 @@ export function fitTilted(
     // Left, top, right and bottom, in pixels from the middle of the map
     let [left, top, right, bottom] = [Infinity, Infinity, -Infinity, -Infinity];
     for (let k = 0; k < points.length; k += REPLAY_ALL_POINT_FLOATS) {
-      const south = (points[k + 1]! - y) * world;
+      const east = (points[k]! - x) * world;
+      const down = (points[k + 1]! - y) * world;
+      // How far below the middle of the screen it lies on the ground
+      const south = down * c - east * s;
       const depth = distance - south * sin;
       // Behind the camera, or level with it: further out, where it comes
       // into view
       if (depth <= 0) top = -Infinity;
       const scale = distance / depth;
-      const px = (points[k]! - x) * world * scale;
+      const px = (east * c + down * s) * scale;
       const py = south * cos * scale;
       left = Math.min(left, px);
       right = Math.max(right, px);
@@ -384,8 +440,10 @@ export function fitTilted(
     const dy = (top + bottom - down + height) / 2 - padding.top;
     const south = (dy * distance) / (distance * cos + dy * sin);
     if (top > -Infinity) {
-      x += (dx * (distance - south * sin)) / distance / world;
-      y += south / world;
+      // Right of the middle and below it on the ground, turned back
+      const right = (dx * (distance - south * sin)) / distance;
+      x += (right * c - south * s) / world;
+      y += (right * s + south * c) / world;
     }
     zoom = Math.min(
       zoom +

@@ -262,10 +262,14 @@ reduced motion, and a toast says why.
 Play every flight the filters and share mode keep at once, each from its own
 first fix, at 100x to 1000x (default 200x): each flight is a bright head with a
 trail that fades behind it (over at most 25 minutes of flight), at its height as
-in the 3D view, on the flat map as well. Behind the heads the heat builds up as
-far as they have flown, in the heatmap's colours, and ends as the whole heat of
-the flights; it is the heat cloud's glow at the height of the flights, with its
-shadow on the ground, and none is drawn while the Heatmap switch is off.
+in the 3D view, on the flat map as well. The trails glow in the colours of the
+Altitude or Groundspeed layer when one is on as the replay opens, on the range
+its legend shows (the selection's, where there is one), and amber otherwise;
+like the Groundspeed layer, a trail draws nothing where the aircraft stands
+still. Behind the heads the heat builds up as far as they have flown, in the
+heatmap's colours, and ends as the whole heat of the flights; it is the heat
+cloud's glow at the height of the flights, with its shadow on the ground, and
+none is drawn while the Heatmap switch is off.
 
 The clock reads the time into every flight ("0:42 into every flight"), never a
 date or an hour, and the slider beside it moves along the same clock: drag it
@@ -683,10 +687,15 @@ replay has no Escape: its close button or a click on the map closes it.
   filter shows while their lines draw in one after another, in the order of
   their files, about five seconds for all of them (each flight takes a part by
   how long it took, and at least 0.6 s so a short hop is seen being drawn); a
-  flight without times shows at the end. Any key, click, touch or wheel skips to
-  the end, and one before the intro could start keeps it from playing; with
-  reduced motion the flights are only framed. A reload, a link copied from the
-  address bar and the saved state do not play it again (see `i` below)
+  flight without times shows at the end. The camera keeps the tilt and the
+  bearing of the link and frames the flights at that tilt as Replay all does,
+  the lines are drawn as Replay all draws its trails (in the colour layer's
+  colours, amber without one), and with the Heatmap on their heat builds up
+  behind them, as the cloud of the 3D view on the flat map too, which fades into
+  the heatmap at the end. Any key, click, touch or wheel skips to the end, and
+  one before the intro could start keeps it from playing; with reduced motion
+  the flights are only framed. A reload, a link copied from the address bar and
+  the saved state do not play it again (see `i` below)
 
 ## Shareable URLs
 

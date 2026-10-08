@@ -9,7 +9,9 @@
  * that has not begun is not drawn, one that has is drawn as far as the
  * time has come, and fades by how long ago each of its pixels was flown.
  * The heads are drawn from the same stretches, one at the tip of the
- * stretch each flight is on.
+ * stretch each flight is on. A trail glows in its colour: its own amber,
+ * or the colour of the colour layer that is on along it (see
+ * replayAllPoints), the line with a soft halo round it.
  *
  * It projects with MapLibre's own code, as the cloud does, so it works on
  * the globe, at the heights of the ribbons and the cloud, and against the
@@ -41,7 +43,12 @@ export const REPLAY_ALL_LAYER = "replay-all";
  */
 export const SHARE_INTRO_LAYER = "share-intro";
 
-/** Half the width of a trail and the reach of a head's glow, in CSS pixels */
+/**
+ * Half the width of a trail and the reach of a head's glow, in CSS pixels.
+ * A trail's glow reaches three times as far as the line, where it fades
+ * below what is drawn: wider, it was four times the pixels of the line
+ * for every stretch.
+ */
 const TRAIL_HALF_WIDTH_PX = 1.5;
 const HEAD_RADIUS_PX = 7;
 
@@ -60,16 +67,22 @@ export interface ReplayAllStyle {
 
 /**
  * A stretch is not drawn where it is the step from one curve to the next,
- * not flown yet or faded away, and for the heads where no flight is on it.
- * Each is pulled towards the camera by its reach for the depth test, so a
- * flight on the ground is not cut by the ground it stands on.
+ * not flown yet or faded away, for the heads where no flight is on it, and
+ * for the trails where its colour is negative (see replayAllPoints). Each
+ * is pulled towards the camera for the depth test by the reach of a head
+ * or of the line of a trail, so a flight on the ground is not cut by the
+ * ground it stands on: by the reach of a trail's glow, three times the
+ * line's, it showed through more of the ridges and ribbons in front of it.
+ * The colour of a stretch is the one of its end, its three bytes in one
+ * number, exact in a float, or none (0) for the trail's own; negated, the
+ * trail leaves the stretch out, and a head on it is drawn in it.
  */
 const VERTEX_SHADER = `
 in vec2 a_corner;
 in vec4 a_start;
-in vec2 a_startClock;
+in vec3 a_startClock;
 in vec4 a_end;
-in vec2 a_endClock;
+in vec3 a_endClock;
 uniform vec2 u_heights;
 uniform vec2 u_viewport;
 uniform vec4 u_depth;
@@ -77,6 +90,9 @@ uniform vec3 u_clock;
 uniform vec2 u_size;
 flat out vec4 v_ends;
 flat out vec2 v_times;
+flat out vec3 v_colour;
+
+const vec3 TRAIL = vec3(1.0, 0.7, 0.28);
 
 vec4 project(vec4 point) {
   return projectTileFor3D(point.xy, point.z * u_heights.x + point.w * u_heights.y);
@@ -93,7 +109,7 @@ void main() {
   float t1 = a_endClock.x;
   float near = u_depth.z;
   if (a_startClock.y < 0.5 || t0 > now || t1 < now - u_clock.y
-    || (head && t1 <= now)) {
+    || (head ? t1 <= now : a_endClock.z < 0.0)) {
     gl_Position = vec4(0.0, 0.0, 2.0, 1.0);
     return;
   }
@@ -117,7 +133,8 @@ void main() {
     vec2 dir = l > 1e-3 ? d / l : vec2(1.0, 0.0);
     reach = u_size.x + 1.0;
     bool atEnd = a_corner.x > 0.0;
-    corner = (atEnd ? pb : pa) + vec2(-dir.y, dir.x) * a_corner.y * reach;
+    corner = (atEnd ? pb : pa)
+      + vec2(-dir.y, dir.x) * a_corner.y * (3.0 * u_size.x + 1.0);
     w = atEnd ? b.w : a.w;
   }
   // Not past the near plane either, as in the heat cloud: an end just
@@ -130,6 +147,10 @@ void main() {
   );
   v_ends = vec4(pa, pb);
   v_times = vec2(t0, mix(t0, t1, cut));
+  float c = abs(a_endClock.z);
+  v_colour = c > 0.0
+    ? vec3(floor(c / 65536.0), mod(floor(c / 256.0), 256.0), mod(c, 256.0)) / 255.0
+    : TRAIL;
 }
 `;
 
@@ -137,23 +158,22 @@ const FRAGMENT_SHADER = `#version 300 es
 precision highp float;
 flat in vec4 v_ends;
 flat in vec2 v_times;
+flat in vec3 v_colour;
 uniform vec3 u_clock;
 uniform vec2 u_size;
 out vec4 fragColor;
-
-const vec3 TRAIL = vec3(1.0, 0.7, 0.28);
 
 void main() {
   vec2 p = gl_FragCoord.xy;
   vec2 a = v_ends.xy;
   vec2 b = v_ends.zw;
   float alpha;
-  vec3 colour = TRAIL;
+  vec3 colour = v_colour;
   if (u_clock.z > 0.5) {
     float d = distance(p, b) / u_size.y;
     float core = 1.0 - smoothstep(0.25, 0.4, d);
     alpha = max(core, 0.7 * exp(-8.0 * d * d));
-    colour = mix(TRAIL, vec3(1.0), core);
+    colour = mix(colour, vec3(1.0), core);
   } else {
     vec2 d = b - a;
     float l = max(length(d), 1e-3);
@@ -162,7 +182,11 @@ void main() {
     float across = abs(dot(p - a, vec2(-dir.y, dir.x)));
     float age = (u_clock.x - mix(v_times.x, v_times.y, s)) / u_clock.y;
     float fade = 1.0 - clamp(age, 0.0, 1.0);
-    alpha = 0.85 * clamp(u_size.x + 0.5 - across, 0.0, 1.0) * fade * fade;
+    float glow = across / (1.25 * u_size.x);
+    alpha = max(
+      0.85 * clamp(u_size.x + 0.5 - across, 0.0, 1.0),
+      0.5 * exp(-glow * glow)
+    ) * fade * fade;
   }
   if (alpha < 0.004) discard;
   fragColor = vec4(colour * alpha, alpha);
@@ -188,14 +212,14 @@ const UNIFORMS = [
 
 /**
  * A stretch is the point it starts from and the one after it: where each
- * is, then its time and whether it joins the next
+ * is, then its time, whether it joins the next and its colour
  */
 function layout(gl: WebGL2RenderingContext): void {
   const stride = REPLAY_ALL_POINT_FLOATS * 4;
   for (let point = 0; point < 2; point++) {
     for (const [slot, size, offset] of [
       [1, 4, 0],
-      [2, 2, 16],
+      [2, 3, 16],
     ] as const) {
       const location = slot + 2 * point;
       gl.enableVertexAttribArray(location);

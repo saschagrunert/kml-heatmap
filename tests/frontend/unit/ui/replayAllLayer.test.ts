@@ -281,19 +281,51 @@ describe("the replay of all flights' layer", () => {
     expect(layer.time).toBe(100);
   });
 
-  it("reads each stretch as its two points, six floats apart", () => {
+  it("reads each stretch as its two points, seven floats apart, the colour with the time", () => {
     layer.setPoints(flights());
 
     draw();
 
-    const stride = 6 * 4;
+    const stride = 7 * 4;
     const pointers = gl.vertexAttribPointer.mock.calls.slice(1);
     expect(pointers).toEqual([
       [1, 4, gl.FLOAT, false, stride, 0],
-      [2, 2, gl.FLOAT, false, stride, 16],
+      [2, 3, gl.FLOAT, false, stride, 16],
       [3, 4, gl.FLOAT, false, stride, stride],
-      [4, 2, gl.FLOAT, false, stride, stride + 16],
+      [4, 3, gl.FLOAT, false, stride, stride + 16],
     ]);
+  });
+
+  it("draws a trail in the colour of the stretch, or its own, with a glow round the line, and none where the colour is negated", () => {
+    layer.setPoints(flights());
+
+    draw();
+
+    const sources = gl.shaderSource.mock.calls.map((call) => String(call[1]));
+    const vertex = sources.find((source) => source.includes("v_colour ="))!;
+    // The colour of the stretch is the one of its end, three bytes in one
+    // number, and the trail's own amber without one; negated, the trail
+    // leaves the stretch out and its head is drawn in it
+    expect(vertex).toContain("float c = abs(a_endClock.z);");
+    expect(vertex).toContain("(head ? t1 <= now : a_endClock.z < 0.0)");
+    expect(vertex).toContain(
+      "vec3(floor(c / 65536.0), mod(floor(c / 256.0), 256.0), mod(c, 256.0)) / 255.0",
+    );
+    expect(vertex).toContain(": TRAIL;");
+    // Three times the line for the glow, whose edge is all but clear, but
+    // pulled to the camera by the line's reach alone
+    expect(vertex).toContain("a_corner.y * (3.0 * u_size.x + 1.0)");
+    expect(vertex).toContain("reach = u_size.x + 1.0;");
+    expect(vertex).toContain("float pulled = max(w - reach * w / u_depth.w");
+    const fragment = sources.find((source) => source.includes("fragColor"))!;
+    expect(fragment).toContain("vec3 colour = v_colour;");
+    expect(fragment).toContain("float glow = across / (1.25 * u_size.x);");
+    expect(fragment).toContain("0.5 * exp(-glow * glow)");
+    // At the edge of the quad, for any width of the line
+    for (const half of [1.5, 3, 100]) {
+      const glow = (3 * half + 1) / (1.25 * half);
+      expect(0.5 * Math.exp(-(glow ** 2))).toBeLessThan(0.004);
+    }
   });
 
   it("compiles a program for the globe of its own", () => {

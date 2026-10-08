@@ -429,8 +429,16 @@ const BUDGET_APP = { raw: 163.25 * 1024, gzip: 56.25 * 1024 };
 // 0.25 KB gzipped for its review: a frame that stops at the start of each
 // flight, the camera held only for a move to it, and the time of each
 // flight as wide as the longest: 152.78 KB and 57.85 KB gzipped in a local
-// build, some 58.14 KB in CI.
-const BUDGET_FEATURES = { raw: 153 * 1024, gzip: 58.75 * 1024 };
+// build, some 58.14 KB in CI. Raised by 2 KB raw and 1 KB gzipped for
+// the intro of a link to shared flights in the 3D view and with the heatmap
+// on, and for trails in the colours of the colour layer that is on: a fit
+// at the tilt and the bearing of the map measured at every fix of the
+// flights, the heat cloud built up by the intro's clock and handed back
+// without a jump, a colour per point of the replay's curves, the glow round
+// its trails and no trail where the Groundspeed layer draws no line
+// (154.73 KB and 58.65 KB gzipped in a local build, about 58.95 KB in CI,
+// which leaves 1.3 % of the gzipped budget).
+const BUDGET_FEATURES = { raw: 155 * 1024, gzip: 59.75 * 1024 };
 // The Wrapped bundle: the Wrapped dialog with its intro, and the statistics
 // rail, fetched the first time either opens. It shares nothing with the
 // feature bundle that the app does not have as well. About 14.1 KB gzipped
