@@ -826,6 +826,51 @@ describe("FilterManager", () => {
       expect([...mockApp.selectedPathIds]).toEqual([1]);
     });
 
+    it("holds the toast's Retry and a year switch while the hotspot tour runs", async () => {
+      // The Retry of a toast still on screen swapped the dataset under the
+      // tour, which ended it with "return" (regression)
+      addYearOption("2025");
+      addYearOption("2024");
+      mockApp.selectedYear = "2025";
+      const yearSelect = document.getElementById(
+        "year-select",
+      ) as HTMLSelectElement;
+      yearSelect.value = "2024";
+      mockApp.dataManager.loadData.mockResolvedValueOnce(null);
+      await filterManager.filterByYear();
+      const [, , retry] = mockApp.dataManager.loadData.mock.calls[0] as [
+        string,
+        AbortSignal,
+        { run: () => boolean | void },
+      ];
+      const previous = mockApp.currentData;
+      mockApp.tourView = {
+        center: { lat: 51, lng: 12 },
+        zoom: 8,
+        bearing: 0,
+        pitch: 0,
+        globeVisible: false,
+        threeDVisible: false,
+        heatmapVisible: true,
+      };
+      mockApp.dataManager.loadData.mockClear();
+      mockApp.dataManager.loadData.mockResolvedValue(year2024Data());
+
+      expect(retry.run()).toBe(false);
+      expect(toastMock.showToast).toHaveBeenCalledWith(
+        "Stop the tour to load 2024 again",
+        "info",
+      );
+      expect(await filterManager.filterByYear("2024")).toBe(false);
+      expect(mockApp.dataManager.loadData).not.toHaveBeenCalled();
+      expect(mockApp.currentData).toBe(previous);
+      expect(mockApp.selectedYear).toBe("2025");
+
+      mockApp.tourView = null;
+      expect(retry.run()).toBe(true);
+      expect(mockApp.dataManager.loadData).toHaveBeenCalledTimes(1);
+    });
+
     it("does nothing if year select element doesn't exist", async () => {
       document.getElementById("year-select")?.remove();
       const redraws = followDrawnKeys();

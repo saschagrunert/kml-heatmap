@@ -24,6 +24,7 @@ import {
   toLngLat,
   toLngLatAfter,
   unwrapLng,
+  whenMapComplete,
   whenStyleReady,
   withMapStill,
   withoutValidation,
@@ -172,6 +173,56 @@ describe("mapHelpers", () => {
       map.finishStyleLoad();
       await Promise.resolve();
       expect(ready).toHaveBeenCalledWith(map);
+    });
+  });
+
+  describe("whenMapComplete", () => {
+    it("does not take the old view's tiles for the new one's right after a jump", async () => {
+      // The sources are only marked to be updated: the tiles held are the
+      // old view's, all loaded, and `loaded` is false until the next frame
+      const map = mapStub();
+      vi.spyOn(map, "areTilesLoaded").mockReturnValue(true);
+      vi.spyOn(map, "loaded").mockReturnValue(false);
+      const complete = vi.fn();
+      void whenMapComplete(map, () => true).then(complete);
+      await Promise.resolve();
+      expect(complete).not.toHaveBeenCalled();
+
+      // In a frame the tiles are the new view's; `loaded` waiting on the
+      // labels as well does not hold it up
+      map.emit("render");
+      await Promise.resolve();
+      expect(complete).toHaveBeenCalledTimes(1);
+    });
+
+    it("resolves at the frame that completes the map, or at once on abort", async () => {
+      const map = mapStub();
+      vi.spyOn(map, "areTilesLoaded").mockReturnValue(false);
+      const renders = map.listenerCount("render");
+      const complete = vi.fn();
+      void whenMapComplete(map, () => true).then(complete);
+      map.emit("render");
+      await Promise.resolve();
+      expect(complete).not.toHaveBeenCalled();
+
+      vi.mocked(map.areTilesLoaded).mockReturnValue(true);
+      map.emit("render");
+      await Promise.resolve();
+      expect(complete).toHaveBeenCalledTimes(1);
+      expect(map.listenerCount("render")).toBe(renders);
+
+      // A caller that no longer waits takes its listener off with it
+      vi.mocked(map.areTilesLoaded).mockReturnValue(false);
+      const waiting = new AbortController();
+      const given = vi.fn();
+      void whenMapComplete(map, () => true, [], 5000, waiting.signal).then(
+        given,
+      );
+      expect(map.listenerCount("render")).toBe(renders + 1);
+      waiting.abort();
+      await Promise.resolve();
+      expect(given).toHaveBeenCalledTimes(1);
+      expect(map.listenerCount("render")).toBe(renders);
     });
   });
 

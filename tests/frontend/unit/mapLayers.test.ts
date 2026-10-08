@@ -11,6 +11,8 @@ import type {
 } from "maplibre-gl";
 import {
   AIRPORTS_HIDDEN_CLASS,
+  AVIATION_BAND,
+  AVIATION_SHOWN_STATE,
   HEAT_SHOWN_STATE,
   setBaseStyle,
   withDataLayers,
@@ -584,17 +586,32 @@ describe("withDataLayers", () => {
       style.layers.find((layer) => layer.id === id)!.paint;
 
     const shown = ["global-state", HEAT_SHOWN_STATE];
+    // Across the aviation chart's band, only while the chart is off: the
+    // heat steps back for it there, by zoom in every frame of a pinch
+    const byZoom = (value: unknown, otherwise: unknown): unknown => [
+      "step",
+      ["zoom"],
+      ["case", shown, value, otherwise],
+      AVIATION_BAND[0],
+      [
+        "case",
+        [
+          "all",
+          shown,
+          ["!", ["to-boolean", ["global-state", AVIATION_SHOWN_STATE]]],
+        ],
+        value,
+        otherwise,
+      ],
+      AVIATION_BAND[1],
+      ["case", shown, value, otherwise],
+    ];
     // A little fainter, on a wider and darker halo than the style's none
     expect(paint("place-labels")).toEqual({
       "text-color": "#fff",
-      "text-opacity": ["case", shown, 0.78, 1],
-      "text-halo-color": [
-        "case",
-        shown,
-        "rgba(14, 14, 14, 0.9)",
-        "rgba(0, 0, 0, 0)",
-      ],
-      "text-halo-width": ["case", shown, 1.6, 0],
+      "text-opacity": byZoom(0.78, 1),
+      "text-halo-color": byZoom("rgba(14, 14, 14, 0.9)", "rgba(0, 0, 0, 0)"),
+      "text-halo-width": byZoom(1.6, 0),
     });
     // Valid for MapLibre, as the style of the map is not validated
     expect(

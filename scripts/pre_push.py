@@ -43,11 +43,14 @@ FLIGHT_PATHSPECS = (":(glob,icase)data/**/*.kml", ":(glob,icase)data/**/*.kmz")
 # What git sends for a ref that is deleted rather than pushed
 ZERO_SHA = "0" * 40
 # Said by a refusal of a push to a remote the clone has no tracking branches
-# of, which counts as having nothing: its first push checks history that may
-# be public elsewhere already
+# of, which counts as having only what the refs pushed to point at there
+# (see published): its first push checks history that may be public
+# elsewhere already. Not "the whole history", which it was not where the
+# clone has the commit of such a ref.
 SKIP_HINT = (
-    "\nThis remote was never fetched from, so the whole history was checked.\n"
-    "If it already has these commits, `git push --no-verify` skips the check."
+    "\nThis remote was never fetched from, so every commit was checked that\n"
+    "the refs pushed to there do not already have. If it has these commits\n"
+    "anyway, `git push --no-verify` skips the check."
 )
 
 
@@ -96,7 +99,7 @@ def _is_tracked(repo: Path, remote: str) -> bool:
     )
 
 
-def published(repo: Path, remote: str, lines: list[str]) -> list[str]:
+def published(repo: Path, remote: str, lines: list[str], tracked: bool) -> list[str]:
     """The revisions whose commits the remote already has, for rev-list.
 
     The remote-tracking branches of ``remote`` and the commit each ref being
@@ -106,14 +109,15 @@ def published(repo: Path, remote: str, lines: list[str]) -> list[str]:
     then only those commits count, never the branches of another remote: a
     private one may hold commits with the raw flights that this remote never
     had, and counting them as published would let them through. The hook
-    fails closed, so such a push checks everything else.
+    fails closed, so such a push checks everything else. ``tracked`` is
+    whether the remote has tracking branches (``_is_tracked``).
     """
     known = []
     for line in lines:
         fields = line.split()
         if len(fields) == 4 and fields[3] != ZERO_SHA and _has_commit(repo, fields[3]):
             known.append(fields[3])
-    remotes = [f"--remotes={remote}"] if _is_tracked(repo, remote) else []
+    remotes = [f"--remotes={remote}"] if tracked else []
     revisions = [*remotes, *dict.fromkeys(known)]
     return ["--not", *revisions] if revisions else []
 
@@ -257,8 +261,9 @@ def _report(line: str) -> None:
 def check(repo: Path, lines: list[str], remote: str = "origin") -> int:
     """Print what is wrong and return the hook's exit status."""
     found = False
-    exclude = published(repo, remote, lines)
-    hint = "" if _is_tracked(repo, remote) else SKIP_HINT
+    tracked = _is_tracked(repo, remote)
+    exclude = published(repo, remote, lines, tracked)
+    hint = "" if tracked else SKIP_HINT
     for commit in commits_to_check(repo, exclude, pushed_shas(lines)):
         for name, issues in violations_in(repo, commit).items():
             found = True

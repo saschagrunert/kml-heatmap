@@ -398,8 +398,13 @@ function compareBundles(before, after, names) {
 // address bar as the page opens, the fetch of the intro, which lives in
 // the feature bundle, and the listening for input from the page open on,
 // as the intro is not to play over a view the visitor moved while the
-// data and the bundle were on their way.
-const BUDGET_APP = { raw: 162.5 * 1024, gzip: 55.5 * 1024 };
+// data and the bundle were on their way. Raised by 0.75 KB raw and 0.75 KB
+// gzipped (163 KB and 55.49 KB gzipped in a local build after, the
+// gzipped budget about 1.4 % over that for CI's zlib) for the heat and the base
+// map's labels that dim across the aviation chart's band of zooms in their
+// paint, through a pinch, and the export that waits for the map within one
+// deadline from the tap to the share sheet.
+const BUDGET_APP = { raw: 163.25 * 1024, gzip: 56.25 * 1024 };
 // The feature bundle: replay and Replay all, the 3D view (relief, ribbons,
 // heat cloud), the imagery, the flight profile, the cross-section and the
 // hotspot tour. Fetched only when one of them is first used, so no part of

@@ -121,9 +121,10 @@ the check. It also refuses a commit message that dates a flight the commit adds
 or changes (`Add flight 16 Aug 2026`), and warns when the push adds a single
 flight, which the commit then dates to about the day it was pushed. Commits
 count as published only when the remote pushed to has them: a first push to a
-remote the clone never fetched from checks the whole history, commits of other
-remotes included, since a private one may hold the raw flights. It needs nothing
-beyond Python; `--no-verify` skips it.
+remote the clone never fetched from checks all the history but what the refs
+pushed to already point at there, commits of other remotes included, since a
+private one may hold the raw flights. It needs nothing beyond Python;
+`--no-verify` skips it.
 
 `make hooks` installs a copy of `pre-push-hook`, which runs `pre_push.py` of the
 worktree the push comes from: the worktrees of a clone share one hooks

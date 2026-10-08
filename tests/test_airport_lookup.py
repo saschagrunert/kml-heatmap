@@ -16,12 +16,14 @@ import kml_heatmap.airport_lookup as lookup_module
 from kml_heatmap.airport_lookup import (
     MAX_DOWNLOAD_BYTES,
     REQUIRE_DATABASE_ENV,
+    REQUIRED_COLUMNS,
     AirportNames,
     AirportRecord,
+    _airport_rows,
     _download_airport_database,
     _is_cache_valid,
     _is_valid_csv_file,
-    _read_airport_csv,
+    _read_database,
     _strip_airport_suffix,
     airport_icao_code,
     database_fingerprint,
@@ -60,6 +62,13 @@ def small_downloads():
     """Accept the two-row test CSV as a complete download."""
     with patch.object(lookup_module, "MIN_DOWNLOAD_ROWS", 1):
         yield
+
+
+def _read_airports(path):
+    """The airports of a CSV file, read as the cache is (see ``load``)."""
+    loaded = _read_database(path, _airport_rows, REQUIRED_COLUMNS)
+    assert loaded is not None
+    return loaded[0]
 
 
 class TestLookupAirportCoordinates:
@@ -119,7 +128,7 @@ class TestLookupAirportElevation:
         # A database without the column
         path = tmp_path / "airports.csv"
         path.write_bytes(VALID_CSV)
-        assert _read_airport_csv(path)["EDDF"].elevation_m is None
+        assert _read_airports(path)["EDDF"].elevation_m is None
 
 
 class TestIsValidCsvFile:
@@ -591,7 +600,7 @@ class TestReadAirportCsv:
             "YYYY,50.0,not_a_number,Test Airport 2\n"
             "ZZZZ,50.0,8.5,Valid Airport\n"
         )
-        db = _read_airport_csv(path)
+        db = _read_airports(path)
         assert set(db) == {"ZZZZ"}
 
     def test_skips_short_rows_and_non_icao(self, tmp_path):
@@ -602,7 +611,7 @@ class TestReadAirportCsv:
             "ABCD\n"
             "EFGH,50.0,8.5,\n"
         )
-        assert _read_airport_csv(path) == {}
+        assert _read_airports(path) == {}
 
 
 class TestLoadAirportDatabase:

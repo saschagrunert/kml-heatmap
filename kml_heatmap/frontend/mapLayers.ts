@@ -57,9 +57,19 @@ const AVIATION_MAX_ZOOM = AVIATION_TILE_MAX_ZOOM - 1 + 2;
 /** A layer's `maxzoom` is exclusive, and the map zooms in fractions */
 const AVIATION_LAYER_MAX_ZOOM = AVIATION_MAX_ZOOM + 0.01;
 
+/**
+ * The map zooms the aviation overlay draws at, from the first to the one
+ * it no longer draws at: the band the heat and the base map's labels step
+ * back across while it is on, in their paint (see dimmedWithin)
+ */
+export const AVIATION_BAND = [
+  AVIATION_MIN_ZOOM,
+  AVIATION_LAYER_MAX_ZOOM,
+] as const;
+
 /** Whether the aviation overlay draws anything at map zoom `zoom` */
 export function aviationDrawsAt(zoom: number): boolean {
-  return zoom >= AVIATION_MIN_ZOOM && zoom < AVIATION_LAYER_MAX_ZOOM;
+  return zoom >= AVIATION_BAND[0] && zoom < AVIATION_BAND[1];
 }
 
 /** Line widths and opacities of the data layers as they are created */
@@ -462,9 +472,14 @@ function addDataLayersTo(map: MapLibreMap): void {
  * and stand on a wider, darker halo of the base map's own colour instead,
  * which keeps the heat around them whole. With the heat off, or stepping
  * back itself for what is drawn over it, the labels are as the base style
- * has them (see followLayerVisibility).
+ * has them (see followLayerVisibility). The heat steps back for the
+ * aviation chart only at the zooms the chart draws at, which the paint
+ * follows by itself through a pinch (AVIATION_SHOWN_STATE): the store
+ * learns of a zoom across the band only once the map comes to rest.
  */
 export const HEAT_SHOWN_STATE = "heatShown";
+/** The global state that says the aviation chart is on (see above) */
+export const AVIATION_SHOWN_STATE = "aviationShown";
 const HEAT_LABEL_OPACITY = 0.78;
 const HEAT_LABEL_HALO = { color: "rgba(14, 14, 14, 0.9)", width: 1.6 } as const;
 
@@ -482,7 +497,27 @@ function whileHeatShown(
   value: string | number,
   otherwise: string | number,
 ): ExpressionSpecification {
-  return ["case", ["global-state", HEAT_SHOWN_STATE], value, otherwise];
+  const shown: ExpressionSpecification = ["global-state", HEAT_SHOWN_STATE];
+  const when = (heat: ExpressionSpecification): ExpressionSpecification => [
+    "case",
+    heat,
+    value,
+    otherwise,
+  ];
+  // Across the chart's band, only while the chart is off
+  const chartOff: ExpressionSpecification = [
+    "!",
+    ["to-boolean", ["global-state", AVIATION_SHOWN_STATE]],
+  ];
+  return [
+    "step",
+    ["zoom"],
+    when(shown),
+    AVIATION_BAND[0],
+    when(["all", shown, chartOff]),
+    AVIATION_BAND[1],
+    when(shown),
+  ];
 }
 
 /**

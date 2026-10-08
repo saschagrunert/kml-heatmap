@@ -853,6 +853,18 @@ class TestTimesAndRangesThatLeftAPart:
             ("2026-08-16T14-30-00Z EDDS", "EDDS"),
             ("2026-08-16T14-30Z EDDS", "EDDS"),
             ("2026-08-16T14Z EDDS", "EDDS"),
+            # Hours and minutes with the letter of the clock, which read as
+            # a unit and stayed whole (privacy)
+            ("Aunt farm 2026-08-16 14-30h", "Aunt farm"),
+            ("Aunt farm 2026-08-16 14-30 h", "Aunt farm"),
+            ("Aunt farm 2026-08-16_14-30h", "Aunt farm"),
+            ("Aunt farm 2026-08-16 14-30 hrs", "Aunt farm"),
+            ("Aunt farm 2026-08-16 14-30m EDDS", "Aunt farm EDDS"),
+            ("Aunt farm 2026-08-16 14-30 s", "Aunt farm"),
+            ("Aunt farm 2026-08-16 14_30H", "Aunt farm"),
+            ("Aunt farm 2026-08-16-14-30-00h", "Aunt farm"),
+            ("Aunt farm 2026-08-16T14-30h", "Aunt farm"),
+            ("Aunt farm 16.08.2026 14-30h EDDS", "Aunt farm EDDS"),
             # A German range of days, with and without the year
             ("Aunt farm 16.-18.08.2026", "Aunt farm"),
             ("Aunt farm 16. - 18.08.26", "Aunt farm"),
@@ -870,6 +882,11 @@ class TestTimesAndRangesThatLeftAPart:
             ("Climb 2026-08-16 15-20 %", "Climb 15-20 %"),
             ("Hold 2026-08-16 14-30 min", "Hold 14-30 min"),
             ("Hold 2026-08-16 14-30 sec", "Hold 14-30 sec"),
+            # No time of the clock, whatever the unit
+            ("Climb 2026-08-16 18-75 m", "Climb 18-75 m"),
+            ("Climb 2026-08-16 18-75m", "Climb 18-75m"),
+            ("Wind 2026-08-16 30-45 kt", "Wind 30-45 kt"),
+            ("Leg 2026-08-16 24-30 h", "Leg 24-30 h"),
             # A runway, which main kept as well
             ("EDDS 2026-08-16 07-25 RWY", "EDDS 07-25 RWY"),
             ("EDDS 2026-08-16 07-25 runway", "EDDS 07-25 runway"),
@@ -893,8 +910,16 @@ class TestTimesAndRangesThatLeftAPart:
             ("Aunt farm 14.30 bis 15.45 Uhr", ["14.30 bis 15.45 Uhr"]),
             ("Aunt farm 14.30 to 15.45Z EDDS", ["14.30 to 15.45Z"]),
             ("Aunt farm 2026-01-01T14-30-00Z EDDS", ["T14-30-00Z"]),
+            ("Aunt farm 2026-01-01 14-30h", ["14-30h"]),
+            ("Aunt farm 2026-01-01 14-30 h", ["14-30 h"]),
+            ("Aunt farm 2026-01-01_14-30h", ["14-30h"]),
+            ("Aunt farm 2026-01-01 14-30 hrs", ["14-30 hrs"]),
+            ("Aunt farm 2026-01-01 14-30m EDDS", ["14-30m"]),
+            ("Aunt farm 2026-01-01 14-30 s", ["14-30 s"]),
             ("EDDS 2026-01-01 07-25 RWY", []),
             ("Hold 2026-01-01 14-30 min", []),
+            ("Climb 2026-01-01 18-75 m", []),
+            ("Wind 2026-01-01 30-45 kt", []),
         ],
     )
     def test_the_check_reports_the_times(self, text, times):

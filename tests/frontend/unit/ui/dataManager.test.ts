@@ -32,6 +32,11 @@ import {
   MAP_LAYERS,
   MAP_SOURCES,
 } from "../../../../kml_heatmap/frontend/utils/constants";
+import {
+  createExpression,
+  type StylePropertySpecification,
+} from "@maplibre/maplibre-gl-style-spec";
+import { AVIATION_BAND } from "../../../../kml_heatmap/frontend/mapLayers";
 import { domCache } from "../../../../kml_heatmap/frontend/utils/domCache";
 import type {
   KMLDataset,
@@ -2012,6 +2017,89 @@ describe("DataManager", () => {
 
       expect(opacity()).toBe(0.35);
       expect(heatLayer().layout["visibility"]).toBe("none");
+    });
+
+    /** The opacity the paint of layer `id` gives at `zoom`, hot lines */
+    const at = (id: string, property: string, zoom: number): number => {
+      const parsed = createExpression(
+        mockApp.map!.layer(id).paint[property],
+        "paint.opacity",
+        { type: "number" } as StylePropertySpecification,
+      );
+      if (parsed.result !== "success") throw new Error("not an expression");
+      return parsed.value.evaluate(
+        { zoom },
+        { type: "LineString", properties: { heat: 1e6 } },
+      ) as number;
+    };
+
+    it("dims the heat across the aviation chart's band, by zoom", () => {
+      // Set once the map came to rest, the dimming lagged the chart
+      // through a pinch: the paint follows the zoom itself now
+      mockApp.currentData = baseData();
+      mockApp.aviationVisible = true;
+      dataManager.applyHeatmapEmphasis();
+
+      const heat = (zoom: number): number =>
+        at(MAP_LAYERS.heat, "heatmap-opacity", zoom);
+      const [from, to] = AVIATION_BAND;
+      // Full strength below the band, dimmed across it, the hand-over to
+      // the lines as before
+      expect(heat(from - 0.01)).toBe(1);
+      expect(heat(from)).toBeCloseTo(0.35);
+      expect(heat(9)).toBeCloseTo(0.35);
+      expect(heat(HEAT_LINES.midZoom)).toBeCloseTo(0.35);
+      expect(heat((HEAT_LINES.midZoom + HEAT_LINES.fullZoom) / 2)).toBeCloseTo(
+        0.35 / 2,
+      );
+      const glow = (zoom: number): number =>
+        at(MAP_LAYERS.heatLinesGlow, "line-opacity", zoom);
+      mockApp.aviationVisible = false;
+      dataManager.applyHeatmapEmphasis();
+      const full = [12, to - 0.01, to + 0.5].map(glow);
+      mockApp.aviationVisible = true;
+      dataManager.applyHeatmapEmphasis();
+      expect(glow(12)).toBeCloseTo(full[0]! * 0.35);
+      expect(glow(to - 0.01)).toBeCloseTo(full[1]! * 0.35);
+      // Above the band, at full strength again
+      expect(glow(to + 0.5)).toBeCloseTo(full[2]!);
+
+      // A colour layer dims it at every zoom
+      mockApp.altitudeVisible = true;
+      dataManager.applyHeatmapEmphasis();
+      expect(heat(from - 1)).toBeCloseTo(0.35);
+      expect(opacity()).toBe(0.35);
+    });
+
+    it("dims the cores of the heat lines where the map comes to rest", () => {
+      // A paint by zoom and by the heat of a line is worked out by MapLibre
+      // at the whole zoom of its tile and the one after, and blended
+      // between them: dimmed by zoom across the chart's band, which ends
+      // just past 13, the cores were dimmed at rest above it up to 14
+      mockApp.currentData = baseData();
+      mockApp.aviationVisible = true;
+      /** The opacity of a hot core at `zoom` as MapLibre draws it */
+      const drawn = (zoom: number): number => {
+        const tile = Math.floor(zoom);
+        const core = (z: number): number =>
+          at(MAP_LAYERS.heatLinesCore, "line-opacity", z);
+        return core(tile) + (zoom - tile) * (core(tile + 1) - core(tile));
+      };
+      const [, to] = AVIATION_BAND;
+      mockApp.aviationInView = false;
+      dataManager.applyHeatmapEmphasis();
+      const full = drawn(to + 0.5);
+      expect(full).toBeGreaterThan(0.5);
+      mockApp.aviationVisible = false;
+      dataManager.applyHeatmapEmphasis();
+      expect(drawn(to + 0.5)).toBeCloseTo(full);
+
+      // Within the band, at rest
+      mockApp.aviationVisible = true;
+      mockApp.aviationInView = true;
+      dataManager.applyHeatmapEmphasis();
+      expect(drawn(to + 0.5)).toBeCloseTo(full * 0.35);
+      expect(drawn(12.5)).toBeCloseTo(full * 0.35);
     });
 
     it("does nothing without a map or before the layers exist", () => {

@@ -60,6 +60,17 @@ export class FilterManager {
   }
 
   /**
+   * The mode that holds the filters, as the toast of a held Retry names it:
+   * a replay (of one flight or of all) or the hotspot tour, which hold the
+   * year select as well (ui/heldControls.ts). Null when none runs.
+   */
+  private holdingMode(): string | null {
+    if (this.app.replayActive) return "the replay";
+    if (this.app.tourView !== null) return "the tour";
+    return null;
+  }
+
+  /**
    * Drop the filter change that is still loading, a Reset view's included,
    * and show the filter that is applied in the dropdowns again
    */
@@ -191,10 +202,11 @@ export class FilterManager {
     keepSelection = false,
   ): Promise<boolean> {
     const yearSelect = domCache.get("year-select", HTMLSelectElement);
-    // A replay holds the filters, and gives way to no switch (see the
-    // constructor). The Retry of a failed switch stays on its toast into a
-    // replay, and swapped the dataset under it.
-    if (!yearSelect || this.app.replayActive) return false;
+    // A replay and the hotspot tour hold the filters, and give way to no
+    // switch (see the constructor). The Retry of a failed switch stays on
+    // its toast into either: it swapped the dataset under a replay, and
+    // ended the tour.
+    if (!yearSelect || this.holdingMode()) return false;
     if (year) yearSelect.value = year;
 
     const requestedYear = yearSelect.value;
@@ -226,11 +238,13 @@ export class FilterManager {
         : {
             label: "Retry",
             run: () => {
-              // A replay holds the filters (see above); the toast stays,
-              // so the failure is not lost to a press that did nothing
-              if (this.app.replayActive) {
+              // A replay or the tour holds the filters (see above); the
+              // toast stays, so the failure is not lost to a press that did
+              // nothing
+              const mode = this.holdingMode();
+              if (mode) {
                 showToast(
-                  "Stop the replay to load " + requestedYear + " again",
+                  "Stop " + mode + " to load " + requestedYear + " again",
                   "info",
                 );
                 return false;

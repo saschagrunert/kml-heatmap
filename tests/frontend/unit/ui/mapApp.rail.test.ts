@@ -1558,17 +1558,41 @@ describe("MapApp controls and map", () => {
         field.remove();
       });
 
-      it("opens the search from a list's checkbox, which takes no text", async () => {
-        await initializeApp(app);
-        const box = document.createElement("input");
-        box.type = "checkbox";
-        document.body.append(box);
+      it.each(["checkbox", "range"])(
+        "opens the search from a %s, which takes no text",
+        async (type) => {
+          // A slider kept the key for itself here while the page's Escape
+          // worked on it (FIELDS): the two agree now
+          await initializeApp(app);
+          const box = document.createElement("input");
+          box.type = type;
+          document.body.append(box);
 
-        expect(press(box).defaultPrevented).toBe(true);
-        await vi.waitFor(() =>
-          expect(m.toggleSearch).toHaveBeenCalledWith(app, true),
-        );
-        box.remove();
+          expect(press(box).defaultPrevented).toBe(true);
+          await vi.waitFor(() =>
+            expect(m.toggleSearch).toHaveBeenCalledWith(app, true),
+          );
+          box.remove();
+        },
+      );
+
+      it("is left to a text area, a select and an editable element", async () => {
+        await initializeApp(app);
+        const editable = document.createElement("div");
+        editable.setAttribute("contenteditable", "true");
+        const fields = [
+          document.createElement("textarea"),
+          document.createElement("select"),
+          editable,
+        ];
+        document.body.append(...fields);
+
+        for (const field of fields) {
+          expect(press(field).defaultPrevented).toBe(false);
+        }
+        await Promise.resolve();
+        expect(loadSearch).not.toHaveBeenCalled();
+        for (const field of fields) field.remove();
       });
 
       it("is left to the browser while the map is held", async () => {

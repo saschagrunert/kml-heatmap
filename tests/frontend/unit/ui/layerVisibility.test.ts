@@ -12,7 +12,10 @@ import {
   setColorLayer,
 } from "../../../../kml_heatmap/frontend/ui/layerVisibility";
 import { LayerManager } from "../../../../kml_heatmap/frontend/ui/layerManager";
-import { HEAT_SHOWN_STATE } from "../../../../kml_heatmap/frontend/mapLayers";
+import {
+  AVIATION_SHOWN_STATE,
+  HEAT_SHOWN_STATE,
+} from "../../../../kml_heatmap/frontend/mapLayers";
 import {
   MAP_LAYERS,
   MAP_SOURCES,
@@ -287,10 +290,20 @@ describe("layer visibility", () => {
     await app.mapReady;
     expect(faded()).toBe(true);
 
-    // Not while the heat steps back, is off, or a replay hides it
+    // Not while the heat steps back, is off, or a replay hides it. The
+    // aviation chart has a state of its own, which the labels' paint
+    // reads across the chart's band only (mapLayers.ts)
+    const chart = (): unknown =>
+      app.map!.getGlobalState()[AVIATION_SHOWN_STATE];
+    expect(chart()).toBe(false);
     app.aviationVisible = true;
-    expect(faded()).toBe(false);
+    expect(faded()).toBe(true);
+    expect(chart()).toBe(true);
     app.aviationVisible = false;
+    expect(chart()).toBe(false);
+    app.altitudeVisible = true;
+    expect(faded()).toBe(false);
+    app.altitudeVisible = false;
     expect(faded()).toBe(true);
     app.heatmapVisible = false;
     expect(faded()).toBe(false);
@@ -407,7 +420,9 @@ describe("layer visibility", () => {
         expect(dimsHeatmap(asMapApp(app))).toBe(dimmed);
         expect(dimsHeatCloud(asMapApp(app))).toBe(dimmed);
         expect(legend.classList.contains("is-dimmed")).toBe(dimmed);
-        expect(faded()).toBe(!dimmed);
+        // The labels follow the band in their paint, by zoom, in every
+        // frame of a pinch: the state stays (see mapLayers.test.ts)
+        expect(faded()).toBe(true);
         // Only a zoom into or out of the band changes something
         expect(app.dataManager.applyHeatmapEmphasis).toHaveBeenCalledTimes(
           dimmed === before ? 0 : 1,

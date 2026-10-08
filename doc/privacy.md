@@ -237,9 +237,11 @@ Removed from the site:
   `H2 2026`, `2026-08-16T14Z`, `14:30`, `1430Z`, `0930z`, `1430 UTC`, `1430L`,
   `1513h`, `1513H`, `1430hrs`, `14h30`, `15.13h`, `14.30 Uhr`, `3pm`, `10 AM`,
   `0930Z-1045Z`, `2026-08-16_1430`, `2026-08-16-14-30`, `2026-08-16 14-30`,
-  `2026-08-16T14-30-00Z`, `14.30-15.45 Uhr`, `14.30 to 15.45Z`, `202608161430`;
-  a range with a unit or a runway after the date stays, `2026-08-16 14-30 min`,
-  `2026-08-16 07-25 RWY`), with the zone, the fraction of a second or the offset
+  `2026-08-16 14-30h`, `2026-08-16 14-30 h`, `2026-08-16T14-30-00Z`,
+  `14.30-15.45 Uhr`, `14.30 to 15.45Z`, `202608161430`; a range with a unit or a
+  runway after the date stays, `2026-08-16 14-30 min`, `2026-08-16 18-75 m`,
+  `2026-08-16 07-25 RWY`, while hours and minutes of the clock with a bare `h`,
+  `m` or `s` are a time), with the zone, the fraction of a second or the offset
   that follows a time (`1430 GMT`, `1430 Zulu`, `09:30 EDT`, `14:30 AEST`,
   `1430 local`, `0930 hours`, `14:30:00.5Z`, `14:30 +02:00`, `1430+0200`; the
   common zones, not every one there is), also with German month names written

@@ -947,12 +947,15 @@ describe("WrappedManager dialog", () => {
   describe("map placeholder", () => {
     const awaiting = (): boolean =>
       el("wrapped-map-container").classList.contains("is-awaiting-map");
+    /** The map's `render` listeners, which the wait adds one to */
+    let renders = 0;
 
     /** Open with a map that still has tiles of the fitted view in flight */
-    function openWithBusyMap(): void {
-      mockApp.map!.loaded.mockReturnValue(false);
+    async function openWithBusyMap(): Promise<void> {
+      mockApp.map!.areTilesLoaded.mockReturnValue(false);
+      renders = mockApp.map!.listenerCount("render");
       openWrapped();
-      vi.advanceTimersByTime(100);
+      await vi.advanceTimersByTimeAsync(100);
     }
 
     it("holds the placeholder from the opening on", () => {
@@ -961,83 +964,95 @@ describe("WrappedManager dialog", () => {
       expect(awaiting()).toBe(true);
     });
 
-    it("reveals the map once it comes to rest with its tiles drawn", () => {
-      openWithBusyMap();
+    it("reveals the map once it comes to rest with its tiles drawn", async () => {
+      await openWithBusyMap();
       expect(awaiting()).toBe(true);
-      expect(mockApp.map!.listenerCount("idle")).toBe(1);
+      expect(mockApp.map!.listenerCount("render")).toBe(renders + 1);
 
-      mockApp.map!.emit("idle");
+      mockApp.map!.areTilesLoaded.mockReturnValue(true);
+      mockApp.map!.emit("render");
+      await vi.advanceTimersByTimeAsync(0);
 
       expect(awaiting()).toBe(false);
-      expect(mockApp.map!.listenerCount("idle")).toBe(0);
+      expect(mockApp.map!.listenerCount("render")).toBe(renders);
     });
 
-    it("reveals at once a map that is already at rest", () => {
-      // No frame is coming for such a map, so neither is an `idle`
+    it("reveals at once a map that is already at rest", async () => {
+      // No frame is coming for such a map
       openWrapped();
       expect(awaiting()).toBe(true);
 
-      vi.advanceTimersByTime(100);
+      await vi.advanceTimersByTimeAsync(100);
 
       expect(awaiting()).toBe(false);
-      expect(mockApp.map!.listenerCount("idle")).toBe(0);
     });
 
-    it("waits for a loaded map that is still moving into the fit", () => {
+    it("waits for a map that is still moving into the fit", async () => {
       mockApp.map!.isMoving.mockReturnValue(true);
       openWrapped();
-      vi.advanceTimersByTime(100);
+      await vi.advanceTimersByTimeAsync(100);
 
       expect(awaiting()).toBe(true);
 
-      mockApp.map!.emit("idle");
+      mockApp.map!.isMoving.mockReturnValue(false);
+      mockApp.map!.emit("render");
+      await vi.advanceTimersByTimeAsync(0);
       expect(awaiting()).toBe(false);
     });
 
-    it("waits for the heat the year worker is still drawing", () => {
+    it("waits for the heat the year worker is still drawing", async () => {
       // The map is at rest meanwhile, with the heat of before
       mockApp.dataManager.heatRequests = 1;
       openWrapped();
-      vi.advanceTimersByTime(100);
+      await vi.advanceTimersByTimeAsync(100);
       expect(awaiting()).toBe(true);
-      mockApp.map!.emit("idle");
+      mockApp.map!.emit("render");
+      await vi.advanceTimersByTimeAsync(0);
       expect(awaiting()).toBe(true);
 
       mockApp.dataManager.heatRequests = 0;
-      mockApp.map!.emit("idle");
+      mockApp.map!.emit("render");
+      await vi.advanceTimersByTimeAsync(0);
       expect(awaiting()).toBe(false);
     });
 
-    it("gives up waiting for a map that never comes to rest", () => {
-      openWithBusyMap();
+    it("gives up waiting for a map that never comes to rest", async () => {
+      await openWithBusyMap();
 
-      vi.advanceTimersByTime(1199);
+      await vi.advanceTimersByTimeAsync(1199);
       expect(awaiting()).toBe(true);
-      vi.advanceTimersByTime(1);
+      await vi.advanceTimersByTimeAsync(1);
 
       expect(awaiting()).toBe(false);
-      expect(mockApp.map!.listenerCount("idle")).toBe(0);
+      expect(mockApp.map!.listenerCount("render")).toBe(renders);
     });
 
-    it("drops the listener and the placeholder on close", () => {
-      openWithBusyMap();
+    it("drops the listener and the placeholder on close", async () => {
+      await openWithBusyMap();
 
       wrappedManager.closeWrapped();
 
       expect(awaiting()).toBe(false);
-      expect(mockApp.map!.listenerCount("idle")).toBe(0);
-      expect(mockApp.map!.off).toHaveBeenCalledWith(
-        "idle",
-        expect.any(Function),
-      );
+      expect(mockApp.map!.listenerCount("render")).toBe(renders);
     });
 
-    it("drops the listener on destroy", () => {
-      openWithBusyMap();
+    it("keeps the placeholder of a reopening from the wait of the close", async () => {
+      // The wait of the closed dialog settles after the close; it must not
+      // reveal the map of the next opening before its own tiles
+      await openWithBusyMap();
+      wrappedManager.closeWrapped();
+      wrappedManager.showWrapped();
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(awaiting()).toBe(true);
+    });
+
+    it("drops the listener on destroy", async () => {
+      await openWithBusyMap();
 
       wrappedManager.destroy();
 
-      expect(mockApp.map!.listenerCount("idle")).toBe(0);
+      expect(mockApp.map!.listenerCount("render")).toBe(renders);
     });
   });
 
