@@ -10,7 +10,7 @@ import {
 import { domCache } from "../utils/domCache";
 import { loadFeatures } from "../services/featureLoader";
 import { TRY_AGAIN } from "../services/lazyImport";
-import { HEAT_SHOWN_STATE } from "../mapLayers";
+import { aviationDrawsAt, HEAT_SHOWN_STATE } from "../mapLayers";
 import { dismissToast, showToast } from "../utils/toast";
 
 /** Said when the imagery's code cannot be fetched and the switch goes off */
@@ -24,6 +24,7 @@ const LAYER_KEYS: readonly (keyof StoreState)[] = [
   "airspeedVisible",
   "airportsVisible",
   "aviationVisible",
+  "aviationInView",
   "replayActive",
   "selectedPathIds",
   "heatCloud",
@@ -46,6 +47,15 @@ export function highlightsSelection(app: MapApp): boolean {
 }
 
 /**
+ * Whether the aviation chart is on and drawn: it has tiles for a band of
+ * zooms only (aviationDrawsAt), and outside it the heat dimmed for a chart
+ * that was not there
+ */
+function showsAviation(app: MapApp): boolean {
+  return app.aviationVisible && app.aviationInView;
+}
+
+/**
  * Whether the heatmap steps back for what is drawn over it: a colour layer,
  * the selection's lines, or the aviation chart, whose airspace outlines and
  * labels drowned under the bloom at full strength. Worked out here with the
@@ -55,7 +65,7 @@ export function dimsHeatmap(app: MapApp): boolean {
   return (
     app.altitudeVisible ||
     app.airspeedVisible ||
-    app.aviationVisible ||
+    showsAviation(app) ||
     highlightsSelection(app)
   );
 }
@@ -68,7 +78,7 @@ export function dimsHeatmap(app: MapApp): boolean {
  * halo round the flights it is meant to show.
  */
 export function dimsHeatCloud(app: MapApp): boolean {
-  return app.aviationVisible || highlightsSelection(app);
+  return showsAviation(app) || highlightsSelection(app);
 }
 
 /**
@@ -164,6 +174,14 @@ export function followLayerVisibility(app: MapApp): void {
       app.store.subscribeKeys(LAYER_KEYS, labels);
       map.on("style.load", labels);
       labels();
+      // Where the map comes to rest, which the dimming follows: the store
+      // only tells when the zoom crosses into or out of the chart's band
+      const zoomed = (): void => {
+        app.aviationInView = aviationDrawsAt(map.getZoom());
+      };
+      const zooms = map.on("zoomend", zoomed);
+      app.signal.addEventListener("abort", () => zooms.unsubscribe());
+      zoomed();
     },
     () => {},
   );

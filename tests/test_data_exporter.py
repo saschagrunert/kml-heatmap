@@ -1091,6 +1091,64 @@ class TestSiteOutput:
             1735689600
         }
 
+    @pytest.mark.parametrize(
+        ("stable_mtimes", "expected"), [(False, 1735689600), (True, 1_000_000_000)]
+    )
+    def test_directories_get_the_day_too(self, tmp_path, stable_mtimes, expected):
+        """Not the time of the build, which a directory listing would show.
+
+        Moving a file in, creating a year directory, removing a stale file
+        and removing the stages each set the time of their directory; a
+        directory the run does not write in keeps its own.
+        """
+        out = tmp_path / "out"
+        (out / "foreign").mkdir(parents=True)
+        os.utime(out / "foreign", (1234567890, 1234567890))
+        (out / "flags").mkdir()
+        (out / "flags" / "xx.svg").write_text("stale flag")
+        _publish_site(out, years=(2024, 2025))
+        with SiteOutput(
+            out,
+            out / "data",
+            ("manifest.json", "vendor/app.js"),
+            ("flags/*.svg",),
+            stable_mtimes=stable_mtimes,
+            build_day=1735689600,
+        ) as site:
+            _stage_site(site, years=(2025, 2026))
+            (site.site_stage / "vendor").mkdir()
+            (site.site_stage / "vendor" / "app.js").write_text("vendored")
+            (site.site_stage / "flags").mkdir()
+            (site.site_stage / "flags" / "de.svg").write_text("flag")
+            site.publish([2025, 2026])
+
+        directories = {
+            path.relative_to(out).as_posix(): path.stat().st_mtime
+            for path in (out, *out.rglob("*"))
+            if path.is_dir()
+        }
+        assert directories.pop("foreign") == 1234567890
+        assert directories == dict.fromkeys(
+            (".", "data", "data/2025", "data/2026", "flags", "vendor"), expected
+        )
+
+    def test_a_year_no_longer_built_with_a_stray_file_gets_the_day(self, tmp_path):
+        """Its data file goes, which set the time of the directory it stays."""
+        out = tmp_path / "out"
+        _publish_site(out, years=(2024, 2025))
+        (out / "data" / "2024" / "notes.txt").write_text("stray")
+        (out / "data" / "elsewhere").mkdir()
+        os.utime(out / "data" / "elsewhere", (1234567890, 1234567890))
+        with SiteOutput(out, out / "data", build_day=1735689600) as site:
+            _stage_site(site, years=(2025,))
+            site.publish([2025])
+
+        assert (out / "data" / "2024" / "notes.txt").exists()
+        assert not (out / "data" / "2024" / "data.json").exists()
+        assert (out / "data" / "2024").stat().st_mtime == 1735689600
+        # Not the tool's, so not touched
+        assert (out / "data" / "elsewhere").stat().st_mtime == 1234567890
+
     def test_the_entry_points_are_published_last(self, tmp_path):
         """A page loaded meanwhile never points at a file not in place yet."""
         out = tmp_path / "out"

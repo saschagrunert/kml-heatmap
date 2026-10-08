@@ -39,7 +39,7 @@ class TestInitWorker:
         lookup_module.databases.reset()
         record = lookup_module.AirportRecord(1.0, 2.0, "Parent Field", "DE")
         init_worker(logging.INFO, pickle.dumps({"ZZZZ": record}))
-        with patch.object(lookup_module, "_read_airport_csv") as read_csv:
+        with patch.object(lookup_module, "_read_database") as read_csv:
             assert lookup_module.lookup_airport_coordinates("ZZZZ") == (
                 1.0,
                 2.0,
@@ -52,10 +52,28 @@ class TestInitWorker:
         lookup_module.databases.reset()
         runways = {"ZZZZ": ()}
         init_worker(logging.INFO, None, pickle.dumps(runways))
-        with patch.object(lookup_module, "_read_runway_csv") as read_csv:
+        with patch.object(lookup_module, "_read_database") as read_csv:
             assert lookup_module.load_runway_database() == runways
         read_csv.assert_not_called()
         lookup_module.databases.reset()
+
+    def test_uses_the_fingerprint_of_the_parent(self):
+        """Not one of the files on disk, which a download may have replaced."""
+        lookup_module.databases.reset()
+        try:
+            init_worker(logging.INFO, pickle.dumps({}), pickle.dumps({}), "0badf00d")
+            assert lookup_module.database_fingerprint() == "0badf00d"
+        finally:
+            lookup_module.databases.reset()
+
+    def test_a_fingerprint_without_both_databases_is_not_used(self):
+        """The worker loads what it lacks itself, which the fingerprint misses."""
+        lookup_module.databases.reset()
+        try:
+            init_worker(logging.INFO, b"not a pickle", pickle.dumps({}), "0badf00d")
+            assert lookup_module.database_fingerprint() != "0badf00d"
+        finally:
+            lookup_module.databases.reset()
 
     def test_a_broken_database_is_loaded_lazily(self, monkeypatch):
         lookup_module.databases.reset()

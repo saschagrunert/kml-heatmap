@@ -9,7 +9,6 @@ describe("storedFlag", () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
-    localStorage.removeItem(key);
   });
 
   it("keeps a flag until it is cleared", () => {

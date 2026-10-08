@@ -4,6 +4,7 @@ import contextlib
 import csv
 import hashlib
 import http.client
+import io
 import math
 import os
 import re
@@ -32,7 +33,9 @@ from .helpers import DATE_PATTERN
 from .logger import logger
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from pathlib import Path
+    from typing import IO
 
 # Pre-compiled pattern for ICAO code extraction. VIII is no code but August
 # in Roman numerals, as a date in Poland or Hungary has it ("16.VIII.2026"),
@@ -63,6 +66,7 @@ __all__ = [
     "standardize_airport_names",
     "standardize_route",
     "use_airport_database",
+    "use_database_fingerprint",
     "use_runway_database",
 ]
 
@@ -353,32 +357,63 @@ def _download_airport_database(database: _CsvDatabase | None = None) -> bool:
     return False
 
 
-def _read_airport_csv(path: Path) -> dict[str, AirportRecord]:
+def _airport_rows(text: IO[str]) -> dict[str, AirportRecord]:
     """Parse the airports CSV into a mapping of ICAO code to record."""
     airports: dict[str, AirportRecord] = {}
-    with open(path, encoding="utf-8") as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            icao = (row.get("ident") or "").strip().upper()
-            # Only include airports with valid ICAO codes (4 characters)
-            if not icao or len(icao) != 4:
-                continue
-            try:
-                lat = float(row.get("latitude_deg") or "")
-                lon = float(row.get("longitude_deg") or "")
-            except ValueError:
-                continue
-            name = (row.get("name") or "").strip()
-            country = (row.get("iso_country") or "").strip()
-            try:
-                elevation_m: float | None = (
-                    float(row.get("elevation_ft") or "") * FEET_TO_METERS
-                )
-            except ValueError:
-                elevation_m = None
-            if name:
-                airports[icao] = AirportRecord(lat, lon, name, country, elevation_m)
+    for row in csv.DictReader(text):
+        icao = (row.get("ident") or "").strip().upper()
+        # Only include airports with valid ICAO codes (4 characters)
+        if not icao or len(icao) != 4:
+            continue
+        try:
+            lat = float(row.get("latitude_deg") or "")
+            lon = float(row.get("longitude_deg") or "")
+        except ValueError:
+            continue
+        name = (row.get("name") or "").strip()
+        country = (row.get("iso_country") or "").strip()
+        try:
+            elevation_m: float | None = (
+                float(row.get("elevation_ft") or "") * FEET_TO_METERS
+            )
+        except ValueError:
+            elevation_m = None
+        if name:
+            airports[icao] = AirportRecord(lat, lon, name, country, elevation_m)
     return airports
+
+
+def _read_airport_csv(path: Path) -> dict[str, AirportRecord]:
+    """The airports of a CSV file (see ``_airport_rows``)."""
+    with open(path, encoding="utf-8") as f:
+        return _airport_rows(f)
+
+
+def _read_database[T](
+    path: Path, rows: Callable[[IO[str]], T], columns: tuple[str, ...] | None
+) -> tuple[T, bytes] | None:
+    """A cached database and the digest of exactly the bytes it was read from.
+
+    One open file for both: the download of another run may replace the
+    file at any time (atomically, so this one keeps reading the file it
+    opened), and a digest of the file on disk could then describe another
+    database than the one read, under which the parse cache would store
+    results computed with this one. ``columns`` checks the file is complete
+    and has them first (see ``_is_valid_csv``), None for no check; None is
+    returned for a file that fails it.
+    """
+    with open(path, "rb") as f:
+        digest = hashlib.file_digest(f, "sha256").digest()
+        if columns is not None:
+            f.seek(0)
+            header_line = f.readline()
+            size = f.seek(0, os.SEEK_END)
+            f.seek(max(size - 1, 0))
+            if not _is_valid_csv(header_line, f.read(1), columns):
+                return None
+        f.seek(0)
+        with io.TextIOWrapper(f, encoding="utf-8") as text:
+            return rows(text), digest
 
 
 def _ensure_cache_file(database: _CsvDatabase | None = None) -> None:
@@ -497,18 +532,23 @@ def _runway_ends(row: dict[str, str]) -> list[RunwayEnd]:
     ]
 
 
-def _read_runway_csv(path: Path) -> dict[str, tuple[RunwayEnd, ...]]:
+def _runway_rows(text: IO[str]) -> dict[str, tuple[RunwayEnd, ...]]:
     """The ends of the open runways of every airport, by its ident."""
     runways: dict[str, list[RunwayEnd]] = {}
-    with open(path, encoding="utf-8") as f:
-        for row in csv.DictReader(f):
-            ident = (row.get("airport_ident") or "").strip().upper()
-            if len(ident) != 4 or (row.get("closed") or "0").strip() == "1":
-                continue
-            ends = _runway_ends(row)
-            if ends:
-                runways.setdefault(ident, []).extend(ends)
+    for row in csv.DictReader(text):
+        ident = (row.get("airport_ident") or "").strip().upper()
+        if len(ident) != 4 or (row.get("closed") or "0").strip() == "1":
+            continue
+        ends = _runway_ends(row)
+        if ends:
+            runways.setdefault(ident, []).extend(ends)
     return {ident: tuple(ends) for ident, ends in runways.items()}
+
+
+def _read_runway_csv(path: Path) -> dict[str, tuple[RunwayEnd, ...]]:
+    """The runways of a CSV file (see ``_runway_rows``)."""
+    with open(path, encoding="utf-8") as f:
+        return _runway_rows(f)
 
 
 class AirportDatabases:
@@ -532,14 +572,28 @@ class AirportDatabases:
         # hashing the database takes a few milliseconds, and the parse
         # cache asks for the fingerprint once per KML file
         self._fingerprint: tuple[list[tuple[str, int, int, int]], str] | None = None
+        # Whether ``load`` and ``load_runways`` read the databases here, and
+        # the digests of the files they read, None for none; and the
+        # fingerprint of the databases another process loaded, which
+        # ``use_fingerprint`` hands over
+        self._read_here = {"airports": False, "runways": False}
+        self._airport_digest: bytes | None = None
+        self._runway_digest: bytes | None = None
+        self._given_fingerprint: str | None = None
 
     def use(self, airports: dict[str, AirportRecord]) -> None:
         """Use a database another process loaded instead of loading it here."""
         self.airports = airports
+        self._read_here["airports"] = False
 
     def use_runways(self, runways: dict[str, tuple[RunwayEnd, ...]]) -> None:
         """Use runways another process loaded instead of loading them here."""
         self.runways = runways
+        self._read_here["runways"] = False
+
+    def use_fingerprint(self, fingerprint: str) -> None:
+        """The fingerprint of the databases ``use`` and ``use_runways`` gave."""
+        self._given_fingerprint = fingerprint
 
     def reset(self) -> None:
         """Forget what was loaded; the next lookup reads the cache again."""
@@ -547,6 +601,10 @@ class AirportDatabases:
             self.airports = None
             self.runways = None
             self._fingerprint = None
+            self._read_here = {"airports": False, "runways": False}
+            self._airport_digest = None
+            self._runway_digest = None
+            self._given_fingerprint = None
 
     def load(self) -> dict[str, AirportRecord]:
         """The airport database, from the cache, downloading it when needed.
@@ -573,14 +631,22 @@ class AirportDatabases:
             required = _database_required()
 
             # A stale but complete cache is still used when the download failed
-            if CACHE_FILE.exists() and (not required or _is_valid_csv_file(CACHE_FILE)):
+            if CACHE_FILE.exists():
                 try:
-                    airports = _read_airport_csv(CACHE_FILE)
+                    loaded = _read_database(
+                        CACHE_FILE,
+                        _airport_rows,
+                        REQUIRED_COLUMNS if required else None,
+                    )
                 except (OSError, csv.Error, ValueError, UnicodeDecodeError) as e:
                     logger.warning("Failed to load airport cache: %s", e)
-                else:
+                    loaded = None
+                if loaded is not None:
+                    airports, digest = loaded
                     if airports or not required:
                         self.airports = airports
+                        self._airport_digest = digest
+                        self._read_here["airports"] = True
                         logger.debug(
                             "Loaded %s airports from cache", f"{len(airports):,}"
                         )
@@ -599,6 +665,7 @@ class AirportDatabases:
                 REQUIRE_DATABASE_ENV,
             )
             self.airports = {}
+            self._read_here["airports"] = True
             return self.airports
 
     def load_runways(self) -> dict[str, tuple[RunwayEnd, ...]]:
@@ -621,14 +688,18 @@ class AirportDatabases:
             _ensure_cache_file(database)
             required = _database_required()
             runways: dict[str, tuple[RunwayEnd, ...]] = {}
-            if database.cache_file.exists() and (
-                not required
-                or _is_valid_csv_file(database.cache_file, database.columns)
-            ):
+            if database.cache_file.exists():
                 try:
-                    runways = _read_runway_csv(database.cache_file)
+                    loaded = _read_database(
+                        database.cache_file,
+                        _runway_rows,
+                        database.columns if required else None,
+                    )
                 except (OSError, csv.Error, ValueError, UnicodeDecodeError) as e:
                     logger.warning("Failed to load the runway cache: %s", e)
+                else:
+                    if loaded is not None:
+                        runways, self._runway_digest = loaded
             if required and not runways:
                 raise AirportDatabaseError(
                     f"The OurAirports runways could not be loaded from "
@@ -638,6 +709,7 @@ class AirportDatabases:
             if not runways:
                 logger.warning("Runway database unavailable - touchdowns get no runway")
             self.runways = runways
+            self._read_here["runways"] = True
             return runways
 
     def fingerprint(self) -> str:
@@ -653,7 +725,22 @@ class AirportDatabases:
         Returns ``"nodb"`` while there is no cached airport database, so
         results computed without one are told apart from results computed
         with it. A missing runway database counts as an empty one.
+
+        Once both are loaded, of the bytes they were read from rather than
+        of the files: a run that downloads them again meanwhile would make
+        the parse cache keep what this process computes with the old ones
+        under the key of the new ones. A worker takes the parent's (see
+        ``use_fingerprint``).
         """
+        if self._given_fingerprint is not None:
+            return self._given_fingerprint
+        if self._read_here["airports"] and self._read_here["runways"]:
+            if self._airport_digest is None:
+                return "nodb"
+            digest = hashlib.sha256(self._airport_digest)
+            if self._runway_digest is not None:
+                digest.update(self._runway_digest)
+            return digest.hexdigest()[:8]
         files = (CACHE_FILE, RUNWAYS_CACHE_FILE)
         key: list[tuple[str, int, int, int]] = []
         for path in files:
@@ -707,6 +794,11 @@ def use_runway_database(runways: dict[str, tuple[RunwayEnd, ...]]) -> None:
 def database_fingerprint() -> str:
     """See ``AirportDatabases.fingerprint``."""
     return databases.fingerprint()
+
+
+def use_database_fingerprint(fingerprint: str) -> None:
+    """See ``AirportDatabases.use_fingerprint``."""
+    databases.use_fingerprint(fingerprint)
 
 
 def refresh_airport_databases() -> None:

@@ -51,6 +51,7 @@ import {
 import { resetMapLibreMock } from "../../../mocks/maplibre-gl";
 import {
   ALTITUDE,
+  ALTITUDE_SELECTED,
   drawMode,
   layerManagerHelpers,
   setupLayerManager,
@@ -1203,6 +1204,32 @@ describe("LayerManager on the relief", () => {
       expect(mockApp.terrainActive).toBe(false);
       expect(features(RIBBONS).length).toBeGreaterThan(0);
       expect(features(ALTITUDE)).toEqual([]);
+    });
+
+    it("leaves the cut of a selection to the feature bundle too, with its legend at once", async () => {
+      // A selection while the bundle loaded was drawn as flat lines in the
+      // 3D view, under the legend of before
+      const legend = document.getElementById("legend-max")!;
+      featureBundle.held = true;
+      mockApp.globeVisible = true;
+      await drawOverHills(11, false);
+      mockApp.store.set("threeDVisible", true);
+      layerManager.syncModes(true);
+      const selected = setDataCalls(ALTITUDE_SELECTED);
+      const written = legend.textContent;
+
+      legend.textContent = "stale";
+      mockApp.selectedPathIds = new Set([1]);
+      layerManager.updateSelectionStyles();
+
+      expect(setDataCalls(ALTITUDE_SELECTED)).toBe(selected);
+      expect(legend.textContent).toBe(written);
+
+      // Nor does a new dataset meanwhile keep the legend of the one before
+      legend.textContent = "stale";
+      layerManager.syncModes(true);
+      expect(legend.textContent).toBe(written);
+      expect(setDataCalls(ALTITUDE_SELECTED)).toBe(selected);
     });
 
     it("draws the flights as lines on the flat map without the feature bundle, which cuts the ribbons", async () => {

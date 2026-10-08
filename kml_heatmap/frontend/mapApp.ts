@@ -137,6 +137,7 @@ import {
 } from "./ui/appChrome";
 import { segmentsForPathIds } from "./calculations/statistics";
 import {
+  REPLAY_HIDDEN_MESSAGE,
   REPLAY_PRECONDITION_MESSAGE,
   REPLAY_TOO_MANY_MESSAGE,
 } from "./ui/replayButton";
@@ -210,6 +211,12 @@ export function startViewPadding(
 const WRAPPED_RESTORE_DELAY_MS = 500;
 
 /**
+ * The touches the touch clock is told of: the start, and the end, from
+ * which a tap's click is measured (see TouchClock.note)
+ */
+const TOUCH_CLOCK_EVENTS = ["touchstart", "touchend", "touchcancel"] as const;
+
+/**
  * How long the map may take to draw once the data is in. The map draws
  * through its worker; a worker that failed to start only says so in the
  * console, and the page would otherwise show an empty map and nothing else.
@@ -278,7 +285,7 @@ export class MapApp {
     moveend?: (e: object) => void;
     zoomend?: (e: object) => void;
     click?: (e: MapMouseEvent) => void;
-    touchstart?: (e: MapTouchEvent) => void;
+    touch?: (e: MapTouchEvent) => void;
   } = {};
   /** Tells the map's taps from its clicks (see handleMapClick) */
   readonly touchClock = new TouchClock();
@@ -603,11 +610,13 @@ export class MapApp {
     this.lifetime.abort();
     resetSafeArea(true);
     if (this.map) {
-      const { moveend, zoomend, click, touchstart } = this.mapHandlers;
+      const { moveend, zoomend, click, touch } = this.mapHandlers;
       if (moveend) this.map.off("moveend", moveend);
       if (zoomend) this.map.off("zoomend", zoomend);
       if (click) this.map.off("click", click);
-      if (touchstart) this.map.off("touchstart", touchstart);
+      if (touch) {
+        for (const type of TOUCH_CLOCK_EVENTS) this.map.off(type, touch);
+      }
       this.map.off("moveend", this.syncResetButton);
       this.map.off("error", this.handleMapError);
     }
@@ -1008,14 +1017,17 @@ export class MapApp {
 
   /**
    * Why the selection cannot be replayed (see canReplay), null if it can:
-   * no times at all before too many flights, which fewer would not mend
+   * no times at all before too many flights, which fewer would not mend.
+   * Shared flights the filter hides all, which share mode keeps, are said
+   * to be hidden, as the chip says, rather than to need picking.
    */
   replayHint(): string | null {
-    return !this.timedSelection()
-      ? REPLAY_PRECONDITION_MESSAGE
-      : this.canReplay()
-        ? null
-        : REPLAY_TOO_MANY_MESSAGE;
+    if (this.timedSelection()) {
+      return this.canReplay() ? null : REPLAY_TOO_MANY_MESSAGE;
+    }
+    return this.selectedPathIds.size > 0 && shownSelection(this).size === 0
+      ? REPLAY_HIDDEN_MESSAGE
+      : REPLAY_PRECONDITION_MESSAGE;
   }
 
   /**
@@ -1282,12 +1294,14 @@ export class MapApp {
         this.airportManager.updateAirportMarkerSizes();
       },
       click: (e) => this.handleMapClick(e),
-      touchstart: (e) => this.touchClock.note(e.originalEvent),
+      touch: (e) => this.touchClock.note(e.originalEvent),
     };
     this.map.on("moveend", this.mapHandlers.moveend!);
     this.map.on("zoomend", this.mapHandlers.zoomend!);
     this.map.on("click", this.mapHandlers.click!);
-    this.map.on("touchstart", this.mapHandlers.touchstart!);
+    for (const type of TOUCH_CLOCK_EVENTS) {
+      this.map.on(type, this.mapHandlers.touch!);
+    }
   }
 
   /**
@@ -1320,7 +1334,10 @@ export class MapApp {
     if (airport !== null) {
       this.airportClickAt = at;
       if (this.isLabelActivation(e.originalEvent)) {
-        this.airportManager.activateAirport(airport);
+        this.airportManager.activateAirport(
+          airport,
+          this.touchClock.isTouchClick(e.originalEvent),
+        );
       }
       return;
     }

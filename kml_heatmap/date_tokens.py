@@ -37,17 +37,20 @@ or half of a year with it ("Summer 2026", "Sommer 2026", "Q3 2026", "H2
 16.08.2026", "Sat 14:30") and a time of day ("14:30", "1430Z", "0930z",
 "1430L", "1513h" as in a Charterware file name, "14h30", "14.30 Uhr", "3pm",
 "0930Z-1045Z", the time after a date as in 20260816T1430, 20260816T14Z,
-2026-08-16_1430 or 2026-08-16-14-30), with the zone, the fraction or the
-offset after it ("1430 GMT", "1430 Zulu", "09:30 EDT", "1430 local", "0930
-hours", "14:30:00.5Z", "14:30 +02:00", "1430+0200"). The common zones count,
-not every one there is. "14.30" alone stays: it is a decimal as often ("fuel
-14.30"), and only goes with a zone, the local time or the hours ("14.30Z",
-"14.30L", "14.30 hrs"). The obfuscator's check reports the times of day in
-names, the descriptions and the file names (``find_time_tokens``), the
-weekdays and holidays anywhere, and in names, descriptions and file names
-the parts of a date as well (``find_partial_date_tokens``): the year of the
-flight completes them. The obfuscator takes all of it out of names and
-descriptions (``stray_date_spans``).
+2026-08-16_1430, 2026-08-16-14-30, 2026-08-16T14-30-00Z or "2026-08-16
+14-30" but not "2026-08-16 07-25 RWY" or "2026-08-16 14-30 min", and a range
+such as "14.30-15.45 Uhr" or "14.30 bis 15.45 Uhr" whole), with the zone,
+the fraction or the offset after it ("1430 GMT", "1430 Zulu", "09:30 EDT",
+"1430 local", "0930 hours", "14:30:00.5Z", "14:30 +02:00", "1430+0200"). The
+common zones count, not every one there is. "14.30" alone stays: it is a
+decimal as often ("fuel 14.30"), and only goes with a zone, the local time
+or the hours ("14.30Z", "14.30L", "14.30 hrs"). The obfuscator's check
+reports the times of day in names, the descriptions and the file names
+(``find_time_tokens``), the weekdays and holidays anywhere, and in names,
+descriptions and file names the parts of a date as well
+(``find_partial_date_tokens``): the year of the flight completes them. The
+obfuscator takes all of it out of names and descriptions
+(``stray_date_spans``).
 
 Where a name could hold a date or something else, it loses the date: a
 decimal such as "fuel 16.8" goes with the dates it looks like. Two numbers
@@ -165,6 +168,9 @@ _WEEK = r"(?:0?[1-9]|[1-4]\d|5[0-3])"
 _HHMM = r"(?:[01]\d|2[0-3])[0-5]\d(?:[0-5]\d)?"
 # What stands between the day and the month of a date written with spaces
 _SPACED = r"(?:\s+(?:[./_-]\s*)?|[./_-]\s+)"
+# The first day of a range of days in German notation, which goes with the
+# date after it: the "16.-" of "16.-18.08.2026", which left "16" behind
+_DAYS_BEFORE_DOTTED = r"(?:(?:0?[1-9]|[12]\d|3[01])\.\s?-\s?)?"
 # The dashes a date is written with besides the hyphen: the hyphen and the
 # non-breaking hyphen of Unicode, the figure dash and the en dash. The
 # patterns read them as the hyphen; each is a single character, so the
@@ -210,16 +216,16 @@ def _numeric_patterns(skip_near_jan_first: bool) -> tuple[re.Pattern[str], ...]:
             + r"(?:0?[1-9]|1[0-2])(?P=sep)(?:0?[1-9]|[12]\d|3[01])(?!\d|\.\d)"
         ),
         # Day first or month first, with a four-digit year, and 16_08_2026
-        # from a file name
+        # from a file name; the German range of days "16.-18.08.2026" whole
         re.compile(
-            r"(?<![\d.])"
+            rf"(?<![\d.]){_DAYS_BEFORE_DOTTED}"
             + unless(r"0?1(?P<skip>[./_-])0?1(?P=skip)\d{4}(?!\d|\.\d)")
             + r"\d{1,2}(?P<sep>[./_-])\d{1,2}(?P=sep)\d{4}(?!\d|\.\d)"
         ),
         # The same with a two-digit year, not right after a letter: in
         # "DA40_16_08" or "DA40-16-08-2026" the type ends in 40
         re.compile(
-            r"(?<![^\W_]|\.)"
+            rf"(?<![^\W_]|\.){_DAYS_BEFORE_DOTTED}"
             + unless(r"0?1(?P<skip>[./_-])0?1(?P=skip)\d{2}(?!\d|\.\d)")
             + r"\d{1,2}(?P<sep>[./_-])\d{1,2}(?P=sep)\d{2}(?!\d|\.\d)"
         ),
@@ -461,7 +467,8 @@ _ROMAN_MONTH_YEAR = re.compile(
 # numbers its versions by year and month, "ForeFlight 2026.03") it is one
 # (see _day_month_dotted_spans and _month_year_spans).
 _DAY_MONTH_DOTTED = re.compile(
-    r"(?<![\d.])(?:0?[1-9]|[12]\d|3[01])\.(?:0?[1-9]|1[0-2])\.(?![\d.])|"
+    rf"(?<![\d.]){_DAYS_BEFORE_DOTTED}(?:0?[1-9]|[12]\d|3[01])\.(?:0?[1-9]|1[0-2])"
+    r"\.(?![\d.])|"
     r"(?<![^\W_]|\.)(?:(?:0[1-9]|[12]\d|3[01])\.(?:0[1-9]|1[0-2])|"
     r"(?:[12]\d|3[01])\.[1-9])(?![^\W_]|\.|,\d)"
 )
@@ -613,9 +620,22 @@ _AFTER_A_TIME = r"(?:(?<=[AaPp][Mm]-)|(?<=[AaPp]\.[Mm]\.-))"
 _NOT_AFTER_A_NAME = rf"(?:(?<!-)|{_AFTER_A_TIME})"
 # What ends a range after a time ("-12 pm", "-1:15pm")
 _RANGE_END = r"-(?:1[0-2]|0?[1-9])(?:[.:][0-5]\d)?\s?(?i:[ap]\.?m)"
+# A range of times with a dot ("14.30-15.45 Uhr", "14.30-15.45Z", "9-11
+# Uhr", "14.30 bis 15.45 Uhr", "14.30 to 15.45Z") goes whole when its end
+# makes it one, as "0930Z-1045Z" does: "14.30" alone stays, and taking out
+# its end alone left the start behind ("14.30 bis"). The other dashes read
+# as the hyphen (see _DASHES).
+_TIME_JOIN = r"(?:\s?-\s?|\s+(?i:bis|to|until|till)\s+)"
+_TIME_RANGE_WORDS = (
+    rf"(?:[01]?\d|2[0-3])(?:[.:]?[0-5]\d)?{_TIME_JOIN}"
+    r"(?:[01]?\d|2[0-3])(?:[.:]?[0-5]\d)?\s*Uhr|"
+    rf"(?:[01]?\d|2[0-3])\.[0-5]\d{_TIME_JOIN}(?:[01]?\d|2[0-3])\.[0-5]\d"
+    rf"(?:\s*{_ZONE_NAME}|L|{_HOURS})(?![A-Za-z])"
+)
 _TIME_OF_DAY_WORDS = re.compile(
     r"(?<![^\W_]|[.:])"
-    rf"(?:(?:[01]?\d|2[0-3])[h.][0-5]\d\s*{_ZONE_NAME}(?![A-Za-z])|"
+    rf"(?:{_TIME_RANGE_WORDS}|"
+    rf"(?:[01]?\d|2[0-3])[h.][0-5]\d\s*{_ZONE_NAME}(?![A-Za-z])|"
     rf"(?:[01]\d|2[0-3])(?:h[0-5]\d|\.[0-5]\d(?:L|{_HOURS})(?![A-Za-z]))|"
     r"(?:[01]?\d|2[0-3])(?:[.:]?[0-5]\d)?\s*Uhr|"
     rf"{_NOT_AFTER_A_NAME}{_HOUR_12}(?i:p\.?m\.?|a\.m\.|am)|"
@@ -673,18 +693,30 @@ _COMPACT_TIME = re.compile(
 # The time of day right after a date is one in any form: the "T14:30:00Z"
 # of an ISO timestamp, whose T would be left behind otherwise, the "1430" of
 # 20260816-1430, 2026-08-16_1430 and 202608161430, the "14-30" of
-# 2026-08-16-14-30, the "15.13" of "16.08.2026, 15.13" and the hour alone
-# of an ISO timestamp, "T14Z", with fractions of
-# a second, the half of the day ("8/16/26 2:30 PM"; a lowercase "am" only
-# right after the time, since " am" is German for "at the") and a UTC
-# offset. Only a date that ends in a digit has a time right after it.
+# 2026-08-16-14-30, 2026-08-16_14-30 and "2026-08-16 14-30" (and "14_30"),
+# the "15.13" of "16.08.2026, 15.13" and the hour alone of an ISO
+# timestamp, "T14Z", with fractions of a second, the half of the day
+# ("8/16/26 2:30 PM"; a lowercase "am" only right after the time, since
+# " am" is German for "at the"), a UTC offset and "Uhr". A range goes whole
+# ("16.08.2026 14.30-15.45 Uhr", "16.08.2026 14.30 bis 15.45 Uhr"), or the
+# "-15" of its end would pass for an offset. Only a date that ends in a
+# digit has a time right after it. The hyphenated form ("T14-30-00Z" too,
+# whose hour alone left "30-00Z") is no time before a unit or a runway: the
+# "18-24 kt" of a wind, the "11-22 km" of a leg, the "14-30 min" of a wait
+# and the "07-25 RWY" of a runway after a date are no times.
+_RANGE_AFTER = (
+    r"\s*(?i:kts?|kn|km|nm|mi|mph|ft|m|kg|lbs?|gal|%|mins?|h|s|secs?)"
+    r"(?![A-Za-z])|\s*(?i:rwys?|rw|runways?|piste|(?:lande)?bahn)\b"
+)
 _TIME_AFTER_DATE = re.compile(
     rf"(?:(?:[-_]|,?\s+|T|(?<=\d))(?:{_HHMM}|"
-    r"(?:[01]?\d|2[0-3])(?P<tsep>[:.])[0-5]\d(?:(?P=tsep)[0-5]\d)?)|"
-    r"T(?:[01]\d|2[0-3])|"
-    r"(?P<dsep>[-_])(?:[01]\d|2[0-3])(?P=dsep)[0-5]\d(?:(?P=dsep)[0-5]\d)?)"
+    r"(?:[01]?\d|2[0-3])(?P<tsep>[:.])[0-5]\d(?:(?P=tsep)[0-5]\d)?"
+    rf"(?:{_TIME_JOIN}(?:[01]?\d|2[0-3])(?P=tsep)[0-5]\d(?:(?P=tsep)[0-5]\d)?)?)|"
+    r"(?:[-_T]|,?\s+)(?:[01]\d|2[0-3])(?P<dsep>[-_])[0-5]\d(?:(?P=dsep)[0-5]\d)?"
+    rf"(?!{_RANGE_AFTER})|"
+    r"T(?:[01]\d|2[0-3]))"
     r"(?:[.,]\d+)?(?:(?:\s*(?:[AP]\.?M\.?|[ap]\.m\.|pm)|am)(?![A-Za-z]))?"
-    rf"{_HOURS}?(?:{_ZONE}|{_OFFSET})?"
+    rf"{_HOURS}?(?:{_ZONE}|{_OFFSET}|\s*Uhr)?"
     r"(?![A-Za-z\d:])"
 )
 # A weekday gives the day of a flight away along with its year and the

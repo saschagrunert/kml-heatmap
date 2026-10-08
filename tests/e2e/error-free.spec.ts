@@ -8,6 +8,7 @@ import {
   readSavedState,
   relevantConsoleErrors,
   selectPathForReplay,
+  toastMessage,
   toggleLayer,
   togglePathSelection,
   waitForAircraftFilter,
@@ -152,9 +153,7 @@ test.describe("Error-Free Interactions", () => {
       await page.locator("#export-btn").click();
 
       expect((await download).suggestedFilename()).toMatch(/^heatmap_.*\.jpg$/);
-      await expect(page.locator(".toast-notification")).toHaveText(
-        "Map exported",
-      );
+      await expect(toastMessage(page, "Map exported")).toBeVisible();
       // The library clones the map into an SVG image; none of that may
       // trip the CSP, which allows no inline styles
       expectClean(errors);

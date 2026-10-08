@@ -301,6 +301,32 @@ describe("the heat cloud", () => {
     expect(style()!.opacity).toBeLessThan(1);
   });
 
+  it("follows where the aviation chart is drawn, and only while it is on", async () => {
+    app.threeDVisible = true;
+    await follow();
+    // The chart has tiles for a band of zooms only, and out of it there is
+    // nothing to step back for
+    app.store.batch(() => {
+      app.aviationVisible = true;
+      app.aviationInView = false;
+    });
+    expect(style()!.opacity).toBe(1);
+    app.aviationInView = true;
+    expect(style()!.opacity).toBeLessThan(1);
+    app.aviationInView = false;
+    expect(style()!.opacity).toBe(1);
+
+    // With the chart off, a zoom across its band leaves the cloud alone:
+    // it was cut anew in the middle of the zoom
+    app.aviationVisible = false;
+    const repaints = map().triggerRepaint.mock.calls.length;
+    const cutsBefore = cuts.count;
+    app.aviationInView = true;
+    app.aviationInView = false;
+    expect(map().triggerRepaint.mock.calls.length).toBe(repaints);
+    expect(cuts.count).toBe(cutsBefore);
+  });
+
   it("follows the year and aircraft filters", async () => {
     app.threeDVisible = true;
     await follow();

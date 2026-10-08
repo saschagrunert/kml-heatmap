@@ -114,18 +114,18 @@ says the charts show once zoomed in.
 ### Search
 
 Find an airport or a place and take the map there: **Search** at the top of the
-View group, `/` anywhere but in a text field or an open sheet or dialog, or the
-Search row of the More sheet on a phone. The field lists the airports of this
-map first, found as you type by their ICAO code, name or country (without regard
-to case or accents), and then the places Photon finds in OpenStreetMap, each
-with a short line under it (the country, or the kind of place and its region).
-Places are searched from three characters on, once you pause typing or press
-Enter with nothing listed, and the answers to the last 50 texts are kept for the
-visit, so none of them is asked again; the line under the list says while it
-searches, when nothing was found, and when Photon cannot be reached, takes
-longer than 10 seconds or the browser is offline, where the airports are still
-found. Photon is asked for what you type and nothing else (see
-[Privacy](privacy.md#requests-to-other-servers)); the panel credits it and
+View group, `/` anywhere but in a text field (a checkbox is none) or an open
+sheet or dialog, or the Search row of the More sheet on a phone. The field lists
+the airports of this map first, found as you type by their ICAO code, name or
+country (without regard to case or accents), and then the places Photon finds in
+OpenStreetMap, each with a short line under it (the country, or the kind of
+place and its region). Places are searched from three characters on, once you
+pause typing or press Enter with nothing listed, and the answers to the last 50
+texts are kept for the visit, so none of them is asked again; the line under the
+list says while it searches, when nothing was found, and when Photon cannot be
+reached, takes longer than 10 seconds or the browser is offline, where the
+airports are still found. Photon is asked for what you type and nothing else
+(see [Privacy](privacy.md#requests-to-other-servers)); the panel credits it and
 OpenStreetMap.
 
 The arrow keys move through the list, Enter takes the option they are on, or the
@@ -217,10 +217,13 @@ auto-zoom button that follows the airplane; Escape closes it. The whole track is
 drawn dimmed and the flown part paints over it in the colours of the active
 scale. Replay needs a selected flight with timing data; a toast explains why it
 is unavailable otherwise, and with nothing selected the Flights tab of the
-statistics opens to pick one from. With two to eight selected, Replay plays them
-one after another (see [Replay all](#replay-all)); with more, such as all of an
-airport's, it is unavailable and says that Replay all plays more. A flight is
-picked on the map only where it is drawn, with Altitude or Groundspeed on.
+statistics opens to pick one from; in share mode, where the filter hides every
+shared flight, it says they are hidden by the filter. A replay, Replay all and
+the flights one after another put away a flight's or an airport's popup left
+open as they start. With two to eight selected, Replay plays them one after
+another (see [Replay all](#replay-all)); with more, such as all of an airport's,
+it is unavailable and says that Replay all plays more. A flight is picked on the
+map only where it is drawn, with Altitude or Groundspeed on.
 
 The chase button (the target next to auto-zoom) watches the flight from a chase
 plane: the camera sits behind and above the airplane, tilted to 70 degrees at
@@ -278,8 +281,9 @@ flight in the air and the time into it ("2 of 3, EDDS → EDTF: 0:42 in"). The
 trails stay until the last flight has landed, fading over the whole run so the
 first flight ends a quarter as bright as the last, and no heat builds up behind
 them. Selected flights without timing data to play by are left out, and a toast
-says how many. Replay is the control that ends it, with Escape and the close
-button; Replay all is held meanwhile.
+says how many. A drag or a click to the end of the slider stays at the end,
+paused, rather than start again from the first flight. Replay is the control
+that ends it, with Escape and the close button; Replay all is held meanwhile.
 
 ### Hotspot tour
 
@@ -416,16 +420,18 @@ hotspot tour runs, nor once you switched 3D on or off). On a touch screen, where
 a tilt is a small two-finger drag, 15 degrees are enough, and the same hint
 comes once on the device without a tilt as well: the first time you zoom in by
 hand past where the heat lines are drawn (`z` 12.75), as the map comes to rest,
-or pick a single flight (not an airport's), whichever comes first. That one goes
-by itself after eight seconds, or as soon as you move the map, but not while the
-focus is on its buttons. The browser remembers that it showed the hint, or that
-you switched 3D on or off yourself, in its localStorage; where it cannot keep
-it, the hint comes once a visit. The hotspot tour, which turns 3D on for its
-flight, or a link that opens in 3D leave the hint for later. From `z` 18 in,
-where the camera is lower than a traffic circuit, the flights are drawn flat
-again. Replay lifts its airplane and its trail with them. The heatmap turns into
-a cloud of the flights at their heights (see [Heatmap](#heatmap) above), on the
-relief and on the globe alike, and lies flat from `z` 18 in with the flights.
+or pick a single flight (not an airport's, nor one ticked in an airport's popup
+or the phone's statistics sheet, which the hint would cover), whichever comes
+first. That one goes by itself after eight seconds, or as soon as you move the
+map, but not while the focus is on its buttons. The browser remembers that it
+showed the hint, or that you switched 3D on or off yourself, in its
+localStorage; where it cannot keep it, the hint comes once a visit. The hotspot
+tour, which turns 3D on for its flight, or a link that opens in 3D leave the
+hint for later. From `z` 18 in, where the camera is lower than a traffic
+circuit, the flights are drawn flat again. Replay lifts its airplane and its
+trail with them. The heatmap turns into a cloud of the flights at their heights
+(see [Heatmap](#heatmap) above), on the relief and on the globe alike, and lies
+flat from `z` 18 in with the flights.
 
 At every zoom the map draws the relief under the flights, shaded faintly (dark
 slopes, a little light on the others) over the satellite imagery when it is on
@@ -626,9 +632,10 @@ replay has no Escape: its close button or a click on the map closes it.
   fainter the more flights are selected; in the 3D view they are lifted to their
   height with the heat cloud
 - **Airport selection** - With nothing selected, click an airport marker to
-  select all flights that visited it; with a selection, or in share mode, the
-  click only opens its popup. The airport popup shows how the flights of the
-  filter used its runways ("RWY 29 · 65%, RWY 11 · 35%") and lists those flights
+  select all flights that visited it; with a selection, in share mode, or with a
+  tap, the click only opens its popup, whose checkboxes select (a tap never
+  changes the selection). The airport popup shows how the flights of the filter
+  used its runways ("RWY 29 · 65%, RWY 11 · 35%") and lists those flights
   (route, aircraft and year), each a button that selects that one flight and a
   checkbox that adds it to the selection or takes it out, with Shift, Ctrl and
   share mode as in the flight list (the rows are marked as selected once the
@@ -656,17 +663,18 @@ replay has no Escape: its close button or a click on the map closes it.
   on a flight shows its values with a Remove button, a click on an airport opens
   its popup, and a click on a row of a list shows its flight, but none of them
   adds or removes a flight by itself; a flight joins or leaves with that Remove
-  or its checkbox in a list, and the mode ends with Exit or the last flight. The
-  shared flights are fixed under a change of the year or the aircraft as well:
-  the ones the filter hides stay shared and in the link, and the chip says so
-  ("Sharing 3 flights, 1 hidden by the filter", "3 flights, 1 hidden" on a
-  phone, "all hidden" where it hides every one, "1 not in 2024" or "none in
-  2024" for flights the year's file lacks, "1 not shown" for both). The map, its
-  lines and ribbons, the airports, the statistics, the frame of Share, Replay
-  and the altitude profile are of the shared flights the filter shows. A link
-  opened in share mode shows the same flights the same way, with the same words
-  for the others. Only a link to every year can tell a flight the site no longer
-  has, which it leaves out and says so
+  or its checkbox in a list, and the mode ends with Exit or the last flight. An
+  airport whose last shared flight is unticked in its popup stays on the map
+  until the popup closes. The shared flights are fixed under a change of the
+  year or the aircraft as well: the ones the filter hides stay shared and in the
+  link, and the chip says so ("Sharing 3 flights, 1 hidden by the filter", "3
+  flights, 1 hidden" on a phone, "all hidden" where it hides every one, "1 not
+  in 2024" or "none in 2024" for flights the year's file lacks, "1 not shown"
+  for both). The map, its lines and ribbons, the airports, the statistics, the
+  frame of Share, Replay and the altitude profile are of the shared flights the
+  filter shows. A link opened in share mode shows the same flights the same way,
+  with the same words for the others. Only a link to every year can tell a
+  flight the site no longer has, which it leaves out and says so
 
 ## Shareable URLs
 

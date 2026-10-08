@@ -86,7 +86,8 @@ export function followStatsPanel(app: MapApp): void {
   // tab (see setupStatsRail). The bar steps aside for a replay and the
   // hotspot tour, which hide the sheet and take Escape. Not an Escape for
   // a popup, a marker or the readout of the cloud, which close first, nor
-  // one that empties the search of the flights.
+  // one that empties the search of the flights. Nor while a sheet of the
+  // bar is open over it, which Escape closes alone: one press closed both.
   document.addEventListener(
     "keydown",
     (event) => {
@@ -94,7 +95,8 @@ export function followStatsPanel(app: MapApp): void {
         isPageEscape(event, ",input[type=search]") &&
         app.statsPanelVisible &&
         !app.wrappedVisible &&
-        app.mobileBar?.isVisible()
+        app.mobileBar?.isVisible() &&
+        !app.mobileBar.sheet.isOpen()
       ) {
         event.preventDefault();
         app.statsPanelVisible = false;

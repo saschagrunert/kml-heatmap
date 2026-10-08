@@ -230,6 +230,11 @@ def _remove_stale_data(data_dir: Path, years: set[str]) -> None:
         logger.warning("Leaving unexpected item in output directory: %s", child)
 
 
+def _directories_on_the_way(root: Path, parts: tuple[str, ...]) -> list[Path]:
+    """``root / parts[0]``, ``root / parts[0] / parts[1]`` and so on."""
+    return [root.joinpath(*parts[:depth]) for depth in range(1, len(parts) + 1)]
+
+
 def _lock_directory(directory: Path) -> int:
     """Take the lock of an output directory, or fail when a run holds it.
 
@@ -401,6 +406,64 @@ class SiteOutput:
         for pattern in self.site_patterns:
             self._remove_stale_matches(pattern, produced)
         _remove_stale_data(self.data_dir, {str(year) for year in years})
+
+        # The stages go now rather than on exit: removing them changes the
+        # time of the directory they are in once more
+        for stage in (self.site_stage, self.data_stage):
+            shutil.rmtree(stage, ignore_errors=True)
+        directory_mtime = _CONTENT_MTIME_EPOCH if self.stable_mtimes else midnight
+        for directory in self._touched_directories(moves):
+            with contextlib.suppress(OSError):
+                os.utime(directory, (directory_mtime, directory_mtime))
+
+    def _touched_directories(self, moves: list[tuple[Path, Path, Path]]) -> list[Path]:
+        """The directories a publish changed, the deepest first.
+
+        Moving a file in, creating a directory and removing a stale file or a
+        stage all set the time of the directory it happens in to the time of
+        the build, which a server shows in a directory listing (nginx with
+        autoindex) and an archive of the site keeps (the Pages artifact): the
+        time of day of a build right after a flight. These are the two
+        destinations, every directory on the way to a published file, the
+        ones between the output and the data directory, those of the
+        ``site_files`` and ``site_patterns``, where stale files are removed,
+        and every year directory of the data directory: one no longer built
+        that a stray file keeps loses its data file, and kept the time of
+        day of that. A directory the run did not write in keeps its time,
+        which says nothing about the build, and so does anything in the data
+        directory that is not the tool's (see _remove_stale_data).
+        """
+        directories = {self.output_dir, self.data_dir}
+        if self.data_dir.is_relative_to(self.output_dir):
+            directories.update(
+                _directories_on_the_way(
+                    self.output_dir, self.data_dir.relative_to(self.output_dir).parts
+                )
+            )
+        for _, destination, relative in moves:
+            directories.update(
+                _directories_on_the_way(destination, relative.parts[:-1])
+            )
+        # Where a stale file was removed; a symlink on the way is somebody
+        # else's, and so is everything behind it
+        for name in (*self.site_files, *self.site_patterns):
+            for directory in _directories_on_the_way(
+                self.output_dir, Path(name).parent.parts
+            ):
+                if directory.is_symlink() or not directory.is_dir():
+                    break
+                directories.add(directory)
+        directories.update(
+            child
+            for child in self.data_dir.iterdir()
+            if YEAR_DIR_PATTERN.match(child.name)
+            and child.is_dir()
+            and not child.is_symlink()
+        )
+        return sorted(
+            (directory for directory in directories if directory.is_dir()),
+            key=lambda directory: (-len(directory.parts), str(directory)),
+        )
 
     def _remove_stale_matches(self, pattern: str, produced: set[str]) -> None:
         """Remove the files matching ``pattern`` that were not produced.

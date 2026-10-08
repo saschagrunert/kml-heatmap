@@ -6,9 +6,13 @@
  * used to fail (or pass) locally for reasons unrelated to the change at
  * hand. build.js stamps the hash of the frontend
  * sources into the first line of the bundle, so a mismatch with the sources
- * on disk is caught here, before any spec drives it. The stylesheet, the page
- * template and the generator are not part of the bundle; a site older than
- * any of them is refused too.
+ * on disk is caught here, before any spec drives it. The page template, the
+ * icons and the generator are not part of the bundle: map_config.js carries
+ * the hash of those ("generator"), and the fixture site the hash of its
+ * flights and databases (fixture.sha1). Hashes rather than modification
+ * times, which the build sets to the build day (and the fixture site to a
+ * day of 2025) on purpose: a site built in the morning was refused after a
+ * source edit in the afternoon, and the fixture site on every local run.
  *
  * CI builds one site with a dummy tile API key and one without, and says
  * which through E2E_API_KEYS ("dummy" or "none"). A build that lost its key
@@ -24,11 +28,13 @@
  * for. The price is that a stale site fails every test with the same
  * message instead of stopping the run once.
  */
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { runInNewContext } from "node:vm";
 import {
   BANNER_PATTERN,
+  computeFixtureHash,
+  computeGeneratorHash,
   computeSourceHash,
   REPO_ROOT,
 } from "../../scripts/source-hash.js";
@@ -63,56 +69,47 @@ function checkBuildHash(site: Site): void {
   }
 }
 
-/**
- * Files the generator copies or renders into the site, besides the bundle,
- * and the dependency lock: a bumped MapLibre or esbuild changes what the
- * site serves and what the bundle contains
- */
-function generatorSources(site: Site): string[] {
-  const packageDir = join(REPO_ROOT, "kml_heatmap");
-  const inDir = (dir: string, suffix: string): string[] =>
-    readdirSync(join(packageDir, dir))
-      .filter((name) => name.endsWith(suffix))
-      .map((name) => join(packageDir, dir, name));
-  return [
-    ...inDir(".", ".py"),
-    // Every static asset but the bundle and its map, which checkBuildHash
-    // covers and which a build in between refreshes anyway
-    ...inDir("static", "").filter((file) => !file.includes(".bundle.js")),
-    ...inDir("templates", ""),
-    join(REPO_ROOT, "package-lock.json"),
-    ...siteInputs(site),
-  ];
+/** The window.MAP_CONFIG that the site's map_config.js sets */
+function readMapConfig(site: Site): Record<string, unknown> {
+  const sandbox: { window: { MAP_CONFIG?: Record<string, unknown> } } = {
+    window: {},
+  };
+  runInNewContext(readSiteFile(site, "map_config.js"), sandbox);
+  return sandbox.window.MAP_CONFIG ?? {};
 }
 
 /**
- * What only the fixture site is made of. data/ is left out on purpose: the
- * functional specs hold for any set of flights, the snapshots only for the
- * flights they were taken with.
+ * The generator the site was built with: the Python package, its templates
+ * and the files of its static directory besides the bundles, which
+ * checkBuildHash covers along with the packages a build pins
  */
-function siteInputs(site: Site): string[] {
-  if (site !== SITES.visual) return [];
-  const fixtureDir = join(REPO_ROOT, "tests", "fixtures", "visual");
-  return [
-    // The directory itself as well: deleting or renaming a flight leaves no
-    // file behind that is newer than the site, but it touches the directory
-    fixtureDir,
-    ...readdirSync(fixtureDir).map((name) => join(fixtureDir, name)),
-    join(REPO_ROOT, "tests", "fixtures", "airports.csv"),
-    join(REPO_ROOT, "scripts", "build_visual_site.py"),
-  ];
-}
-
-function checkSiteAge(site: Site): void {
-  readSiteFile(site, "index.html");
-  const built = statSync(join(REPO_ROOT, site.dir, "index.html")).mtimeMs;
-  const newer = generatorSources(site).filter(
-    (file) => statSync(file).mtimeMs > built,
-  );
-  if (newer.length > 0) {
-    const names = newer.map((file) => file.slice(REPO_ROOT.length + 1));
+function checkGenerator(site: Site): void {
+  const built = readMapConfig(site)["generator"];
+  const current = computeGeneratorHash();
+  if (built !== current) {
+    const shown =
+      typeof built === "string" && built ? built : "without a generator hash";
     throw new Error(
-      `${site.dir}/ is older than ${names.join(", ")}; ${rebuildHint(site)}`,
+      `${site.dir}/ was built by another generator (site ${shown}, ` +
+        `checkout ${current}); ${rebuildHint(site)}`,
+    );
+  }
+}
+
+/**
+ * What only the fixture site is made of (computeFixtureHash), which
+ * scripts/build_visual_site.py hashes into fixture.sha1 after a build.
+ * data/ is left out on purpose: the functional specs hold for any set of
+ * flights, the snapshots only for the flights they were taken with.
+ */
+function checkSiteInputs(site: Site): void {
+  if (site !== SITES.visual) return;
+  const current = computeFixtureHash();
+  const built = readSiteFile(site, "fixture.sha1").trim();
+  if (built !== current) {
+    throw new Error(
+      `${site.dir}/ was built from another fixture (site ${built || "without a hash"}, ` +
+        `checkout ${current}); ${rebuildHint(site)}`,
     );
   }
 }
@@ -128,11 +125,7 @@ function checkApiKeys(site: Site): void {
     );
   }
 
-  const sandbox: {
-    window: { MAP_CONFIG?: { cartoApiKey?: string } };
-  } = { window: {} };
-  runInNewContext(readSiteFile(site, "map_config.js"), sandbox);
-  const present = !!sandbox.window.MAP_CONFIG?.cartoApiKey;
+  const present = !!readMapConfig(site)["cartoApiKey"];
   if (present !== (expected === "dummy")) {
     throw new Error(
       `E2E_API_KEYS=${expected}, but ${site.dir}/map_config.js ${present ? "carries" : "lacks"} cartoApiKey`,
@@ -143,6 +136,7 @@ function checkApiKeys(site: Site): void {
 export function checkSite(name: SiteName): void {
   const site = SITES[name];
   checkBuildHash(site);
-  checkSiteAge(site);
+  checkGenerator(site);
+  checkSiteInputs(site);
   checkApiKeys(site);
 }

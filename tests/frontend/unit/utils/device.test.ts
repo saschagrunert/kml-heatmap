@@ -198,11 +198,43 @@ describe("device", () => {
 
       expect(clock.isTouchClick(at(1100))).toBe(true);
       expect(clock.isTouchClick(at(1100, "mouse"))).toBe(true);
-      // A mouse's click a while later, and nothing from before the touch
+      // A mouse's click a while later, or long before
       expect(clock.isTouchClick(at(2500))).toBe(false);
-      expect(clock.isTouchClick(at(900))).toBe(false);
+      expect(clock.isTouchClick(at(-100))).toBe(false);
       expect(clock.follows(at(1500))).toBe(true);
       expect(clock.follows(at(2500))).toBe(false);
+    });
+
+    it("takes a click stamped at or just before the end of the touch for a tap", () => {
+      // Handled after the touch, so the browser's for it, whatever its
+      // stamp says: WebKit may stamp it with the end of the touch or a
+      // moment before, which then counted as a mouse's
+      const clock = new TouchClock();
+      stubMedia();
+      clock.note(at(1000));
+      clock.note(at(1800));
+
+      expect(clock.isTouchClick(at(1800, "mouse"))).toBe(true);
+      expect(clock.isTouchClick(at(1790, "mouse"))).toBe(true);
+      expect(clock.isTouchClick(at(1810, "mouse"))).toBe(true);
+      expect(clock.isTouchClick(at(700, "mouse"))).toBe(false);
+    });
+
+    it("measures from the end of a touch, for a long press or a busy page", () => {
+      // iOS says "mouse" for a tap's click. A press of a second and more
+      // was over long after it began, and its click came after the end.
+      const clock = new TouchClock();
+      stubMedia();
+      clock.note(at(1000));
+      clock.note(at(2400));
+
+      expect(clock.isTouchClick(at(2450, "mouse"))).toBe(true);
+      expect(clock.follows(at(3000))).toBe(true);
+      expect(clock.isTouchClick(at(3500, "mouse"))).toBe(false);
+      // An end told before its start (events of another clock) does not
+      // move the time back
+      clock.note(at(500));
+      expect(clock.follows(at(3000))).toBe(true);
     });
 
     it("takes a click with no touch before for a mouse's, on any device", () => {

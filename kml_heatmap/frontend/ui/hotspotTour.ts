@@ -55,7 +55,7 @@ import {
 import { domCache } from "../utils/domCache";
 import { DEGREES_TO_RADIANS, metresPerPixel } from "../utils/geometry";
 import { setControlIcon, type IconName } from "../utils/icons";
-import { isPageEscape, mapSize, toLngLat } from "../utils/mapHelpers";
+import { FIELDS, isPageEscape, mapSize, toLngLat } from "../utils/mapHelpers";
 import { prefersReducedMotion } from "../utils/motion";
 import { announceInRegion, announceStatus, showToast } from "../utils/toast";
 import {
@@ -69,6 +69,7 @@ import {
 import { crossSectionOpen, toggleCrossSection } from "./crossSection";
 import { nameButton } from "./crossSectionElements";
 import { restingPitch } from "./replayState";
+import { followPanelHeight } from "./replayManager";
 
 /** How long the camera flies from one place to the next, in ms */
 export const TOUR_FLY_MS = 4000;
@@ -393,6 +394,10 @@ export function createHotspotTour(app: MapApp): HotspotTour {
       playing = !stepping;
       const panel = panelOf();
       panel.root.hidden = false;
+      // A long name takes a second line on a phone, and a turn of the phone
+      // or a resize of the window one more or one less: measured as it
+      // changes, not only as a step is shown. Taken off as the tour ends.
+      followPanelHeight(panel.root, listening.signal, TOUR_PANEL_HEIGHT_VAR);
       goTo(0);
       (stepping ? panel.next : panel.play).focus();
     },
@@ -522,7 +527,6 @@ export function createHotspotTour(app: MapApp): HotspotTour {
     release = null;
     showRunning(false);
     panel.root.hidden = true;
-    document.body.style.removeProperty(TOUR_PANEL_HEIGHT_VAR);
     if (app.signal.aborted) return;
     if (how === "takeover") {
       // A click or a key that moves nothing does not stop the camera, which
@@ -600,11 +604,6 @@ export function createHotspotTour(app: MapApp): HotspotTour {
     // Not disabled, which would drop its focus: said, and a press ignored
     panel.previous.setAttribute("aria-disabled", String(at === 0));
     nameButton(panel.next, last ? "End the tour" : "Next hotspot");
-    // A long name takes a second line on a phone
-    document.body.style.setProperty(
-      TOUR_PANEL_HEIGHT_VAR,
-      panel.root.offsetHeight + "px",
-    );
   }
 
   /** Speak a message through the panel's own live region */
@@ -665,11 +664,11 @@ export function createHotspotTour(app: MapApp): HotspotTour {
   }
 
   // Escape stops it, as it closes the replay; not from a popup or a
-  // marker, which it closes first
+  // marker, which it closes first, nor from a text field or a select
   document.addEventListener(
     "keydown",
     (event) => {
-      if (!tourMap || !isPageEscape(event)) return;
+      if (!tourMap || !isPageEscape(event, FIELDS)) return;
       event.preventDefault();
       tour.stop();
     },

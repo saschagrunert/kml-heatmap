@@ -14,6 +14,7 @@ import {
 } from "../state/store";
 import { FEET_TO_METERS, NAUTICAL_MILES_TO_KM } from "../utils/constants";
 import { formatNumber } from "../utils/formatters";
+import { unwrapLng } from "../utils/mapHelpers";
 import { altitudeRangeFt } from "../calculations/statistics";
 
 /**
@@ -284,7 +285,10 @@ export function formatAirspeedLabel(valueKt: number): string {
 
 /**
  * Squared planar distance (in degrees, longitude scaled by cos(lat)) from a
- * point to a line segment.
+ * point to a line segment. Its end is taken on the turn of the world of its
+ * start: a segment across the antimeridian, from 179.9 to -179.9, is the
+ * short way round, not a line round the whole world, which put the point
+ * at 180 nearer the segment after it.
  */
 function distanceToSegmentSquared(
   lat: number,
@@ -295,7 +299,7 @@ function distanceToSegmentSquared(
   const scale = Math.cos(lat * DEGREES_TO_RADIANS);
   const ax = a[1] * scale;
   const ay = a[0];
-  const bx = b[1] * scale;
+  const bx = unwrapLng(b[1], a[1]) * scale;
   const by = b[0];
   const px = lng * scale;
   const py = lat;

@@ -8,7 +8,6 @@ import {
   type PickList,
 } from "../../../../kml_heatmap/frontend/ui/pathSelection";
 import { resetSafeArea } from "../../../../kml_heatmap/frontend/utils/safeArea";
-import { TOAST_STACK_ID } from "../../../../kml_heatmap/frontend/utils/toast";
 import {
   createMockApp,
   createDataset,
@@ -106,9 +105,7 @@ describe("PathSelection", () => {
   afterEach(() => {
     btn.remove();
     chip.remove();
-    // A toast of one test stays for seconds, and a test that reads the
-    // first one read another test's in CI
-    document.getElementById(TOAST_STACK_ID)?.remove();
+    vi.useRealTimers();
   });
 
   describe("togglePathSelection", () => {
@@ -676,12 +673,15 @@ describe("PathSelection", () => {
         ),
       );
       const map = mockApp.map!;
+      // The frames the view waits for the layout in (afterLayout), and many
+      // more: a fit that was coming has come by the end of them
+      vi.useFakeTimers({ toFake: ["requestAnimationFrame", "setTimeout"] });
+      const settled = (): Promise<unknown> => vi.advanceTimersByTimeAsync(200);
+      // Left alone, the flight is framed by then
+      pathSelection.selectFlight(1);
+      await settled();
+      expect(map.fitBounds).toHaveBeenCalledTimes(1);
       map.fitBounds.mockClear();
-      const settled = async (): Promise<void> => {
-        for (let i = 0; i < 6; i++) {
-          await new Promise((resolve) => setTimeout(resolve, 20));
-        }
-      };
 
       // Moved by hand while the layout settled: the user's map is theirs
       pathSelection.selectFlight(1);
@@ -700,8 +700,21 @@ describe("PathSelection", () => {
     });
 
     it("says how to add a flight that is not shared, and leaves it out", async () => {
+      mockApp.currentData = createDataset(
+        [{ id: 1 }, { id: 2 }, { id: 3 }],
+        [1, 2, 3].map((id) =>
+          createSegment({
+            path_id: id,
+            coords: [
+              [50 + id, 8],
+              [51 + id, 9],
+            ],
+          }),
+        ),
+      );
       const map = mockApp.map!;
       map.fitBounds.mockClear();
+      vi.useFakeTimers({ toFake: ["requestAnimationFrame", "setTimeout"] });
 
       pathSelection.selectFlight(3);
 
@@ -711,8 +724,12 @@ describe("PathSelection", () => {
           (toast) => toast.textContent,
         ),
       ).toContain(NOT_SHARED_HINT);
-      await new Promise((resolve) => setTimeout(resolve, 50));
+      await vi.advanceTimersByTimeAsync(200);
       expect(map.fitBounds).not.toHaveBeenCalled();
+      // A shared flight picked the same way is framed within that time
+      pathSelection.selectFlight(1);
+      await vi.advanceTimersByTimeAsync(200);
+      expect(map.fitBounds).toHaveBeenCalledTimes(1);
     });
 
     it("adds or takes out a flight of its checkbox, and ends with the last one", () => {

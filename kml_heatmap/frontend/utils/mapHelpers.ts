@@ -214,6 +214,16 @@ export function isInMarker(target: EventTarget | null | undefined): boolean {
 }
 
 /**
+ * For the `besides` of isPageEscape: the fields that take an Escape of
+ * their own. A text field, where it clears what was typed (the search of
+ * the flights), and a select, whose own list it closes. Not a slider or a
+ * box to tick, which have no use for it.
+ */
+export const FIELDS =
+  ",input:not([type=range]):not([type=checkbox]):not([type=radio])," +
+  "textarea,select,[contenteditable]";
+
+/**
  * Whether `event` is an Escape for what the page has open: not one a
  * listener before has taken, nor one in a popup or on a marker of the map,
  * which close the popup first. `besides` goes on the end of the selectors
@@ -556,6 +566,50 @@ export function closeWhenBehindGlobe(map: MapLibreMap, popup: Popup): void {
  * within a frame or two; one that has lost its WebGL context never does.
  */
 export const MAP_STILL_TIMEOUT_MS = 3000;
+
+/**
+ * How long `whenMapComplete` waits for the map to finish drawing (ms)
+ * before it settles for what there is
+ */
+export const MAP_COMPLETE_TIMEOUT_MS = 5000;
+
+/**
+ * Resolve once the map has drawn all there is to draw: no tile loading,
+ * the `sources` the map has loaded and `drawn` true, which is the heat the
+ * year worker still works on (see DataManager.heatRequests). The sources
+ * as well: `areTilesLoaded` asks only about the tiles in view, which are
+ * all there while the GeoJSON worker still cuts the data `setData` handed
+ * it. Checked at every frame, which a tile or a heat that lands asks for:
+ * `render` and not `idle`, which a map whose heat cloud pulses never
+ * reaches. After `timeoutMs` at the latest: a tile that does not load,
+ * offline, must not hold the caller for good.
+ */
+export function whenMapComplete(
+  map: MapLibreMap,
+  drawn: () => boolean,
+  sources: readonly string[] = [],
+  timeoutMs = MAP_COMPLETE_TIMEOUT_MS,
+): Promise<void> {
+  return new Promise((resolve) => {
+    const check = (): void => {
+      if (
+        drawn() &&
+        map.areTilesLoaded() &&
+        sources.every((id) => !map.getSource(id) || map.isSourceLoaded(id))
+      ) {
+        done();
+      }
+    };
+    const done = (): void => {
+      clearTimeout(timer);
+      map.off("render", check);
+      resolve();
+    };
+    const timer = setTimeout(done, timeoutMs);
+    map.on("render", check);
+    check();
+  });
+}
 
 /** The maps `withMapStill` is capturing */
 const stillMaps = new WeakSet<MapLibreMap>();

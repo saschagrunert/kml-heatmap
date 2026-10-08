@@ -550,10 +550,12 @@ export class WrappedManager {
   }
 
   /**
-   * Empty the cards and say they are being prepared, in the words and the
-   * style of the statistics panel's loading line. The column is busy until
-   * renderContent fills it: the cards of the last opening, or of the data
-   * before, must not show for the new filter.
+   * Say the cards are being prepared, in the words and the style of the
+   * statistics panel's loading line, in place of the figures. The column is
+   * busy until renderContent fills it: the cards of the last opening, or of
+   * the data before, must not show for the new filter. The cards below the
+   * figures are hidden until renderContent says which have anything: they
+   * were emptied, and showed as blank tiles meanwhile.
    */
   private renderLoading(): void {
     this.renderTitle();
@@ -562,14 +564,8 @@ export class WrappedManager {
       const what = this.app.selectedYear === "all" ? "flight history" : "year";
       statsEl.innerHTML = `<p class="kh-stats-loading" role="status">Preparing your ${what}…</p>`;
     }
-    for (const id of [
-      "wrapped-fun-facts",
-      "wrapped-aircraft-fleet",
-      "wrapped-top-airports",
-      "wrapped-airports-grid",
-    ]) {
-      const section = domCache.get(id);
-      if (section) section.innerHTML = "";
+    for (const card of ["facts", "fleet", "airports"]) {
+      domCache.get("wrapped-card-" + card)?.toggleAttribute("hidden", true);
     }
     domCache.get("wrapped-cards-column")?.setAttribute("aria-busy", "true");
     this.cardsScroll?.update();
@@ -706,7 +702,8 @@ export class WrappedManager {
     }
 
     // A card left empty is hidden: it would be a blank tile, named by a
-    // heading that is not there
+    // heading that is not there. The facts always have theirs.
+    domCache.get("wrapped-card-facts")?.toggleAttribute("hidden", false);
     const fleetCard = domCache.get("wrapped-card-fleet");
     if (fleetCard) fleetCard.hidden = !fleetEl?.innerHTML;
     const airportsCard = domCache.get("wrapped-card-airports");

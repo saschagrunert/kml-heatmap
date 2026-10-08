@@ -48,6 +48,7 @@ import type { Airport } from "../types";
 import { foldText, matchAirports } from "../calculations/airportSearch";
 import {
   PhotonClient,
+  PLACE_DEBOUNCE_MS,
   PLACE_MIN_LENGTH,
   placeKey,
   type Place,
@@ -69,9 +70,6 @@ export const SEARCH_BUTTON_ID = "search-btn";
 export const SEARCH_PANEL_ID = "location-search";
 const INPUT_ID = "location-search-input";
 const LIST_ID = "location-search-results";
-
-/** The pause in the typing after which Photon is asked (ms) */
-export const PLACE_DEBOUNCE_MS = 600;
 
 /** How long Photon has to answer before the search says it failed (ms) */
 export const PLACE_TIMEOUT_MS = 10_000;

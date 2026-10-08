@@ -21,7 +21,11 @@ from typing import TYPE_CHECKING
 from urllib.parse import quote
 
 from .aircraft import merge_aircraft_data
-from .airport_lookup import load_airport_database, load_runway_database
+from .airport_lookup import (
+    database_fingerprint,
+    load_airport_database,
+    load_runway_database,
+)
 from .airports import deduplicate_airports
 from .data_exporter import (
     ExportResult,
@@ -240,6 +244,8 @@ def _parse_in_pool(
     database = pickle.dumps(airports, protocol=pickle.HIGHEST_PROTOCOL)
     # Loaded already, as the cache keys cover them (see _parse_kml_files)
     runways = pickle.dumps(load_runway_database(), protocol=pickle.HIGHEST_PROTOCOL)
+    # Of the two as read here, which the workers' cache keys take as well
+    fingerprint = database_fingerprint()
     done: set[str] = set()
     pool_broken = False
     # The files a worker ran out of memory on, parsed again one at a time
@@ -248,7 +254,7 @@ def _parse_in_pool(
     with WorkerPool(
         parse_worker_count(kml_files),
         "parsing the KML files",
-        (level, database, runways),
+        (level, database, runways, fingerprint),
     ) as executor:
         future_to_file = {
             executor.submit(parse, f, cache_paths[f]): f for f in kml_files

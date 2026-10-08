@@ -143,7 +143,6 @@ describe("the readout of the heat cloud", () => {
     lifetime.abort();
     releaseReadoutData();
     resetMapLibreMock();
-    document.getElementById("toast-status")?.remove();
   });
 
   it("listens to the pointer only while the 3D view draws the cloud", () => {

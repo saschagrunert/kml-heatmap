@@ -469,6 +469,8 @@ export class LayerManager implements PathHitTester {
             state.tables[set].runs = [];
             state.tables[set].g++;
           }
+          // The legend is of this dataset and its selection already
+          this.updateModeLegend(mode);
         } else if (rebuild || !this.drawAtRest(mode)) this.redrawPaths(mode);
       } else if (rebuild) {
         // Hidden by the replay: drawn as it shows again
@@ -842,6 +844,13 @@ export class LayerManager implements PathHitTester {
           : this.app.airspeedVisible;
       const state = this.state[mode];
       if (!visible || !data || !state.segments) continue;
+      // While the relief's code is on its way the cut waits for it (see
+      // syncTerrain), the selection's too: it was drawn as flat lines in
+      // the 3D view meanwhile. Its legend says its range at once.
+      if (this.cutAwaited) {
+        this.updateModeLegend(mode);
+        continue;
+      }
       const config = CONFIGS[mode];
       // A mode left behind while it was hidden is drawn again as a whole
       if (state.dirty && this.handleOf(mode).isVisible()) {
@@ -862,6 +871,12 @@ export class LayerManager implements PathHitTester {
       }
     }
     this.pathHover.rehoverOnIdle();
+  }
+
+  /** The legend of `mode` for the range its selection, or all, is shown in */
+  private updateModeLegend(mode: LayerMode): void {
+    const config = CONFIGS[mode];
+    updateLegend(resolveColorRange(this.app, this.state, config), config);
   }
 
   updateAltitudeLegend(range: Range): void {

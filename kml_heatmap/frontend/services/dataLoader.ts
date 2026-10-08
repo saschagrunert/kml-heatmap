@@ -765,9 +765,10 @@ export class DataLoader {
   /**
    * Load airports data, published in state/siteData.ts, which is where the
    * code that needs it without a loader at hand reads it from
-   * @returns Array of airport objects
+   * @returns Array of airport objects, null when it could not be loaded
+   *   (asked for again on the next call)
    */
-  async loadAirports(): Promise<Airport[]> {
+  async loadAirports(): Promise<Airport[] | null> {
     try {
       if (!siteData.airports) {
         this.airportsRequest ??= this.fetchJson(
@@ -780,7 +781,7 @@ export class DataLoader {
       return siteData.airports;
     } catch (error) {
       logError("Error loading airports:", error);
-      return [];
+      return null;
     } finally {
       this.airportsRequest = null;
     }

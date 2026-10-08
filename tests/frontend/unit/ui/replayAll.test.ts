@@ -26,6 +26,7 @@ import {
 } from "../../../../kml_heatmap/frontend/ui/replayAllLayer";
 import * as motion from "../../../../kml_heatmap/frontend/utils/motion";
 import {
+  DAY_MAX_FLIGHTS,
   FEET_TO_METERS,
   MAP_LAYERS,
 } from "../../../../kml_heatmap/frontend/utils/constants";
@@ -1139,14 +1140,24 @@ describe("the replay of all flights", () => {
       expect(held("altitude-btn")).toBe(false);
     });
 
-    it("closes on Escape, but not from the speed picker", () => {
+    it("closes on Escape, but not from the speed picker or a text field", () => {
       controls.show();
       const speed = document.getElementById("replay-all-speed")!;
+      const search = document.createElement("input");
+      search.type = "search";
+      document.body.append(search);
 
-      speed.dispatchEvent(
-        new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
-      );
+      for (const target of [speed, search]) {
+        const escape = new KeyboardEvent("keydown", {
+          key: "Escape",
+          bubbles: true,
+          cancelable: true,
+        });
+        target.dispatchEvent(escape);
+        expect(escape.defaultPrevented).toBe(false);
+      }
       expect(controls.isOpen).toBe(true);
+      search.remove();
 
       document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
       expect(controls.isOpen).toBe(false);
@@ -1329,6 +1340,8 @@ describe("the replay of all flights", () => {
 
     beforeEach(() => {
       vi.spyOn(ReplayAllPlayer.prototype, "start");
+      // Timed flights, which the Replay control asks for (canReplay)
+      app.hasTimingData = true;
     });
 
     it("plays them in the order of their files, from the Replay control", () => {
@@ -1397,6 +1410,63 @@ describe("the replay of all flights", () => {
       expect(style.fade).toBeCloseTo(2 * player.duration, 6);
     });
 
+    it("stays at the end, paused, where its slider is dragged or clicked to", () => {
+      const player = open(1, 2);
+      const slider = document.getElementById(
+        "replay-all-time",
+      ) as HTMLInputElement;
+
+      slider.dispatchEvent(new Event("pointerdown"));
+      slider.value = slider.max;
+      slider.dispatchEvent(new Event("input"));
+      window.dispatchEvent(new Event("pointerup"));
+
+      // Not from the first flight again
+      expect(player.playing).toBe(false);
+      expect(player.time).toBeCloseTo(player.duration, 6);
+      expect(player.finished).toBe(true);
+      // Play starts them from the first flight again
+      player.resume();
+      expect(player.time).toBe(0);
+      expect(player.finished).toBe(false);
+    });
+
+    it("says every flight has landed when its slider is dragged to the end", () => {
+      // It stays there, paused, and the landing it never played went
+      // without a word
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      try {
+        const player = open(1, 2);
+        const landed = vi.fn();
+        const said = player.onLanded!;
+        player.onLanded = () => {
+          landed();
+          said();
+        };
+        const slider = document.getElementById(
+          "replay-all-time",
+        ) as HTMLInputElement;
+        const live = document.getElementById("replay-all-live")!;
+
+        slider.dispatchEvent(new Event("pointerdown"));
+        slider.value = slider.max;
+        slider.dispatchEvent(new Event("input"));
+        // Held there, once
+        slider.dispatchEvent(new Event("input"));
+        window.dispatchEvent(new Event("pointerup"));
+        vi.runAllTimers();
+
+        expect(live.textContent).toBe("Every flight has landed");
+        expect(landed).toHaveBeenCalledTimes(1);
+        // Back, and to the end again, is a landing again
+        player.seek(10);
+        player.seek(player.duration);
+        expect(landed).toHaveBeenCalledTimes(2);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
     it("leaves out a flight without times, and says so", () => {
       const player = open(4, 1, 2);
 
@@ -1409,7 +1479,8 @@ describe("the replay of all flights", () => {
     });
 
     it("says how many play, one of them as one", () => {
-      open(1);
+      // Flight 4 has no times
+      open(4, 1);
 
       expect(toast.announceStatus).toHaveBeenLastCalledWith(
         "Replaying 1 flight one after another at 200 times their speed",
@@ -1427,7 +1498,8 @@ describe("the replay of all flights", () => {
     });
 
     it("says why when none of them can be played", () => {
-      open(5);
+      // Flight 5's clock is too short to play by, and 4 has no times
+      open(5, 4);
 
       expect(app.replayActive).toBe(false);
       expect(toast.showToast).toHaveBeenCalledWith(
@@ -1466,6 +1538,38 @@ describe("the replay of all flights", () => {
       toggleSequence(asMapApp(app));
 
       expect([...controlsOfApp()!.legs!.keys()]).toEqual([1]);
+    });
+
+    it("leaves a selection that changed under a late click to Replay", () => {
+      // A Replay click that waited for the bundle: by then one flight, or
+      // more than play one after another, were selected
+      app.currentData = DAY;
+      app.selectedPathIds = new Set([1]);
+      toggleSequence(asMapApp(app));
+
+      expect(app.toggleReplay).toHaveBeenCalledOnce();
+      expect(app.replayActive).toBe(false);
+      expect(ReplayAllPlayer.prototype.start).not.toHaveBeenCalled();
+
+      app.selectedPathIds = new Set(
+        Array.from({ length: DAY_MAX_FLIGHTS + 1 }, (_, i) => i + 1),
+      );
+      toggleSequence(asMapApp(app));
+
+      expect(app.toggleReplay).toHaveBeenCalledTimes(2);
+      expect(ReplayAllPlayer.prototype.start).not.toHaveBeenCalled();
+    });
+
+    it("puts away the popups left open on the map before it plays", () => {
+      app.airportManager.closePopup.mockImplementation(() => {
+        expect(app.replayActive).toBe(false);
+      });
+
+      open(1, 2);
+
+      expect(app.airportManager.closePopup).toHaveBeenCalled();
+      expect(app.layerManager.closeSegmentPopup).toHaveBeenCalled();
+      expect(app.replayActive).toBe(true);
     });
 
     it("closes from the Replay control, and gives it back", () => {

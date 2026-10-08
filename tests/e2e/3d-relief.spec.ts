@@ -304,7 +304,7 @@ test.describe("Map orientation on the relief", HEAVY, () => {
     // Asked for one by one rather than by waiting for the map to be idle,
     // which takes the base map and the heat of the whole view along (see
     // jumpToView)
-    await jumpToView(page, coord, 8);
+    await jumpToView(page, coord, 8, { timeout: RELIEF_TIMEOUT_MS });
     await reliefExpect
       .poll(
         async () =>
@@ -402,7 +402,7 @@ test.describe("Map orientation on the relief", HEAVY, () => {
       const { lat, lng } = window.mapApp!.map!.getCenter();
       return [lat, lng] as const;
     });
-    await jumpToView(page, center, 10);
+    await jumpToView(page, center, 10, { timeout: RELIEF_TIMEOUT_MS });
     await reliefExpect
       .poll(async () => {
         const { drawn, marks, pulses } = await heatCloudOnMap(page);
@@ -423,7 +423,7 @@ test.describe("Map orientation on the relief", HEAVY, () => {
       const at = await findSegmentFarFromAirports(page);
       expect(at).not.toBeNull();
       await enterRelief(page, [at!.coord[0]!, at!.coord[1]!] as const);
-      await activateReplay(page);
+      await activateReplay(page, { timeout: RELIEF_TIMEOUT_MS });
       await page.evaluate(() => {
         const state = window.mapApp!.replayState;
         window.mapApp!.replayManager!.seekReplay(
@@ -523,7 +523,9 @@ test.describe("Map orientation on the relief", HEAVY, () => {
       );
       const [lat, lng] = await airportPosition(page, name);
       const side = Math.floor(lng * 2) / 2 + 0.25 > lng ? 0.1 : -0.1;
-      await jumpToView(page, [lat - 0.02, lng + side], 12);
+      await jumpToView(page, [lat - 0.02, lng + side], 12, {
+        timeout: RELIEF_TIMEOUT_MS,
+      });
       const measure = (): Promise<{ ground: number[]; rise: number }> =>
         page.evaluate((airport) => {
           const map = window.mapApp!.map!;

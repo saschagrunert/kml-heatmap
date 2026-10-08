@@ -3,6 +3,7 @@ import {
   activateReplay,
   gotoApp,
   playUntilProgress,
+  toastMessage,
   waitForPathData,
 } from "./helpers";
 import {
@@ -32,9 +33,12 @@ test.describe("Replay", () => {
     // The button is actionable even when replay is unavailable
     await replayBtn.click({ force: true });
 
-    await expect(page.locator(".toast-notification")).toHaveText(
-      "Pick flights with timing data to replay, under Statistics, Flights",
-    );
+    await expect(
+      toastMessage(
+        page,
+        "Pick flights with timing data to replay, under Statistics, Flights",
+      ),
+    ).toBeVisible();
     // Screen readers hear it through the persistent status region
     await expect(page.locator("#toast-status")).toHaveText(
       "Pick flights with timing data to replay, under Statistics, Flights",
@@ -222,9 +226,7 @@ test.describe("Replay", () => {
     const chase = page.locator("#replay-chase-btn");
     await chase.click();
     await expect(chase).toHaveAttribute("aria-pressed", "false");
-    await expect(page.locator(".toast-notification")).toContainText(
-      "reduced motion",
-    );
+    await expect(toastMessage(page, "reduced motion")).toBeVisible();
   });
 
   test.describe("with motion", HEAVY, () => {
@@ -572,7 +574,7 @@ test.describe("Replay", () => {
     await page.locator(".replay-airplane-icon").click();
 
     const popup = mapPopupContent(page);
-    await expect(popup).toBeVisible({ timeout: 3000 });
+    await expect(popup).toBeVisible();
     await expect(popup).toContainText("Current position");
 
     // Closed through the marker: the test is of what the popup shows
@@ -609,7 +611,7 @@ test.describe("Replay", () => {
     await page.keyboard.press("Enter");
 
     const popup = mapPopupContent(page);
-    await expect(popup).toBeVisible({ timeout: 3000 });
+    await expect(popup).toBeVisible();
     await expect(popup).toContainText("Current position");
   });
 

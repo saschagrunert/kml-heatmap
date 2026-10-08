@@ -62,9 +62,9 @@ describe("MapOrientation", () => {
 
   beforeEach(() => {
     // Every test starts on a device that has not had the tip of the 3D
-    // view: one that offered or used it stores that, and a test that
-    // counts the tip's listeners failed in CI after one that did
-    localStorage.clear();
+    // view (tests/frontend/setup.ts clears the storage): one that offered
+    // or used it stores that, and a test that counts the tip's listeners
+    // failed in CI after one that did
     unmount = mountElements({
       // In the document, so the map's canvas can take focus
       map: "div",
@@ -302,11 +302,6 @@ describe("MapOrientation", () => {
     beforeEach(() => {
       vi.mocked(showToast).mockClear();
       vi.mocked(dismissToast).mockClear();
-      localStorage.clear();
-    });
-
-    afterEach(() => {
-      localStorage.clear();
     });
 
     /** Tilt the map to `pitch` and end it as a gesture or `eventData` does */
@@ -557,6 +552,20 @@ describe("MapOrientation", () => {
         expect(localStorage.getItem(THREE_D_TIP_STORAGE_KEY)).toBeNull();
 
         popup.mockReturnValue(false);
+        await pick();
+        expect(offers()).toHaveLength(1);
+      });
+
+      it("does not come over the phone's statistics sheet, but with a later pick", async () => {
+        const sheet = { isVisible: vi.fn(() => true) };
+        app.mobileBar = sheet as unknown as MockApp["mobileBar"];
+        app.statsPanelVisible = true;
+        // A flight ticked in one of its lists
+        await pick();
+        expect(offers()).toHaveLength(0);
+        expect(localStorage.getItem(THREE_D_TIP_STORAGE_KEY)).toBeNull();
+
+        app.statsPanelVisible = false;
         await pick();
         expect(offers()).toHaveLength(1);
       });

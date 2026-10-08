@@ -210,12 +210,13 @@ export class MapOrientation {
    *   a pinch that turned into a pan still moves the map.
    * - One flight that comes into the selection, by whatever control: a
    *   flight tapped, picked from a list or ticked. Not the flights of an
-   *   airport, whose popup the tip would cover: a click on an airport
-   *   selects them before it opens the popup (activateAirport), so the
-   *   pick is weighed once that has run, and none counts with an airport's
-   *   popup open, one flown to once included. Nor the selection a link or
-   *   the saved state brought, which is put back before this listens, nor
-   *   what a load trims off it.
+   *   airport, whose popup the tip would cover: a click of a mouse on an
+   *   airport selects them before it opens the popup (activateAirport; a
+   *   tap only opens it), so the pick is weighed once that has run, and
+   *   none counts with an airport's popup open, one flown to or ticked in
+   *   it included, nor one ticked on the phone's statistics sheet. Nor the
+   *   selection a link or the saved state brought, which is put back
+   *   before this listens, nor what a load trims off it.
    *
    * Every device the map runs on can draw the 3D view, as the map itself
    * needs WebGL 2 (MapApp.setupMap). A mouse tilts with a right drag, and
@@ -232,8 +233,14 @@ export class MapOrientation {
         for (const id of ids) if (!before.has(id)) added++;
         before = new Set(ids);
         if (added !== 1 || app.isInitializing) return;
+        // Nor over the phone's statistics sheet, whose lists tick flights
+        // too: the tip comes with a later pick on the map instead
         queueMicrotask(() => {
-          if (!signal.aborted && !app.airportManager.isPopupOpen()) {
+          if (
+            !signal.aborted &&
+            !app.airportManager.isPopupOpen() &&
+            !(app.statsPanelVisible && app.mobileBar?.isVisible())
+          ) {
             this.offerThreeD(true);
           }
         });

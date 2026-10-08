@@ -71,7 +71,9 @@ export function isTouchDevice(): boolean {
 
 /**
  * Milliseconds after a touch in which a click or a move of the mouse is
- * the browser's for the tap, not one of a mouse
+ * the browser's for the tap, not one of a mouse. Counted from the end of
+ * the touch: a long press, or a tap while the page is busy, ends well
+ * after it began, and its click comes after the end.
  */
 const TAP_MS = 1000;
 
@@ -84,18 +86,32 @@ const TAP_MS = 1000;
  * could disagree about one click.
  */
 export class TouchClock {
-  /** When the map was last touched, by the clock of its events */
+  /**
+   * When the map was last touched, by the clock of its events: the start
+   * of a touch, then its end
+   */
   private touchedAt = -Infinity;
 
-  /** A touch on the map */
+  /**
+   * A touch on the map, as it starts and again as it ends (or is
+   * cancelled). Measured from the start alone, a press of about a second
+   * was over by the time of its click, which then counted as a mouse's and
+   * toggled a flight on iOS, whose click for a tap says "mouse".
+   */
   note(event: Event): void {
-    this.touchedAt = event.timeStamp;
+    this.touchedAt = Math.max(this.touchedAt, event.timeStamp);
   }
 
-  /** Whether an event of the mouse is the browser's for a touch just before */
+  /**
+   * Whether an event of the mouse is the browser's for a touch just before:
+   * within TAP_MS of it on either side. Events are handled in the order
+   * they come, so one stamped before the touch that is handled after it is
+   * the browser's for it: a click WebKit stamps at or before the end of
+   * the touch it makes it for, or by a clock of its own, counted as a
+   * mouse's.
+   */
   follows(event: Event): boolean {
-    const since = event.timeStamp - this.touchedAt;
-    return since >= 0 && since < TAP_MS;
+    return Math.abs(event.timeStamp - this.touchedAt) < TAP_MS;
   }
 
   /**

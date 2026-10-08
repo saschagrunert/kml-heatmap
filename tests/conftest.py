@@ -229,6 +229,37 @@ def reset_airport_cache():
     reset()
 
 
+#: How many times larger the large input of :func:`growth` is than the small one
+GROWTH_FACTOR = 8
+
+#: The most :func:`growth` may come to for work that is linear in its input.
+#: Linear work comes to about GROWTH_FACTOR (constant costs bring it below),
+#: quadratic work to its square, 64: a regex that backtracked from every
+#: position of a long run measured 60 here.
+LINEAR_GROWTH = 2.5 * GROWTH_FACTOR
+
+
+def growth(run, make, small, repeats=3):
+    """How much longer ``run(make(n))`` takes for a GROWTH_FACTOR times larger ``n``.
+
+    A guard against catastrophic backtracking that holds on any machine: a
+    fixed number of seconds failed on a CI runner busy with other work,
+    which slows the small input and the large one alike and leaves their
+    ratio as it is. Each input is timed ``repeats`` times and the fastest
+    run counts, so a pause of the runner during one of them does not.
+    """
+
+    def fastest(text):
+        times = []
+        for _ in range(repeats):
+            started = time.perf_counter()
+            run(text)
+            times.append(time.perf_counter() - started)
+        return min(times)
+
+    return fastest(make(small * GROWTH_FACTOR)) / fastest(make(small))
+
+
 def parse_data(path):
     """The payload of a data file of the site."""
     return json.loads(Path(path).read_text(encoding="utf-8"))

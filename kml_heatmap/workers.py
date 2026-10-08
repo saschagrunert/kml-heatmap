@@ -16,7 +16,11 @@ from concurrent.futures import Executor, Future, ProcessPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
 from typing import TYPE_CHECKING, Any
 
-from .airport_lookup import use_airport_database, use_runway_database
+from .airport_lookup import (
+    use_airport_database,
+    use_database_fingerprint,
+    use_runway_database,
+)
 from .logger import logger, set_log_level
 from .parser import parse_size
 
@@ -84,6 +88,7 @@ def init_worker(
     log_level: int,
     airport_database: bytes | None = None,
     runway_database: bytes | None = None,
+    database_fingerprint: str | None = None,
 ) -> None:
     """Configure a worker process (log level, airport and runway databases).
 
@@ -94,19 +99,29 @@ def init_worker(
     pickle them again for every worker, in the parent, one after the other.
     Each worker read the runway CSV again otherwise, and might have read
     one that changed after the parent computed the cache keys.
+    ``database_fingerprint`` is the parent's fingerprint of the two (see
+    ``airport_lookup.AirportDatabases.fingerprint``), which the worker's
+    cache keys take: a hash of the files on disk would describe the
+    databases of a download that replaced them after the parent read them.
+    It only counts with both databases, which it describes.
 
     Any failure here would terminate the worker and break the whole pool,
     so nothing may escape: without a database the worker loads it itself.
     """
     set_log_level(log_level)
+    received = 0
     if airport_database is not None:
         with contextlib.suppress(Exception):
             database = pickle.loads(airport_database)  # noqa: S301
             use_airport_database(database)
+            received += 1
     if runway_database is not None:
         with contextlib.suppress(Exception):
             runways = pickle.loads(runway_database)  # noqa: S301
             use_runway_database(runways)
+            received += 1
+    if database_fingerprint is not None and received == 2:
+        use_database_fingerprint(database_fingerprint)
 
 
 # What starting a process pool raises where it cannot start one: a sandbox

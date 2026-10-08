@@ -15,16 +15,20 @@ have flown, but not when.
 The one full date it carries that depends on the flights is when it was built:
 `map_config.js` holds the build date (the day in UTC, without the time) and the
 short hash of the commit it was built from, and the statistics panel shows both.
-A site built right after a flight therefore hints at the day of that flight, but
-not at its time. The files carry the day as well, as their modification time,
-which a server sends as `Last-Modified`: 00:00 UTC of the build day, and a
-second later for a file a second build of the day changed. Every file the
-flights decide (the data, the page, the flags and the previews) gets the build
-day on every build, changed or not, so none of them keeps the day of the build
-that first published it, which would date its flight; only a bundle, stylesheet
-or icon a build did not change keeps its time. A time an older build or another
-tool left, which can hold the time of day, is replaced by the build day. With
-`KML_HEATMAP_STABLE_MTIMES=1` the time is taken from the content instead (see
+It also holds a hash of the generator's own files (`generator`), which the tests
+compare with the checkout and which holds no date. A site built right after a
+flight therefore hints at the day of that flight, but not at its time. The files
+carry the day as well, as their modification time, which a server sends as
+`Last-Modified`: 00:00 UTC of the build day, and a second later for a file a
+second build of the day changed. Every file the flights decide (the data, the
+page, the flags and the previews) gets the build day on every build, changed or
+not, so none of them keeps the day of the build that first published it, which
+would date its flight; only a bundle, stylesheet or icon a build did not change
+keeps its time. A time an older build or another tool left, which can hold the
+time of day, is replaced by the build day. The directories a build writes in get
+00:00 UTC of the build day as well, which a directory listing would show
+otherwise. With `KML_HEATMAP_STABLE_MTIMES=1` the time is taken from the content
+instead (see
 [How the output directory is written](usage.md#how-the-output-directory-is-written)).
 Set `SOURCE_DATE_EPOCH` to stamp a different day. The commit is
 `KML_HEATMAP_COMMIT` (with its remote in `KML_HEATMAP_REPOSITORY`, which
@@ -152,10 +156,11 @@ names the day as well; the places named after one keep it (`Christmas Island`,
 `Easter Island`, `Pentecost Airport`, `Whitsunday Coast`). The name of a file
 carries no time of day either (`1513h`, `1513H`, `15h13`, `0930Z`, `0930z`,
 `0930UTC`, `15:13`, `3pm`, `10 AM`, `1430 GMT`, `1430 Zulu`, `14:30 EST`,
-`1430 local`, `0930 hours`, `14.30Z`, `0930Z-1045Z`, `14:30 +02:00`,
-`1430+0200`), except for the sequence number in the time slot of an obfuscated
-Charterware name, and neither do its names and descriptions, nor a Unix time of
-a past day in the text of an element (see
+`1430 local`, `0930 hours`, `14.30Z`, `0930Z-1045Z`, `14.30-15.45 Uhr`,
+`14.30 bis 15.45 Uhr`, `14:30 +02:00`, `1430+0200`), except for the sequence
+number in the time slot of an obfuscated Charterware name, and neither do its
+names and descriptions, nor a Unix time of a past day in the text of an element
+(see
 [Troubleshooting](usage.md#make-check-obfuscation-or-the-commit-hook-fails)). An
 `AM` in capitals after a number is a time, even where it is German written in
 capitals (`2 AM RHEIN`), which cannot be told from one; `3 am` stays. A comment,
@@ -228,29 +233,31 @@ Removed from the site:
   `16.8`, `16 08 2026`, `16AUG26`, `16-AUG-26`, `260816`, `03/2026`,
   `2026/8/16`, `KW33 2026`, `KW33`, `CW33`, `Week 33`, `Wk 33`, `2026W33`,
   `2026/W33`, `08-2026`, `2026_08`, `2026.08`, `Aug '26`, `Jul/Aug 2026`,
-  `16-18 Aug 2026`, `Summer 2026`, `Sommer 2026`, `Q3 2026`, `H2 2026`,
-  `2026-08-16T14Z`, `14:30`, `1430Z`, `0930z`, `1430 UTC`, `1430L`, `1513h`,
-  `1513H`, `1430hrs`, `14h30`, `15.13h`, `14.30 Uhr`, `3pm`, `10 AM`,
-  `0930Z-1045Z`, `2026-08-16_1430`, `2026-08-16-14-30`, `202608161430`), with
-  the zone, the fraction of a second or the offset that follows a time
-  (`1430 GMT`, `1430 Zulu`, `09:30 EDT`, `14:30 AEST`, `1430 local`,
-  `0930 hours`, `14:30:00.5Z`, `14:30 +02:00`, `1430+0200`; the common zones,
-  not every one there is), also with German month names written day first
-  (`16. Mai 2026`, `16. März`, `16MAI26`, `Mai 2026`); a month name alone
-  (`Flugplatz Juli`) stays, and so do runway designators in a name that speaks
-  of a runway (`RWY 08/26`, `07L/25R`) and a version after a word or an app that
-  says so (`firmware 12.10`, `ForeFlight 2026.03`), and a season, a quarter or a
-  half without its year (`Summer camp`), a decade (`Dec '80s`; `May '68` goes,
-  as `Aug '98` could be a flight), and the number of a type before a date
-  (`PA-28-16 Aug 2026` keeps `PA-28`: a range only counts with days that go up),
-  while a bare `26/08` is August 26th and `EDDS 07/25` July 25th (or July 2025):
-  where a name could hold a date, the date goes. A registration that looks like
-  a time keeps it (`N1513H`, `RA-1430L`), and `W33` alone is the code of an
-  airport in the US as often. A time written with a dot and nothing else
-  (`Aunt farm 14.30`) stays, since it cannot be told from a decimal
-  (`Fuel 14.30`); with a zone, the local time, the hours or `Uhr` it goes
-  (`14.30Z`, `14.30 UTC`, `14.30L`, `14.30 hrs`, `15.13h`, `14.30 Uhr`). Four
-  digits before `hours` go even where they count the hours of an engine
+  `16-18 Aug 2026`, `16.-18.08.2026`, `Summer 2026`, `Sommer 2026`, `Q3 2026`,
+  `H2 2026`, `2026-08-16T14Z`, `14:30`, `1430Z`, `0930z`, `1430 UTC`, `1430L`,
+  `1513h`, `1513H`, `1430hrs`, `14h30`, `15.13h`, `14.30 Uhr`, `3pm`, `10 AM`,
+  `0930Z-1045Z`, `2026-08-16_1430`, `2026-08-16-14-30`, `2026-08-16 14-30`,
+  `2026-08-16T14-30-00Z`, `14.30-15.45 Uhr`, `14.30 to 15.45Z`, `202608161430`;
+  a range with a unit or a runway after the date stays, `2026-08-16 14-30 min`,
+  `2026-08-16 07-25 RWY`), with the zone, the fraction of a second or the offset
+  that follows a time (`1430 GMT`, `1430 Zulu`, `09:30 EDT`, `14:30 AEST`,
+  `1430 local`, `0930 hours`, `14:30:00.5Z`, `14:30 +02:00`, `1430+0200`; the
+  common zones, not every one there is), also with German month names written
+  day first (`16. Mai 2026`, `16. März`, `16MAI26`, `Mai 2026`); a month name
+  alone (`Flugplatz Juli`) stays, and so do runway designators in a name that
+  speaks of a runway (`RWY 08/26`, `07L/25R`) and a version after a word or an
+  app that says so (`firmware 12.10`, `ForeFlight 2026.03`), and a season, a
+  quarter or a half without its year (`Summer camp`), a decade (`Dec '80s`;
+  `May '68` goes, as `Aug '98` could be a flight), and the number of a type
+  before a date (`PA-28-16 Aug 2026` keeps `PA-28`: a range only counts with
+  days that go up), while a bare `26/08` is August 26th and `EDDS 07/25` July
+  25th (or July 2025): where a name could hold a date, the date goes. A
+  registration that looks like a time keeps it (`N1513H`, `RA-1430L`), and `W33`
+  alone is the code of an airport in the US as often. A time written with a dot
+  and nothing else (`Aunt farm 14.30`) stays, since it cannot be told from a
+  decimal (`Fuel 14.30`); with a zone, the local time, the hours or `Uhr` it
+  goes (`14.30Z`, `14.30 UTC`, `14.30L`, `14.30 hrs`, `15.13h`, `14.30 Uhr`).
+  Four digits before `hours` go even where they count the hours of an engine
   (`Engine 1500 hours`)
 - Weekdays in placemark and file names: named in full in English or German
   wherever they stand (`Saturday`, `Sundays`, `Samstag`, `sonntags`,

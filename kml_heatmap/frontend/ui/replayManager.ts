@@ -24,6 +24,7 @@ import { groundProfilesFt } from "../calculations/groundProfile";
 import { shownSelection } from "../calculations/datasetIndex";
 import { appendCurve } from "../calculations/curves";
 import {
+  FIELDS,
   isPageEscape,
   toBounds,
   toLngLat,
@@ -85,26 +86,28 @@ const REPLAY_DISABLED_CONTROL_IDS = [
 export const REPLAY_PANEL_HEIGHT_VAR = "--replay-panel-h";
 
 /**
- * Keep REPLAY_PANEL_HEIGHT_VAR at the height of a replay's `panel` while it
- * shows: the toasts and the colour legend stand on top of it, and it wraps
- * anew as a phone turns or the window resizes. Returns what stops that and
- * takes the property off again, which `signal` does as well: the app's,
- * for a panel whose owner has no destroy of its own.
+ * Keep REPLAY_PANEL_HEIGHT_VAR, or `property`, at the height of a replay's
+ * `panel` (or the hotspot tour's) while it shows: the toasts and the colour
+ * legend stand on top of it, and it wraps anew as a phone turns or the
+ * window resizes. Returns what stops that and takes the property off
+ * again, which `signal` does as well: the app's, for a panel whose owner
+ * has no destroy of its own.
  */
 export function followPanelHeight(
   panel: HTMLElement,
   signal?: AbortSignal,
+  property = REPLAY_PANEL_HEIGHT_VAR,
 ): () => void {
   const style = document.body.style;
   const measure = (): void =>
-    style.setProperty(REPLAY_PANEL_HEIGHT_VAR, panel.offsetHeight + "px");
+    style.setProperty(property, panel.offsetHeight + "px");
   measure();
   const watch =
     typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
   watch?.observe(panel);
   const stop = (): void => {
     watch?.disconnect();
-    style.removeProperty(REPLAY_PANEL_HEIGHT_VAR);
+    style.removeProperty(property);
     signal?.removeEventListener("abort", stop);
   };
   signal?.addEventListener("abort", stop, { once: true });
@@ -207,8 +210,9 @@ export class ReplayManager {
     document.addEventListener("visibilitychange", this.onVisibilityChange);
 
     // Escape leaves the replay, as it leaves Wrapped and the sheets. Not
-    // from the speed picker, whose own list it closes, nor from a popup or
-    // a marker on the map, where it closes the popup.
+    // from the speed picker, whose own list it closes, nor from a text
+    // field such as the search of the flights, which it empties, nor from a
+    // popup or a marker on the map, where it closes the popup.
     document.addEventListener(
       "keydown",
       (event) => {
@@ -216,7 +220,7 @@ export class ReplayManager {
         if (
           !app.replayActive ||
           app.replayState.all ||
-          !isPageEscape(event, ",#replay-speed")
+          !isPageEscape(event, FIELDS)
         ) {
           return;
         }

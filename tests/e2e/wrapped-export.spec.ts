@@ -6,6 +6,7 @@ import {
   openWrapped,
   readSavedState,
   settleAnimations,
+  toastMessage,
   togglePathSelection,
   waitForAircraftFilter,
   waitForAppReady,
@@ -391,9 +392,7 @@ test.describe("Wrapped and Export", () => {
     const download = await downloadPromise;
     expect(download.suggestedFilename()).toMatch(/^heatmap_.*\.jpg$/);
 
-    await expect(page.locator(".toast-notification")).toHaveText(
-      "Map exported",
-    );
+    await expect(toastMessage(page, "Map exported")).toBeVisible();
     await expect(page.locator("#export-btn")).toHaveText("Export image");
     await expect(page.locator("#export-btn")).toBeEnabled();
     await expect(page.locator("#replay-btn")).toBeVisible();
@@ -419,9 +418,12 @@ test.describe("Wrapped and Export", () => {
     await page.route("**/html-to-image*", (route) => route.abort());
     await page.locator("#export-btn").click();
 
-    await expect(page.locator(".toast-notification")).toHaveText(
-      "Export is unavailable: its code could not be loaded. Check the connection and try again.",
-    );
+    await expect(
+      toastMessage(
+        page,
+        "Export is unavailable: its code could not be loaded. Check the connection and try again.",
+      ),
+    ).toBeVisible();
     await expect(page.locator("#export-btn")).toHaveText("Export image");
     await expect(page.locator("#export-btn")).toBeEnabled();
     expect(requested).toHaveLength(1);
@@ -457,7 +459,7 @@ test.describe("Wrapped and Export", () => {
 
     await page.locator("#share-btn").click();
 
-    await expect(page.locator(".toast-notification")).toHaveText("Link copied");
+    await expect(toastMessage(page, "Link copied")).toBeVisible();
     const copied = await page.evaluate(() => navigator.clipboard.readText());
     expect(copied).toBe(page.url());
     expect(copied).toContain("?");

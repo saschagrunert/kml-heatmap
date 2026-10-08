@@ -189,7 +189,8 @@ Variables:
 - `INPUT_DIR` - Directory with the KML files (default: `data`)
 - `OUTPUT_DIR` - Output directory (default: `docs`); it must not be `INPUT_DIR`,
   lie inside it or contain it, and the two need different base names
-- `CACHE_DIR` - Host directory mounted as `/cache` (default:
+- `CACHE_DIR` - Host directory mounted as `/cache`, a relative one from where
+  `make` runs (default: `KML_HEATMAP_CACHE_DIR` when it is set, else
   `~/.cache/kml-heatmap`, see [Cache directory](output.md#cache-directory))
 - `HOST_BIND` - Address `make serve` binds on the host (default: `127.0.0.1`;
   use `0.0.0.0` for the local network)
@@ -425,8 +426,10 @@ bundle, stylesheet or icon a build did not change keeps its time, every file the
 flights decide (the data, the page, the flags and previews) gets the build day,
 and one that changed again on the same day gets a second more each time. A time
 that is no such day, left by an older build or another tool, is replaced by the
-build day. The headers a host should send are in
-[Hosting](hosting.md#headers-and-compression).
+build day. The directories a build writes in (the output and data directories,
+the years, `vendor/`, `flags/` and the previews) get the build day as well, or
+one fixed time in 2001 with `KML_HEATMAP_STABLE_MTIMES=1`. The headers a host
+should send are in [Hosting](hosting.md#headers-and-compression).
 
 ### Exit status
 

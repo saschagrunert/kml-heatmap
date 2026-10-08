@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
+  AIRPORTS_FAILED_MESSAGE,
   colorSegmentPopups,
   createAirportMarkers,
   loadInitialData,
@@ -226,6 +227,24 @@ describe("appInitializer", () => {
       expect(marker.setPopup).not.toHaveBeenCalled();
     });
 
+    it("takes the markers of before off the map when made again", () => {
+      // A second set over the first stayed on the map for good
+      create();
+      const first = eddf().marker as unknown as MockMarker;
+
+      create();
+
+      expect(first.remove).toHaveBeenCalledTimes(1);
+      expect(Object.keys(app.airportMarkers)).toEqual([
+        "Frankfurt EDDF",
+        "Munich EDDM",
+      ]);
+      expect(eddf().marker).not.toBe(first);
+      expect(
+        app.map!.getCanvasContainer().querySelectorAll("button"),
+      ).toHaveLength(2);
+    });
+
     it("makes each marker a button named after its airport", () => {
       create();
       const element = eddf().getElement();
@@ -300,6 +319,22 @@ describe("appInitializer", () => {
 
       expect(app.airportManager.activateAirport).toHaveBeenCalledWith(
         "Frankfurt EDDF",
+        false,
+      );
+    });
+
+    it("tells the airport manager of a finger's tap, which only opens", () => {
+      create();
+      // WebKit's click for a tap may say "mouse"; the touch came just before
+      app.touchClock.note(new Event("touchend"));
+
+      eddf()
+        .getElement()
+        .dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 1 }));
+
+      expect(app.airportManager.activateAirport).toHaveBeenCalledWith(
+        "Frankfurt EDDF",
+        true,
       );
     });
 
@@ -324,6 +359,7 @@ describe("appInitializer", () => {
       );
       expect(app.airportManager.activateAirport).toHaveBeenCalledWith(
         "Munich EDDM",
+        false,
       );
     });
 
@@ -338,6 +374,7 @@ describe("appInitializer", () => {
         .dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 1 }));
       expect(app.airportManager.activateAirport).toHaveBeenLastCalledWith(
         "Frankfurt EDDF",
+        false,
       );
 
       // Beside it, where no code is
@@ -347,6 +384,7 @@ describe("appInitializer", () => {
         .dispatchEvent(new MouseEvent("click", { bubbles: true }));
       expect(app.airportManager.activateAirport).toHaveBeenLastCalledWith(
         "Frankfurt EDDF",
+        false,
       );
     });
 
@@ -503,11 +541,14 @@ describe("appInitializer", () => {
       app.filterManager = filterManager as unknown as MockApp["filterManager"];
     });
 
-    /** The first load (or a Retry) asked for `year`, with no Retry action */
+    /**
+     * The first load (or a Retry) asked for `year`, with no Retry action
+     * but for all years, some of which can fail with the rest on the map
+     */
     const loadedFirst = (year: string): unknown[] => [
       year,
       expect.any(AbortSignal),
-      undefined,
+      year === "all" ? expect.objectContaining({ label: "Retry" }) : undefined,
     ];
 
     it("loads everything in order and stores the results", async () => {
@@ -679,6 +720,9 @@ describe("appInitializer", () => {
       // It would open on zeros while its button says the flights are missing
       expect(app.store.get("statsPanelVisible")).toBe(false);
       expect(document.body.classList.contains("flights-failed")).toBe(true);
+      // And the restored flag goes, which the saves and the link kept
+      // writing while the rail was closed
+      expect(app.savedState).toEqual({});
     });
 
     it("hides the colour legends until the first dataset is in", async () => {
@@ -815,6 +859,113 @@ describe("appInitializer", () => {
       await loadInitialData(asMapApp(app));
 
       expect(seen).toEqual(["2025"]);
+    });
+
+    describe("when the airports fail to load", () => {
+      /** The Retry of the toast that says so */
+      const retryOfToast = (): (() => unknown) => {
+        const calls = toastMock.showToast.mock.calls as [
+          string,
+          string,
+          { run: () => unknown },
+        ][];
+        const call = calls
+          .filter(([message]) => message === AIRPORTS_FAILED_MESSAGE)
+          .pop();
+        if (!call) throw new Error("No toast said the airports failed");
+        expect(call[1]).toBe("error");
+        return call[2].run;
+      };
+
+      it("says so with a Retry that puts them on the map", async () => {
+        // They were missing without a word, and never asked for again
+        app.dataManager.loadAirports.mockResolvedValueOnce(null);
+        await loadInitialData(asMapApp(app));
+        expect(Object.keys(app.airportMarkers)).toHaveLength(0);
+        const retry = retryOfToast();
+        app.airportManager.updateAirportPopups.mockClear();
+        app.airportManager.updateAirportMarkerSizes.mockClear();
+
+        retry();
+
+        await vi.waitFor(() =>
+          expect(Object.keys(app.airportMarkers)).toHaveLength(2),
+        );
+        expect(app.dataManager.loadAirports).toHaveBeenCalledTimes(2);
+        // The home base and the sizes of the zoom, as on the first load
+        expect(app.airportManager.updateAirportPopups).toHaveBeenCalled();
+        expect(app.airportManager.updateAirportMarkerSizes).toHaveBeenCalled();
+        expect(toastMock.dismissToast).toHaveBeenCalledWith(
+          AIRPORTS_FAILED_MESSAGE,
+        );
+      });
+
+      it("loads them once for a double click on its Retry", async () => {
+        // The button stays clickable while the toast fades: two loads put
+        // a second set of markers on the map
+        app.dataManager.loadAirports.mockResolvedValueOnce(null);
+        await loadInitialData(asMapApp(app));
+        const retry = retryOfToast();
+        let resolve!: (list: Airport[]) => void;
+        app.dataManager.loadAirports.mockReturnValueOnce(
+          new Promise<Airport[]>((r) => (resolve = r)),
+        );
+
+        retry();
+        retry();
+        resolve(airports);
+
+        await vi.waitFor(() =>
+          expect(Object.keys(app.airportMarkers)).toHaveLength(2),
+        );
+        await Promise.resolve();
+        expect(app.dataManager.loadAirports).toHaveBeenCalledTimes(2);
+        const container = app.map!.getCanvasContainer();
+        for (const marker of Object.values(app.airportMarkers)) {
+          expect(container.contains(marker.getElement())).toBe(true);
+        }
+        expect(container.querySelectorAll("button")).toHaveLength(2);
+      });
+
+      it("says so under the flights of a year picked after both failed", async () => {
+        // Nothing said it then: no airports, no word, no Retry
+        app.dataManager.loadAirports.mockResolvedValue(null);
+        app.dataManager.loadData.mockResolvedValue(null);
+        await loadInitialData(asMapApp(app));
+        expect(toastMock.showToast).not.toHaveBeenCalled();
+        app.dataManager.loadData.mockResolvedValue(data);
+
+        yearSelect().value = "2024";
+        await filterManager.filterByYear();
+
+        expect(app.currentData).toBe(data);
+        expect(retryOfToast()).toBeTypeOf("function");
+        // Once per failure, not at every load
+        toastMock.showToast.mockClear();
+        app.dataManager.loadData.mockResolvedValue(
+          createDataset([{ id: 2, year: 2025 }], [], 1),
+        );
+        yearSelect().value = "2025";
+        await filterManager.filterByYear();
+        expect(toastMock.showToast).not.toHaveBeenCalledWith(
+          AIRPORTS_FAILED_MESSAGE,
+          expect.anything(),
+          expect.anything(),
+        );
+      });
+
+      it("says so again when the Retry fails as well", async () => {
+        app.dataManager.loadAirports.mockResolvedValue(null);
+        await loadInitialData(asMapApp(app));
+        const retry = retryOfToast();
+        toastMock.showToast.mockClear();
+
+        retry();
+
+        await vi.waitFor(() => expect(retryOfToast()).toBeTypeOf("function"));
+        expect(app.dataManager.loadAirports).toHaveBeenCalledTimes(2);
+        expect(Object.keys(app.airportMarkers)).toHaveLength(0);
+      });
     });
 
     describe("when the year fails to load", () => {
@@ -998,7 +1149,7 @@ describe("appInitializer", () => {
       });
 
       it("loads the airports again with the flights when they failed too", async () => {
-        app.dataManager.loadAirports.mockResolvedValueOnce([]);
+        app.dataManager.loadAirports.mockResolvedValueOnce(null);
         await loadInitialData(asMapApp(app));
         expect(Object.keys(app.airportMarkers)).toHaveLength(0);
         const markersAtPublish: number[] = [];
@@ -1013,6 +1164,25 @@ describe("appInitializer", () => {
         // There before the dataset that says which of them show
         expect(markersAtPublish).toEqual([2]);
         expect(app.dataManager.loadAirports).toHaveBeenCalledTimes(2);
+      });
+
+      it("says the airports are missing when they fail again under flights that came", async () => {
+        // No toast beside the note on the map, whose Retry loads both
+        app.dataManager.loadAirports.mockResolvedValue(null);
+        await loadInitialData(asMapApp(app));
+        expect(toastMock.showToast).not.toHaveBeenCalled();
+        app.dataManager.loadData.mockResolvedValue(data);
+
+        document.getElementById("map-empty-retry")!.click();
+
+        await vi.waitFor(() =>
+          expect(toastMock.showToast).toHaveBeenCalledWith(
+            AIRPORTS_FAILED_MESSAGE,
+            "error",
+            expect.objectContaining({ label: "Retry" }),
+          ),
+        );
+        expect(app.currentData).toBe(data);
       });
 
       it("leaves airports that are there alone on a Retry", async () => {
@@ -1073,6 +1243,9 @@ describe("appInitializer", () => {
       expect(toastMock.dismissToast).toHaveBeenCalledWith(
         "The list of years is unavailable, showing all years",
       );
+      // Reset view goes to the newest year, as on a first visit with the
+      // list; it stayed at all years
+      expect(app.defaultYear).toBe("2025");
     });
 
     it("brings back a restored speed layer with late metadata that has speeds", async () => {

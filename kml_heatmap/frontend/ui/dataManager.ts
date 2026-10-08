@@ -678,7 +678,7 @@ export class DataManager {
     showToast(message, "error", retry);
   }
 
-  async loadAirports(): Promise<Airport[]> {
+  async loadAirports(): Promise<Airport[] | null> {
     return await this.dataLoader.loadAirports();
   }
 

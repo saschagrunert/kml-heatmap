@@ -17,7 +17,7 @@
 
 import { createHash } from "node:crypto";
 import { readdirSync, readFileSync } from "node:fs";
-import { dirname, join, relative } from "node:path";
+import { dirname, join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 export const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -114,4 +114,91 @@ export function computeSourceHash() {
  */
 export function buildBanner(sourceHash) {
   return `/* kml-heatmap build ${sourceHash} */`;
+}
+
+/**
+ * The files of the generator that shape a site besides the bundles: the
+ * modules of the Python package, its templates and the files right in its
+ * static directory, but no bundle or source map (computeSourceHash covers
+ * those) and no hidden file. Keep in step with _generator_files in
+ * kml_heatmap/site_assets.py.
+ * @returns {string[]}
+ */
+function generatorFiles() {
+  const packageDir = join(REPO_ROOT, "kml_heatmap");
+  /**
+   * @param {string} dir
+   * @param {string} suffix
+   * @returns {string[]}
+   */
+  const filesIn = (dir, suffix) =>
+    readdirSync(join(packageDir, dir), { withFileTypes: true })
+      .filter(
+        (entry) =>
+          entry.isFile() &&
+          entry.name.endsWith(suffix) &&
+          !entry.name.startsWith(".") &&
+          !entry.name.includes(".bundle.js"),
+      )
+      .map((entry) => join(packageDir, dir, entry.name));
+  return [
+    ...filesIn(".", ".py"),
+    ...filesIn("templates", ""),
+    ...filesIn("static", ""),
+  ];
+}
+
+/**
+ * SHA-1 of the path relative to the repository and the content of each
+ * file, in path order
+ * @param {string[]} files
+ * @returns {string}
+ */
+function hashFiles(files) {
+  const named = files.map((file) => ({
+    name: relative(REPO_ROOT, file).split(sep).join("/"),
+    file,
+  }));
+  named.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+  const hash = createHash("sha1");
+  for (const { name, file } of named) {
+    hash.update(name);
+    hash.update("\0");
+    hash.update(readFileSync(file));
+    hash.update("\0");
+  }
+  return hash.digest("hex");
+}
+
+/**
+ * Hash of the generator a site was built with, as its map_config.js carries
+ * it ("generator", see generator_hash in kml_heatmap/site_assets.py). The
+ * e2e site check compares the two: the build dates its files to the day, or
+ * earlier, so their times cannot tell whether the generator changed since.
+ * @returns {string}
+ */
+export function computeGeneratorHash() {
+  return hashFiles(generatorFiles()).slice(0, 12);
+}
+
+/**
+ * Hash of what only the fixture site of scripts/build_visual_site.py is
+ * made of: the flights and aircraft of tests/fixtures/visual/ (no hidden
+ * file), the two databases and the script itself. The script leaves it in
+ * visual-site/fixture.sha1, computed the same way (fixture_hash, whose
+ * fixture_inputs lists the same files), and the e2e site check compares
+ * the two; the modification times it compared before are of a day of 2025,
+ * which SOURCE_DATE_EPOCH gives the fixture site.
+ * @returns {string}
+ */
+export function computeFixtureHash() {
+  const fixtureDir = join(REPO_ROOT, "tests", "fixtures", "visual");
+  return hashFiles([
+    ...readdirSync(fixtureDir, { withFileTypes: true })
+      .filter((entry) => entry.isFile() && !entry.name.startsWith("."))
+      .map((entry) => join(fixtureDir, entry.name)),
+    join(REPO_ROOT, "tests", "fixtures", "airports.csv"),
+    join(REPO_ROOT, "tests", "fixtures", "runways.csv"),
+    join(REPO_ROOT, "scripts", "build_visual_site.py"),
+  ]);
 }

@@ -52,7 +52,7 @@ import {
 } from "./heldControls";
 import { domCache } from "../utils/domCache";
 import { setControlIcon } from "../utils/icons";
-import { isPageEscape } from "../utils/mapHelpers";
+import { FIELDS, isPageEscape } from "../utils/mapHelpers";
 import { prefersReducedMotion } from "../utils/motion";
 import { announceInRegion, announceStatus, showToast } from "../utils/toast";
 import { nameButton } from "./crossSectionElements";
@@ -202,11 +202,12 @@ export class ReplayAllControls {
       if (this.open) this.announce("Every flight has landed");
     };
     // Escape leaves it, as it leaves the replay of one flight; not from the
-    // speed picker, whose own list it closes, nor from a popup or a marker
+    // speed picker, whose own list it closes, nor from a text field, nor
+    // from a popup or a marker
     document.addEventListener(
       "keydown",
       (event) => {
-        if (!this.open || !isPageEscape(event, ",#replay-all-speed")) return;
+        if (!this.open || !isPageEscape(event, FIELDS)) return;
         event.preventDefault();
         this.close();
       },
@@ -253,6 +254,11 @@ export class ReplayAllControls {
       }
       return;
     }
+    // A popup left open on the map, a tapped flight's or an airport's,
+    // would stay over the replay, as for the replay of one flight
+    // (ReplayManager): before replayActive, which a popup closing reads
+    app.airportManager.closePopup();
+    app.layerManager.closeSegmentPopup();
     this.open = true;
     const control = (this.control = sequence
       ? REPLAY_BUTTON_ID
@@ -518,10 +524,14 @@ export class ReplayAllControls {
     slider.addEventListener("pointerdown", () => {
       if (!this.player.playing) return;
       this.player.pause();
+      // Not from the end, where it would start again from the first flight:
+      // the flights one after another end as the last lands, and a drag or
+      // a click there stays with it, paused. Every flight at once plays on
+      // from there while the trails fade.
       const letGo = (): void => {
         removeEventListener("pointerup", letGo);
         removeEventListener("pointercancel", letGo);
-        if (this.open) this.player.resume();
+        if (this.open && !this.player.finished) this.player.resume();
       };
       addEventListener("pointerup", letGo);
       addEventListener("pointercancel", letGo);
@@ -628,6 +638,13 @@ export function toggleSequence(
     return;
   }
   if (!data) return;
+  // Decided again: a click whose bundle came late found another selection,
+  // of one flight, or of more than play one after another. Replay takes it
+  // as it is now: one flight replays, and too many are said to be.
+  if (!app.canReplay() || !app.playsInSequence()) {
+    app.toggleReplay();
+    return;
+  }
   // Of those the filter shows: share mode keeps flights it hides, which
   // the map does not draw (shownSelection)
   const order = flightOrder(data.path_info, shownSelection(app));

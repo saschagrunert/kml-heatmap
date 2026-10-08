@@ -52,6 +52,7 @@ __all__ = [
     "build_commit",
     "build_date",
     "build_time",
+    "generator_hash",
     "load_template",
     "minify_html",
     "missing_build_files",
@@ -244,6 +245,62 @@ def _frontend_source_hash() -> str | None:
     for version in package_versions:
         digest.update(version.encode())
         digest.update(b"\0")
+    return digest.hexdigest()[:12]
+
+
+def _generator_files(package: Path) -> list[Path]:
+    """The files of the generator that shape a site besides the bundles.
+
+    The modules of the package, its templates and the files right in its
+    static directory (the stylesheets, the icons, the manifest), but none of
+    the bundles or their source maps, which the bundle's own hash covers, nor
+    a hidden file such as an editor's swap file. Keep in step with
+    ``computeGeneratorHash`` in scripts/source-hash.js.
+    """
+
+    def files_in(directory: Path, suffix: str = "") -> list[Path]:
+        return [
+            path
+            for path in directory.iterdir()
+            if path.name.endswith(suffix)
+            and not path.name.startswith(".")
+            and ".bundle.js" not in path.name
+            and path.is_file()
+        ]
+
+    return [
+        *files_in(package, ".py"),
+        *files_in(package / "templates"),
+        *files_in(package / "static"),
+    ]
+
+
+def generator_hash() -> str:
+    """The hash of the generator a site is built with, "" when unreadable.
+
+    ``map_config.js`` carries it next to the commit, and the e2e site check
+    (tests/e2e/site-check.ts) compares it with the checkout's, so a site an
+    older generator built is refused. It used to compare modification times
+    instead, which the build sets to the build day (or older) on purpose
+    and so said nothing about which is newer. The SHA-1 of the path, relative
+    to the directory of the package, and the content of every file of
+    ``_generator_files`` in path order; the same as scripts/source-hash.js
+    computes, which TestGeneratorHashParity checks. Holds no date.
+    """
+    package = Path(__file__).parent
+    digest = hashlib.sha1(usedforsecurity=False)
+    try:
+        files = sorted(
+            (path.relative_to(package.parent).as_posix(), path)
+            for path in _generator_files(package)
+        )
+        for name, path in files:
+            digest.update(name.encode())
+            digest.update(b"\0")
+            digest.update(path.read_bytes())
+            digest.update(b"\0")
+    except OSError:
+        return ""
     return digest.hexdigest()[:12]
 
 
@@ -527,6 +584,8 @@ def _generate_map_config(
         "builtOn": build_date(built_at),
         "commit": commit.hash,
         "commitUrl": commit.url,
+        # Not read by the page: the e2e site check compares it
+        "generator": generator_hash(),
     }
     # ASCII only, so the file reads the same whatever charset it is served as
     config_json = json.dumps(config, ensure_ascii=True, separators=(",", ":"))

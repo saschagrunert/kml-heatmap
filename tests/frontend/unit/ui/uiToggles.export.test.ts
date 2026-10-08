@@ -4,6 +4,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
   EXPORT_FAILED_MESSAGE,
+  EXPORT_SHARE_WAIT_MS,
   EXPORT_UNAVAILABLE_MESSAGE,
   MAX_CANVAS_PIXELS,
   UIToggles,
@@ -15,6 +16,8 @@ import {
   type HtmlToImage,
 } from "../../../../kml_heatmap/frontend/ui/uiToggles";
 import { logError } from "../../../../kml_heatmap/frontend/utils/logger";
+import { MAP_COMPLETE_TIMEOUT_MS } from "../../../../kml_heatmap/frontend/utils/mapHelpers";
+import { MAP_SOURCES } from "../../../../kml_heatmap/frontend/utils/constants";
 import {
   asMapApp,
   createMockApp,
@@ -93,7 +96,6 @@ describe("UIToggles export and share", () => {
   afterEach(() => {
     unmount();
     delete (HTMLImageElement.prototype as { decode?: unknown }).decode;
-    document.querySelectorAll(".toast-notification").forEach((e) => e.remove());
     resetHtmlToImageLoader();
     // Without media queries the phone layout goes by the width alone
     Reflect.deleteProperty(window, "matchMedia");
@@ -312,6 +314,84 @@ describe("UIToggles export and share", () => {
       await vi.advanceTimersByTimeAsync(0);
 
       expect(app.map!.triggerRepaint).toHaveBeenCalledTimes(1);
+      expect(toJpeg).toHaveBeenCalledTimes(1);
+    });
+
+    it("waits for the tiles and the heat on their way before it captures", async () => {
+      // It captured the map with gaps, or the heat of the year before
+      const toJpeg = installHtmlToImage();
+      const map = app.map!;
+      app.dataManager.heatRequests = 1;
+      map.areTilesLoaded.mockReturnValue(false);
+
+      uiToggles.exportMap();
+      await vi.advanceTimersByTimeAsync(100);
+      expect(toJpeg).not.toHaveBeenCalled();
+
+      // Tiles in, the heat still on its way
+      map.areTilesLoaded.mockReturnValue(true);
+      map.emit("render");
+      await vi.advanceTimersByTimeAsync(0);
+      expect(toJpeg).not.toHaveBeenCalled();
+
+      app.dataManager.heatRequests = 0;
+      map.emit("render");
+      await finishExport();
+      expect(toJpeg).toHaveBeenCalledTimes(1);
+    });
+
+    it("waits for the heat sources the worker still parses", async () => {
+      // The tiles in view are all there while the worker still cuts the
+      // data of setData: the export took the heat of before
+      const toJpeg = installHtmlToImage();
+      const map = app.map!;
+      let parsing: string[] = [MAP_SOURCES.heat, MAP_SOURCES.heatLines];
+      map.isSourceLoaded.mockImplementation((id) => !parsing.includes(id));
+
+      uiToggles.exportMap();
+      await vi.advanceTimersByTimeAsync(100);
+      expect(toJpeg).not.toHaveBeenCalled();
+
+      parsing = [MAP_SOURCES.heatLines];
+      map.emit("render");
+      await vi.advanceTimersByTimeAsync(0);
+      expect(toJpeg).not.toHaveBeenCalled();
+
+      parsing = [];
+      map.emit("render");
+      await finishExport();
+      expect(toJpeg).toHaveBeenCalledTimes(1);
+    });
+
+    it("waits no longer than the share sheet allows on a phone", async () => {
+      // navigator.share needs the tap on Export to be recent
+      setInnerWidth(500);
+      const share = vi.fn().mockResolvedValue(undefined);
+      defineNavigatorProperty("share", share);
+      defineNavigatorProperty(
+        "canShare",
+        vi.fn(() => true),
+      );
+      const toJpeg = installHtmlToImage();
+      app.map!.areTilesLoaded.mockReturnValue(false);
+
+      uiToggles.exportMap();
+      await vi.advanceTimersByTimeAsync(EXPORT_SHARE_WAIT_MS - 1);
+      expect(toJpeg).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      await finishExport();
+      expect(toJpeg).toHaveBeenCalledTimes(1);
+      expect(share).toHaveBeenCalledTimes(1);
+    });
+
+    it("captures what there is once the map has taken too long", async () => {
+      const toJpeg = installHtmlToImage();
+      app.map!.areTilesLoaded.mockReturnValue(false);
+
+      uiToggles.exportMap();
+      await vi.advanceTimersByTimeAsync(MAP_COMPLETE_TIMEOUT_MS - 1);
+      expect(toJpeg).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
       expect(toJpeg).toHaveBeenCalledTimes(1);
     });
 

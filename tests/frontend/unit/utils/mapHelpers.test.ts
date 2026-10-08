@@ -6,6 +6,7 @@ import {
   createActivationFilter,
   cssVar,
   DOUBLE_TAP_MS,
+  FIELDS,
   firstSymbolLayerId,
   fromLngLat,
   isBehindGlobe,
@@ -504,6 +505,31 @@ describe("mapHelpers", () => {
       const taken = escape("plain");
       taken.preventDefault();
       expect(isPageEscape(taken)).toBe(false);
+      document.body.innerHTML = "";
+    });
+
+    it("leaves an Escape in a text field or a select to the field with FIELDS", () => {
+      document.body.innerHTML =
+        '<input type="search" id="search"><input type="text" id="text">' +
+        '<textarea id="area"></textarea><select id="speed"></select>' +
+        '<div contenteditable="true" id="edit"></div>' +
+        '<input type="range" id="slider"><input type="checkbox" id="box">';
+      const escape = (id: string): KeyboardEvent => {
+        const event = new KeyboardEvent("keydown", {
+          key: "Escape",
+          bubbles: true,
+          cancelable: true,
+        });
+        document.getElementById(id)!.dispatchEvent(event);
+        return event;
+      };
+
+      for (const id of ["search", "text", "area", "speed", "edit"]) {
+        expect(isPageEscape(escape(id))).toBe(true);
+        expect(isPageEscape(escape(id), FIELDS)).toBe(false);
+      }
+      expect(isPageEscape(escape("slider"), FIELDS)).toBe(true);
+      expect(isPageEscape(escape("box"), FIELDS)).toBe(true);
       document.body.innerHTML = "";
     });
   });

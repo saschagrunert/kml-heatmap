@@ -484,6 +484,11 @@ describe("cross-section", () => {
       const marker = document.createElement("div");
       marker.className = "maplibregl-marker";
       expect(escapeIn(marker)).toBe(true);
+      // Nor one in a text field, which empties it
+      const search = document.createElement("input");
+      search.type = "search";
+      expect(escapeIn(search)).toBe(true);
+      search.remove();
       expect(root().hidden).toBe(false);
 
       // One of its own ends is not: it closes, and focus goes to the control

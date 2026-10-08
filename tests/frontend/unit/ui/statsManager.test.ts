@@ -41,6 +41,13 @@ describe("StatsManager", () => {
   let statsPanel: HTMLElement;
 
   beforeEach(() => {
+    // A clock that stands still: the statistics of a filter come in slices
+    // of a few milliseconds (filterStatisticsInSlices), and a first slice
+    // that ran past its time on a loaded machine handed back a promise, so
+    // the panel said it was loading where a test read its figures. With the
+    // clock held every slice finishes the work; the test of the loading
+    // panel moves it on purpose.
+    vi.spyOn(performance, "now").mockReturnValue(0);
     // features/airports caches the country map on its first lookup, so every
     // test needs the airport data before the first render happens
     // Each with the code the export found in its name
@@ -132,6 +139,36 @@ describe("StatsManager", () => {
   });
 
   describe("updateStatsForSelection", () => {
+    it("leaves the title of the Flights tab to it when the figures land there", async () => {
+      // Worked out in slices, they landed after a switch to the Flights
+      // tab and named the rail "Statistics" over the list
+      let land!: () => void;
+      const spy = vi
+        .spyOn(panelStats, "filterStatisticsInSlices")
+        .mockImplementation(
+          (view) =>
+            new Promise<FilteredStatistics>((resolve) => {
+              land = () => resolve(panelStats.filterStatistics(view));
+            }),
+        );
+      const title = document.querySelector(
+        "#stats-rail-title .kh-stats-title-text",
+      )!;
+      statsManager.updateStatsForSelection();
+      expect(title.textContent).toBe("Statistics");
+
+      // As the tab writes it (ui/flightList.ts)
+      mockApp.flightListVisible = true;
+      title.textContent = "Flights";
+      land();
+      await vi.waitFor(() =>
+        expect(statsPanel.getAttribute("aria-busy")).toBeNull(),
+      );
+
+      expect(title.textContent).toBe("Flights");
+      spy.mockRestore();
+    });
+
     it("shows filtered statistics for all paths when nothing is selected", () => {
       mockApp.selectedYear = "2025";
 
@@ -749,12 +786,6 @@ describe("StatsManager", () => {
 
   describe("store subscriptions", () => {
     beforeEach(() => {
-      // The figures of a filter in one task, however loaded the machine:
-      // a first slice that ran past its time handed back a promise, and
-      // the panel said it was loading where these read its figures
-      vi.spyOn(panelStats, "filterStatisticsInSlices").mockImplementation(
-        (view) => panelStats.filterStatistics(view),
-      );
       mockApp.store.set("statsPanelVisible", true);
     });
 
@@ -1007,6 +1038,29 @@ describe("StatsManager", () => {
       expect(statsPanel.hasAttribute("aria-busy")).toBe(false);
       expect(leadValue(statsPanel, "Flights")).toBe("7");
       slices.mockRestore();
+    });
+
+    it("shows the figures once the slices of a long filter are done", async () => {
+      // The real slicing, with a clock that runs past a slice at every
+      // step: the first slice hands back a promise and the rest follow in
+      // tasks of their own
+      vi.useFakeTimers({ toFake: ["setTimeout"] });
+      let now = 0;
+      vi.spyOn(performance, "now").mockImplementation(() => (now += 1000));
+      const slices = vi.spyOn(panelStats, "filterStatisticsInSlices");
+
+      mockApp.selectedYear = "2025";
+
+      expect(slices).toHaveBeenCalledTimes(1);
+      expect(slices.mock.results[0]!.value).toBeInstanceOf(Promise);
+      expect(statsPanel.querySelector(".kh-stats-loading")).not.toBeNull();
+      expect(statsPanel.getAttribute("aria-busy")).toBe("true");
+
+      await vi.runAllTimersAsync();
+
+      expect(statsPanel.querySelector(".kh-stats-loading")).toBeNull();
+      expect(statsPanel.hasAttribute("aria-busy")).toBe(false);
+      expect(leadValue(statsPanel, "Flights")).toBe("1");
     });
 
     it("drops statistics a newer filter has overtaken", async () => {

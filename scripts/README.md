@@ -119,8 +119,11 @@ obfuscation check on every KML file that the commits about to be pushed add or
 change, and refuses the push when one carries a real date or when it cannot run
 the check. It also refuses a commit message that dates a flight the commit adds
 or changes (`Add flight 16 Aug 2026`), and warns when the push adds a single
-flight, which the commit then dates to about the day it was pushed. It needs
-nothing beyond Python; `--no-verify` skips it.
+flight, which the commit then dates to about the day it was pushed. Commits
+count as published only when the remote pushed to has them: a first push to a
+remote the clone never fetched from checks the whole history, commits of other
+remotes included, since a private one may hold the raw flights. It needs nothing
+beyond Python; `--no-verify` skips it.
 
 `make hooks` installs a copy of `pre-push-hook`, which runs `pre_push.py` of the
 worktree the push comes from: the worktrees of a clone share one hooks
@@ -227,7 +230,13 @@ site under test (`docs/`, or `visual-site/` for the snapshots) with the
 checkout, so the e2e tests refuse to run against a stale site, and the generator
 warns when the bundle it is about to publish is stale.
 `kml_heatmap/site_assets.py` mirrors the hash in Python; `TestSourceHashParity`
-in `tests/test_site_assets.py` checks that both implementations agree.
+in `tests/test_site_assets.py` checks that both implementations agree. Two more
+hashes live there: `computeGeneratorHash`, of the Python package, its templates
+and the static files besides the bundles, which `generator_hash` in
+`site_assets.py` writes into `map_config.js` (`TestGeneratorHashParity`), and
+`computeFixtureHash`, of what the fixture site is made of, which
+`build_visual_site.py` writes into `visual-site/fixture.sha1`. The site check
+compares both with the checkout.
 
 ## vendor.js
 

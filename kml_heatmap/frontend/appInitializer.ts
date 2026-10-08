@@ -21,6 +21,9 @@ import type { Airport, AirportMarker, Metadata } from "./types";
 /** Said when the first load goes without the list of years */
 const NO_YEARS_MESSAGE = "The list of years is unavailable, showing all years";
 
+/** Said, with a Retry, when airports.json could not be loaded */
+export const AIRPORTS_FAILED_MESSAGE = "Could not load the airports";
+
 /**
  * Populate the year dropdown and make sure the selected year exists.
  * A restored/URL year that is not available falls back to the latest year
@@ -53,8 +56,7 @@ export function resolveYearSelection(
     fillYears(select, availableYears);
   }
 
-  const latestValue =
-    availableYears.length > 0 ? Math.max(...availableYears).toString() : "all";
+  const latestValue = latestYear(availableYears);
   app.defaultYear = latestValue;
 
   let year = app.selectedYear;
@@ -78,6 +80,11 @@ export function resolveYearSelection(
   // and reads it as soon as the store announces the year
   if (select) select.value = year;
   app.selectedYear = year;
+}
+
+/** The newest of `years`, "all" for none: the year a first visit opens on */
+function latestYear(years: number[]): string {
+  return years.length > 0 ? Math.max(...years).toString() : "all";
 }
 
 /** Put the years of the metadata after "All years" in the dropdown */
@@ -114,6 +121,9 @@ function applyMetadata(
     if (select) select.value = "all";
     app.selectedYear = "all";
   } else if (late) {
+    // Reset view goes to the year a first visit opens on, which it is now
+    // able to tell: it stayed at all years for the rest of the session
+    app.defaultYear = latestYear(metadata.available_years);
     if (select) {
       const shown = select.value;
       fillYears(select, metadata.available_years);
@@ -179,8 +189,10 @@ function applyMetadata(
  */
 export async function loadInitialData(app: MapApp): Promise<void> {
   colorSegmentPopups(app.signal);
+  // Said over flights whenever they come, should airports.json fail
+  const airportsAgain = followMissingAirports(app);
   // From the start, so the legends wait for the first dataset
-  const failure = followLoadFailure(app);
+  const failure = followLoadFailure(app, airportsAgain);
 
   // Both are preloaded by the template; asked for together so that neither
   // waits for the other when they are not
@@ -201,7 +213,8 @@ export async function loadInitialData(app: MapApp): Promise<void> {
   // Add airport markers. None shows until the dataset says which airports
   // its flights used: a first load that failed left the dots of every year
   // on the map, unlabelled.
-  showAirportMarkers(app, airports);
+  if (airports) showAirportMarkers(app, airports);
+  else airportsAgain.failed();
 
   // Load the selected year's data; currentData is the single source of
   // path_info and path_segments for all managers. The layers, the
@@ -217,9 +230,14 @@ export async function loadInitialData(app: MapApp): Promise<void> {
   app.airportManager.updateAirportMarkerSizes();
 
   // Restore stats panel visibility, over flights only: without them the
-  // rail opened on zeros (see followLoadFailure)
+  // rail opened on zeros (see followLoadFailure). Given up on, the flag
+  // goes, as Wrapped's does in MapApp: the saves and Copy link kept
+  // writing the statistics open while the rail was closed (see
+  // StateManager.panelVisible), and a Retry that loads does not open it.
   if (app.savedState?.statsPanelVisible && app.currentData) {
     app.statsPanelVisible = true;
+  } else if (app.savedState) {
+    delete app.savedState.statsPanelVisible;
   }
 }
 
@@ -227,6 +245,62 @@ export async function loadInitialData(app: MapApp): Promise<void> {
 function showAirportMarkers(app: MapApp, airports: Airport[]): void {
   createAirportMarkers(app, airports);
   app.airportManager.showAirports();
+}
+
+/**
+ * Follow airports.json after it failed: say so over flights, the first
+ * load's or those of a year picked later, which went without airports and
+ * without a word or a Retry for the session; once per failure, not at
+ * every load. `again` loads it once more while it is missing (null
+ * otherwise) and puts the airports on the map: their markers at the size
+ * of the zoom, the home base and the labels. The rest (the search, the
+ * tour, the profile, Wrapped) reads them from state/siteData.ts as it
+ * needs them. It resolves to whether they came, one load at a time: a
+ * double click on the toast's Retry, which stays clickable while it fades,
+ * ran two and left a second set of markers on the map.
+ */
+function followMissingAirports(app: MapApp): {
+  failed: () => void;
+  again: () => Promise<boolean> | null;
+} {
+  let missing = false;
+  let said = false;
+  let loading: Promise<boolean> | null = null;
+  const again = (): Promise<boolean> =>
+    (loading ??= app.dataManager
+      .loadAirports()
+      .then((airports) => {
+        if (!airports || app.signal.aborted) {
+          // A new failure, which flights on the map say again
+          said = false;
+          return false;
+        }
+        missing = false;
+        dismissToast(AIRPORTS_FAILED_MESSAGE);
+        showAirportMarkers(app, airports);
+        app.airportManager.updateAirportPopups();
+        app.airportManager.updateAirportMarkerSizes();
+        return true;
+      })
+      .finally(() => (loading = null)));
+  const say = (): void => {
+    if (!missing || said || loading || !app.currentData || app.signal.aborted) {
+      return;
+    }
+    said = true;
+    showToast(AIRPORTS_FAILED_MESSAGE, "error", {
+      label: "Retry",
+      run: () => void again().then(say),
+    });
+  };
+  app.store.subscribe("currentData", say, { signal: app.signal });
+  return {
+    failed: () => {
+      missing = true;
+      say();
+    },
+    again: () => (missing ? again() : null),
+  };
 }
 
 /**
@@ -252,7 +326,10 @@ const NEED_DATA_CONTROL_IDS = [
  * @returns `settle` says the first load is over, before which nothing is
  *   shown
  */
-function followLoadFailure(app: MapApp): { settle: () => void } {
+function followLoadFailure(
+  app: MapApp,
+  airports: { again: () => Promise<boolean> | null },
+): { settle: () => void } {
   const panel = domCache.get("map-empty");
   const retryButton = domCache.get("map-empty-retry");
   const text = panel?.querySelector("p");
@@ -330,11 +407,11 @@ function followLoadFailure(app: MapApp): { settle: () => void } {
     sync();
     try {
       // The airports as well, when they failed with the flights: the
-      // markers are there before the dataset that says which of them show
-      if (Object.keys(app.airportMarkers).length === 0) {
-        showAirportMarkers(app, await app.dataManager.loadAirports());
-        app.airportManager.updateAirportMarkerSizes();
-      }
+      // markers are there before the dataset that says which of them show.
+      // Failed again under flights that came, they say so as on the first
+      // load.
+      const loading = airports.again();
+      if (loading) await loading;
       await app.filterManager.loadShownYear();
     } finally {
       retrying = false;
@@ -417,7 +494,10 @@ export function createAirportMarkers(app: MapApp, airports: Airport[]): void {
     const isActivation = createActivationFilter();
     element.addEventListener("click", (event) => {
       if (isActivation(event)) {
-        app.airportManager.activateAirport(pressedAirport(event) ?? name);
+        app.airportManager.activateAirport(
+          pressedAirport(event) ?? name,
+          app.touchClock.isTouchClick(event),
+        );
       }
     });
     // The target reaches past the dot, up over where its code goes, and a
@@ -451,6 +531,9 @@ export function createAirportMarkers(app: MapApp, airports: Airport[]): void {
       if (event.key === "Escape") airportMarker.closePopup();
     });
 
+    // In place of one made before, which goes: a second set over the
+    // first stayed on the map for good, with no entry left to take it off
+    app.airportMarkers[name]?.marker.remove();
     app.airportMarkers[name] = airportMarker;
   }
 }

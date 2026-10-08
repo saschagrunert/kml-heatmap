@@ -52,7 +52,12 @@ const isWatch = args.watch;
 const isDevelopment = process.env.NODE_ENV === "development" || isWatch;
 const minify = !isDevelopment;
 
-const sourceHash = computeSourceHash();
+// A watch build stamps no hash: the hash of when it started would stay in
+// the bundles while the sources it rebuilds from change, so the e2e site
+// check and the generator would take a site built from edited sources for
+// one of the sources on disk. Without one, both say it is no build of the
+// checkout; `npm run build` makes it one again.
+const sourceHash = isWatch ? "dev-watch" : computeSourceHash();
 const buildBanner = makeBanner(sourceHash);
 
 /**
@@ -383,8 +388,12 @@ function compareBundles(before, after, names) {
 // Raised for share mode on top of the replay of a day and the search
 // (159.35 KB and 54.22 KB gzipped in a local build after): the selection
 // it holds still, its chip, the flights a filter hides and a tap told from
-// a click.
-const BUDGET_APP = { raw: 161.5 * 1024, gzip: 55.25 * 1024 };
+// a click. Raised by 256 B raw (161.67 KB and 54.99 KB gzipped in a local
+// build after) for the airports that a failed airports.json leaves out,
+// said over flights whenever they come and loaded again once per Retry,
+// and an export that waits for the heat sources, less long before the
+// share sheet.
+const BUDGET_APP = { raw: 161.75 * 1024, gzip: 55.25 * 1024 };
 // The feature bundle: replay and Replay all, the 3D view (relief, ribbons,
 // heat cloud), the imagery, the flight profile, the cross-section and the
 // hotspot tour. Fetched only when one of them is first used, so no part of

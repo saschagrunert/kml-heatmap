@@ -516,36 +516,65 @@ export async function togglePathSelection(
 }
 
 /**
+ * How long the helpers that load and replay flights wait for each step. A
+ * spec in the relief of the 3D view passes its own: a frame there took
+ * 2.7 to 16 s in software WebGL on a busy runner, where the flat map draws
+ * one in a few milliseconds.
+ */
+export interface WaitOptions {
+  /** For each step, in ms */
+  timeout?: number;
+}
+
+/** How long a step waits for the paths of the flights on the flat map */
+const PATH_DATA_TIMEOUT_MS = 15000;
+
+/**
+ * The interval a page.waitForFunction asks its predicate in (ms). By
+ * default it asks once a frame, and a page that draws a frame in seconds
+ * (the relief, or a page cutting the flights anew on a loaded machine)
+ * asked a predicate that held at once only after it, or not before the
+ * wait ran out. On a timer the page answers between two frames.
+ */
+const POLL_MS = 250;
+
+/**
  * Enable altitude layer and wait for path data to load: drawn as lines, or
  * in the 3D view as ribbons, where the lines are left empty
  */
-export async function waitForPathData(page: Page): Promise<void> {
+export async function waitForPathData(
+  page: Page,
+  { timeout = PATH_DATA_TIMEOUT_MS }: WaitOptions = {},
+): Promise<void> {
   const altBtn = layerButton(page, "altitude");
   if ((await altBtn.getAttribute("aria-pressed")) !== "true") {
     await toggleLayer(page, "altitude");
   }
-  await expect(altBtn).toHaveAttribute("aria-pressed", "true");
+  await expect(altBtn).toHaveAttribute("aria-pressed", "true", { timeout });
   await page.waitForFunction(
     () => {
       const app = window.mapApp;
       return !!app && (app.fullPathInfo?.length ?? 0) > 0;
     },
     undefined,
-    { timeout: 15000 },
+    { timeout, polling: POLL_MS },
   );
   await expect
     .poll(
       async () =>
         (await pathCount(page, "altitude")) +
         (await ribbonCount(page, "altitude")),
-      { timeout: 15000 },
+      { timeout },
     )
     .toBeGreaterThan(0);
 }
 
 /** Select a single path with timing data for replay */
-export async function selectPathForReplay(page: Page): Promise<number> {
-  await waitForPathData(page);
+export async function selectPathForReplay(
+  page: Page,
+  options: WaitOptions = {},
+): Promise<number> {
+  await waitForPathData(page, options);
 
   const pathId = await page.evaluate(() => {
     const app = window.mapApp!;
@@ -592,17 +621,22 @@ export async function selectFlightsForReplay(
   return pathIds;
 }
 
-/** Activate replay mode (select path + toggle replay) */
-export async function activateReplay(page: Page): Promise<number> {
-  const pathId = await selectPathForReplay(page);
+/**
+ * Activate replay mode (select path + toggle replay). The waits take the
+ * expect timeout of the project unless `timeout` says otherwise.
+ */
+export async function activateReplay(
+  page: Page,
+  options: WaitOptions = {},
+): Promise<number> {
+  const pathId = await selectPathForReplay(page, options);
   await expect(page.locator("#replay-btn")).toHaveAttribute(
     "title",
     "Replay selected flights",
+    options,
   );
   await startReplay(page);
-  await expect(page.locator("#replay-controls")).toBeVisible({
-    timeout: 5000,
-  });
+  await expect(page.locator("#replay-controls")).toBeVisible(options);
   return pathId;
 }
 
@@ -623,10 +657,12 @@ async function startReplay(page: Page): Promise<void> {
 export async function playUntilProgress(page: Page): Promise<void> {
   await page.locator("#replay-play-btn").click();
   await expect(page.locator("#replay-pause-btn")).toBeVisible();
+  // On a timer rather than once a frame, which in WebKit drawing WebGL in
+  // software came too seldom for the 5 s this waited before
   await page.waitForFunction(
     () => window.mapApp!.replayState.currentTime > 0,
     undefined,
-    { timeout: 5000 },
+    { polling: 100, timeout: 15000 },
   );
 }
 

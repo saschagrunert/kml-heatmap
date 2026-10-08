@@ -144,7 +144,6 @@ const cursorOf = (root: HTMLElement, name: string): Element =>
 describe("flight profile", () => {
   beforeEach(() => {
     lifetime = new AbortController();
-    localStorage.clear();
     document.body.className = "";
     document.body.removeAttribute("style");
     document.body.innerHTML = `
