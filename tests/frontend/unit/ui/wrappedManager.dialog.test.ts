@@ -182,7 +182,7 @@ describe("WrappedManager dialog", () => {
       );
     });
 
-    it("clears the cards of the last opening while it prepares new ones", () => {
+    it("hides the cards of the last opening while it prepares new ones", () => {
       openWrapped();
       wrappedManager.closeWrapped();
       expect(el("wrapped-fun-facts").innerHTML).not.toBe("");
@@ -192,14 +192,25 @@ describe("WrappedManager dialog", () => {
       wrappedManager.showWrapped();
 
       expect(statValue("Flights")).toBeUndefined();
-      for (const id of [
-        "wrapped-fun-facts",
-        "wrapped-aircraft-fleet",
-        "wrapped-top-airports",
-        "wrapped-airports-grid",
-      ]) {
-        expect(el(id).innerHTML).toBe("");
-      }
+      // Hidden until renderContent says which have anything: emptied, they
+      // were blank tiles meanwhile
+      const cards = ["facts", "fleet", "airports"].map((card) =>
+        el("wrapped-card-" + card),
+      );
+      expect(cards.map((card) => card.hidden)).toEqual([true, true, true]);
+    });
+
+    it("shows the cards again that have anything once they are ready", async () => {
+      mockApp.currentData = createFlightHistory();
+      slowClock();
+      wrappedManager.showWrapped();
+
+      await vi.runAllTimersAsync();
+
+      expect(el("wrapped-card-facts").hidden).toBe(false);
+      // The history has aircraft and airports, so both have something
+      expect(el("wrapped-card-fleet").hidden).toBe(false);
+      expect(el("wrapped-card-airports").hidden).toBe(false);
     });
 
     it("stops preparing the cards when it closes while they load", async () => {

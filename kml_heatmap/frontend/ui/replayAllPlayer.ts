@@ -128,7 +128,8 @@ export class ReplayAllPlayer {
   onChange: (() => void) | null = null;
   /**
    * Told each time the last flight lands, in the first play of a run and
-   * in every one after it from the start again
+   * in every one after it from the start again, and as the clock is moved
+   * there (seek)
    */
   onLanded: (() => void) | null = null;
   private readonly app: MapApp;
@@ -204,6 +205,14 @@ export class ReplayAllPlayer {
   /** Whether a run is on the map */
   get active(): boolean {
     return this.keep !== null;
+  }
+
+  /**
+   * Whether the clock stands at the end of the run (see end), where resume
+   * would start it from the beginning again
+   */
+  get finished(): boolean {
+    return this.active && this.time >= this.end();
   }
 
   /** When the last flight of the run has landed */
@@ -394,9 +403,25 @@ export class ReplayAllPlayer {
    */
   seek(seconds: number): void {
     if (!this.active) return;
+    const before = this.time;
     this.time = Math.min(Math.max(seconds, 0), this.duration);
+    // A run of flights one after another dragged to its end stays there,
+    // paused, and never played the landing of its last flight: nothing
+    // said every flight had landed
+    this.landedFrom(before);
     this.app.map?.triggerRepaint();
     this.onChange?.();
+  }
+
+  /**
+   * Tell that the last flight has landed, when the clock has just come to
+   * its landing from `before`: once for each time it gets there
+   */
+  private landedFrom(before: number): void {
+    if (this.time < this.duration) return;
+    this.settle?.(true);
+    this.settle = null;
+    if (before < this.duration) this.onLanded?.();
   }
 
   /**
@@ -426,11 +451,7 @@ export class ReplayAllPlayer {
     this.lastFrame = now;
     const before = this.time;
     this.time += step * this.speed;
-    if (this.time >= this.duration) {
-      this.settle?.(true);
-      this.settle = null;
-      if (before < this.duration) this.onLanded?.();
-    }
+    this.landedFrom(before);
     // Played to the end once the last trail has faded (see end)
     const end = this.end();
     if (this.time >= end) {

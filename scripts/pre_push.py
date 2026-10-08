@@ -5,7 +5,14 @@ The repository is public, so the obfuscation check of CI only notices a real
 date once it has been published. This hook runs the same check before the
 push, on every KML file that the commits about to be pushed add or change,
 including commits whose files a later commit fixes again: the history is
-published, not just its tip. Commits the remote already has are skipped.
+published, not just its tip. Commits the remote already has are skipped:
+those of its remote-tracking branches, and those of the refs being pushed to
+where they are in the clone. Not those of another remote, a fork or a mirror
+whose commits the public remote may never have had: a private remote may hold
+the raw flights. A push to a URL or to a remote never fetched from has no
+remote-tracking branches of its own, so only the refs being pushed to count,
+and a first push to a new remote checks the whole history. When that history
+is already public elsewhere and clean, `git push --no-verify` skips it.
 
 Install it once per clone with `make hooks`. It needs nothing but the
 Python the project requires, and it fails closed: when it cannot run the
@@ -35,6 +42,13 @@ KML_PATHSPECS = (":(glob,icase)**/*.kml", ":(glob,icase)**/*.kmz")
 FLIGHT_PATHSPECS = (":(glob,icase)data/**/*.kml", ":(glob,icase)data/**/*.kmz")
 # What git sends for a ref that is deleted rather than pushed
 ZERO_SHA = "0" * 40
+# Said by a refusal of a push to a remote the clone has no tracking branches
+# of, which counts as having nothing: its first push checks history that may
+# be public elsewhere already
+SKIP_HINT = (
+    "\nThis remote was never fetched from, so the whole history was checked.\n"
+    "If it already has these commits, `git push --no-verify` skips the check."
+)
 
 
 def _git(repo: Path, *args: str) -> bytes:
@@ -49,7 +63,64 @@ def _git(repo: Path, *args: str) -> bytes:
     ).stdout
 
 
-def commits_to_check(repo: Path, remote: str, pushed_shas: list[str]) -> list[str]:
+def _text(output: bytes) -> str:
+    """Output of git as text, whatever the encoding of its file names.
+
+    git hands over names and messages as the bytes they are. A name that is
+    no UTF-8 keeps its bytes as surrogates, which turn back into the same
+    bytes as an argument of the next git command or as a path, rather than
+    failing the hook with a UnicodeDecodeError it would not explain.
+    """
+    return output.decode(errors="surrogateescape")
+
+
+def _has_commit(repo: Path, sha: str) -> bool:
+    """Whether the commit ``sha`` is in the clone."""
+    try:
+        _git(repo, "cat-file", "-e", f"{sha}^{{commit}}")
+    except subprocess.CalledProcessError:
+        return False
+    return True
+
+
+def _is_tracked(repo: Path, remote: str) -> bool:
+    """Whether the clone has remote-tracking branches of ``remote``."""
+    return bool(
+        _git(
+            repo,
+            "for-each-ref",
+            "--count=1",
+            "--format=%(refname)",
+            f"refs/remotes/{remote}/",
+        ).strip()
+    )
+
+
+def published(repo: Path, remote: str, lines: list[str]) -> list[str]:
+    """The revisions whose commits the remote already has, for rev-list.
+
+    The remote-tracking branches of ``remote`` and the commit each ref being
+    pushed to points at on the remote, where the clone has it: a push that
+    only updates a branch does not check everything before it again. A push
+    to a URL or to a remote not fetched from has no tracking branches, and
+    then only those commits count, never the branches of another remote: a
+    private one may hold commits with the raw flights that this remote never
+    had, and counting them as published would let them through. The hook
+    fails closed, so such a push checks everything else.
+    """
+    known = []
+    for line in lines:
+        fields = line.split()
+        if len(fields) == 4 and fields[3] != ZERO_SHA and _has_commit(repo, fields[3]):
+            known.append(fields[3])
+    remotes = [f"--remotes={remote}"] if _is_tracked(repo, remote) else []
+    revisions = [*remotes, *dict.fromkeys(known)]
+    return ["--not", *revisions] if revisions else []
+
+
+def commits_to_check(
+    repo: Path, exclude: list[str], pushed_shas: list[str]
+) -> list[str]:
     """The commits being pushed that add or change a KML file, oldest first.
 
     --full-history keeps a side branch that adds a file and a later merge
@@ -63,12 +134,11 @@ def commits_to_check(repo: Path, remote: str, pushed_shas: list[str]) -> list[st
         "--reverse",
         "--full-history",
         *pushed_shas,
-        "--not",
-        f"--remotes={remote}",
+        *exclude,
         "--",
         *KML_PATHSPECS,
     )
-    return output.decode().split()
+    return _text(output).split()
 
 
 def changed_kml_files(repo: Path, commit: str) -> list[str]:
@@ -87,11 +157,11 @@ def changed_kml_files(repo: Path, commit: str) -> list[str]:
         "--",
         *KML_PATHSPECS,
     )
-    names = [name for name in output.decode().split("\0") if name]
+    names = [name for name in _text(output).split("\0") if name]
     return list(dict.fromkeys(names))
 
 
-def added_flights(repo: Path, remote: str, pushed_shas: list[str]) -> list[str]:
+def added_flights(repo: Path, exclude: list[str], pushed_shas: list[str]) -> list[str]:
     """The flight files under data/ that the commits being pushed add."""
     if not pushed_shas:
         return []
@@ -103,17 +173,16 @@ def added_flights(repo: Path, remote: str, pushed_shas: list[str]) -> list[str]:
         "--format=",
         "-z",
         *pushed_shas,
-        "--not",
-        f"--remotes={remote}",
+        *exclude,
         "--",
         *FLIGHT_PATHSPECS,
     )
-    names = (name.strip("\n") for name in output.decode().split("\0"))
+    names = (name.strip("\n") for name in _text(output).split("\0"))
     return list(dict.fromkeys(name for name in names if name))
 
 
 def dated_messages(
-    repo: Path, remote: str, pushed_shas: list[str]
+    repo: Path, exclude: list[str], pushed_shas: list[str]
 ) -> list[tuple[str, str]]:
     """The dates, weekdays and holidays in the messages of commits to flights.
 
@@ -136,13 +205,12 @@ def dated_messages(
         "--reverse",
         "--format=%H%x00%B%x1e",
         *pushed_shas,
-        "--not",
-        f"--remotes={remote}",
+        *exclude,
         "--",
         *FLIGHT_PATHSPECS,
     )
     found: list[tuple[str, str]] = []
-    for record in output.decode().split("\x1e"):
+    for record in _text(output).split("\x1e"):
         commit, _, message = record.strip("\n").partition("\0")
         if not commit:
             continue
@@ -180,35 +248,43 @@ def pushed_shas(lines: list[str]) -> list[str]:
     return shas
 
 
-def check(repo: Path, remote: str, lines: list[str]) -> int:
+def _report(line: str) -> None:
+    """Print a line naming a file or a message, with any byte no UTF-8 escaped."""
+    shown = line.encode(errors="surrogateescape").decode(errors="backslashreplace")
+    print(shown, file=sys.stderr)
+
+
+def check(repo: Path, lines: list[str], remote: str = "origin") -> int:
     """Print what is wrong and return the hook's exit status."""
     found = False
-    for commit in commits_to_check(repo, remote, pushed_shas(lines)):
+    exclude = published(repo, remote, lines)
+    hint = "" if _is_tracked(repo, remote) else SKIP_HINT
+    for commit in commits_to_check(repo, exclude, pushed_shas(lines)):
         for name, issues in violations_in(repo, commit).items():
             found = True
             for issue in issues:
-                print(f"  {commit[:7]} {name}: {issue}", file=sys.stderr)
+                _report(f"  {commit[:7]} {name}: {issue}")
     if found:
         print(
             "\nPush refused: the commits above carry real flight dates, and the\n"
             "repository is public. Run `make obfuscate`, then rewrite the\n"
-            "commits (amend or rebase) so none of them holds the originals.",
+            f"commits (amend or rebase) so none of them holds the originals.{hint}",
             file=sys.stderr,
         )
         return 1
-    messages = dated_messages(repo, remote, pushed_shas(lines))
+    messages = dated_messages(repo, exclude, pushed_shas(lines))
     for commit, token in messages:
-        print(f"  {commit[:7]} commit message: {token}", file=sys.stderr)
+        _report(f"  {commit[:7]} commit message: {token}")
     if messages:
         print(
             "\nPush refused: the messages of the commits above date the flights\n"
             "they add or change, and the repository is public. Reword them\n"
             "without the dates and weekdays: `git commit --amend` for the last\n"
-            "commit, `git rebase -i` with `reword` for an earlier one.",
+            f"commit, `git rebase -i` with `reword` for an earlier one.{hint}",
             file=sys.stderr,
         )
         return 1
-    added = added_flights(repo, remote, pushed_shas(lines))
+    added = added_flights(repo, exclude, pushed_shas(lines))
     if len(added) == 1:
         print(
             f"pre-push: warning: this push adds one flight ({added[0]}); a "
@@ -220,10 +296,11 @@ def check(repo: Path, remote: str, lines: list[str]) -> int:
 
 
 def main() -> int:
+    # The remote's name, or the URL a push names in its place
     remote = sys.argv[1] if len(sys.argv) > 1 else "origin"
     try:
         sys.path.insert(0, str(ROOT))
-        return check(Path.cwd(), remote, sys.stdin.read().splitlines())
+        return check(Path.cwd(), sys.stdin.read().splitlines(), remote)
     except (ImportError, SyntaxError) as e:
         reason = f"{e}; needs Python 3.14 as python3"
     except subprocess.CalledProcessError as e:
@@ -231,6 +308,8 @@ def main() -> int:
         reason = f"git failed: {stderr or e}"
     except OSError as e:
         reason = str(e)
+    except UnicodeError as e:
+        reason = f"unexpected text: {e}"
     print(
         f"pre-push: cannot check the KML files ({reason}). Refusing the push; "
         "`git push --no-verify` skips the check.",

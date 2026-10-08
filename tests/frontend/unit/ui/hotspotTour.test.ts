@@ -444,6 +444,52 @@ describe("hotspot tour", () => {
     document.dispatchEvent(taken);
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter" }));
     expect(tour.isOpen).toBe(true);
+    // Nor one in a text field, which empties it
+    const search = document.createElement("input");
+    search.type = "search";
+    document.body.append(search);
+    const typed = new KeyboardEvent("keydown", {
+      key: "Escape",
+      bubbles: true,
+      cancelable: true,
+    });
+    search.dispatchEvent(typed);
+    expect(tour.isOpen).toBe(true);
+    expect(typed.defaultPrevented).toBe(false);
+    search.remove();
+  });
+
+  it("follows the height of its panel as it wraps anew", () => {
+    // Measured as a step was shown only: a turn of the phone left the
+    // toasts standing on the panel, or far above it
+    const observers: ResizeObserverCallback[] = [];
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        constructor(callback: ResizeObserverCallback) {
+          observers.push(callback);
+        }
+        observe(): void {}
+        disconnect(): void {}
+      },
+    );
+    try {
+      tour.start();
+      const panel = document.getElementById("hotspot-tour")!;
+      vi.spyOn(panel, "offsetHeight", "get").mockReturnValue(96);
+
+      for (const observer of observers) {
+        observer([], {} as ResizeObserver);
+      }
+
+      expect(document.body.style.getPropertyValue("--tour-panel-h")).toBe(
+        "96px",
+      );
+      tour.stop();
+      expect(document.body.style.getPropertyValue("--tour-panel-h")).toBe("");
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it("ends where it is, in the 3D view, when the user takes the map over", async () => {

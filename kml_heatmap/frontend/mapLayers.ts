@@ -57,6 +57,11 @@ const AVIATION_MAX_ZOOM = AVIATION_TILE_MAX_ZOOM - 1 + 2;
 /** A layer's `maxzoom` is exclusive, and the map zooms in fractions */
 const AVIATION_LAYER_MAX_ZOOM = AVIATION_MAX_ZOOM + 0.01;
 
+/** Whether the aviation overlay draws anything at map zoom `zoom` */
+export function aviationDrawsAt(zoom: number): boolean {
+  return zoom >= AVIATION_MIN_ZOOM && zoom < AVIATION_LAYER_MAX_ZOOM;
+}
+
 /** Line widths and opacities of the data layers as they are created */
 const PATH_LINE = { width: 4, opacity: 0.85 };
 const SELECTED_PATH_LINE = { width: 6, opacity: 1 };

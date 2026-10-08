@@ -478,6 +478,30 @@ describe("layers feature", () => {
       expect(findNearestSegment([], 50, 8)).toBeUndefined();
     });
 
+    it("measures a segment across the antimeridian the short way round", () => {
+      // Measured as a line round the whole world, a point on it near 180
+      // was nearer the end of the segment after it
+      const along = (from: number, to: number): PathSegment =>
+        segmentOf({
+          path_id: 1,
+          coords: [
+            [-17, from],
+            [-17, to],
+          ],
+        });
+      const run = [
+        along(179.5, 179.9),
+        along(179.9, -179.9),
+        along(-179.9, -179.5),
+      ];
+
+      for (const lng of [-179.95, 179.95, 180.05, -539.95]) {
+        expect(findNearestSegment(run, -17, lng)).toBe(run[1]);
+      }
+      expect(findNearestSegment(run, -17, -179.7)).toBe(run[2]);
+      expect(findNearestSegment(run, -17, 179.7)).toBe(run[0]);
+    });
+
     it("handles zero-length segments", () => {
       const point: PathSegment = {
         path_id: 1,

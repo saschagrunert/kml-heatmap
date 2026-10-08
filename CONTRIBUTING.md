@@ -211,8 +211,10 @@ above, outside the container, since the image has no Python the package runs on:
 npm run build && python scripts/build_visual_site.py
 ```
 
-The run refuses a `visual-site/` that is older than the sources, the fixture or
-that script, and names this command.
+The run refuses a `visual-site/` built from other sources, another generator,
+another fixture or another version of that script, and names this command: the
+script leaves the hash of the fixture in `visual-site/fixture.sha1`, and
+`map_config.js` carries the hash of the generator.
 
 Nothing in that site changes on its own and the pinned image renders it the same
 on every run, so every snapshot is compared exactly (`maxDiffPixels: 0`). An

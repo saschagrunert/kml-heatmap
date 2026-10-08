@@ -273,15 +273,23 @@ export class AirportManager {
    * still, would have shown them all. The popup's list adds one by one
    * instead (ui/airportFlights.ts). Nothing is selected during a replay,
    * which shows the one flight, or the hotspot tour, which tours them.
+   * Nor by a finger: a tap never changes the selection, and one that meant
+   * to look at an airport put all its flights on the map; the popup's
+   * checkboxes select.
+   * @param byTouch - Whether a finger activated it (MapApp.touchClock)
    */
-  activateAirport(name: string): void {
+  activateAirport(name: string, byTouch = false): void {
     if (this.isPopupOpen(name)) {
       this.closePopup(name);
       return;
     }
     const app = this.app;
     // Share mode always has a selection, so it never selects here
-    if (!app.pathSelection.held() && app.selectedPathIds.size === 0) {
+    if (
+      !byTouch &&
+      !app.pathSelection.held() &&
+      app.selectedPathIds.size === 0
+    ) {
       app.pathSelection.selectPathsByAirport(name);
     }
     this.openPopup(name);
@@ -325,8 +333,10 @@ export class AirportManager {
 
     // Moving the open popup is no close: the focus belongs to whatever
     // asked for the new one, not to the marker that is left behind
-    if (this.openAirport !== null) this.setExpanded(this.openAirport, false);
+    const previous = this.openAirport;
+    if (previous !== null) this.setExpanded(previous, false);
     this.openAirport = name;
+    if (previous !== null && previous !== name) this.releaseKept(previous);
     this.setExpanded(name, true);
     this.popup.setLngLat(marker.getLatLng());
     // The list goes into the popup's element, which an open popup has
@@ -422,10 +432,26 @@ export class AirportManager {
     this.openAirport = null;
     if (name === null) return;
     this.setExpanded(name, false);
+    // The popup kept its airport on the map (keptAirport)
+    this.releaseKept(name);
 
     const active = document.activeElement;
     if (active === null || active === document.body) {
-      this.app.airportMarkers[name]?.getElement().focus();
+      const marker = this.app.airportMarkers[name]?.getElement();
+      // One that went with the popup leaves the focus with the map
+      if (marker && !marker.hidden) marker.focus();
+      else this.app.map?.getCanvas().focus();
+    }
+  }
+
+  /**
+   * Hide an airport the popup no longer keeps, if the filter and the
+   * selection do not show it
+   */
+  private releaseKept(name: string): void {
+    const visibleAirports = this.visibleAirports;
+    if (visibleAirports !== null && !visibleAirports.has(name)) {
+      this.applyVisibility();
     }
   }
 
@@ -512,9 +538,32 @@ export class AirportManager {
     this.applyVisibility();
   }
 
+  /**
+   * The airport whose open popup keeps it on the map, if any. In share mode
+   * only the airports of the shared flights show, and unticking the last
+   * of them in the popup's list hid the airport, which took the popup and
+   * the focus in it along: the next tick went nowhere. So the airport stays
+   * for as long as its popup does, and goes as it closes (onPopupClosed).
+   * Only while the filter still has flights there: one that hides them all
+   * takes the popup away, as with every other airport it hides.
+   */
+  private keptAirport(): string | null {
+    const name = this.openAirport;
+    if (name === null || !this.popup.isOpen()) return null;
+    return (this.airportFlightCounts()[name] ?? 0) > 0 ? name : null;
+  }
+
+  /** The airports the filter and the selection show, the kept one too */
+  private shownBySelection(): ReadonlySet<string> | null {
+    const visibleAirports = this.visibleAirports;
+    const kept = this.keptAirport();
+    if (visibleAirports === null || kept === null) return visibleAirports;
+    return new Set(visibleAirports).add(kept);
+  }
+
   /** Show the markers and labels of the airports the filter and view allow */
   private applyVisibility(): void {
-    const visibleAirports = this.visibleAirports;
+    const visibleAirports = this.shownBySelection();
     const far = this.farAirports;
     for (const [airportName, marker] of Object.entries(
       this.app.airportMarkers,
@@ -555,9 +604,10 @@ export class AirportManager {
   /** The airports whose labels are shown, null for all */
   private shownAirports(): ReadonlySet<string> | null {
     const far = this.farAirports;
-    if (far.size === 0) return this.visibleAirports;
+    const visibleAirports = this.shownBySelection();
+    if (far.size === 0) return visibleAirports;
     const names = new Set(
-      this.visibleAirports ?? siteAirports().map((airport) => airport.name),
+      visibleAirports ?? siteAirports().map((airport) => airport.name),
     );
     for (const name of far) names.delete(name);
     return names;

@@ -137,10 +137,14 @@ every spec gets (`tests/e2e/site-check.ts`) compares the build hash in
 stylesheets, the build configuration and the pinned versions of esbuild, Lucide
 and the vendored maplibre-gl, html-to-image and flag-icons, see
 [`scripts/README.md`](../../scripts/README.md#source-hashjs)) and fails the
-tests with a hint when they differ. It also fails them when `docs/index.html` is
-older than the Python package, its templates and static assets or
-`package-lock.json`, and when `E2E_API_KEYS` (`dummy` or `none`, set by CI) does
-not match whether `docs/map_config.js` carries a key.
+tests with a hint when they differ. It also fails them when the hash of the
+generator in `docs/map_config.js` (`generator`: the Python package, its
+templates and the static files besides the bundles) differs from the checkout's,
+when the hash of the fixture in `visual-site/fixture.sha1` does, and when
+`E2E_API_KEYS` (`dummy` or `none`, set by CI) does not match whether
+`docs/map_config.js` carries a key. Hashes, not modification times: the build
+dates its files to the day, or to 2025 for the fixture site, so their times
+cannot tell an old site from a new one.
 
 ### Running them locally
 

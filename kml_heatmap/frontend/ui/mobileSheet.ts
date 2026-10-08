@@ -512,6 +512,9 @@ export class MobileSheet {
   }
 
   private handleKeyDown(event: KeyboardEvent): void {
+    // An Escape something else took first is not the sheet's as well: one
+    // press closed the readout of the cloud and the sheet with it
+    if (event.defaultPrevented) return;
     if (event.key === "Escape") {
       event.preventDefault();
       this.close();

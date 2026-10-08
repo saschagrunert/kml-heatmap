@@ -11,6 +11,7 @@
 import { test, expect, type Page } from "./fixtures";
 import { gotoApp } from "./helpers";
 import { mapPopup } from "./map";
+import { PLACE_DEBOUNCE_MS } from "../../kml_heatmap/frontend/services/photon";
 
 /** Photon's answer to any text: one city with its extent */
 const ANSWER = {
@@ -32,15 +33,20 @@ const ANSWER = {
 };
 
 /**
- * Answer Photon with ANSWER, or fail its requests, and return the texts
- * it was asked for
+ * Answer Photon with ANSWER, or fail its requests, once `held` resolves,
+ * and return the texts it was asked for
  */
-async function stubPhoton(page: Page, fail = false): Promise<string[]> {
+async function stubPhoton(
+  page: Page,
+  fail = false,
+  held?: Promise<void>,
+): Promise<string[]> {
   const asked: string[] = [];
   await page.route(
     (url) => url.hostname === "photon.komoot.io",
     async (route) => {
       asked.push(new URL(route.request().url()).searchParams.get("q") ?? "");
+      await held;
       if (fail) await route.abort("failed");
       else await route.fulfill({ json: ANSWER });
     },
@@ -61,6 +67,26 @@ const panel = (page: Page) => page.locator("#location-search");
 const field = (page: Page) => page.getByRole("combobox", { name: /search/i });
 const option = (page: Page, name: string | RegExp) =>
   page.getByRole("option", { name });
+/**
+ * The option of the airport named `name`. A match by role and name is one
+ * of a part of the name, which the option's name (the airport's name, its
+ * code and country) holds for any airport whose name holds this one's as
+ * well, and strict mode refuses two.
+ */
+const airportOption = (page: Page, name: string) =>
+  page
+    .getByRole("group", { name: "Airports" })
+    .getByRole("option")
+    .filter({
+      has: page.locator(".location-search-name").getByText(name, {
+        exact: true,
+      }),
+    });
+/** What the panel says while Photon is asked (SEARCHING_MESSAGE) */
+const SEARCHING = "Searching places";
+/** How often Photon was asked for `text` */
+const times = (asked: string[], text: string): number =>
+  asked.filter((query) => query === text).length;
 
 test.describe("the search @desktop", () => {
   test("is not fetched by a visit that does not search", async ({ page }) => {
@@ -120,7 +146,7 @@ test.describe("the search @desktop", () => {
 
     await page.locator("#search-btn").click();
     await field(page).fill(airport.code);
-    await option(page, airport.name).click();
+    await airportOption(page, airport.name).click();
 
     await expect(panel(page)).toBeHidden();
     await expect(mapPopup(page)).toBeVisible({ timeout: 15000 });
@@ -133,14 +159,32 @@ test.describe("the search @desktop", () => {
   test("asks Photon once after a pause, and marks the place it picks", async ({
     page,
   }) => {
-    const asked = await stubPhoton(page);
+    // Its answer held back, a request says so in the panel until it comes
+    let answer!: () => void;
+    const asked = await stubPhoton(
+      page,
+      false,
+      new Promise<void>((resolve) => (answer = resolve)),
+    );
     await gotoApp(page);
 
     await page.locator("#search-btn").click();
-    await field(page).pressSequentially("Stuttgart", { delay: 20 });
+    await expect(field(page)).toBeVisible();
+    // The pause on the page's own clock, held while the word is typed: a
+    // loaded runner took longer than the pause between two keys on the
+    // real one, and the page asked for the start of the word as well
+    const now = await page.evaluate(() => Date.now());
+    await page.clock.install({ time: now });
+    await page.clock.pauseAt(now + 1000);
+    await field(page).pressSequentially("Stuttgart");
+    await page.clock.runFor(PLACE_DEBOUNCE_MS - 100);
+    await expect(panel(page)).not.toContainText(SEARCHING);
+    await page.clock.runFor(200);
+    await expect(panel(page)).toContainText(SEARCHING);
+    await expect.poll(() => asked).toEqual(["stuttgart"]);
+    answer();
+    await page.clock.resume();
 
-    await expect(option(page, /^Stuttgart/)).toBeVisible();
-    expect(asked).toEqual(["stuttgart"]);
     await expect(option(page, /^Stuttgart/)).toContainText(
       "City · Baden-Württemberg, Germany",
     );
@@ -149,7 +193,7 @@ test.describe("the search @desktop", () => {
     await field(page).fill("Stuttgar");
     await field(page).fill("Stuttgart");
     await expect(option(page, /^Stuttgart/)).toBeVisible();
-    expect(asked).toEqual(["stuttgart"]);
+    expect(times(asked, "stuttgart")).toBe(1);
 
     await option(page, /^Stuttgart/).click();
     await expect(panel(page)).toBeHidden();

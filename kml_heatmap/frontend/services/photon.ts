@@ -26,6 +26,12 @@ export const PLACE_RESULTS = 5;
 /** The fewest characters a search asks Photon for */
 export const PLACE_MIN_LENGTH = 3;
 
+/**
+ * The pause in the typing after which the search asks Photon (ms). Here,
+ * with no imports, so the e2e suite can read it too.
+ */
+export const PLACE_DEBOUNCE_MS = 600;
+
 /** How many answers the client keeps; the oldest goes first */
 const CACHE_SIZE = 50;
 

@@ -5,6 +5,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
+  dimsHeatCloud,
   dimsHeatmap,
   followLayerVisibility,
   highlightsSelection,
@@ -279,6 +280,8 @@ describe("layer visibility", () => {
 
   it("fades the base map's labels while the heat is drawn at full strength", async () => {
     const faded = (): unknown => app.map!.getGlobalState()[HEAT_SHOWN_STATE];
+    // At a zoom the aviation chart draws at
+    app.map!.setZoom(8);
     followLayerVisibility(asMapApp(app));
     // Once the style is there
     await app.mapReady;
@@ -373,6 +376,44 @@ describe("layer visibility", () => {
 
       app.aviationVisible = false;
       expect(dimsHeatmap(asMapApp(app))).toBe(false);
+    });
+
+    it("dim the heat for the aviation chart only where it draws", async () => {
+      // It has tiles from zoom 6 to 13: the heat dimmed above and below
+      // for a chart that was not there
+      const legend = el("heat-legend");
+      const faded = (): unknown => app.map!.getGlobalState()[HEAT_SHOWN_STATE];
+      const map = app.map!;
+      map.setZoom(4);
+      followLayerVisibility(asMapApp(app));
+      await app.mapReady;
+      app.aviationVisible = true;
+      expect(dimsHeatmap(asMapApp(app))).toBe(false);
+      expect(dimsHeatCloud(asMapApp(app))).toBe(false);
+      expect(legend.classList.contains("is-dimmed")).toBe(false);
+      expect(faded()).toBe(true);
+
+      let before = false;
+      for (const [zoom, dimmed] of [
+        [6, true],
+        [13, true],
+        [13.5, false],
+        [9, true],
+        [5.9, false],
+      ] as const) {
+        app.dataManager.applyHeatmapEmphasis.mockClear();
+        map.setZoom(zoom);
+        map.emit("zoomend");
+        expect(dimsHeatmap(asMapApp(app))).toBe(dimmed);
+        expect(dimsHeatCloud(asMapApp(app))).toBe(dimmed);
+        expect(legend.classList.contains("is-dimmed")).toBe(dimmed);
+        expect(faded()).toBe(!dimmed);
+        // Only a zoom into or out of the band changes something
+        expect(app.dataManager.applyHeatmapEmphasis).toHaveBeenCalledTimes(
+          dimmed === before ? 0 : 1,
+        );
+        before = dimmed;
+      }
     });
 
     it("come and go with the selection, and dim the heatmap with them", () => {

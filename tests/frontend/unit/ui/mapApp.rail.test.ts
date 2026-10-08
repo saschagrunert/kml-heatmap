@@ -3,6 +3,7 @@
  */
 import { DAY_MAX_FLIGHTS } from "../../../../kml_heatmap/frontend/utils/constants";
 import {
+  REPLAY_HIDDEN_MESSAGE,
   REPLAY_PRECONDITION_MESSAGE,
   REPLAY_TOO_MANY_MESSAGE,
 } from "../../../../kml_heatmap/frontend/ui/replayButton";
@@ -504,6 +505,7 @@ describe("MapApp controls and map", () => {
       const bar = app.mobileBar;
       app.mobileBar = {
         isVisible: () => true,
+        sheet: { isOpen: () => false },
         destroy: () => {},
       } as unknown as MapApp["mobileBar"];
       // Not under Wrapped, whose dialog takes it
@@ -517,11 +519,35 @@ describe("MapApp controls and map", () => {
       app.mobileBar = bar;
     });
 
+    it("leaves Escape to a sheet of the bar open over it", async () => {
+      // One press closed the sheet and the statistics under it
+      await initializeApp(app);
+      const bar = app.mobileBar;
+      app.mobileBar = {
+        isVisible: () => true,
+        sheet: { isOpen: () => true },
+        destroy: () => {},
+      } as unknown as MapApp["mobileBar"];
+      app.store.set("statsPanelVisible", true);
+
+      const escape = new KeyboardEvent("keydown", {
+        key: "Escape",
+        bubbles: true,
+        cancelable: true,
+      });
+      document.dispatchEvent(escape);
+
+      expect(app.statsPanelVisible).toBe(true);
+      expect(escape.defaultPrevented).toBe(false);
+      app.mobileBar = bar;
+    });
+
     it("leaves an Escape for a popup, a marker, the search of the flights or one taken before to them", async () => {
       await initializeApp(app);
       const bar = app.mobileBar;
       app.mobileBar = {
         isVisible: () => true,
+        sheet: { isOpen: () => false },
         destroy: () => {},
       } as unknown as MapApp["mobileBar"];
       app.store.set("statsPanelVisible", true);
@@ -941,6 +967,9 @@ describe("MapApp controls and map", () => {
       });
       expect(app.canReplay()).toBe(false);
       expect(replayButton().getAttribute("aria-disabled")).toBe("true");
+      // Said as the chip says it, not as if none were picked
+      expect(app.replayHint()).toBe(REPLAY_HIDDEN_MESSAGE);
+      expect(replayButton().title).toBe(REPLAY_HIDDEN_MESSAGE);
     });
 
     it("leaves the button to a running replay", async () => {
@@ -1082,10 +1111,13 @@ describe("MapApp controls and map", () => {
       const signal = app.signal;
       // `moveend` is listened to three times: the save, the label declutter
       // of MapOrientation, which also follows every turn and tilt, and
-      // Reset view, which is unavailable at the start view
+      // Reset view, which is unavailable at the start view. `zoomend` twice:
+      // the airport markers' sizes and the band of the aviation chart,
+      // which the heat dims for
       const types = ["moveend", "zoomend", "click", "error", "rotate", "pitch"];
+      const listened: Record<string, number> = { moveend: 3, zoomend: 2 };
       for (const type of types) {
-        expect(map.listenerCount(type)).toBe(type === "moveend" ? 3 : 1);
+        expect(map.listenerCount(type)).toBe(listened[type] ?? 1);
       }
 
       app.destroy();
@@ -1526,6 +1558,19 @@ describe("MapApp controls and map", () => {
         field.remove();
       });
 
+      it("opens the search from a list's checkbox, which takes no text", async () => {
+        await initializeApp(app);
+        const box = document.createElement("input");
+        box.type = "checkbox";
+        document.body.append(box);
+
+        expect(press(box).defaultPrevented).toBe(true);
+        await vi.waitFor(() =>
+          expect(m.toggleSearch).toHaveBeenCalledWith(app, true),
+        );
+        box.remove();
+      });
+
       it("is left to the browser while the map is held", async () => {
         await initializeApp(app);
         app.replayActive = true;
@@ -1684,6 +1729,7 @@ describe("MapApp controls and map", () => {
       );
       expect(mockAirportManagerInstance.activateAirport).toHaveBeenCalledWith(
         "Leipzig EDDP",
+        false,
       );
       // Not a click on the map beside every flight
       expect(mockLayerManagerInstance.hitTest).not.toHaveBeenCalled();
@@ -1695,6 +1741,25 @@ describe("MapApp controls and map", () => {
         originalEvent: { detail: 2, timeStamp: 1200 },
       });
       expect(mockAirportManagerInstance.activateAirport).toHaveBeenCalledOnce();
+    });
+
+    it("tells the airport of a label tapped by a finger, which only opens", async () => {
+      await initializeApp(app);
+      mockAirportManagerInstance.airportLabelAt.mockReturnValue("Leipzig EDDP");
+
+      // iOS says "mouse" for a tap's click; the map saw the touch end
+      mockMap(app).emit("touchend", {
+        originalEvent: { timeStamp: 900, touches: [] },
+      });
+      mockMap(app).emit("click", {
+        ...click,
+        originalEvent: { detail: 1, timeStamp: 1000, pointerType: "mouse" },
+      });
+
+      expect(mockAirportManagerInstance.activateAirport).toHaveBeenCalledWith(
+        "Leipzig EDDP",
+        true,
+      );
     });
 
     it("closes the popups, none of which closes on a click by itself", async () => {

@@ -492,6 +492,15 @@ describe("wrapped feature", () => {
       expect(time?.text.html).toContain("27 hours");
     });
 
+    it("says one hour in the singular", () => {
+      const facts = generateFunFacts(yearStats, {
+        total_flight_time_seconds: 3600 + 59 * 60,
+      });
+
+      const time = facts.find((f) => f.category === "time");
+      expect(time?.text.html).toContain("<strong>1 hour</strong>");
+    });
+
     it("gives a flight time under an hour in minutes", () => {
       const facts = generateFunFacts(yearStats, {
         total_flight_time_seconds: 45 * 60,

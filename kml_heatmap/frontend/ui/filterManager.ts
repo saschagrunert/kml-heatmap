@@ -48,9 +48,14 @@ export class FilterManager {
     // A year switch still loading when a replay starts would land in the
     // middle of it: clear the selection the replay plays, reset the
     // statistics and leave the replay running over nothing. The replay is
-    // the later request, so the switch gives way (see cancelPending).
+    // the later request, so the switch gives way (see cancelPending). The
+    // hotspot tour, which ends as other flights land, gives way to none
+    // either: the switch ended it as soon as it started.
     app.store.subscribe("replayActive", (active) => {
       if (active) this.cancelPending();
+    });
+    app.store.subscribe("tourView", (view) => {
+      if (view) this.cancelPending();
     });
   }
 
@@ -212,8 +217,11 @@ export class FilterManager {
       // Reset view is more than this switch, and its button stays there to
       // be pressed again. A retry of the first load has the panel on the
       // map to be tried again from, and a second Retry on the toast next to
-      // it only made two ways of doing one thing.
-      also || keepSelection
+      // it only made two ways of doing one thing. Not so a first load of
+      // all years that brings some of them: the panel goes, and the toast
+      // that says which did not come had nothing to try them again with.
+      // That Retry is a switch to all years, which keeps the selection.
+      also || (keepSelection && requestedYear !== "all")
         ? undefined
         : {
             label: "Retry",

@@ -260,9 +260,13 @@ is set. The container image sets it to `/cache`, which `make build` mounts from
 and `--cache-dir` names one for a run (see
 [Command-line options](usage.md#command-line-options)). Without a home directory
 (no `HOME` and no entry in the password database, as in a container run under a
-foreign user id) it is `kml-heatmap-cache` in the temp directory instead.
-Anything in it can be deleted at any time; the next run fetches or computes it
-again.
+foreign user id) it is `kml-heatmap-cache-<uid>` in the temp directory instead,
+with the user id in its name. One there that is not a directory of that user
+alone (a symlink, another user's, or one others may write to) is not used: the
+run warns and caches in a fresh directory of its own, for that run only, which
+it removes as it exits. One that others may only read is made the user's alone
+(mode 0700): the parse cache holds the raw flights. Anything in it can be
+deleted at any time; the next run fetches or computes it again.
 
 | Entry                         | What it holds                                                                                                                                                                                                                                                                  | How long                                                                                                                                                                                                                                                 | Delete it to                                                                                                               |
 | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |

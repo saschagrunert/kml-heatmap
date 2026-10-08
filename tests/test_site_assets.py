@@ -107,6 +107,7 @@ class TestMapConfig:
             "builtOn",
             "commit",
             "commitUrl",
+            "generator",
         }
         assert config["center"] == [50.0, 8.0]
         assert config["bounds"] == [[49.0, 7.0], [51.0, 9.0]]
@@ -724,6 +725,102 @@ class TestStaleBundleWarning:
 
         assert assets_module._frontend_source_hash() is None
         assert capsys.readouterr().err == ""
+
+
+class TestGeneratorHash:
+    """The hash map_config.js carries, which the e2e site check compares."""
+
+    @pytest.fixture
+    def package(self, tmp_path, monkeypatch):
+        """A package of a module, a template and static files, as hashed."""
+        package = tmp_path / "kml_heatmap"
+        (package / "templates").mkdir(parents=True)
+        (package / "static" / "vendor").mkdir(parents=True)
+        (package / "site_assets.py").write_text("code")
+        (package / "templates" / "map_template.html").write_text("<html>")
+        (package / "static" / "styles.css").write_text("body {}")
+        monkeypatch.setattr(assets_module, "__file__", str(package / "site_assets.py"))
+        return package
+
+    def test_holds_no_date(self, tmp_path):
+        _generate_map_config(tmp_path, BOUNDS, "data")
+        config = _map_config(tmp_path / "map_config.js")
+        assert re.fullmatch(r"[0-9a-f]{12}", config["generator"])
+        assert config["generator"] == assets_module.generator_hash()
+
+    @pytest.mark.parametrize(
+        "change",
+        [
+            "site_assets.py",
+            "renderer.py",
+            "templates/map_template.html",
+            "static/styles.css",
+            "static/favicon.svg",
+        ],
+    )
+    def test_changes_with_what_the_generator_publishes(self, package, change):
+        before = assets_module.generator_hash()
+        (package / change).write_text("changed")
+        assert assets_module.generator_hash() != before
+
+    @pytest.mark.parametrize(
+        "change",
+        [
+            "static/mapApp.bundle.js",
+            "static/mapApp.bundle.js.map",
+            "static/vendor/maplibre-gl.mjs",
+            "static/.styles.css.swp",
+            "notes.txt",
+            "frontend.ts",
+        ],
+    )
+    def test_ignores_the_bundles_and_what_is_no_source(self, package, change):
+        """The bundles have a hash of their own (TestSourceHashParity)."""
+        before = assets_module.generator_hash()
+        (package / change).write_text("changed")
+        assert assets_module.generator_hash() == before
+
+    def test_an_unreadable_package_gives_none(self, package, monkeypatch):
+        def unreadable(_self):
+            raise PermissionError("denied")
+
+        monkeypatch.setattr(Path, "read_bytes", unreadable)
+        assert assets_module.generator_hash() == ""
+
+
+class TestGeneratorHashParity:
+    """generator_hash and computeGeneratorHash in scripts/source-hash.js agree.
+
+    The site check compares the JavaScript one with what the Python one put
+    into map_config.js; two that disagreed would refuse every site.
+    """
+
+    def test_matches_the_javascript_implementation(self):
+        repo_root = assets_module.FRONTEND_DIR.parent.parent
+        if not (repo_root / "scripts" / "source-hash.js").is_file():
+            pytest.skip("not running from a checkout")
+        node = shutil.which("node")
+        if node is None:
+            if os.environ.get("CI"):
+                pytest.fail("node is required to check the generator hash parity")
+            pytest.skip("node is not installed")
+
+        result = subprocess.run(  # noqa: S603
+            [
+                node,
+                "-e",
+                (
+                    'import("./scripts/source-hash.js")'
+                    ".then((m) => console.log(m.computeGeneratorHash()))"
+                ),
+            ],
+            capture_output=True,
+            text=True,
+            cwd=repo_root,
+            check=True,
+        )
+
+        assert result.stdout.strip() == assets_module.generator_hash()
 
 
 class TestSourceHashParity:

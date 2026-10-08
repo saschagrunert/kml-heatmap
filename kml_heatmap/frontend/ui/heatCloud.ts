@@ -684,6 +684,17 @@ export function followHeatCloud(app: MapApp): void {
     const signal = app.signal;
     if (signal.aborted) return;
     app.store.subscribeKeys(CLOUD_KEYS, sync, { signal });
+    // Whether the aviation chart is drawn changes the cloud's strength only
+    // while the chart is on (dimsHeatCloud): a zoom across the band it is
+    // drawn in synced the cloud with the chart off too, and cut it anew
+    // in the middle of the zoom
+    app.store.subscribe(
+      "aviationInView",
+      () => {
+        if (app.aviationVisible) sync();
+      },
+      { signal },
+    );
     // Cut around the view, or closer in than the last relief level, the
     // points are cut again for the view the map comes to rest at, in a
     // task of their own after the frame the move ends in. Not while the

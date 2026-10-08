@@ -667,6 +667,50 @@ describe("AirportManager", () => {
       expect(popup.isOpen()).toBe(false);
     });
 
+    it("keeps a shared airport whose last flight is unticked in its popup until it closes", () => {
+      // Share mode with two flights: path 3 is the only one at EDDK
+      mockApp.selectedPathIds = new Set([2, 3]);
+      mockApp.isolateSelection = true;
+      expect(hidden()).toEqual(["LOWW"]);
+      markers["EDDK"]!.openPopup();
+      const labels = mockApp.map!.source(MAP_SOURCES.airportLabels).setData;
+
+      mockApp.selectedPathIds = new Set([2]);
+
+      // The popup and the focus in it stay for the next tick
+      expect(popup.isOpen()).toBe(true);
+      expect(hidden()).toEqual(["LOWW"]);
+      const shown = (
+        labels.mock.lastCall![0] as GeoJSON.FeatureCollection<
+          GeoJSON.Point,
+          { name: string }
+        >
+      ).features.map((label) => label.properties.name);
+      expect(shown).toContain("EDDK");
+
+      // Closed, the airport goes. The focus, which was in the popup, falls
+      // to the page with it, and goes to the map rather than the marker.
+      (document.activeElement as HTMLElement | null)?.blur();
+      const canvas = mockApp.map!.getCanvas();
+      canvas.tabIndex = 0;
+      document.body.append(canvas);
+      popup.remove();
+      expect(hidden()).toEqual(["EDDK", "LOWW"]);
+      expect(document.activeElement).toBe(mockApp.map!.getCanvas());
+    });
+
+    it("hides the airport a kept popup moves away from", () => {
+      mockApp.selectedPathIds = new Set([2, 3]);
+      mockApp.isolateSelection = true;
+      markers["EDDK"]!.openPopup();
+      mockApp.selectedPathIds = new Set([2]);
+
+      markers["EDDF"]!.openPopup();
+
+      expect(hidden()).toEqual(["EDDK", "LOWW"]);
+      expect(airportManager.isPopupOpen("EDDF")).toBe(true);
+    });
+
     it("keeps the popup of a marker that stays", () => {
       markers["EDDF"]!.openPopup();
 
@@ -728,6 +772,13 @@ describe("AirportManager", () => {
       );
       expect(open).toHaveBeenCalledWith("EDDF");
       expect(order).toEqual(["select", "open"]);
+    });
+
+    it("only opens the popup for a finger, which never selects", () => {
+      airportManager.activateAirport("EDDF", true);
+
+      expect(mockApp.pathSelection.selectPathsByAirport).not.toHaveBeenCalled();
+      expect(airportManager.isPopupOpen("EDDF")).toBe(true);
     });
 
     it("closes the popup it has open and selects nothing", () => {

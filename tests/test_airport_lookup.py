@@ -511,6 +511,77 @@ class TestDatabaseFingerprint:
                 assert database_fingerprint() != first
 
 
+class TestFingerprintOfTheLoadedDatabases:
+    """The parse cache key describes the databases the parse used.
+
+    Another run may download them again while this one parses: a hash of
+    the files on disk would then store results computed with the old
+    databases under the key of the new ones.
+    """
+
+    @pytest.fixture
+    def cached(self, tmp_path, monkeypatch):
+        database = tmp_path / "airports.csv"
+        database.write_bytes(VALID_CSV)
+        runways = tmp_path / "runways.csv"
+        runways.write_text("airport_ident,le_ident,he_ident,closed\nTEST,09,27,0\n")
+        monkeypatch.setattr(lookup_module, "CACHE_FILE", database)
+        monkeypatch.setattr(lookup_module, "RUNWAYS_CACHE_FILE", runways)
+        monkeypatch.setattr(lookup_module, "_ensure_cache_file", lambda *_: None)
+        lookup_module.databases.reset()
+        yield database, runways
+        lookup_module.databases.reset()
+
+    def test_a_download_after_loading_keeps_the_fingerprint(self, cached):
+        database, runways = cached
+        before = database_fingerprint()
+        lookup_module.load_airport_database()
+        lookup_module.load_runway_database()
+        assert database_fingerprint() == before
+
+        replacement = database.with_name("new.csv")
+        replacement.write_bytes(
+            VALID_CSV + b'3,"EDDM","large_airport","Munich",48.35,11.78,"DE"\n'
+        )
+        os.replace(replacement, database)
+        runways.write_text("airport_ident,le_ident,he_ident,closed\nTEST,08,26,0\n")
+
+        assert database_fingerprint() == before
+        # A process that loads them afresh gets the new one
+        lookup_module.databases.reset()
+        lookup_module.load_airport_database()
+        lookup_module.load_runway_database()
+        assert database_fingerprint() != before
+
+    def test_the_fingerprint_is_of_the_bytes_that_were_parsed(self, cached):
+        """A file replaced between hashing and parsing cannot split the two."""
+        database, _ = cached
+        real = lookup_module._airport_rows
+
+        def replaced_meanwhile(text):
+            other = database.with_name("other.csv")
+            other.write_bytes(VALID_CSV.replace(b"TEST", b"TSET"))
+            os.replace(other, database)
+            return real(text)
+
+        with patch.object(lookup_module, "_airport_rows", replaced_meanwhile):
+            airports = lookup_module.load_airport_database()
+        lookup_module.load_runway_database()
+
+        assert "TEST" in airports
+        loaded = database_fingerprint()
+        lookup_module.databases.reset()
+        database.write_bytes(VALID_CSV)
+        assert database_fingerprint() == loaded
+
+    def test_nodb_when_none_could_be_loaded(self, cached):
+        database, _ = cached
+        database.unlink()
+        lookup_module.load_airport_database()
+        lookup_module.load_runway_database()
+        assert database_fingerprint() == "nodb"
+
+
 class TestReadAirportCsv:
     def test_skips_non_numeric_coordinates(self, tmp_path):
         path = tmp_path / "airports.csv"

@@ -5,6 +5,7 @@
 
 import { KM_TO_NAUTICAL_MILES } from "../utils/constants";
 import { formatNumber } from "../utils/formatters";
+import { pluralize } from "../utils/htmlGenerators";
 import { formatFlightTime } from "../utils/statsFormat";
 import { markup } from "../utils/markup";
 import { countCountries } from "./countries";
@@ -353,10 +354,11 @@ export function generateFunFacts(
     // Time facts (lower priority - time is shown in stats cards above)
     if (filteredStats.total_flight_time_seconds) {
       const seconds = filteredStats.total_flight_time_seconds;
-      // Under an hour, whole hours would read "0 hours in the air"
+      // Under an hour, whole hours would read "0 hours in the air"; one
+      // hour is not "1 hours"
       const duration =
         seconds >= 3600
-          ? `${formatNumber(Math.floor(seconds / 3600))} hours`
+          ? pluralize(Math.floor(seconds / 3600), "hour")
           : formatFlightTime(seconds);
       facts.push({
         icon: "clock",

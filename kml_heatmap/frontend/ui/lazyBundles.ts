@@ -126,14 +126,16 @@ export function prepareWrappedOnIntent(app: MapApp): void {
 /**
  * Open the search with `/`, as many sites do, from anywhere but a field
  * that takes text (the flight list's search, the search itself) or a
- * select, and without a modifier: Ctrl or Alt with it is the browser's or
- * the system's. The key is the browser's quick find in Firefox otherwise,
- * which the page takes over. Not while a modal is open (a sheet of the
- * phone's bar, which a tablet with a keyboard may have, or Wrapped): the
- * search would open outside it, and one Escape close both. Nor while a
- * replay, the tour or Wrapped holds the map, which the search does not
- * open under (MapApp.toggleSearch): the key stays the browser's. On an
- * open search it goes back to the field; Escape and the button close it.
+ * select, and without a modifier. A checkbox or a radio button takes no
+ * text: the key works from a list's checkbox too. Ctrl or Alt with it is
+ * the browser's or the system's. The key is the browser's quick find in
+ * Firefox otherwise, which the page takes over. Not while a modal is open
+ * (a sheet of the phone's bar, which a tablet with a keyboard may have, or
+ * Wrapped): the search would open outside it, and one Escape close both.
+ * Nor while a replay, the tour or Wrapped holds the map, which the search
+ * does not open under (MapApp.toggleSearch): the key stays the browser's.
+ * On an open search it goes back to the field; Escape and the button
+ * close it.
  */
 export function followSearchKey(app: MapApp): void {
   document.addEventListener(
@@ -150,7 +152,9 @@ export function followSearchKey(app: MapApp): void {
         document.querySelector('[aria-modal="true"]:not([hidden])') ||
         (target instanceof HTMLElement &&
           (target.isContentEditable ||
-            target.matches("input, textarea, select")))
+            target.matches(
+              "input:not([type=checkbox], [type=radio]), textarea, select",
+            )))
       ) {
         return;
       }

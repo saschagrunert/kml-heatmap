@@ -57,7 +57,7 @@ import {
   wrapDegrees,
   type Coordinate,
 } from "../utils/geometry";
-import { isPageEscape, toLngLat } from "../utils/mapHelpers";
+import { FIELDS, isPageEscape, toLngLat } from "../utils/mapHelpers";
 import { isSectionLine } from "../state/urlState";
 import { COLUMNS, createChart, ROWS } from "./crossSectionChart";
 import {
@@ -529,9 +529,13 @@ function createTool(app: MapApp): Tool {
   };
 
   const onKeyDown = (event: KeyboardEvent): void => {
-    // An Escape in a popup or on an airport's marker closes the popup; one
-    // on an end of the line is the tool's
-    if (phase === "closed" || !isPageEscape(event, ":not(.section-handle)")) {
+    // An Escape in a popup or on an airport's marker closes the popup, one
+    // in a text field or a select is the field's; one on an end of the line
+    // is the tool's
+    if (
+      phase === "closed" ||
+      !isPageEscape(event, ":not(.section-handle)" + FIELDS)
+    ) {
       return;
     }
     event.preventDefault();

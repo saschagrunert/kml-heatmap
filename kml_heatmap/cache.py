@@ -1,14 +1,17 @@
 """Cache directory management and atomic file writes for kml-heatmap."""
 
+import atexit
 import contextlib
 import json
 import os
 import shutil
+import stat
 import tempfile
 from pathlib import Path
 from typing import IO, TYPE_CHECKING, Any
 
 from .constants import CACHE_DIR_ENV
+from .logger import logger
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -23,16 +26,103 @@ __all__ = [
 ]
 
 
+def _is_private_directory(path: Path, uid: int) -> bool:
+    """Create ``path`` for this user alone, or check one that is there.
+
+    Fine only as a directory of its own (no symlink) that ``uid`` owns and
+    nobody else may write to: the temp directory is shared with every user
+    of the machine, and one who created the cache directory first could put
+    a parse result, an airport database or a preview image of their own
+    into every site built from it. Nor may anybody else read it: the parse
+    cache holds the raw flights, real dates and times among them, so one
+    of this user's that others may read or enter (0755, as a umask of 022
+    or an older version left it) is made this user's alone first.
+    """
+    try:
+        path.mkdir(mode=0o700, exist_ok=True)
+        status = path.lstat()
+    except OSError:
+        return False
+    if (
+        not stat.S_ISDIR(status.st_mode)
+        or status.st_uid != uid
+        or status.st_mode & (stat.S_IWGRP | stat.S_IWOTH)
+    ):
+        return False
+    if stat.S_IMODE(status.st_mode) & 0o077:
+        try:
+            path.chmod(0o700)
+        except OSError:
+            return False
+    return True
+
+
 def _default_cache_dir() -> Path:
-    """~/.cache/kml-heatmap, or a temp directory when there is no home."""
+    """~/.cache/kml-heatmap, or one in the temp directory when there is no home.
+
+    The temp directory is shared with every other user, so the one there
+    carries the user id in its name and is only used when it belongs to this
+    user and nobody else can write to it (nor read it, once it is checked).
+    Otherwise the run gets a fresh one of its own, which it passes on to its
+    workers through the environment and removes as it exits; nothing is
+    cached across runs then.
+    """
     try:
         return Path.home() / ".cache" / "kml-heatmap"
     except RuntimeError:  # no HOME and no passwd entry (containers)
+        pass
+    getuid = getattr(os, "getuid", None)
+    if getuid is None:  # pragma: no cover - Windows has a temp dir per user
         return Path(tempfile.gettempdir()) / "kml-heatmap-cache"
+    uid = getuid()
+    shared = Path(tempfile.gettempdir()) / f"kml-heatmap-cache-{uid}"
+    if _is_private_directory(shared, uid):
+        return shared
+    private = Path(tempfile.mkdtemp(prefix="kml-heatmap-cache-"))
+    # Gone with the run, which nothing after it uses, rather than a copy of
+    # the raw flights left in the temp directory for every run. Its workers
+    # leave without running this, and find it through the environment.
+    atexit.register(shutil.rmtree, private, ignore_errors=True)
+    logger.warning(
+        "Not using the cache directory %s: it is not a directory of this user "
+        "alone; caching in %s for this run",
+        shared,
+        private,
+    )
+    os.environ[CACHE_DIR_ENV] = str(private)
+    return private
 
 
 _cache_dir_env = os.environ.get(CACHE_DIR_ENV)
 CACHE_DIR = Path(_cache_dir_env) if _cache_dir_env else _default_cache_dir()
+
+# The longest file name, in bytes, that most file systems take
+_NAME_MAX = 255
+# What NamedTemporaryFile puts after the prefix: eight random characters, and
+# the suffix _replace_through_temp gives it
+_TEMP_RANDOM_LENGTH = 8
+_TEMP_SUFFIX = ".tmp"
+
+
+def _temp_prefix(name: str) -> str:
+    """The prefix of the temp file that replaces the file ``name``.
+
+    ``.<name>.``, so a leftover is hidden and says which file it was for, and
+    the name of the temp file as a whole still fits the file system: a file
+    name of 242 bytes or more would not, with the random part and the suffix
+    after it. The extension is kept and the part before it shortened (by
+    whole characters), so a leftover still matches the patterns that look
+    for one (``obfuscate.TEMP_FILE_PATTERN``, ``data/**/.*.tmp`` in
+    .gitignore).
+    """
+    room = _NAME_MAX - len("..") - _TEMP_RANDOM_LENGTH - len(_TEMP_SUFFIX)
+    stem, extension = os.path.splitext(name)
+    while stem and len(os.fsencode(stem + extension)) > room:
+        stem = stem[:-1]
+    shortened = stem + extension
+    while len(os.fsencode(shortened)) > room:
+        shortened = shortened[:-1]
+    return f".{shortened}."
 
 
 def _regular_file_mode() -> int:
@@ -79,8 +169,8 @@ def _replace_through_temp(
         with tempfile.NamedTemporaryFile(
             mode="wb" if binary else "w",
             dir=path.parent,
-            prefix=f".{path.name}.",
-            suffix=".tmp",
+            prefix=_temp_prefix(path.name),
+            suffix=_TEMP_SUFFIX,
             delete=False,
             encoding=None if binary else "utf-8",
             newline=newline,

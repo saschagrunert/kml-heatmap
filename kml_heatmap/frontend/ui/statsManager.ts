@@ -639,7 +639,9 @@ export class StatsManager {
     // The wait for the statistics, or for this code, is over
     panel.removeAttribute("aria-busy");
 
-    setStatsTitle(isSelection);
+    // Not over the Flights tab: the statistics worked out in slices land
+    // after a switch to it as well, and named the rail "Statistics" there
+    if (!this.app.flightListVisible) setStatsTitle(isSelection);
 
     let html = '<div class="kh-stats">';
 

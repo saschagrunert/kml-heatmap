@@ -1,7 +1,5 @@
 """Tests for date_tokens module."""
 
-import time
-
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
@@ -17,6 +15,7 @@ from kml_heatmap.date_tokens import (
     strip_dates,
     without_spans,
 )
+from tests.conftest import LINEAR_GROWTH, growth
 
 
 class TestFindDateTokens:
@@ -820,6 +819,127 @@ def test_month_number():
     assert month_number("Flight") is None
 
 
+class TestTimesAndRangesThatLeftAPart:
+    """Times and ranges that left a time or a day behind until 2026-10."""
+
+    @pytest.mark.parametrize(
+        ("text", "kept"),
+        [
+            # Hours and minutes with a hyphen or an underscore after a date,
+            # after a space as well as after an underscore
+            ("Aunt farm 2026-08-16 14-30", "Aunt farm"),
+            ("Aunt farm 2026-08-16 14_30", "Aunt farm"),
+            ("Aunt farm 2026-08-16_14-30", "Aunt farm"),
+            ("Aunt farm 2026-08-16_14.30", "Aunt farm"),
+            ("Aunt farm 16.08.2026 14-30 EDDS", "Aunt farm EDDS"),
+            # A range with dots and Uhr, a zone or the local time, whole
+            ("Aunt farm 14.30-15.45 Uhr", "Aunt farm"),
+            ("Aunt farm 16.08.2026 14.30-15.45 Uhr", "Aunt farm"),
+            ("Aunt farm 16.08.2026 14.30 Uhr", "Aunt farm"),
+            ("Aunt farm 14.30-15.45Z", "Aunt farm"),
+            ("Aunt farm 14.30 - 15.45 UTC - EDDS", "Aunt farm - EDDS"),
+            ("Aunt farm 14.30-15.45L", "Aunt farm"),
+            ("Rundflug 9-11 Uhr", "Rundflug"),
+            ("Rundflug 1430-1545 Uhr", "Rundflug"),
+            # Joined by a word or the en dash of the input, which left
+            # "14.30 bis" behind
+            ("Aunt farm 14.30 bis 15.45 Uhr", "Aunt farm"),
+            ("Aunt farm 14.30 to 15.45Z EDDS", "Aunt farm EDDS"),
+            ("Aunt farm 14.30 until 15.45 UTC", "Aunt farm"),
+            ("Aunt farm 14.30\u201315.45 Uhr", "Aunt farm"),
+            ("Rundflug 9 bis 11 Uhr", "Rundflug"),
+            ("Aunt farm 16.08.2026 14.30 bis 15.45 Uhr EDDS", "Aunt farm EDDS"),
+            # The whole hyphenated time after the T, which left "30-00Z"
+            ("2026-08-16T14-30-00Z EDDS", "EDDS"),
+            ("2026-08-16T14-30Z EDDS", "EDDS"),
+            ("2026-08-16T14Z EDDS", "EDDS"),
+            # A German range of days, with and without the year
+            ("Aunt farm 16.-18.08.2026", "Aunt farm"),
+            ("Aunt farm 16. - 18.08.26", "Aunt farm"),
+            ("Aunt farm 16.-18.08.", "Aunt farm"),
+        ],
+    )
+    def test_nothing_is_left(self, text, kept):
+        assert strip_dates(text) == kept
+
+    @pytest.mark.parametrize(
+        ("text", "kept"),
+        [
+            ("EDDS 2026-08-16 18-24 kt", "EDDS 18-24 kt"),
+            ("Leg 2026-08-16 14-30 km", "Leg 14-30 km"),
+            ("Climb 2026-08-16 15-20 %", "Climb 15-20 %"),
+            ("Hold 2026-08-16 14-30 min", "Hold 14-30 min"),
+            ("Hold 2026-08-16 14-30 sec", "Hold 14-30 sec"),
+            # A runway, which main kept as well
+            ("EDDS 2026-08-16 07-25 RWY", "EDDS 07-25 RWY"),
+            ("EDDS 2026-08-16 07-25 runway", "EDDS 07-25 runway"),
+            ("EDDS 2026-08-16 07-25 Piste", "EDDS 07-25 Piste"),
+            # The same with a zone is a time
+            ("Leg 2026-08-16 14-30 MEZ", "Leg"),
+        ],
+    )
+    def test_a_range_with_a_unit_after_a_date_stays(self, text, kept):
+        assert strip_dates(text) == kept
+
+    @pytest.mark.parametrize(
+        ("text", "times"),
+        [
+            ("Aunt farm 2026-01-01 14-30", ["14-30"]),
+            ("Aunt farm 2026-01-01_14-30", ["14-30"]),
+            ("Aunt farm 2026-01-01 14_30", ["14_30"]),
+            ("Aunt farm 14.30-15.45 Uhr", ["14.30-15.45 Uhr"]),
+            ("Aunt farm 01.01.2026 14.30-15.45 Uhr", ["14.30-15.45 Uhr"]),
+            ("Aunt farm 14.30-15.45 UTC", ["14.30-15.45 UTC"]),
+            ("Aunt farm 14.30 bis 15.45 Uhr", ["14.30 bis 15.45 Uhr"]),
+            ("Aunt farm 14.30 to 15.45Z EDDS", ["14.30 to 15.45Z"]),
+            ("Aunt farm 2026-01-01T14-30-00Z EDDS", ["T14-30-00Z"]),
+            ("EDDS 2026-01-01 07-25 RWY", []),
+            ("Hold 2026-01-01 14-30 min", []),
+        ],
+    )
+    def test_the_check_reports_the_times(self, text, times):
+        assert find_time_tokens(text) == times
+
+    def test_the_check_reports_a_range_of_days_whole(self):
+        assert find_date_tokens(
+            "Aunt farm 16.-18.08.2026", skip_near_jan_first=True
+        ) == ["16.-18.08.2026"]
+        assert find_partial_date_tokens("Aunt farm 16.-18.08.") == ["16.-18.08."]
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            # Decimals and frequencies with a hyphen between them, or a
+            # word without a zone or Uhr after them
+            "Fuel 14.30-15.45",
+            "Fuel 14.30 to 15.45 EDDS",
+            "EDDS 118.30-121.50",
+            # Altitudes and headings
+            "EDDS 1000-2000 ft",
+            "EDDS 3500-4500 ft",
+            "Heading 270-15",
+            # Runways, a type with numbers before a date stays a type
+            "RWY 09-27 EDDS",
+            "EDDS 16-34",
+        ],
+    )
+    def test_what_stays(self, text):
+        assert strip_dates(text) == text
+        assert find_time_tokens(text) == []
+
+    @pytest.mark.parametrize(
+        ("text", "kept"),
+        [
+            # Only right after the date: a runway after a word stays
+            ("EDDS 2026-08-16 RWY 09-27", "EDDS RWY 09-27"),
+            ("PA-28-16.08.2026", "PA-28"),
+            ("Gate 2-16.08.2026", "Gate 2"),
+        ],
+    )
+    def test_what_stays_next_to_a_date(self, text, kept):
+        assert strip_dates(text) == kept
+
+
 class TestDashesAndTheYearFirst:
     """An en dash or a Unicode hyphen stands for the hyphen."""
 
@@ -1279,12 +1399,13 @@ class TestMoreDateShapes:
 
     @pytest.mark.parametrize("unit", ["1-", "Jan/", "Mar-", "08-", "1st-", "1 to "])
     def test_a_long_run_of_range_joins_takes_no_quadratic_time(self, unit):
-        text = unit * (40_000 // len(unit))
-        started = time.perf_counter()
-        strip_dates(text)
-        find_date_tokens(text)
-        # About 0.2 s; quadratic, 20 KB of "1-" alone took 10 s
-        assert time.perf_counter() - started < 5
+        def run(text):
+            strip_dates(text)
+            find_date_tokens(text)
+
+        # 40 KB took about 0.2 s; quadratic, 20 KB of "1-" alone took 10 s
+        ratio = growth(run, lambda size: unit * (size // len(unit)), 5_000)
+        assert ratio < LINEAR_GROWTH
 
     def test_the_check_reports_an_hour_after_a_date(self):
         assert find_time_tokens("EDDS 2026-08-16T10Z") == ["T10Z"]

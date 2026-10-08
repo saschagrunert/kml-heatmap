@@ -7,7 +7,12 @@ import { canShareLink, isPhoneLayout, isSmallDevice } from "../utils/device";
 import { domCache } from "../utils/domCache";
 import { TRY_AGAIN, importWithRetry } from "../services/lazyImport";
 import { logError } from "../utils/logger";
-import { withMapStill } from "../utils/mapHelpers";
+import {
+  MAP_COMPLETE_TIMEOUT_MS,
+  whenMapComplete,
+  withMapStill,
+} from "../utils/mapHelpers";
+import { MAP_SOURCES } from "../utils/constants";
 import { showToast } from "../utils/toast";
 import { NO_TIMING_MESSAGE, STILL_LOADING_MESSAGE } from "./actions";
 import { altitudeColours, setColorLayer } from "./layerVisibility";
@@ -144,6 +149,23 @@ function downloadBlob(blob: Blob, fallbackHref: string, filename: string) {
 type DeliveryOutcome = "shared" | "downloaded" | "cancelled";
 
 /**
+ * How long an export that goes to the share sheet waits for the map to be
+ * complete (ms). `navigator.share` needs the tap on Export to be recent,
+ * which the full MAP_COMPLETE_TIMEOUT_MS outlasted on a slow phone: the
+ * share failed and the image was downloaded instead.
+ */
+export const EXPORT_SHARE_WAIT_MS = 2000;
+
+/** Whether the export goes to the share sheet of a phone (see deliverImage) */
+function sharesFiles(): boolean {
+  return (
+    isSmallDevice() &&
+    typeof navigator.share === "function" &&
+    typeof navigator.canShare === "function"
+  );
+}
+
+/**
  * Hand the exported image to the user: the native share sheet on mobile
  * devices that support file sharing, a download otherwise.
  */
@@ -153,11 +175,7 @@ async function deliverImage(
 ): Promise<DeliveryOutcome> {
   const blob = dataUrlToBlob(dataUrl);
 
-  if (
-    isSmallDevice() &&
-    typeof navigator.share === "function" &&
-    typeof navigator.canShare === "function"
-  ) {
+  if (sharesFiles()) {
     const file = new File([blob], filename, { type: blob.type });
     if (navigator.canShare({ files: [file] })) {
       try {
@@ -303,10 +321,24 @@ export class UIToggles {
           .trim() || "#1a1a1a",
       quality: 0.95,
     };
+    // Not before the map is complete: an export taken while its tiles or
+    // the heat of a year that has just come in were on their way had gaps
+    // in the map, or the heat of before.
     // html-to-image copies DOM, and the map's WebGL canvas copies blank, so
     // the map stands still as an image of itself while it is captured,
-    // drawn at the scale of the export so it is as sharp as the page on it
+    // drawn at the scale of the export so it is as sharp as the page on it.
+    // Not as long on the way to the share sheet, which needs the tap on
+    // Export to be recent (see EXPORT_SHARE_WAIT_MS); a download follows
+    // when it is not.
     const map = this.app.map;
+    if (map) {
+      await whenMapComplete(
+        map,
+        () => !this.app.dataManager.heatRequests,
+        [MAP_SOURCES.heat, MAP_SOURCES.heatIsolated, MAP_SOURCES.heatLines],
+        sharesFiles() ? EXPORT_SHARE_WAIT_MS : MAP_COMPLETE_TIMEOUT_MS,
+      );
+    }
     const capture = (): Promise<string> =>
       htmlToImage.toJpeg(mapContainer, options);
     const dataUrl = map

@@ -224,6 +224,7 @@ export async function jumpToView(
   page: Page,
   [lat, lng]: readonly [number, number],
   zoom: number,
+  { timeout = 15000 }: { timeout?: number } = {},
 ): Promise<void> {
   const view = { lat, lng, zoom: zoom - ZOOM_OFFSET };
   await page.evaluate((to) => {
@@ -248,10 +249,11 @@ export async function jumpToView(
       );
     },
     view,
-    // The camera is there as soon as jumpTo returns, but the predicate is
-    // asked in a frame, and a page cutting the flights anew for the relief
-    // on a loaded machine may not draw one for seconds
-    { timeout: 15000 },
+    // The camera is there as soon as jumpTo returns, but a page cutting
+    // the flights anew for the relief on a loaded machine may not draw a
+    // frame for seconds, so the predicate is asked on a timer rather than
+    // once a frame (the default of waitForFunction)
+    { timeout, polling: 250 },
   );
 }
 

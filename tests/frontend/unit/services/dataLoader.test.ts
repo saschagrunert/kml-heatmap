@@ -1534,12 +1534,15 @@ describe("DataLoader", () => {
       expect(result).toBe(mockAirports);
     });
 
-    it("returns empty array on error", async () => {
+    it("returns null on error", async () => {
+      // An empty list read as a site without airports, and nobody said
+      // they were missing
       mockFetchJson.mockRejectedValueOnce(new Error("Failed"));
 
       const result = await loader.loadAirports();
 
-      expect(result).toEqual([]);
+      expect(result).toBeNull();
+      expect(siteData.airports).toBeNull();
     });
     it("publishes the list and shares one request", async () => {
       const mockAirports = [{ name: "EDDF", lat: 50, lon: 8 }];
@@ -1560,7 +1563,7 @@ describe("DataLoader", () => {
       async (json) => {
         files["test-data/airports.json"] = json;
 
-        expect(await loader.loadAirports()).toEqual([]);
+        expect(await loader.loadAirports()).toBeNull();
 
         expect(siteData.airports).toBeNull();
         expect(logError).toHaveBeenCalledWith(
@@ -1571,7 +1574,7 @@ describe("DataLoader", () => {
     );
 
     it("asks again after a failure", async () => {
-      expect(await loader.loadAirports()).toEqual([]);
+      expect(await loader.loadAirports()).toBeNull();
 
       files["test-data/airports.json"] = { airports: [] };
       await loader.loadAirports();

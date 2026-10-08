@@ -443,27 +443,31 @@ describe("ReplayManager activation", () => {
       mockApp.replayState.all = false;
     });
 
-    it("leaves Escape to the speed picker and to a popup", () => {
+    it("leaves Escape to the speed picker, a text field and a popup", () => {
       mockApp.selectedPathIds = new Set([1]);
       replayManager.toggleReplay();
       const popup = document.createElement("div");
       popup.className = "maplibregl-popup";
       const inside = document.createElement("button");
       popup.append(inside);
-      document.body.append(popup);
+      const search = document.createElement("input");
+      search.type = "search";
+      document.body.append(popup, search);
 
-      for (const target of [el("replay-speed"), inside]) {
-        target.dispatchEvent(
-          new KeyboardEvent("keydown", {
-            key: "Escape",
-            bubbles: true,
-            cancelable: true,
-          }),
-        );
+      for (const target of [el("replay-speed"), inside, search]) {
+        const escape = new KeyboardEvent("keydown", {
+          key: "Escape",
+          bubbles: true,
+          cancelable: true,
+        });
+        target.dispatchEvent(escape);
+        // Nor kept from the field, which empties itself on it
+        expect(escape.defaultPrevented).toBe(false);
       }
 
       expect(mockApp.replayActive).toBe(true);
       popup.remove();
+      search.remove();
     });
 
     it("syncs the auto-zoom button with the autoZoom state on activation", () => {

@@ -1,8 +1,13 @@
 """Tests for cache module."""
 
+import atexit
 import contextlib
+import fnmatch
 import importlib
 import os
+import shutil
+import subprocess
+import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
@@ -46,11 +51,86 @@ class TestCacheDir:
                 tmp_path / ".cache" / "kml-heatmap"
             )
 
-    def test_default_cache_dir_without_home_uses_tempdir(self):
-        with patch.object(Path, "home", side_effect=RuntimeError("no home")):
-            result = cache_module._default_cache_dir()
-        assert result.name == "kml-heatmap-cache"
-        assert result.parent.is_dir()
+    @pytest.fixture
+    def no_home(self, monkeypatch, tmp_path):
+        """No home directory, and a temp directory of the test's own."""
+
+        def home():
+            raise RuntimeError("no home")
+
+        monkeypatch.setattr(Path, "home", home)
+        monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
+        # A refused directory hands the fresh one on through the environment
+        monkeypatch.setenv("KML_HEATMAP_CACHE_DIR", "unchanged")
+        return tmp_path
+
+    def test_default_cache_dir_without_home_uses_tempdir(self, no_home):
+        result = cache_module._default_cache_dir()
+        assert result == no_home / f"kml-heatmap-cache-{os.getuid()}"
+        assert result.is_dir()
+        assert result.stat().st_mode & 0o777 == 0o700
+        # Used again by the next run, and by the workers of this one
+        assert cache_module._default_cache_dir() == result
+        assert os.environ["KML_HEATMAP_CACHE_DIR"] == "unchanged"
+
+    @pytest.mark.parametrize("mode", [0o770, 0o777, 0o722])
+    def test_a_temp_cache_others_can_write_to_is_refused(self, no_home, mode):
+        """Another user could put parse results of their own into it."""
+        shared = no_home / f"kml-heatmap-cache-{os.getuid()}"
+        shared.mkdir()
+        shared.chmod(mode)
+
+        result = cache_module._default_cache_dir()
+
+        assert result != shared
+        assert result.parent == no_home
+        assert result.stat().st_mode & 0o777 == 0o700
+        assert os.environ["KML_HEATMAP_CACHE_DIR"] == str(result)
+
+    @pytest.mark.parametrize("mode", [0o755, 0o750, 0o705])
+    def test_a_temp_cache_others_can_read_is_made_private(self, no_home, mode):
+        """The parse cache holds the raw flights, real dates among them."""
+        shared = no_home / f"kml-heatmap-cache-{os.getuid()}"
+        shared.mkdir()
+        shared.chmod(mode)
+
+        result = cache_module._default_cache_dir()
+
+        assert result == shared
+        assert result.stat().st_mode & 0o777 == 0o700
+        assert os.environ["KML_HEATMAP_CACHE_DIR"] == "unchanged"
+
+    def test_the_cache_of_a_run_alone_goes_as_it_exits(self, no_home, monkeypatch):
+        """Not a copy of the raw flights left in the temp directory per run."""
+        registered = []
+        monkeypatch.setattr(
+            atexit, "register", lambda *args, **kwargs: registered.append(args)
+        )
+        shared = no_home / f"kml-heatmap-cache-{os.getuid()}"
+        shared.mkdir()
+        shared.chmod(0o777)
+
+        result = cache_module._default_cache_dir()
+        (result / "parse.json").write_text("raw")
+        for function, *args in registered:
+            function(*args)
+
+        assert not result.exists()
+        assert shared.is_dir()
+
+    def test_a_temp_cache_of_another_user_is_refused(self, no_home, monkeypatch):
+        monkeypatch.setattr(os, "getuid", lambda: 4242)
+        result = cache_module._default_cache_dir()
+        assert result.name != "kml-heatmap-cache-4242"
+        assert (no_home / "kml-heatmap-cache-4242").is_dir()
+
+    def test_a_symlinked_temp_cache_is_refused(self, no_home, tmp_path_factory):
+        target = tmp_path_factory.mktemp("elsewhere")
+        target.chmod(0o700)
+        (no_home / f"kml-heatmap-cache-{os.getuid()}").symlink_to(target)
+        result = cache_module._default_cache_dir()
+        assert result.parent == no_home
+        assert not result.is_symlink()
 
     def test_module_reads_environment_at_import(self, monkeypatch, tmp_path):
         monkeypatch.setenv("KML_HEATMAP_CACHE_DIR", str(tmp_path / "elsewhere"))
@@ -63,7 +143,78 @@ class TestCacheDir:
         assert cache_module.CACHE_DIR == CACHE_DIR
 
 
+MAKE = shutil.which("make")
+MAKEFILE = Path(__file__).parent.parent / "Makefile"
+
+
+@pytest.mark.skipif(MAKE is None, reason="needs make")
+class TestMakeBuildCache:
+    """The cache directory `make build` mounts into the container."""
+
+    def _build_commands(self, directory: Path, *variables: str) -> str:
+        (directory / "data").mkdir(exist_ok=True)
+        assert MAKE is not None
+        return subprocess.run(  # noqa: S603
+            [
+                MAKE,
+                *("-n", "-s", "-f", str(MAKEFILE), "-C", str(directory)),
+                *("build", "CONTAINER_RUNTIME=podman", *variables),
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
+
+    def test_a_relative_cache_directory_is_mounted_from_where_make_runs(self, tmp_path):
+        """Not a volume of the runtime named after it, which a bind mount is."""
+        commands = self._build_commands(tmp_path, "KML_HEATMAP_CACHE_DIR=cache")
+        assert f'-v "{tmp_path}/cache:/cache"' in commands
+        assert f'mkdir -p "{tmp_path}/cache"' in commands
+
+    def test_an_absolute_one_with_spaces_stays_as_it_is(self, tmp_path):
+        commands = self._build_commands(tmp_path, "CACHE_DIR=/a b/cache")
+        assert '-v "/a b/cache:/cache"' in commands
+
+
 class TestAtomicWrite:
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "a" * 251 + ".kml",
+            "\u00e4" * 125 + ".kml",
+            "a" * 242 + ".KML",
+            "b" * 255,
+            "c" * 10 + "." + "d" * 244,
+        ],
+        ids=["ascii", "two-byte", "capitals", "no-extension", "long-extension"],
+    )
+    def test_a_name_of_up_to_255_bytes(self, tmp_path, name):
+        """The temp file adds 14 bytes, which a long name has no room for.
+
+        Its prefix is shortened instead, before the extension, so a leftover
+        of an interrupted obfuscation still matches the patterns it is found
+        and ignored by.
+        """
+        from kml_heatmap.obfuscate import TEMP_FILE_PATTERN
+
+        path = tmp_path / name
+        path.write_text("old")
+        temp_names = []
+
+        def write(tmp):
+            temp_names.append(Path(tmp.name).name)
+            tmp.write("new")
+
+        atomic_write(path, write, keep_mode=True)
+
+        assert path.read_text() == "new"
+        assert [p.name for p in tmp_path.iterdir()] == [name]
+        (temp_name,) = temp_names
+        assert len(os.fsencode(temp_name)) <= 255
+        assert fnmatch.fnmatchcase(temp_name, ".*.tmp")
+        if name.lower().endswith(".kml"):
+            assert TEMP_FILE_PATTERN.match(temp_name)
+
     def test_result_has_regular_file_mode(self, tmp_path, umask_022):
         path = tmp_path / "site.html"
         atomic_write(path, lambda tmp: tmp.write("<html/>"))

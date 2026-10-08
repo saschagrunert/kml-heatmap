@@ -28,7 +28,7 @@ from `pyproject.toml`.
 ```bash
 npm run build            # Build the production bundle (minified, size budget checked)
 npm run build:dev        # Build the development bundle (unminified)
-npm run build:watch      # Watch mode for development
+npm run build:watch      # Watch mode for development (no build hash: the e2e tests want `npm run build`)
 npm run test             # Run unit tests
 npm run test:watch       # Watch mode for tests
 npm run test:ui          # Run tests with UI

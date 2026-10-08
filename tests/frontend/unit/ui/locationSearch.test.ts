@@ -10,7 +10,6 @@ import {
   AIRPORT_ZOOM,
   NOTHING_FOUND_MESSAGE,
   OFFLINE_MESSAGE,
-  PLACE_DEBOUNCE_MS,
   PLACE_TIMEOUT_MS,
   PLACES_FAILED_MESSAGE,
   SEARCH_BUTTON_ID,
@@ -21,6 +20,7 @@ import {
   airportDetail,
   toggleSearch,
 } from "../../../../kml_heatmap/frontend/ui/locationSearch";
+import { PLACE_DEBOUNCE_MS } from "../../../../kml_heatmap/frontend/services/photon";
 import {
   resetSiteData,
   siteData,

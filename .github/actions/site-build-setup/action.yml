@@ -61,5 +61,5 @@ runs:
       uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: ~/.cache/kml-heatmap/terrain
-        key: terrain-${{ hashFiles('data/**/*.kml', 'kml_heatmap/terrain*.py', 'kml_heatmap/png.py') }}
+        key: terrain-${{ hashFiles('data/**/*.kml', 'data/**/*.kmz', 'kml_heatmap/terrain*.py', 'kml_heatmap/png.py') }}
         restore-keys: terrain-

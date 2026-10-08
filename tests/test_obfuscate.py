@@ -3,7 +3,6 @@
 import logging
 import os
 import re
-import time
 import zipfile
 from datetime import UTC, datetime, timedelta
 from itertools import pairwise
@@ -37,7 +36,7 @@ from kml_heatmap.obfuscate import (
     rename_charterware_files,
     rename_dated_files,
 )
-from tests.conftest import parse_kml_file
+from tests.conftest import LINEAR_GROWTH, growth, parse_kml_file
 
 SAMPLE_KML = """\
 <?xml version="1.0" encoding="UTF-8"?>
@@ -1356,6 +1355,12 @@ class TestCheckObfuscated:
             ("EDDS 14.30Z.kml", "a time of day: 14.30Z"),
             ("EDDS 14h30 UTC.kml", "a time of day: 14h30 UTC"),
             ("EDDS 1430+0200.kml", "a time of day: 1430+0200"),
+            ("Aunt farm 2026-01-01 14-30.kml", "a time of day: 14-30"),
+            ("Aunt farm 2026-01-01_14-30.kml", "a time of day: 14-30"),
+            ("Aunt farm 2026-01-01 14_30.kml", "a time of day: 14_30"),
+            ("Aunt farm 14.30-15.45 Uhr.kml", "a time of day: 14.30-15.45 Uhr"),
+            ("Aunt farm 14.30-15.45Z.kml", "a time of day: 14.30-15.45Z"),
+            ("Aunt farm 14.30 bis 15.45 Uhr.kml", "a time of day: 14.30 bis 15.45 Uhr"),
             ("EDDS - EDDF Saturday.kml", "a weekday: Saturday"),
             ("1_DEHYL_Sonntag.kml", "a weekday: Sonntag"),
         ],
@@ -2113,6 +2118,44 @@ class TestNamesAndDescriptions:
                 "Date not on Jan 1: 16.08.2026",
                 "<name>Trip &amp; back</name>",
             ),
+            # Times after a date with hyphens or underscores, ranges with a
+            # dot and German ranges of days, which left a part behind
+            (
+                "<name>Aunt farm 2026-01-01 14-30</name>",
+                "Time of day gives the flight away, remove it: 14-30",
+                "<name>Aunt farm 2026-01-01</name>",
+            ),
+            (
+                "<name>Aunt farm 2026-01-01 14_30</name>",
+                "Time of day gives the flight away, remove it: 14_30",
+                "<name>Aunt farm 2026-01-01</name>",
+            ),
+            (
+                "<name>Aunt farm 14.30-15.45 Uhr</name>",
+                "Time of day gives the flight away, remove it: 14.30-15.45 Uhr",
+                "<name>Aunt farm</name>",
+            ),
+            (
+                "<name>Aunt farm 01.01.2026 14.30-15.45 Uhr</name>",
+                "Time of day gives the flight away, remove it: 14.30-15.45 Uhr",
+                "<name>Aunt farm 01.01.2026</name>",
+            ),
+            (
+                "<name>Aunt farm 16.-18.08.2026</name>",
+                "Date not on Jan 1: 16.-18.08.2026",
+                "<name>Aunt farm</name>",
+            ),
+            # A range joined by a word, and a hyphenated time after the T
+            (
+                "<name>Aunt farm 14.30 bis 15.45 Uhr</name>",
+                "Time of day gives the flight away, remove it: 14.30 bis 15.45 Uhr",
+                "<name>Aunt farm</name>",
+            ),
+            (
+                "<name>Aunt farm 2026-01-01T14-30-00Z EDDS</name>",
+                "Time of day gives the flight away, remove it: T14-30-00Z",
+                "<name>Aunt farm 2026-01-01 EDDS</name>",
+            ),
         ],
     )
     def test_the_rewrite_fixes_what_the_check_reports(
@@ -2391,6 +2434,10 @@ class TestRenamedNamesAreClean:
             ("EDDS Sat Sat 2026-08-16.kml", "EDDS.kml"),
             ("EDDS Heiligabend.kml", "EDDS.kml"),
             ("EDDS 16.VII.2026.kml", "EDDS.kml"),
+            ("Aunt farm 2026-08-16 14-30.kml", "Aunt farm.kml"),
+            ("Aunt farm 2026-08-16_14-30.kml", "Aunt farm.kml"),
+            ("Aunt farm 16.08.2026 14.30-15.45 Uhr.kml", "Aunt farm.kml"),
+            ("Aunt farm 16.-18.08.2026.kml", "Aunt farm.kml"),
         ],
     )
     def test_names(self, tmp_path, name, renamed):
@@ -2480,11 +2527,13 @@ class TestCheckSkipsCanonicalTimestamps:
     )
     def test_a_long_blank_run_takes_no_quadratic_time(self, pattern):
         """The indent is matched from the start of its run, once."""
-        text = " " * 80_000 + "x"
-        started = time.perf_counter()
-        pattern.sub("", text)
-        # Milliseconds; scanned again from each blank, 80 K took 11.7 s
-        assert time.perf_counter() - started < 2
+        # 80 K took a millisecond; scanned again from each blank, 11.7 s
+        ratio = growth(
+            lambda text: pattern.sub("", text),
+            lambda size: " " * size + "x",
+            10_000,
+        )
+        assert ratio < LINEAR_GROWTH
 
     def test_the_indent_still_goes_with_the_tag(self):
         text = (

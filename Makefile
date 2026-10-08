@@ -24,7 +24,10 @@ export KML_HEATMAP_COMMIT KML_HEATMAP_REPOSITORY
 CONTAINER_RUNTIME ?= $(shell command -v podman 2>/dev/null || command -v docker 2>/dev/null)
 INPUT_DIR ?= data
 OUTPUT_DIR ?= docs
-CACHE_DIR ?= $(HOME)/.cache/kml-heatmap
+CACHE_DIR ?= $(or $(KML_HEATMAP_CACHE_DIR),$(HOME)/.cache/kml-heatmap)
+# Absolute for the bind mount: a relative one names a volume of the runtime
+# instead. Not with abspath, which splits a path with spaces.
+CACHE_MOUNT = $(if $(filter /%,$(CACHE_DIR)),$(CACHE_DIR),$(CURDIR)/$(CACHE_DIR))
 HOST_BIND ?= 127.0.0.1
 PORT ?= 8000
 IMAGE_NAME := kml-heatmap
@@ -90,7 +93,7 @@ build: require-runtime ## Build the image and generate OUTPUT_DIR from INPUT_DIR
 	  echo "error: INPUT_DIR and OUTPUT_DIR must have different base names"; \
 	  exit 1; }
 	$(CONTAINER_RUNTIME) build -t $(IMAGE_NAME) .
-	mkdir -p "$(CACHE_DIR)" "$(OUTPUT_DIR)"
+	mkdir -p "$(CACHE_MOUNT)" "$(OUTPUT_DIR)"
 	$(CONTAINER_RUNTIME) run --rm $(RUN_AS_USER) -e HOME=/tmp \
 	  -e CARTO_API_KEY -e KML_HEATMAP_SITE_URL \
 	  -e KML_HEATMAP_COMMIT -e KML_HEATMAP_REPOSITORY -e SOURCE_DATE_EPOCH \
@@ -98,7 +101,7 @@ build: require-runtime ## Build the image and generate OUTPUT_DIR from INPUT_DIR
 	  -e KML_HEATMAP_REQUIRE_TERRAIN \
 	  -v "$(abspath $(INPUT_DIR)):$(INPUT_MOUNT):ro" \
 	  -v "$(abspath $(OUTPUT_DIR)):$(OUTPUT_MOUNT)" \
-	  -v "$(CACHE_DIR):/cache" \
+	  -v "$(CACHE_MOUNT):/cache" \
 	  $(IMAGE_NAME) "$(INPUT_MOUNT)" --output-dir "$(OUTPUT_MOUNT)"
 
 serve: require-runtime ## Serve OUTPUT_DIR on http://HOST_BIND:PORT (run 'make build' first)

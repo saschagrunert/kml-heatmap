@@ -14,6 +14,12 @@ import { domCache } from "../utils/domCache";
 export const REPLAY_BUTTON_LABEL = "Replay selected flights";
 export const REPLAY_PRECONDITION_MESSAGE =
   "Pick flights with timing data to replay, under Statistics, Flights";
+/**
+ * Shared flights a filter hides, every one of them: share mode keeps them,
+ * and the chip says "all hidden by the filter"
+ */
+export const REPLAY_HIDDEN_MESSAGE =
+  "The shared flights are all hidden by the filter; change it to replay them";
 /** More than a day of flights, such as all of an airport's (DAY_MAX_FLIGHTS) */
 export const REPLAY_TOO_MANY_MESSAGE = `Select up to ${DAY_MAX_FLIGHTS} flights to replay them one after another; Replay all plays more`;
 

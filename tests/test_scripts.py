@@ -6,6 +6,7 @@ still shows up when it stops doing what its docstring says.
 
 import importlib.util
 import os
+import shutil
 import subprocess
 import sys
 from itertools import pairwise
@@ -240,13 +241,75 @@ class TestBuildVisualSite:
         # The rest of the environment is passed on
         assert env["PATH"] == os.environ["PATH"]
 
+    def test_a_built_site_carries_the_hash_of_its_inputs(self, tmp_path, monkeypatch):
+        """The e2e site check compares it, not modification times."""
+        site = tmp_path / "visual-site"
+        monkeypatch.setattr(build_visual_site, "SITE_DIR", site)
+
+        def run(command, *, cwd, env, check):
+            site.mkdir()
+            return subprocess.CompletedProcess(command, 0)
+
+        monkeypatch.setattr(build_visual_site.subprocess, "run", run)
+
+        assert build_visual_site.main() == 0
+        assert (site / "fixture.sha1").read_text() == (
+            build_visual_site.fixture_hash() + "\n"
+        )
+
+    def test_the_inputs_are_hashed_with_their_names(self, tmp_path, monkeypatch):
+        """A flight renamed or removed changes the hash, as an edit does."""
+        fixture = tmp_path / "tests" / "fixtures" / "visual"
+        fixture.mkdir(parents=True)
+        (fixture / "1_DEHYL_DA40.kml").write_text("flight")
+        (fixture / ".1_DEHYL_DA40.kml.swp").write_text("editor")
+        monkeypatch.setattr(build_visual_site, "ROOT", tmp_path)
+        monkeypatch.setattr(build_visual_site, "FIXTURE_DIR", fixture)
+        for name in ("AIRPORTS", "RUNWAYS"):
+            path = tmp_path / f"{name.lower()}.csv"
+            path.write_text(name)
+            monkeypatch.setattr(build_visual_site, name, path)
+        script = tmp_path / "build_visual_site.py"
+        script.write_text("script")
+        monkeypatch.setattr(build_visual_site, "__file__", str(script))
+
+        first = build_visual_site.fixture_hash()
+        (fixture / ".1_DEHYL_DA40.kml.swp").write_text("edited")
+        assert build_visual_site.fixture_hash() == first
+        (fixture / "1_DEHYL_DA40.kml").rename(fixture / "2_DEHYL_DA40.kml")
+        assert build_visual_site.fixture_hash() != first
+
+    def test_the_hash_of_the_inputs_matches_the_site_check(self):
+        """computeFixtureHash in scripts/source-hash.js, which the e2e site
+        check compares with the hash this script left in the site."""
+        node = shutil.which("node")
+        if node is None:
+            if os.environ.get("CI"):
+                pytest.fail("node is required to check the fixture hash parity")
+            pytest.skip("node is not installed")
+        result = subprocess.run(  # noqa: S603
+            [
+                node,
+                "-e",
+                (
+                    'import("./scripts/source-hash.js")'
+                    ".then((m) => console.log(m.computeFixtureHash()))"
+                ),
+            ],
+            capture_output=True,
+            text=True,
+            cwd=build_visual_site.ROOT,
+            check=True,
+        )
+        assert result.stdout.strip() == build_visual_site.fixture_hash()
+
 
 class TestPrePushWithoutGit:
     def test_fails_closed_when_git_is_missing(self, tmp_path, monkeypatch):
         monkeypatch.setattr(pre_push.shutil, "which", lambda _: None)
 
         with pytest.raises(OSError, match="git is not on PATH"):
-            pre_push.commits_to_check(tmp_path, "origin", ["a" * 40])
+            pre_push.commits_to_check(tmp_path, ["--not", "--remotes"], ["a" * 40])
 
 
 check_site_files = _load("check_site_files")

@@ -203,6 +203,18 @@ describe("MobileSheet", () => {
       expect(sheet.isOpen()).toBe(false);
     });
 
+    it("leaves an Escape that something else took first", () => {
+      // The readout of the cloud closed, and the sheet under it with it
+      const taken = (event: Event): void => event.preventDefault();
+      document.addEventListener("keydown", taken, true);
+      document.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Escape", cancelable: true }),
+      );
+      document.removeEventListener("keydown", taken, true);
+
+      expect(sheet.isOpen()).toBe(true);
+    });
+
     it("stops taking taps the moment it closes", () => {
       // `hidden` alone leaves the sheet hit-testable: the stylesheet gives
       // `.mobile-sheet` a display of its own, and the slide-out delays

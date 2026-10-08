@@ -84,6 +84,12 @@ export interface StoreState extends ToggleFlags {
    */
   selectionRibbons: boolean;
   /**
+   * Whether the map is at a zoom the aviation chart draws at, on or off
+   * (aviationDrawsAt in mapLayers.ts): the heat steps back for the chart
+   * only there (see ui/layerVisibility.ts, its only writer)
+   */
+  aviationInView: boolean;
+  /**
    * Whether a replay is running. The layer flags keep what the user chose;
    * what the map shows follows from both (see ui/layerVisibility.ts).
    */
@@ -133,6 +139,7 @@ export const STORE_ACCESSOR_KEYS = [
   "forcedHeatCloud",
   "crossSectionLine",
   "selectionRibbons",
+  "aviationInView",
   "replayActive",
   "tourView",
   "currentData",
@@ -195,6 +202,7 @@ export function createDefaultState(): StoreState {
     forcedHeatCloud: false,
     crossSectionLine: "",
     selectionRibbons: false,
+    aviationInView: true,
     replayActive: false,
     tourView: null,
     currentData: null,

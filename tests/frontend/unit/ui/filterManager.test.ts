@@ -643,6 +643,36 @@ describe("FilterManager", () => {
       );
     });
 
+    it("offers a Retry for the years a first load of all years did not bring", async () => {
+      // Some years came, the panel went, and the toast that named the
+      // others had nothing to load them again with
+      mockApp.currentData = null;
+      mockApp.selectedYear = "all";
+      mockApp.selectedPathIds.add(3);
+      mockApp.dataManager.loadData.mockResolvedValue({
+        ...year2024Data(),
+        incomplete: true,
+      });
+      await filterManager.loadShownYear();
+      const [, , retry] = mockApp.dataManager.loadData.mock.calls[0] as [
+        string,
+        AbortSignal,
+        { label: string; run: () => boolean | void } | undefined,
+      ];
+      expect(retry?.label).toBe("Retry");
+      mockApp.dataManager.loadData.mockClear();
+      mockApp.dataManager.loadData.mockResolvedValue(allYearsData());
+
+      expect(retry!.run()).toBe(true);
+      await vi.waitFor(() =>
+        expect(mockApp.currentData).toEqual(allYearsData()),
+      );
+
+      expect(mockApp.dataManager.loadData.mock.calls[0]![0]).toBe("all");
+      expect(mockApp.selectedYear).toBe("all");
+      expect([...mockApp.selectedPathIds]).toEqual([3]);
+    });
+
     it("says which year it shows once the switch is applied", async () => {
       addYearOption("2024");
 
@@ -711,6 +741,56 @@ describe("FilterManager", () => {
       expect(mockApp.selectedYear).toBe("2025");
       expect(mockApp.currentData).toBe(previous);
       expect([...mockApp.selectedPathIds]).toEqual([1]);
+    });
+
+    it("gives way to the hotspot tour that starts while the year loads", async () => {
+      // The switch landed as the tour ran and ended it with other flights
+      const tourView = {
+        center: { lat: 51, lng: 12 },
+        zoom: 8,
+        bearing: 0,
+        pitch: 0,
+        globeVisible: false,
+        threeDVisible: false,
+        heatmapVisible: true,
+      };
+      mockApp.selectedYear = "2025";
+      addYearOption("2025");
+      addYearOption("2024");
+      const yearSelect = document.getElementById(
+        "year-select",
+      ) as HTMLSelectElement;
+      const previous = mockApp.currentData;
+      let resolve: (d: KMLDataset) => void = () => {};
+      mockApp.dataManager.loadData.mockImplementation(
+        () =>
+          new Promise<KMLDataset>((r) => {
+            resolve = r;
+          }),
+      );
+
+      yearSelect.value = "2024";
+      const pending = filterManager.filterByYear();
+      mockApp.tourView = tourView;
+
+      expect(yearSelect.value).toBe("2025");
+      resolve(year2024Data());
+      expect(await pending).toBe(false);
+      expect(mockApp.currentData).toBe(previous);
+
+      // A pick that waits for the next one is dropped as well
+      vi.useFakeTimers();
+      try {
+        mockApp.tourView = null;
+        mockApp.dataManager.loadData.mockClear();
+        yearSelect.value = "2024";
+        filterManager.pickYear();
+        mockApp.tourView = tourView;
+        await vi.advanceTimersByTimeAsync(YEAR_PICK_DELAY_MS);
+        expect(mockApp.dataManager.loadData).not.toHaveBeenCalled();
+      } finally {
+        vi.useRealTimers();
+      }
     });
 
     it("leaves a running replay alone when the toast's Retry is pressed", async () => {

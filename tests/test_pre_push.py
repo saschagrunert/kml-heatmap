@@ -90,7 +90,7 @@ def push_of(sha: str, remote_sha: str = pre_push.ZERO_SHA) -> list[str]:
 
 
 def run_check(repo: Path, lines: list[str]) -> int:
-    status: int = pre_push.check(repo, "origin", lines)
+    status: int = pre_push.check(repo, lines)
     return status
 
 
@@ -106,6 +106,8 @@ class TestCheck:
         assert f"{sha[:7]} data/2.kml" in err
         assert "2025-03-03" in err
         assert "Push refused" in err
+        # Only a remote never fetched from is offered the way round
+        assert "--no-verify" not in err
 
     def test_refuses_a_date_with_a_one_digit_month(self, repo, capsys):
         """The shapes of date_tokens: the hook checks what the export strips."""
@@ -140,6 +142,61 @@ class TestCheck:
         git(repo, "update-ref", "refs/remotes/origin/main", "HEAD")
         sha = commit(repo, {"data/3.kml": CLEAN_KML})
         assert run_check(repo, push_of(sha)) == 0
+
+    def test_a_remote_without_tracking_branches_checks_the_rest(self, repo, capsys):
+        """A push to a URL or an unfetched remote has no tracking branches.
+
+        The commits of another remote do not count then: a private remote
+        may hold the raw flights, and a first push to a new public remote
+        would publish them. The refusal says how to skip the check.
+        """
+        commit(repo, {"data/2.kml": REAL_KML})
+        git(repo, "update-ref", "-d", "refs/remotes/origin/main")
+        git(repo, "update-ref", "refs/remotes/private/main", "HEAD")
+        sha = commit(repo, {"data/3.kml": CLEAN_KML})
+        assert pre_push.check(repo, push_of(sha), "public") == 1
+        err = capsys.readouterr().err
+        assert "data/2.kml" in err
+        assert "--no-verify" in err
+
+    def test_a_remote_without_tracking_branches_passes_clean_history(self, repo):
+        git(repo, "update-ref", "-d", "refs/remotes/origin/main")
+        sha = commit(repo, {"data/2.kml": CLEAN_KML})
+        assert pre_push.check(repo, push_of(sha), "https://example.com/r") == 0
+
+    def test_checks_what_only_another_remote_has(self, repo, capsys):
+        """A fork or a mirror may have commits the public remote never had."""
+        commit(repo, {"data/2.kml": REAL_KML})
+        git(repo, "update-ref", "refs/remotes/fork/main", "HEAD")
+        sha = commit(repo, {"data/3.kml": CLEAN_KML})
+        assert run_check(repo, push_of(sha)) == 1
+        assert "data/2.kml" in capsys.readouterr().err
+        # Pushed to the fork, they are its own already
+        assert pre_push.check(repo, push_of(sha), "fork") == 0
+
+    def test_skips_what_the_ref_pushed_to_already_has(self, repo):
+        """Without any tracking branch, the remote's side of the ref counts."""
+        published = commit(repo, {"data/2.kml": REAL_KML})
+        git(repo, "update-ref", "-d", "refs/remotes/origin/main")
+        sha = commit(repo, {"data/3.kml": CLEAN_KML})
+        assert run_check(repo, push_of(sha, published)) == 0
+        # Not what the remote's ref does not reach
+        assert run_check(repo, push_of(sha, git(repo, "rev-parse", "HEAD~2"))) == 1
+
+    def test_a_remote_commit_the_clone_lacks_checks_the_rest(self, repo):
+        commit(repo, {"data/2.kml": REAL_KML})
+        sha = commit(repo, {"data/3.kml": CLEAN_KML})
+        assert run_check(repo, push_of(sha, "1" * 40)) == 1
+
+    def test_a_file_name_that_is_no_utf_8(self, repo, capsys):
+        """git hands over names as bytes; the hook still checks the file."""
+        name = os.fsdecode(b"data/Fl\xfcg.kml")
+        (repo / name).write_text(REAL_KML)
+        git(repo, "add", "--", name)
+        git(repo, "commit", "-q", "-m", "c")
+        sha = git(repo, "rev-parse", "HEAD")
+        assert run_check(repo, push_of(sha)) == 1
+        assert "2025-03-03" in capsys.readouterr().err
 
     def test_ignores_commits_without_kml_files(self, repo):
         sha = commit(repo, {"README.md": "2025-03-03"})
@@ -219,6 +276,17 @@ class TestCommitMessages:
         sha = commit(repo, {"README.md": "x"}, "Docs of 16 Aug 2026")
         assert run_check(repo, push_of(sha)) == 0
 
+    def test_refuses_a_dated_message_that_is_no_utf_8(self, repo, capsys):
+        """A Latin-1 message git does not convert says what it holds."""
+        (repo / "data" / "2.kml").write_text(CLEAN_KML)
+        git(repo, "add", "data/2.kml")
+        message = repo.parent / "message"
+        message.write_bytes(b"Flug am 16. Aug 2026 \xfcber Ulm\n")
+        git(repo, "-c", "i18n.commitEncoding=bogus", "commit", "-q", "-F", str(message))
+        sha = git(repo, "rev-parse", "HEAD")
+        assert run_check(repo, push_of(sha)) == 1
+        assert "16. Aug 2026" in capsys.readouterr().err
+
     def test_skips_messages_the_remote_already_has(self, repo):
         sha = commit(
             repo,
@@ -257,6 +325,15 @@ class TestMain:
         assert "fatal: bad object deadbeef" in err
         assert "Python 3.14" not in err
         assert "--no-verify" in err
+
+    def test_text_it_cannot_read_fails_closed(self, monkeypatch, capsys):
+        def broken(*_args):
+            raise UnicodeDecodeError("utf-8", b"\xfc", 0, 1, "invalid start byte")
+
+        monkeypatch.setattr(pre_push, "check", broken)
+        monkeypatch.setattr(sys, "stdin", io.StringIO(""))
+        assert pre_push.main() == 1
+        assert "cannot check" in capsys.readouterr().err
 
 
 WRAPPER = SCRIPT.parent / "pre-push-hook"
