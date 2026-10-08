@@ -30,6 +30,7 @@ export default defineConfig({
     restoreMocks: true,
     unstubGlobals: true,
     unstubEnvs: true,
+    setupFiles: ["tests/frontend/setup.ts"],
     include: [
       "tests/frontend/unit/**/*.test.ts",
       "tests/frontend/contract/**/*.test.ts",

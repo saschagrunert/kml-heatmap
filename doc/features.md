@@ -346,12 +346,21 @@ Switching it on leaves the Heatmap, Altitude and Groundspeed layers as they are
 paths by altitude only when all three are off, where nothing would be lifted,
 and tilts a flatter map to 50 degrees. Tilting the flat map does not turn it on;
 the first time in a visit that you tilt it past 30 degrees yourself, a hint
-offers the 3D view with a **3D** button (not while a replay or Wrapped runs, nor
-once 3D was on). From `z` 18 in, where the camera is lower than a traffic
-circuit, the flights are drawn flat again. Replay lifts its airplane and its
-trail with them. The heatmap turns into a cloud of the flights at their heights
-(see [Heatmap](#heatmap) above), on the relief and on the globe alike, and lies
-flat from `z` 18 in with the flights.
+offers the 3D view with a **3D** button (not while a replay, Wrapped or the
+hotspot tour runs, nor once you switched 3D on or off). On a touch screen, where
+a tilt is a small two-finger drag, 15 degrees are enough, and the same hint
+comes once on the device without a tilt as well: the first time you zoom in by
+hand past where the heat lines are drawn (`z` 12.75), as the map comes to rest,
+or pick a single flight (not an airport's), whichever comes first. That one goes
+by itself after eight seconds, or as soon as you move the map, but not while the
+focus is on its buttons. The browser remembers that it showed the hint, or that
+you switched 3D on or off yourself, in its localStorage; where it cannot keep
+it, the hint comes once a visit. The hotspot tour, which turns 3D on for its
+flight, or a link that opens in 3D leave the hint for later. From `z` 18 in,
+where the camera is lower than a traffic circuit, the flights are drawn flat
+again. Replay lifts its airplane and its trail with them. The heatmap turns into
+a cloud of the flights at their heights (see [Heatmap](#heatmap) above), on the
+relief and on the globe alike, and lies flat from `z` 18 in with the flights.
 
 At every zoom the map draws the relief under the flights, shaded faintly (dark
 slopes, a little light on the others) over the satellite imagery when it is on

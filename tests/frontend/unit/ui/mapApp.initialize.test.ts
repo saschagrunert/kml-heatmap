@@ -43,6 +43,7 @@ const toastMock = vi.hoisted(() => ({
   showToast: vi.fn(),
   announceStatus: vi.fn(),
   dismissToast: vi.fn(),
+  TOAST_DURATION_MS: 4000,
 }));
 vi.mock("../../../../kml_heatmap/frontend/utils/toast", () => toastMock);
 // The real bar registers a window resize listener it never removes, so every

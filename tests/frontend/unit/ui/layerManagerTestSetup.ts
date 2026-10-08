@@ -319,10 +319,6 @@ export function setupLayerManager(): Pick<
   LayerManagerBindings,
   "layerManager" | "mockApp" | "frames"
 > {
-  // jsdom's window has the property, which makes the page take the device
-  // for a touch screen (utils/device.ts) and open no tooltip: a test that
-  // wants a finger sets it, the others start as a mouse
-  delete (window as { ontouchstart?: unknown }).ontouchstart;
   const frames = new Map<number, FrameRequestCallback>();
   let handle = 0;
   vi.stubGlobal(
@@ -379,5 +375,4 @@ export function setupLayerManager(): Pick<
 export function teardownLayerManager(layerManager: LayerManager): void {
   layerManager.destroy();
   document.body.innerHTML = "";
-  delete (window as { ontouchstart?: unknown }).ontouchstart;
 }

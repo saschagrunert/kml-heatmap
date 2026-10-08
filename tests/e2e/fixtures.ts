@@ -317,8 +317,25 @@ async function installHermeticRoutes(
   return offSite;
 }
 
+/**
+ * The key the page remembers the tip of the 3D view under
+ * (THREE_D_TIP_STORAGE_KEY in ui/mapOrientation.ts)
+ */
+export const THREE_D_TIP_KEY = "kml-heatmap-3d-tip";
+
+/**
+ * Whether the browser has had the tip of the 3D view: "shown", as for the
+ * specs at large, or "fresh", as a phone that has never had it
+ */
+export type ThreeDTip = "shown" | "fresh";
+
 export const test = base.extend<
-  { hermetic: void; terrain: TerrainFixture },
+  {
+    hermetic: void;
+    terrain: TerrainFixture;
+    threeDTip: ThreeDTip;
+    threeDTipState: void;
+  },
   SiteOptions & { currentSite: void }
 >({
   // The ground of the elevation tiles, for `test.use` in a spec
@@ -342,6 +359,29 @@ export const test = base.extend<
         "the page requested a third-party URL; it is meant to carry its " +
           "own assets and work offline",
       ).toEqual([]);
+    },
+    { auto: true },
+  ],
+  // Whether the browser has had the tip that offers the 3D view on a touch
+  // screen (listenForTip and letTipGo in ui/mapOrientation.ts), for
+  // `test.use` in a spec about it. "shown" by default: it comes with the
+  // first flight picked, or the first zoom in by hand to the heat lines,
+  // and stays a while over the map just above the phone's bar, where the
+  // specs on a phone go on to tap. "fresh" sets nothing: every test has a
+  // context of its own, whose storage starts empty.
+  threeDTip: ["shown", { option: true }],
+  threeDTipState: [
+    async ({ context, threeDTip }, use) => {
+      if (threeDTip === "shown") {
+        await context.addInitScript((key) => {
+          try {
+            localStorage.setItem(key, "1");
+          } catch {
+            // about:blank and other pages without storage of their own
+          }
+        }, THREE_D_TIP_KEY);
+      }
+      await use();
     },
     { auto: true },
   ],

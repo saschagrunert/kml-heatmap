@@ -14,10 +14,13 @@
 import type { Map as MapLibreMap } from "maplibre-gl";
 import type { MapApp } from "../mapApp";
 import { setUnavailable } from "../utils/buttonState";
+import { HEAT_LINES } from "../utils/constants";
+import { isTouchDevice } from "../utils/device";
 import { domCache } from "../utils/domCache";
 import { DEGREES_TO_RADIANS } from "../utils/geometry";
 import { isReplayCameraMove } from "../utils/mapHelpers";
-import { dismissToast, showToast } from "../utils/toast";
+import { storedFlag, storeFlag } from "../utils/storedFlag";
+import { dismissToast, showToast, TOAST_DURATION_MS } from "../utils/toast";
 
 /**
  * The tilt the 3D view turns a flatter map to, and what counts as flat
@@ -29,10 +32,44 @@ const THREE_D_MIN_PITCH = 20;
 /**
  * The tilt past which a flat map tilted by hand offers the 3D view, once a
  * visit: tilting does not turn it on, as a tilt is also just a look at the
- * map (see onPitchEnd)
+ * map (see onPitchEnd). On a touch screen a tilt is two fingers dragged up
+ * or down side by side, which the map only takes while they stay level
+ * and which tilts it by little, so a smaller tilt counts there.
  */
 const THREE_D_HINT_PITCH = 30;
+const THREE_D_HINT_TOUCH_PITCH = 15;
 export const THREE_D_HINT_MESSAGE = "Turn on 3D to lift the flights";
+
+/**
+ * How long the tip (see listenForTip) stays when nothing takes it away:
+ * twice an info toast's time, as it has a button to reach as well as a
+ * line to read. It goes by itself, unlike the offer of a tilt: it comes
+ * unasked, right after a pick or a zoom, just above the bar where the next
+ * tap is.
+ */
+export const THREE_D_TIP_MS = 2 * TOAST_DURATION_MS;
+
+/**
+ * Where the browser remembers that it offered the 3D view, or that the
+ * user switched 3D on, so the tip of a touch screen (see listenForTip)
+ * comes once on a device rather than on every visit. For the device, not
+ * for one map, like the flight profile's: it is about finding the switch.
+ * Where the storage is unavailable, the tip comes once a visit.
+ */
+export const THREE_D_TIP_STORAGE_KEY = "kml-heatmap-3d-tip";
+
+/** Listen to the map's `type` events until `signal` aborts */
+function listenUntil(
+  map: MapLibreMap,
+  type: "movestart" | "moveend" | "zoomstart",
+  listener: (event: { originalEvent?: unknown }) => void,
+  signal: AbortSignal,
+): void {
+  const subscription = map.on(type, listener);
+  signal.addEventListener("abort", () => subscription.unsubscribe(), {
+    once: true,
+  });
+}
 
 /**
  * The compass in the control column, and the one that floats over the map
@@ -50,37 +87,38 @@ export class MapOrientation {
   /** Set once the style has loaded, before which no projection can be set */
   private styled: MapLibreMap | null = null;
   private globeToastShown = false;
-  /** The 3D view was offered (onPitchEnd), or used, in this visit */
+  /**
+   * The 3D view was offered (offerThreeD), switched on or off by the user,
+   * or on as the visit opened, in this visit
+   */
   private threeDHinted: boolean;
   private readonly unsubscribe: () => void;
+  /**
+   * Ends the listening for the moments of the tip (listenForTip), as it is
+   * offered, the user switches 3D on or off or the map goes
+   */
+  private readonly tipMoments = new AbortController();
+  /**
+   * Ends what takes the tip's toast away by itself (letTipGo), as it goes,
+   * 3D comes on or the map goes
+   */
+  private tipToast = new AbortController();
 
   private readonly onTurn = (): void => this.syncCompass();
 
   /**
-   * A flat map tilted past THREE_D_HINT_PITCH by the user: a gesture, which
-   * MapLibre passes its `originalEvent` along with, and none of the app's
-   * own camera moves (the 3D button, Reset view, a replay, Wrapped). Not
-   * during a replay or Wrapped, which own the map.
+   * A flat map tilted past THREE_D_HINT_PITCH (THREE_D_HINT_TOUCH_PITCH on
+   * a touch screen) by the user: a gesture, which MapLibre passes its
+   * `originalEvent` along with, and none of the app's own camera moves
+   * (the 3D button, Reset view, a replay, Wrapped).
    */
   private readonly onPitchEnd = (event: { originalEvent?: unknown }): void => {
-    const app = this.app;
-    if (
-      this.threeDHinted ||
-      !event.originalEvent ||
-      app.threeDVisible ||
-      app.replayActive ||
-      app.wrappedVisible ||
-      (app.map?.getPitch() ?? 0) < THREE_D_HINT_PITCH
-    ) {
-      return;
+    const limit = isTouchDevice()
+      ? THREE_D_HINT_TOUCH_PITCH
+      : THREE_D_HINT_PITCH;
+    if (event.originalEvent && (this.app.map?.getPitch() ?? 0) >= limit) {
+      this.offerThreeD();
     }
-    this.threeDHinted = true;
-    showToast(THREE_D_HINT_MESSAGE, "info", {
-      label: "3D",
-      run: () => {
-        if (!app.threeDVisible) this.toggleThreeD();
-      },
-    });
   };
 
   /**
@@ -102,13 +140,24 @@ export class MapOrientation {
 
   constructor(app: MapApp) {
     this.app = app;
+    // A link or the saved state that opened in 3D has shown it in this
+    // visit; that is no switch found, so the device keeps its tip
     this.threeDHinted = app.threeDVisible;
-    // Used another way, the 3D view needs no offer
+    // On, the 3D view needs no offer on the screen. Only the user's own
+    // switch uses the offer up (toggleThreeD): the hotspot tour turns it on
+    // for its flight, and puts it back after.
     this.unsubscribe = app.store.subscribe("threeDVisible", (on) => {
       if (!on) return;
-      this.threeDHinted = true;
+      this.tipToast.abort();
       dismissToast(THREE_D_HINT_MESSAGE);
     });
+    if (
+      isTouchDevice() &&
+      !this.threeDHinted &&
+      !storedFlag(THREE_D_TIP_STORAGE_KEY)
+    ) {
+      this.listenForTip();
+    }
     const map = app.map;
     if (!map) return;
 
@@ -135,12 +184,170 @@ export class MapOrientation {
 
   destroy(): void {
     this.unsubscribe();
+    this.tipMoments.abort();
+    this.tipToast.abort();
     const map = this.app.map;
     if (!map) return;
     map.off("rotate", this.onTurn);
     map.off("pitch", this.onTurn);
     map.off("moveend", this.onMoveEnd);
     map.off("pitchend", this.onPitchEnd);
+  }
+
+  /**
+   * The tip: the offer of the 3D view on a touch screen without a tilt,
+   * once on a device (THREE_D_TIP_STORAGE_KEY). A phone keeps the switch in
+   * its Layers sheet, and the tilt that offers it is a gesture few make on
+   * a touch screen, so the 3D view went unfound there. The tip comes at the
+   * first moment of looking at the flights themselves, whichever comes
+   * first, and never over the first view, which nobody has looked at yet:
+   *
+   * - A zoom in by hand that crosses to where the heat lines have come in
+   *   (HEAT_LINES), where the flights are drawn as lines; not a zoom out,
+   *   nor a pinch on a view among the lines already. Measured from where
+   *   the map rested before the gesture to where it comes to rest after
+   *   it, the glide of a pinch included, so the tip does not show while
+   *   a pinch that turned into a pan still moves the map.
+   * - One flight that comes into the selection, by whatever control: a
+   *   flight tapped, picked from a list or ticked. Not the flights of an
+   *   airport, whose popup the tip would cover: a click on an airport
+   *   selects them before it opens the popup (activateAirport), so the
+   *   pick is weighed once that has run, and none counts with an airport's
+   *   popup open, one flown to once included. Nor the selection a link or
+   *   the saved state brought, which is put back before this listens, nor
+   *   what a load trims off it.
+   *
+   * Every device the map runs on can draw the 3D view, as the map itself
+   * needs WebGL 2 (MapApp.setupMap). A mouse tilts with a right drag, and
+   * keeps the offer of the tilt alone.
+   */
+  private listenForTip(): void {
+    const app = this.app;
+    const signal = this.tipMoments.signal;
+    let before = new Set(app.selectedPathIds);
+    app.store.subscribe(
+      "selectedPathIds",
+      (ids) => {
+        let added = 0;
+        for (const id of ids) if (!before.has(id)) added++;
+        before = new Set(ids);
+        if (added !== 1 || app.isInitializing) return;
+        queueMicrotask(() => {
+          if (!signal.aborted && !app.airportManager.isPopupOpen()) {
+            this.offerThreeD(true);
+          }
+        });
+      },
+      { signal },
+    );
+    const map = app.map;
+    if (!map) return;
+    let rest = map.getZoom();
+    let byHand = false;
+    listenUntil(
+      map,
+      "zoomstart",
+      (event) => {
+        if (event.originalEvent) byHand = true;
+      },
+      signal,
+    );
+    listenUntil(
+      map,
+      "moveend",
+      () => {
+        const from = rest;
+        rest = map.getZoom();
+        if (!byHand) return;
+        byHand = false;
+        const lines = HEAT_LINES.midZoom;
+        if (!app.isInitializing && from < lines && rest >= lines) {
+          this.offerThreeD(true);
+        }
+      },
+      signal,
+    );
+  }
+
+  /**
+   * Take the tip's toast away after THREE_D_TIP_MS, or as soon as the map
+   * is moved by hand: the user went on with the map. The status region
+   * has read it out all the same (showToast). Never from under the focus:
+   * while it is on the toast's buttons, a keyboard or a screen reader is
+   * at them, and the time starts again once the focus has left.
+   */
+  private letTipGo(toast: HTMLElement): void {
+    const phase = new AbortController();
+    this.tipToast = phase;
+    const signal = phase.signal;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const close = (): void => {
+      if (toast.contains(document.activeElement)) return;
+      phase.abort();
+      dismissToast(THREE_D_HINT_MESSAGE);
+    };
+    const wait = (): void => {
+      clearTimeout(timer);
+      timer = setTimeout(close, THREE_D_TIP_MS);
+    };
+    wait();
+    signal.addEventListener("abort", () => clearTimeout(timer), {
+      once: true,
+    });
+    toast.addEventListener("focusin", () => clearTimeout(timer), { signal });
+    toast.addEventListener(
+      "focusout",
+      (event) => {
+        const to = event.relatedTarget;
+        if (!(to instanceof Node && toast.contains(to))) wait();
+      },
+      { signal },
+    );
+    const map = this.app.map;
+    if (!map) return;
+    listenUntil(
+      map,
+      "movestart",
+      (event) => {
+        if (event.originalEvent) close();
+      },
+      signal,
+    );
+  }
+
+  /**
+   * Offer the 3D view, unless it was offered or switched on in this visit,
+   * or something else holds the map: a replay or Replay all, Wrapped, or
+   * the hotspot tour, which turns the 3D view on by itself. The offer is a
+   * toast whose 3D button does what the switch does; as the `tip` it goes
+   * by itself (letTipGo). Offered, it is not the device's tip any more.
+   */
+  private offerThreeD(tip = false): void {
+    const app = this.app;
+    if (
+      this.threeDHinted ||
+      app.threeDVisible ||
+      app.replayActive ||
+      app.wrappedVisible ||
+      app.tourView
+    ) {
+      return;
+    }
+    this.threeDHinted = true;
+    this.usedTip();
+    const toast = showToast(THREE_D_HINT_MESSAGE, "info", {
+      label: "3D",
+      run: () => {
+        if (!app.threeDVisible) this.toggleThreeD();
+      },
+    });
+    if (tip) this.letTipGo(toast);
+  }
+
+  /** The device has had the tip, or found the switch without it */
+  private usedTip(): void {
+    storeFlag(THREE_D_TIP_STORAGE_KEY, true);
+    this.tipMoments.abort();
   }
 
   /** Turn the map north up and lay it flat, the way every view starts */
@@ -168,6 +375,10 @@ export class MapOrientation {
   toggleThreeD(): void {
     const entering = !this.app.threeDVisible;
     this.app.threeDVisible = entering;
+    // The switch is found, also to turn off the 3D view a link or the
+    // tour turned on, and needs no offer any more
+    this.threeDHinted = true;
+    this.usedTip();
     if (!entering) return;
     const map = this.app.map;
     if (
