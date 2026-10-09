@@ -38,8 +38,8 @@ test = [
     "lxml-stubs>=0.5.1",
 ]
 dev = [
-    "ruff>=0.16.9",
-    "mypy>=2.3.1",
+    "ruff>=0.16.10",
+    "mypy>=2.4.0",
     "pip-audit>=2.10.1",
     # The audit of .github/workflows (make lint and the CI lint job)
     "zizmor>=1.30.1",
