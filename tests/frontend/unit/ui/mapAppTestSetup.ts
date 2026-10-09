@@ -69,7 +69,6 @@ export const mockAirportManagerInstance = {
   updateAirportMarkerSizes: vi.fn(),
   closePopup: vi.fn(),
   activateAirport: vi.fn(),
-  airportLabelAt: vi.fn((): string | null => null),
   destroy: vi.fn(),
 } satisfies StandIn<AirportManager>;
 

@@ -58,8 +58,8 @@ const FLIGHT_LAYERS = [
 ];
 
 /**
- * The airport codes, a label layer on top of all, and the stand-ins of the
- * dots they give way to above them (ui/airportLabels.ts)
+ * The room of the airport codes and of their dots, invisible labels on top
+ * of all that the place names give way to (ui/airportLabels.ts)
  */
 const AIRPORT_LABELS = ["airport-labels", "airport-dots"];
 

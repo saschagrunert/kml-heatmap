@@ -147,14 +147,20 @@ function arrive(): void {
   map.emit("moveend", eventData);
 }
 
-/** A marker of the airport, as appInitializer makes them */
+/**
+ * A marker of the airport, as appInitializer makes them: its element, and
+ * the button in it that takes the focus, which this returns
+ */
 function addMarker(airport: Airport): HTMLButtonElement {
-  const element = document.createElement("button");
+  const element = document.createElement("div");
+  const button = document.createElement("button");
+  element.append(button);
   map.getCanvasContainer().append(element);
   app.airportMarkers[airport.name] = {
     getElement: () => element,
+    getControl: () => button,
   } as unknown as MockApp["airportMarkers"][string];
-  return element;
+  return button;
 }
 
 beforeEach(() => {
@@ -826,7 +832,7 @@ describe("a pick", () => {
   });
 
   it("marks an airport with a pulse where its marker is not shown", () => {
-    addMarker(STUTTGART).hidden = true;
+    addMarker(STUTTGART).parentElement!.hidden = true;
     toggleSearch(asMapApp(app));
     type("EDDS");
     key("Enter");

@@ -6,58 +6,241 @@
 import type { Airport, PathInfo } from "../types";
 import { siteData } from "../state/siteData";
 
-/** Class of the element MapLibre positions; the stylesheet resets it */
+/** Class of the element MapLibre positions */
 export const AIRPORT_MARKER_CLASS = "airport-marker-root";
 
+/** Class of the button round an airport's dot */
+const DOT_CONTROL_CLASS = "airport-marker-container";
+
 /**
- * Build the element of an airport marker: a real button, so the marker
- * takes focus, and Enter and Space reach it as a click.
+ * Build the element of an airport marker, which MapLibre positions, around
+ * the two parts of it that may take the pointer and the focus: a button
+ * round the dot, and the chip of its ICAO code, on a stem where there is
+ * room (see ui/airportLabels.ts). One of them at a time is the airport's
+ * target (setAirportTarget); a press on the other part, where it takes
+ * one, is a press on the airport as well.
  *
- * The container inside is a 24px square around a dot a third that size: the
- * dot is what is drawn, the square is what a finger has to hit. WCAG asks
- * for 24, and at these zoom levels neighbouring airports are nowhere near
- * far enough apart to earn the spacing exemption. The stylesheet sizes it.
- * The ICAO code beside it is a label of the map (see ui/airportLabels.ts).
+ * The button is a 24px square around a dot a third that size: the dot is
+ * what is drawn, the square is what a finger has to hit. WCAG asks for 24,
+ * and where airports lie closer than that the square of the one that
+ * places its code first keeps it, and the other's code takes its place.
  * @param name - Airport name
+ * @param code - The code it shows
  * @param isHomeBase - Whether the airport is the current home base
  */
 export function createAirportElement(
   name: string,
+  code: string,
   isHomeBase = false,
-): HTMLButtonElement {
+): HTMLElement {
+  const root = document.createElement("div");
+  root.className = AIRPORT_MARKER_CLASS;
   const button = document.createElement("button");
   button.type = "button";
-  button.className = AIRPORT_MARKER_CLASS;
+  button.className = DOT_CONTROL_CLASS;
   // The name a pointer reads and the name a screen reader announces; the
   // label on the map is only the code
   button.title = name;
   button.setAttribute("aria-label", name);
   // It opens and closes the airport's popup; AirportManager keeps this true
   button.setAttribute("aria-expanded", "false");
-
-  const container = document.createElement("div");
-  container.className = "airport-marker-container";
-  const dot = document.createElement("div");
+  const dot = document.createElement("span");
   dot.className = "airport-marker";
-  // The part of the target over the code above the dot (see the stylesheet)
-  const reach = document.createElement("span");
-  reach.className = "airport-marker-reach";
-  container.append(dot, reach);
-  button.append(container);
+  button.append(dot);
+  root.append(button, createCodeElement(code));
 
-  if (isHomeBase) setAirportElementHome(button, true);
-  return button;
+  if (isHomeBase) setAirportElementHome(root, true);
+  return root;
 }
 
 /**
- * Style a marker element as the home base, or as any other airport. The
- * element stays the same, so its focus and its listeners survive a change
- * of home base.
+ * An airport's code, for its marker: a chip at the end of an arm, with the
+ * stem from the dot, left out until it is placed (see
+ * ui/airportLabels.ts). Hidden from assistive technology while the button
+ * round the dot is the airport's target, which is named after it.
+ */
+export function createCodeElement(code: string): HTMLElement {
+  const arm = document.createElement("span");
+  arm.className = "airport-code-arm is-hidden";
+  arm.setAttribute("aria-hidden", "true");
+  const stem = document.createElement("span");
+  stem.className = "airport-code-stem";
+  const chip = document.createElement("span");
+  chip.className = "airport-code";
+  const face = document.createElement("span");
+  face.className = "airport-code-face";
+  face.textContent = code;
+  chip.append(face);
+  arm.append(stem, chip);
+  return arm;
+}
+
+/** The parts of an airport's marker that may take the pointer */
+function parts(
+  root: HTMLElement,
+): { dot: HTMLElement; chip: HTMLElement } | null {
+  const dot = root.querySelector<HTMLElement>("." + DOT_CONTROL_CLASS);
+  const chip = root.querySelector<HTMLElement>(".airport-code");
+  return dot && chip ? { dot, chip } : null;
+}
+
+/**
+ * What of an airport's marker takes the focus and is announced: the chip
+ * of its code where that is its target, the button round its dot otherwise
+ */
+export function airportControl(root: HTMLElement): HTMLElement {
+  const found = parts(root);
+  if (!found) return root;
+  return found.chip.getAttribute("role") === "button" ? found.chip : found.dot;
+}
+
+/**
+ * Tell assistive technology whether an airport's popup is open, on its
+ * button and on its chip while that is a button
+ */
+export function setAirportExpanded(
+  root: HTMLElement,
+  expanded: boolean,
+  controls: string,
+): void {
+  const found = parts(root);
+  if (!found) return;
+  for (const element of [found.dot, found.chip]) {
+    if (element === found.chip && element.getAttribute("role") !== "button") {
+      element.removeAttribute("aria-expanded");
+      element.removeAttribute("aria-controls");
+      continue;
+    }
+    element.setAttribute("aria-expanded", String(expanded));
+    if (expanded) element.setAttribute("aria-controls", controls);
+    else element.removeAttribute("aria-controls");
+  }
+}
+
+/** Where an airport's marker takes the pointer and the focus */
+export interface AirportTarget {
+  /**
+   * The chip of its code: a neighbour's square lies too close to its dot
+   * for a square of its own, and its code is drawn
+   */
+  chip: boolean;
+  /**
+   * Half the square round its dot, in pixels: smaller than the full one
+   * where a neighbour's lies close and there is no chip to take its place;
+   * null for the full square
+   */
+  half: number | null;
+  /** Neither: a panel lies over its dot */
+  out: boolean;
+}
+
+/**
+ * Make one part of an airport's marker its target (AirportTarget): that one
+ * takes the pointer, the focus and the airport's name, the other none of
+ * them (inert, which only this sets on these parts; dialogs make the whole
+ * marker inert). The focus goes along to the new target.
+ */
+export function setAirportTarget(
+  root: HTMLElement,
+  { chip, half, out }: AirportTarget,
+): void {
+  const found = parts(root);
+  if (!found) return;
+  const { dot, chip: code } = found;
+  const useChip = chip && !out;
+  const was = airportControl(root);
+  const focused = document.activeElement === was;
+  const arm = code.parentElement;
+  if (useChip) {
+    code.setAttribute("role", "button");
+    code.tabIndex = 0;
+    code.setAttribute("aria-label", dot.getAttribute("aria-label") ?? "");
+    code.title = dot.title;
+    arm?.removeAttribute("aria-hidden");
+    const expanded = dot.getAttribute("aria-expanded") === "true";
+    const controls = dot.getAttribute("aria-controls");
+    code.setAttribute("aria-expanded", String(expanded));
+    if (controls) code.setAttribute("aria-controls", controls);
+  } else if (code.hasAttribute("role")) {
+    for (const name of [
+      "role",
+      "tabindex",
+      "aria-label",
+      "title",
+      "aria-expanded",
+      "aria-controls",
+    ]) {
+      code.removeAttribute(name);
+    }
+    arm?.setAttribute("aria-hidden", "true");
+  }
+  const now = useChip ? code : dot;
+  if (focused && now !== was) now.focus({ preventScroll: true });
+  setInert(dot, useChip || out);
+  setInert(code, out);
+  if (half === null || useChip) root.style.removeProperty("--marker-target");
+  else root.style.setProperty("--marker-target", `${2 * half}px`);
+}
+
+function setInert(element: HTMLElement, inert: boolean): void {
+  if (element.hasAttribute("inert") !== inert) {
+    element.toggleAttribute("inert", inert);
+  }
+}
+
+/** Activate the chip of an airport's code from the keyboard, as a button */
+export function onChipKey(event: KeyboardEvent): void {
+  const chip = event.target as HTMLElement | null;
+  if (chip?.getAttribute("role") !== "button") return;
+  if (event.key !== "Enter" && event.key !== " ") return;
+  event.preventDefault();
+  chip.click();
+}
+
+/**
+ * The airport whose code a press on a marker hit, when that is another's:
+ * a code drawn into the square of another airport's marker would give it
+ * its press (ui/airportLabels.ts keeps them apart). Null for a press on
+ * the marker itself: on its dot, on its code, or from the keyboard (no
+ * place on the screen).
+ */
+export function codeOwnerAt(
+  event: MouseEvent,
+  element: HTMLElement,
+): string | null {
+  const target = event.target as Element | null;
+  if (event.detail === 0 || target?.closest(".airport-code")) return null;
+  for (const hit of document.elementsFromPoint?.(
+    event.clientX,
+    event.clientY,
+  ) ?? []) {
+    if (hit.classList.contains("airport-marker") && element.contains(hit)) {
+      return null;
+    }
+    const owner = hit
+      .closest(".airport-code")
+      ?.closest<HTMLElement>("." + AIRPORT_MARKER_CLASS);
+    if (owner && owner !== element) {
+      return (
+        owner
+          .querySelector("." + DOT_CONTROL_CLASS)
+          ?.getAttribute("aria-label") ?? null
+      );
+    }
+  }
+  return null;
+}
+
+/**
+ * Style a marker element as the home base, or as any other airport: its dot
+ * and its code. The element stays the same, so its focus and its listeners
+ * survive a change of home base.
  */
 export function setAirportElementHome(
   element: HTMLElement,
   isHomeBase: boolean,
 ): void {
+  element.classList.toggle("is-home", isHomeBase);
   element
     .querySelector(".airport-marker")
     ?.classList.toggle("airport-marker-home", isHomeBase);

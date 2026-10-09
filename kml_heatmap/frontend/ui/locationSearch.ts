@@ -706,7 +706,7 @@ class LocationSearch {
       const marker = this.app.airportMarkers[airport.name];
       const element = marker?.getElement();
       if (this.app.airportsVisible && element && !element.hidden) {
-        element.focus({ preventScroll: true });
+        marker!.getControl().focus({ preventScroll: true });
         this.app.airportManager.openPopup(airport.name);
       } else {
         this.showPin(map, airport.lon, airport.lat);

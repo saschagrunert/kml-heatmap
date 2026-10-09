@@ -1,5 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { AirportManager } from "../../../../kml_heatmap/frontend/ui/airportManager";
+import {
+  AirportManager,
+  popupOffsets,
+} from "../../../../kml_heatmap/frontend/ui/airportManager";
 import { createAirportMarkers } from "../../../../kml_heatmap/frontend/appInitializer";
 import {
   resetSiteData,
@@ -14,10 +17,8 @@ import type {
   AirportMarker,
   PathInfo,
 } from "../../../../kml_heatmap/frontend/types";
-import {
-  MAP_LAYERS,
-  MAP_SOURCES,
-} from "../../../../kml_heatmap/frontend/utils/constants";
+import { MAP_SOURCES } from "../../../../kml_heatmap/frontend/utils/constants";
+import { AirportCodes } from "../../../../kml_heatmap/frontend/ui/airportLabels";
 import {
   createMockApp,
   createDataset,
@@ -26,7 +27,6 @@ import {
 } from "../../testHelpers";
 import type { Popup as MockPopup } from "../../../mocks/maplibre-gl";
 import { REPLAY_CAMERA_MOVE } from "../../../../kml_heatmap/frontend/utils/mapHelpers";
-import type { Point } from "maplibre-gl";
 
 const { loadFeatures, listFlights } = vi.hoisted(() => ({
   listFlights: vi.fn(),
@@ -144,20 +144,18 @@ describe("AirportManager", () => {
         closeOnClick: false,
       });
       // Every side MapLibre may hang it on: one left out would be [0, 0],
-      // over the dot
+      // over the dot. At the edge of the dot's pointer target until there
+      // is a code to clear (popupOffsets)
       expect(offset).toEqual({
         center: [0, 0],
-        // Below the airport, at the edge of its dot's pointer target
         top: [0, 12],
         "top-left": [0, 12],
         "top-right": [0, 12],
-        // Above it, clear of its code, which sits above the dot
-        bottom: [0, -40],
-        "bottom-left": [0, -40],
-        "bottom-right": [0, -40],
-        // Beside it, clear of the code's half width
-        left: [30, 0],
-        right: [-30, 0],
+        bottom: [0, -12],
+        "bottom-left": [0, -12],
+        "bottom-right": [0, -12],
+        left: [12, 0],
+        right: [-12, 0],
       });
       // `setPopup` brings click and key handling that would toggle twice
       for (const marker of Object.values(markers)) {
@@ -205,7 +203,7 @@ describe("AirportManager", () => {
       const closed = vi.fn();
       popup.on("close", closed);
       markers["EDDF"]!.openPopup();
-      markers["EDDF"]!.getElement().focus();
+      markers["EDDF"]!.getControl().focus();
 
       markers["EDDM"]!.openPopup();
 
@@ -386,7 +384,7 @@ describe("AirportManager", () => {
     }
 
     function expanded(name: string): string | null {
-      return markers[name]!.getElement().getAttribute("aria-expanded");
+      return markers[name]!.getControl().getAttribute("aria-expanded");
     }
 
     it("closes the popup it opened, as the airplane's does", () => {
@@ -419,7 +417,7 @@ describe("AirportManager", () => {
       expect(expanded("EDDM")).toBe("true");
       // The marker whose popup is open names it
       const controls = (name: string): string | null =>
-        markers[name]!.getElement().getAttribute("aria-controls");
+        markers[name]!.getControl().getAttribute("aria-controls");
       expect(controls("EDDF")).toBeNull();
       expect(controls("EDDM")).toBe("airport-popup");
     });
@@ -434,7 +432,7 @@ describe("AirportManager", () => {
     });
 
     it("closes from the keyboard and leaves focus on the marker", () => {
-      const element = markers["EDDF"]!.getElement();
+      const element = markers["EDDF"]!.getControl();
       element.focus();
       // Enter and Space reach a button as a click with a `detail` of 0
       click("EDDF", 0);
@@ -460,7 +458,7 @@ describe("AirportManager", () => {
 
   describe("popup keyboard access", () => {
     it("moves focus into a popup opened from the keyboard", () => {
-      const element = markers["EDDF"]!.getElement();
+      const element = markers["EDDF"]!.getControl();
       element.focus();
       focusVisible(element, true);
 
@@ -472,7 +470,7 @@ describe("AirportManager", () => {
     });
 
     it("leaves focus alone when a pointer opened the popup", () => {
-      const element = markers["EDDF"]!.getElement();
+      const element = markers["EDDF"]!.getControl();
       element.focus();
       focusVisible(element, false);
 
@@ -491,7 +489,7 @@ describe("AirportManager", () => {
       // Closing takes the popup, and the focus in it, out of the document
       popup.remove();
 
-      expect(document.activeElement).toBe(markers["EDDF"]!.getElement());
+      expect(document.activeElement).toBe(markers["EDDF"]!.getControl());
     });
 
     it("puts focus back on the marker rather than on the page", () => {
@@ -500,7 +498,7 @@ describe("AirportManager", () => {
 
       markers["EDDF"]!.closePopup();
 
-      expect(document.activeElement).toBe(markers["EDDF"]!.getElement());
+      expect(document.activeElement).toBe(markers["EDDF"]!.getControl());
     });
 
     it("does not take focus from wherever the user went", () => {
@@ -843,23 +841,60 @@ describe("AirportManager", () => {
       labels().find((feature) => feature.properties["name"] === name);
     const labelSource = () => mockApp.map!.source(MAP_SOURCES.airportLabels);
 
-    it("hands the label layer every airport, with its flights and the home base", () => {
+    it("tells the map of every airport shown, the home base and the busier first", () => {
       airportManager.showAirports();
 
       expect(labels().map((feature) => feature.properties["name"])).toEqual(
-        airports.map((airport) => airport.name),
+        // EDDF has three flights, EDDM two, EDDK one, LOWW none
+        ["EDDF", "EDDM", "EDDK", "LOWW"],
       );
-      expect(label("EDDF")!.properties).toMatchObject({
-        icao: "EDDF",
-        count: 3,
-        home: true,
-      });
-      expect(label("EDDM")!.properties).toMatchObject({
-        count: 2,
-        home: false,
-      });
-      expect(label("LOWW")!.properties["count"]).toBe(0);
       expect(label("EDDK")!.geometry.coordinates).toEqual([7.14, 50.87]);
+    });
+
+    describe("its code on the map", () => {
+      beforeEach(() => {
+        const map = mockApp.map!;
+        map.jumpTo({ center: [8.5, 50.5], zoom: 6 });
+        const container = map.getContainer();
+        Object.defineProperty(container, "clientWidth", { value: 800 });
+        Object.defineProperty(container, "clientHeight", { value: 600 });
+      });
+
+      it("draws the code of an airport in view, and tells the map of its room", () => {
+        airportManager.updateLabels();
+
+        // EDDF is 170 by 400 pixels from the middle; the others are off
+        const arm =
+          markers["EDDF"]!.getElement().querySelector(".airport-code-arm")!;
+        expect(arm.classList.contains("is-hidden")).toBe(false);
+        expect(label("EDDF")!.properties["icao"]).toBe("EDDF");
+        expect(label("EDDF")!.properties["o"]).toHaveLength(2);
+        expect(label("EDDM")!.properties).not.toHaveProperty("o");
+      });
+
+      it("points the popup past the code of its airport", () => {
+        airportManager.updateLabels();
+        popup.setOffset.mockClear();
+
+        markers["EDDF"]!.openPopup();
+
+        const offsets = (
+          popup.setOffset.mock.lastCall as unknown[]
+        )[0] as Record<string, [number, number]>;
+        // The code is above the dot: a popup above clears it, one below
+        // points at the dot
+        expect(offsets["bottom"]![1]).toBeLessThan(-12);
+        expect(offsets["top"]).toEqual([0, 12]);
+      });
+
+      it("points the popup past its code again when the code moves", () => {
+        markers["EDDF"]!.openPopup();
+        popup.setOffset.mockClear();
+
+        airportManager.updateLabels();
+
+        expect(popup.setOffset).toHaveBeenCalled();
+      });
     });
 
     it("leaves out the airports towards the horizon of a steeply tilted map", async () => {
@@ -902,13 +937,13 @@ describe("AirportManager", () => {
       Object.defineProperty(map.getContainer(), "clientHeight", {
         value: 800,
       });
-      markers["EDDK"]!.getElement().focus();
+      markers["EDDK"]!.getControl().focus();
 
       map.jumpTo({ center: [8.67, 50.1], pitch: 80 });
       map.emit("moveend");
 
       expect(markers["EDDK"]!.getElement().hidden).toBe(false);
-      expect(document.activeElement).toBe(markers["EDDK"]!.getElement());
+      expect(document.activeElement).toBe(markers["EDDK"]!.getControl());
     });
 
     it("keeps an airport the filter hides hidden as it comes back from the horizon", async () => {
@@ -971,22 +1006,18 @@ describe("AirportManager", () => {
       await mockApp.mapReady;
       await Promise.resolve();
       const map = mockApp.map!;
-      expect(map.listenerCount("moveend")).toBeGreaterThan(0);
       const listening = {
         moveend: map.listenerCount("moveend"),
-        move: map.listenerCount(`mousemove:${MAP_LAYERS.airportLabels}`),
-        leave: map.listenerCount(`mouseleave:${MAP_LAYERS.airportLabels}`),
+        move: map.listenerCount("move"),
+        resize: map.listenerCount("resize"),
       };
 
       airportManager.destroy();
 
-      expect(map.listenerCount("moveend")).toBe(listening.moveend - 1);
-      expect(map.listenerCount(`mousemove:${MAP_LAYERS.airportLabels}`)).toBe(
-        listening.move - 1,
-      );
-      expect(map.listenerCount(`mouseleave:${MAP_LAYERS.airportLabels}`)).toBe(
-        listening.leave - 1,
-      );
+      // Its own rest and that of the codes
+      expect(map.listenerCount("moveend")).toBe(listening.moveend - 2);
+      expect(map.listenerCount("move")).toBe(listening.move - 1);
+      expect(map.listenerCount("resize")).toBe(listening.resize - 1);
     });
 
     it("leaves out the airports the filter hides, like their markers", () => {
@@ -996,82 +1027,41 @@ describe("AirportManager", () => {
         "EDDF",
         "EDDK",
       ]);
-      // Counted under the filter: EDDF has one flight in 2024
-      expect(label("EDDF")!.properties["count"]).toBe(1);
+    });
+  });
+
+  describe("popupOffsets", () => {
+    const place = (angle: number) => ({
+      angle,
+      from: 4,
+      to: 9,
+      at: 17,
+      hw: 20,
+      hh: 8,
+      narrow: false,
+      level: 0,
+      scale: 1,
     });
 
-    it("finds the airport whose label the map placed at a point", () => {
-      const map = mockApp.map!;
-      map.renderedFeatures = [
-        { layer: { id: "paths-altitude" }, properties: { pathId: 1 } },
-        {
-          layer: { id: MAP_LAYERS.airportLabels },
-          properties: { name: "EDDM" },
-        },
-      ];
+    it("clears a code above the dot only for a popup above it", () => {
+      const offsets = popupOffsets(place(-90));
 
-      const point = { x: 10, y: 20 } as Point;
-      expect(airportManager.airportLabelAt(point)).toBe("EDDM");
-      // A few pixels around the click, which lands on whole pixels
-      const [box, options] = map.queryRenderedFeatures.mock.calls[0] as [
-        [[number, number], [number, number]],
-        unknown,
-      ];
-      const [[left, top], [right, bottom]] = box;
-      expect(options).toEqual({ layers: [MAP_LAYERS.airportLabels] });
-      expect(10 - left).toBeGreaterThan(0);
-      expect(right - 10).toBe(10 - left);
-      expect(20 - top).toBe(10 - left);
-      expect(bottom - 20).toBe(10 - left);
-
-      map.renderedFeatures = [
-        { layer: { id: "paths-altitude" }, properties: { pathId: 1 } },
-      ];
-      expect(
-        airportManager.airportLabelAt({ x: 10, y: 20 } as Point),
-      ).toBeNull();
+      expect(offsets.bottom).toEqual([0, -29]);
+      expect(offsets.top).toEqual([0, 12]);
+      // Beside the dot the popup is clear of its half width
+      expect(offsets.left).toEqual([24, 0]);
+      expect(offsets.right).toEqual([-24, 0]);
     });
 
-    it("lights a hovered label up, and the dot of its marker with it", async () => {
-      await mockApp.mapReady;
-      await Promise.resolve();
-      const map = mockApp.map!;
-      const hover = (name: string): boolean =>
-        markers[name]!.getElement().classList.contains("is-label-hovered");
-      const pointOn = (name: string): void =>
-        map.emit(`mousemove:${MAP_LAYERS.airportLabels}`, {
-          features: [{ properties: { name } }],
-        });
-
-      pointOn("EDDF");
-      expect(hover("EDDF")).toBe(true);
-      expect(map.featureStates.get("airport-labels:EDDF")).toEqual({
-        hover: true,
-      });
-      expect(map.getCanvas().style.cursor).toBe("pointer");
-
-      // Straight on to the next label
-      pointOn("EDDM");
-      expect(hover("EDDF")).toBe(false);
-      expect(map.featureStates.get("airport-labels:EDDF")).toEqual({
-        hover: false,
-      });
-      expect(hover("EDDM")).toBe(true);
-
-      map.emit(`mouseleave:${MAP_LAYERS.airportLabels}`);
-      expect(hover("EDDM")).toBe(false);
-      expect(map.featureStates.get("airport-labels:EDDM")).toEqual({
-        hover: false,
-      });
-      expect(map.getCanvas().style.cursor).toBe("");
+    it("clears a code below or beside the dot on that side", () => {
+      expect(popupOffsets(place(90)).top).toEqual([0, 29]);
+      expect(popupOffsets(place(90)).bottom).toEqual([0, -12]);
+      expect(popupOffsets(place(0)).left[0]).toBeCloseTo(41);
+      expect(popupOffsets(place(180)).right[0]).toBeCloseTo(-41);
     });
 
-    it("finds no label before the map has its layers", () => {
-      mockApp.map!.removeLayer(MAP_LAYERS.airportLabels);
-
-      expect(
-        airportManager.airportLabelAt({ x: 10, y: 20 } as Point),
-      ).toBeNull();
+    it("keeps to the dot's pointer target with no code", () => {
+      expect(popupOffsets(null).bottom).toEqual([0, -12]);
     });
   });
 
@@ -1101,22 +1091,48 @@ describe("AirportManager", () => {
       expect(popup.isOpen()).toBe(false);
     });
 
+    it("places the codes again once the airports are back on", () => {
+      vi.useFakeTimers({
+        toFake: ["requestAnimationFrame", "cancelAnimationFrame"],
+      });
+      try {
+        const placed = vi.spyOn(
+          AirportCodes.prototype as unknown as { place(settle: boolean): void },
+          "place",
+        );
+        mockApp.airportsVisible = false;
+        placed.mockClear();
+
+        mockApp.airportsVisible = true;
+        expect(placed).not.toHaveBeenCalled();
+        // Once the markers show again, at the next frame
+        vi.advanceTimersToNextFrame();
+
+        expect(placed).toHaveBeenCalledTimes(1);
+        expect(placed).toHaveBeenCalledWith(true);
+        placed.mockRestore();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
     it("counts the home base again, and refreshes the visibility, when the filter changes", () => {
-      const labels = mockApp.map!.source(MAP_SOURCES.airportLabels).setData;
+      const placed = vi.spyOn(AirportCodes.prototype, "update");
       markers["EDDF"]!.openPopup();
       popup.setHTML.mockClear();
-      labels.mockClear();
+      placed.mockClear();
 
       mockApp.selectedYear = "2024";
 
       expect(popup.setHTML).toHaveBeenCalledTimes(1);
-      expect(labels).toHaveBeenCalledTimes(1);
+      expect(placed).toHaveBeenCalledTimes(1);
       expect(markers["EDDM"]!.getElement().hidden).toBe(true);
 
       mockApp.selectedAircraft = "D-ABCD";
 
       expect(popup.setHTML).toHaveBeenCalledTimes(2);
-      expect(labels).toHaveBeenCalledTimes(2);
+      expect(placed).toHaveBeenCalledTimes(2);
+      placed.mockRestore();
     });
 
     it("refreshes only the visibility for a selection change, and only where it changes", () => {

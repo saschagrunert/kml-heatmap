@@ -1649,52 +1649,26 @@ describe("MapApp controls and map", () => {
       expect(mockLayerManagerInstance.closeSegmentPopup).toHaveBeenCalledOnce();
     });
 
-    it("hands a click on an airport's label to its airport, as on the marker", async () => {
+    it("leaves a click on an airport's code to its marker, as on the dot", async () => {
       await initializeApp(app);
       app.selectedPathIds = new Set([...app.selectedPathIds, 1]);
-      mockAirportManagerInstance.airportLabelAt.mockReturnValue("Leipzig EDDP");
+      // The code is a part of the marker's button (ui/airportLabels.ts)
+      const marker = document.createElement("button");
+      marker.className = "maplibregl-marker";
+      const code = document.createElement("span");
+      code.className = "airport-code";
+      marker.append(code);
 
       mockMap(app).emit("click", {
         ...click,
-        originalEvent: { detail: 1, timeStamp: 1000 },
+        originalEvent: { target: code, detail: 1, timeStamp: 1000 },
       });
 
-      expect(mockAirportManagerInstance.airportLabelAt).toHaveBeenCalledWith(
-        click.point,
-      );
-      expect(mockAirportManagerInstance.activateAirport).toHaveBeenCalledWith(
-        "Leipzig EDDP",
-        false,
-      );
-      // Not a click on the map beside every flight
+      // The marker's own listener acts on it; the map does nothing
+      expect(mockAirportManagerInstance.activateAirport).not.toHaveBeenCalled();
       expect(mockLayerManagerInstance.hitTest).not.toHaveBeenCalled();
       expect(mockPathSelectionInstance.clearSelection).not.toHaveBeenCalled();
-
-      // The second click of a double click would close what the first opened
-      mockMap(app).emit("click", {
-        ...click,
-        originalEvent: { detail: 2, timeStamp: 1200 },
-      });
-      expect(mockAirportManagerInstance.activateAirport).toHaveBeenCalledOnce();
-    });
-
-    it("tells the airport of a label tapped by a finger, which only opens", async () => {
-      await initializeApp(app);
-      mockAirportManagerInstance.airportLabelAt.mockReturnValue("Leipzig EDDP");
-
-      // iOS says "mouse" for a tap's click; the map saw the touch end
-      mockMap(app).emit("touchend", {
-        originalEvent: { timeStamp: 900, touches: [] },
-      });
-      mockMap(app).emit("click", {
-        ...click,
-        originalEvent: { detail: 1, timeStamp: 1000, pointerType: "mouse" },
-      });
-
-      expect(mockAirportManagerInstance.activateAirport).toHaveBeenCalledWith(
-        "Leipzig EDDP",
-        true,
-      );
+      expect(mockAirportManagerInstance.closePopup).not.toHaveBeenCalled();
     });
 
     it("closes the popups, none of which closes on a click by itself", async () => {

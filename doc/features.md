@@ -91,11 +91,37 @@ flights. Hovering a path shows the exact value.
 
 ### Airports
 
-The Airports switch shows the airport markers with their ICAO codes above them.
-The codes are placed together with the place names of the base map, so they
-never cover one another, nor the dot of another airport; where a code above its
-dot has no room, the home base and then the busier airport keep theirs, and the
-others come back as you zoom in. They are left out below `z` 5, and on a map
+The Airports switch shows the airport markers with their ICAO codes. Each code
+sits on a chip at the end of a short stem from its dot, above it where there is
+room, otherwise wherever round the dot there is, and where the airports crowd,
+further out on a longer stem, a leader line that says whose code it is. Codes
+never cover one another, another dot or another stem, nor the panels over the
+map, nor the square round another airport's dot that takes a press for it; the
+home base and then the busier airports choose first, and a code is only left out
+where nothing round its dot is free. Placed on the screen as the map is drawn,
+this holds on a turned or tilted map and on the globe alike. While the map moves
+a code keeps its place as long as that stays free and glides round its dot when
+it has to move; at rest the codes take their best places again, so a code pushed
+aside comes back above its dot. The place names of the base map give way to the
+codes and their dots, once the map is at rest; on a tilted map the room kept for
+a dot shrinks and grows a few pixels with the distance. On a tilted map (the 3D
+view) the codes are pins: drawn smaller the farther they are and larger the
+nearer, as the map draws its labels (never smaller than 0.7 of their size nor
+than 9 pixels of text, and on a phone never smaller at all), and standing
+straight up from their dots, on a taller stem where it is crowded, before they
+turn aside. An airport the relief hides from the camera fades out, its code with
+it. Wrapped's overview draws them flat. A click or a tap on a code opens its
+airport, as on the dot, and the airport's popup opens clear of its code. Each
+airport is one target for the pointer and the keyboard, and no two overlap: the
+24 pixel square round its dot where that lies clear of the squares of the
+airports placed before it, otherwise its code's chip (taking a press in at least
+24 by 24 pixels round the code it draws), which then takes the focus and the
+airport's name while the dot takes no press of its own. Only an airport whose
+code has no room either gets a square smaller than 24 pixels, as large as its
+neighbours leave. Airports under a panel, and the replay's airplane, are kept
+the same way: a marker under a panel takes no press and no focus, and the
+airplane's square comes first. The codes are left out below `z` 5 on the map
+(Wrapped's overview shows them as long as it shows the markers), and on a map
 tilted past about 55 degrees the airports more than twice as far from the camera
 as the middle of the map are hidden, markers and codes, where they would crowd
 into a strip along the horizon. Below `z` 3 the markers are hidden too, a clump

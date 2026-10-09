@@ -67,75 +67,12 @@ async function sourceHeat(page: Page, id: string): Promise<number> {
   );
 }
 
-/** How many airport codes the map has placed in view */
-function placedAirportLabels(page: Page): Promise<number> {
-  return page.evaluate(
-    () =>
-      window.mapApp!.map!.queryRenderedFeatures({ layers: ["airport-labels"] })
-        .length,
-  );
-}
+/** The airport codes drawn, beside their dots (ui/airportLabels.ts) */
+const SHOWN_CODES = ".airport-code-arm:not(.is-hidden) .airport-code";
 
-/**
- * A point well inside a placed airport label, on the map and not on a
- * marker, with the code the label shows. The map tells which label is at a
- * point, not where a label is, so the ground around each airport is
- * searched. The middle of a code is under its marker, which reaches up
- * over it (see `.airport-marker-reach`), and a point on the label's edge
- * may be just off it once a click lands on whole pixels; so of the points
- * on the label and on the map, the one nearest the label's middle is taken.
- */
-function airportLabelPoint(
-  page: Page,
-): Promise<{ x: number; y: number; icao: string } | null> {
-  return page.evaluate(() => {
-    const map = window.mapApp!.map!;
-    const box = map.getCanvas().getBoundingClientRect();
-    for (const feature of map.queryRenderedFeatures({
-      layers: ["airport-labels"],
-    })) {
-      const [lng, lat] = (feature.geometry as GeoJSON.Point).coordinates;
-      const at = map.project([lng!, lat!]);
-      const hits: [number, number][] = [];
-      for (let dy = -40; dy <= 40; dy += 1) {
-        for (let dx = -48; dx <= 48; dx += 1) {
-          const point: [number, number] = [
-            Math.round(at.x + dx),
-            Math.round(at.y + dy),
-          ];
-          const [hit] = map.queryRenderedFeatures(point, {
-            layers: ["airport-labels"],
-          });
-          if (hit?.properties["name"] === feature.properties["name"]) {
-            hits.push(point);
-          }
-        }
-      }
-      if (hits.length === 0) continue;
-      const mean = (axis: 0 | 1): number =>
-        hits.reduce((sum, point) => sum + point[axis], 0) / hits.length;
-      const middle = [mean(0), mean(1)] as const;
-      const onMap = hits
-        .filter(
-          ([x, y]) =>
-            document.elementFromPoint(box.left + x, box.top + y) ===
-            map.getCanvas(),
-        )
-        .sort(
-          (a, b) =>
-            Math.hypot(a[0] - middle[0], a[1] - middle[1]) -
-            Math.hypot(b[0] - middle[0], b[1] - middle[1]),
-        );
-      const [best] = onMap;
-      if (!best) continue;
-      return {
-        x: box.left + best[0],
-        y: box.top + best[1],
-        icao: String(feature.properties["icao"]),
-      };
-    }
-    return null;
-  });
+/** How many airport codes are drawn in view */
+function placedAirportLabels(page: Page): Promise<number> {
+  return page.locator(SHOWN_CODES).count();
 }
 
 function refreshAirportMarkerSizes(page: Page): Promise<void> {
@@ -502,7 +439,7 @@ test.describe("Layers", () => {
       .toBe(1);
   });
 
-  test("airport labels are drawn by the map, and none zoomed out", async ({
+  test("airport codes are drawn beside their dots, and none zoomed out", async ({
     page,
   }) => {
     await expect(
@@ -513,12 +450,12 @@ test.describe("Layers", () => {
     await setZoom(page, 8);
     await expect.poll(() => placedAirportLabels(page)).toBeGreaterThan(0);
 
-    // Below the label layer's minimum zoom
+    // Below the zoom of the codes
     await setZoom(page, 4);
     await expect.poll(() => placedAirportLabels(page)).toBe(0);
   });
 
-  test("a click on an airport's label opens its popup, as the marker does", async ({
+  test("a click on an airport's code opens its popup, as the marker does", async ({
     page,
   }) => {
     await expect(
@@ -527,11 +464,12 @@ test.describe("Layers", () => {
     await setZoom(page, 8);
     await expect.poll(() => placedAirportLabels(page)).toBeGreaterThan(0);
 
-    const target = await airportLabelPoint(page);
-    expect(target).not.toBeNull();
-    await page.mouse.click(target!.x, target!.y);
+    // A code that has come to rest: it glides while the map settles
+    const code = page.locator(SHOWN_CODES).first();
+    const icao = (await code.textContent())!;
+    await code.click();
 
-    await expect(mapPopupContent(page)).toContainText(target!.icao);
+    await expect(mapPopupContent(page)).toContainText(icao);
   });
 
   test("the colour layers follow the filter while the heatmap is off (regression)", async ({

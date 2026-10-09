@@ -338,8 +338,13 @@ export interface AirportMarker extends PopupHost {
   readonly marker: Marker;
   /** Latitude first, like the rest of the app */
   getLatLng(): MapCenter;
-  /** The marker's element: a real button, so it takes focus and Enter */
-  getElement(): HTMLButtonElement;
+  /** The marker's element, which the map positions */
+  getElement(): HTMLElement;
+  /**
+   * What of the marker takes the focus and Enter: the button round its dot,
+   * or the chip of its code where that is its target (setAirportTarget)
+   */
+  getControl(): HTMLElement;
   setVisible(visible: boolean): void;
   setHome(home: boolean): void;
 }
