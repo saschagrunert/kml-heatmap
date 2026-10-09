@@ -135,8 +135,8 @@ export class MapLayerHandle implements LayerHandle {
  * Handle of the airport markers and their labels. The markers are DOM, not
  * a map layer, so hiding them is a class on the map container that the
  * stylesheet acts on; every marker follows at once and none has to be
- * removed and added again. The labels are a layer of the map, and so are
- * the stand-ins of the dots they keep clear of.
+ * removed and added again, their codes with them. The room the codes and
+ * the dots take from the place names is a layer of the map.
  */
 export class AirportLayerHandle extends MapLayerHandle {
   constructor(visible = true) {
@@ -450,13 +450,12 @@ function addDataLayersTo(map: MapLibreMap): void {
     before,
   );
 
-  // The airport codes: labels, so on top of every layer, the base style's
-  // own labels included (see ui/airportLabels.ts)
+  // The room of the airport codes and their dots: labels, so on top of
+  // every layer, the base style's own labels included (see
+  // ui/airportLabels.ts)
   map.addSource(MAP_SOURCES.airportLabels, {
     type: "geojson",
     data: emptyGeoJson(),
-    // The hover state is set by the airport's name
-    promoteId: "name",
   });
   addAirportLabelImages(map);
   map.addLayer(airportLabelLayer());
@@ -554,7 +553,7 @@ function labelOverHeat(layer: LayerSpecification): LayerSpecification {
  * them. They are carried over as the map reports them, with their data,
  * filters, visibility and paint, in their order, and below the first label
  * layer of the new style, where `addDataLayers` would have put them; the
- * airport labels and the stand-ins of their dots go on top of all. The
+ * room of the airport codes and of their dots goes on top of all. The
  * projection comes along too: it lives in the style, and a globe chosen
  * before the base style arrived would otherwise turn back into Mercator;
  * and so does the relief of the 3D view (ui/terrain.ts), which would
@@ -584,7 +583,7 @@ export function withDataLayers(
   }
   const ids: readonly string[] = Object.values(MAP_LAYERS);
   const own = previous.layers.filter((layer) => ids.includes(layer.id));
-  // The app's symbol layers are the airport labels and their dots
+  // The app's symbol layers are the room of the airport codes and dots
   const onTop = own.filter((layer) => layer.type === "symbol");
   const below = own.filter((layer) => layer.type !== "symbol");
   const labels = next.layers.findIndex((layer) => layer.type === "symbol");

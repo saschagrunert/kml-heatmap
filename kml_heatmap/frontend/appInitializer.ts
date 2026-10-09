@@ -3,8 +3,11 @@
  * Extracted from MapApp to reduce file size and improve modularity
  */
 
-import { Marker, Point } from "maplibre-gl";
+import { Marker } from "maplibre-gl";
 import {
+  airportControl,
+  codeOwnerAt,
+  onChipKey,
   createAirportElement,
   setAirportElementHome,
 } from "./features/airports";
@@ -13,7 +16,7 @@ import { domCache } from "./utils/domCache";
 import { applyMetricColors } from "./utils/htmlGenerators";
 import { createActivationFilter, toLngLat } from "./utils/mapHelpers";
 import { announceStatus, dismissToast, showToast } from "./utils/toast";
-import { setAirportLabelHover } from "./ui/airportLabels";
+import { NO_CODE_LABEL } from "./ui/airportLabels";
 import { NO_DATA_MESSAGE, NO_TIMING_MESSAGE } from "./ui/actions";
 import type { MapApp } from "./mapApp";
 import type { Airport, AirportMarker, Metadata } from "./types";
@@ -462,8 +465,14 @@ export function createAirportMarkers(app: MapApp, airports: Airport[]): void {
 
   for (const airport of airports) {
     const name = airport.name;
-    const element = createAirportElement(name);
-    const marker = new Marker({ element, anchor: "center" })
+    const element = createAirportElement(name, airport.code ?? NO_CODE_LABEL);
+    // The relief or the far side of the globe hides it, and its code with
+    // it: the stylesheet fades it out (`opacityWhenCovered` is its opacity)
+    const marker = new Marker({
+      element,
+      anchor: "center",
+      opacityWhenCovered: 0,
+    })
       .setLngLat(toLngLat([airport.lat, airport.lon]))
       .addTo(map);
 
@@ -475,6 +484,7 @@ export function createAirportMarkers(app: MapApp, airports: Airport[]): void {
         return { lat, lng };
       },
       getElement: () => element,
+      getControl: () => airportControl(element),
       openPopup: () => app.airportManager.openPopup(name),
       closePopup: () => app.airportManager.closePopup(name),
       isPopupOpen: () => app.airportManager.isPopupOpen(name),
@@ -486,49 +496,25 @@ export function createAirportMarkers(app: MapApp, airports: Airport[]): void {
       setHome: (home) => setAirportElementHome(element, home),
     };
 
-    // A button reports Enter and Space as a click, so this one listener is
-    // the mouse, the finger and the keyboard. A second activation closes the
-    // popup again, as the airplane's does. The second click of a double
-    // click or a double tap is not one: it would close what the first
-    // opened (see createActivationFilter).
+    // A button reports Enter and Space as a click, and so does the chip of
+    // the code while it is the target (onChipKey), so this one listener is
+    // the mouse, the finger and the keyboard, on the dot and on the code
+    // alike. A second activation closes the popup again, as the airplane's
+    // does. The second click of a double click or a double tap is not one:
+    // it would close what the first opened (see createActivationFilter).
     const isActivation = createActivationFilter();
     element.addEventListener("click", (event) => {
       if (isActivation(event)) {
         app.airportManager.activateAirport(
-          pressedAirport(event) ?? name,
+          codeOwnerAt(event, element) ?? name,
           app.touchClock.isTouchClick(event),
         );
       }
     });
-    // The target reaches past the dot, up over where its code goes, and a
-    // code of an airport nearby may have gone below or beside its own dot
-    // into it (see ui/airportLabels.ts): a press there on a code is one on
-    // that code, which the map tells. On the dot, and from the keyboard,
-    // it is this airport.
-    const pressedAirport = (event: MouseEvent): string | null => {
-      const target = event.target;
-      if (
-        !(target instanceof Element) ||
-        target === element ||
-        target.classList.contains("airport-marker")
-      ) {
-        return null;
-      }
-      const box = map.getCanvas().getBoundingClientRect();
-      return app.airportManager.airportLabelAt(
-        new Point(event.clientX - box.left, event.clientY - box.top),
-      );
-    };
-    // The dot under the pointer lights its label up too (see airportLabels)
-    element.addEventListener("mouseenter", () =>
-      setAirportLabelHover(map, name, true),
-    );
-    element.addEventListener("mouseleave", () =>
-      setAirportLabelHover(map, name, false),
-    );
     // Escape reaches the popup itself only while focus is inside it
     element.addEventListener("keydown", (event) => {
       if (event.key === "Escape") airportMarker.closePopup();
+      else onChipKey(event);
     });
 
     // In place of one made before, which goes: a second set over the

@@ -52,8 +52,8 @@ function yearSelect(): HTMLSelectElement {
 }
 
 const airports: Airport[] = [
-  { name: "Frankfurt EDDF", lat: 50.1, lon: 8.67 },
-  { name: "Munich EDDM", lat: 48.35, lon: 11.78 },
+  { name: "Frankfurt EDDF", code: "EDDF", lat: 50.1, lon: 8.67 },
+  { name: "Munich EDDM", code: "EDDM", lat: 48.35, lon: 11.78 },
 ];
 
 const metadata: Metadata = {
@@ -214,6 +214,8 @@ describe("appInitializer", () => {
       expect(marker.options).toEqual({
         element: eddf().getElement(),
         anchor: "center",
+        // Faded out entirely where the relief covers it (the stylesheet)
+        opacityWhenCovered: 0,
       });
       // Longitude first for the map, latitude first for the app
       expect(marker.setLngLat).toHaveBeenCalledWith([8.67, 50.1]);
@@ -248,14 +250,16 @@ describe("appInitializer", () => {
     it("makes each marker a button named after its airport", () => {
       create();
       const element = eddf().getElement();
+      const button = eddf().getControl() as HTMLButtonElement;
 
-      expect(element).toBeInstanceOf(HTMLButtonElement);
-      expect(element.type).toBe("button");
       expect(element.classList.contains("airport-marker-root")).toBe(true);
-      expect(element.title).toBe("Frankfurt EDDF");
-      expect(element.getAttribute("aria-label")).toBe("Frankfurt EDDF");
+      expect(button).toBeInstanceOf(HTMLButtonElement);
+      expect(element.contains(button)).toBe(true);
+      expect(button.type).toBe("button");
+      expect(button.title).toBe("Frankfurt EDDF");
+      expect(button.getAttribute("aria-label")).toBe("Frankfurt EDDF");
       // It opens a popup, which starts out closed
-      expect(element.getAttribute("aria-expanded")).toBe("false");
+      expect(button.getAttribute("aria-expanded")).toBe("false");
       // The code is a label of the map (see ui/airportLabels.ts)
       expect(element.querySelector(".airport-label")).toBeNull();
     });
@@ -338,51 +342,16 @@ describe("appInitializer", () => {
       );
     });
 
-    it("gives a press on a code of another airport in its reach to that airport", () => {
+    it("activates its airport on a press on its code, which is part of it", () => {
       create();
       const element = eddf().getElement();
-      const reach = element.querySelector(".airport-marker-reach")!;
-      app.airportManager.airportLabelAt.mockReturnValue("Munich EDDM");
 
-      // A code placed below or beside its own dot, under this target
-      reach.dispatchEvent(
-        new MouseEvent("click", {
-          bubbles: true,
-          detail: 1,
-          clientX: 40,
-          clientY: 30,
-        }),
-      );
-
-      expect(app.airportManager.airportLabelAt).toHaveBeenCalledWith(
-        expect.objectContaining({ x: 40, y: 30 }),
-      );
-      expect(app.airportManager.activateAirport).toHaveBeenCalledWith(
-        "Munich EDDM",
-        false,
-      );
-    });
-
-    it("keeps a press on the dot, or beside it on no code, for its airport", () => {
-      create();
-      const element = eddf().getElement();
-      app.airportManager.airportLabelAt.mockReturnValue("Munich EDDM");
-
-      // On the dot: the codes keep off it, and a finger's padding reached
       element
-        .querySelector(".airport-marker")!
+        .querySelector(".airport-code")!
         .dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 1 }));
-      expect(app.airportManager.activateAirport).toHaveBeenLastCalledWith(
-        "Frankfurt EDDF",
-        false,
-      );
 
-      // Beside it, where no code is
-      app.airportManager.airportLabelAt.mockReturnValue(null);
-      element
-        .querySelector(".airport-marker-reach")!
-        .dispatchEvent(new MouseEvent("click", { bubbles: true }));
-      expect(app.airportManager.activateAirport).toHaveBeenLastCalledWith(
+      expect(element.querySelector(".airport-code")!.textContent).toBe("EDDF");
+      expect(app.airportManager.activateAirport).toHaveBeenCalledWith(
         "Frankfurt EDDF",
         false,
       );
@@ -431,45 +400,27 @@ describe("appInitializer", () => {
     });
 
     it("acts on a click alone, which is also Enter and Space on a button", () => {
-      const listen = vi.spyOn(HTMLButtonElement.prototype, "addEventListener");
+      const listen = vi.spyOn(HTMLDivElement.prototype, "addEventListener");
 
       create([airports[0]!]);
 
-      // The only key is Escape; the pointer's coming and going lights the
-      // label up
+      // The keys are Escape, and Enter and Space on the code's chip while
+      // it is the target (onChipKey), which press it; the stylesheet lights
+      // up the dot and the code of the marker under the pointer
       expect(listen.mock.calls.map(([type]) => type).sort()).toEqual([
         "click",
         "keydown",
-        "mouseenter",
-        "mouseleave",
       ]);
       listen.mockRestore();
 
       // The keys arrive as the click the browser makes of them, and not a
       // second time through a key listener
       eddf()
-        .getElement()
+        .getControl()
         .dispatchEvent(
           new KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
         );
       expect(app.airportManager.activateAirport).not.toHaveBeenCalled();
-    });
-
-    it("lights its label up while the pointer is on the dot", () => {
-      create();
-      const element = eddf().getElement();
-
-      element.dispatchEvent(new MouseEvent("mouseenter"));
-      expect(app.map!.setFeatureState).toHaveBeenLastCalledWith(
-        { source: "airport-labels", id: "Frankfurt EDDF" },
-        { hover: true },
-      );
-
-      element.dispatchEvent(new MouseEvent("mouseleave"));
-      expect(app.map!.setFeatureState).toHaveBeenLastCalledWith(
-        { source: "airport-labels", id: "Frankfurt EDDF" },
-        { hover: false },
-      );
     });
 
     it("closes its popup on Escape from the focused marker", () => {

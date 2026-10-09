@@ -557,7 +557,7 @@ export async function centerOnAirport(
 /** Give an airport's marker the keyboard focus */
 export function focusAirportMarker(page: Page, name: string): Promise<void> {
   return page.evaluate((airport) => {
-    window.mapApp!.airportMarkers[airport]!.getElement().focus();
+    window.mapApp!.airportMarkers[airport]!.getControl().focus();
   }, name);
 }
 
@@ -568,7 +568,7 @@ export function airportMarkerIsFocused(
   return page.evaluate(
     (airport) =>
       document.activeElement ===
-      window.mapApp!.airportMarkers[airport]!.getElement(),
+      window.mapApp!.airportMarkers[airport]!.getControl(),
     name,
   );
 }

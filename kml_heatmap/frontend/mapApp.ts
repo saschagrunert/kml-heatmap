@@ -60,7 +60,6 @@ import { domCache } from "./utils/domCache";
 import { applyGradientTokens } from "./utils/colors";
 import { renderControlIcons } from "./utils/icons";
 import {
-  createActivationFilter,
   cssVar,
   DOUBLE_TAP_MS,
   followContextLoss,
@@ -324,13 +323,7 @@ export class MapApp {
   /** Takes back `keepMarkerTapsFromZoom`, set with the map */
   private releaseMarkerTaps: (() => void) | null = null;
   /**
-   * The clicks on airport labels that activate them: the second click of a
-   * double click or tap would close the popup the first one opened, as it
-   * would on a marker (see createActivationFilter)
-   */
-  private readonly isLabelActivation = createActivationFilter();
-  /**
-   * When an airport's marker or label was last clicked. The popup the click
+   * When an airport's marker or its code was last clicked. The popup the click
    * opens pans the map until it shows in full, which can carry the airport
    * out from under the second tap of a double tap, and the map gets that
    * one: it must not close the popup. By the time of the event, as in
@@ -754,12 +747,7 @@ export class MapApp {
     // A first visit has just been fitted to it, and a saved view or a link
     // may show the very same (see isReset)
     this.measureStartView(map);
-    // An airport's label opens its popup like the marker does, so a double
-    // click or tap on it does not zoom either
-    this.releaseMarkerTaps = keepMarkerTapsFromZoom(
-      map,
-      (point) => this.airportManager?.airportLabelAt(point) != null,
-    );
+    this.releaseMarkerTaps = keepMarkerTapsFromZoom(map);
 
     // Registered before anything can fail. Without a listener MapLibre
     // writes every error to the console itself.
@@ -1353,20 +1341,6 @@ export class MapApp {
     // not change the selection behind the dialog, nor open the values of a
     // flight, whose popup would be a tab stop outside the dialog.
     if (this.wrappedVisible) return;
-
-    // An airport's label is drawn by the map, and a click on it is one on
-    // its marker (see ui/airportLabels.ts), replay or not
-    const airport = this.airportManager.airportLabelAt(e.point);
-    if (airport !== null) {
-      this.airportClickAt = at;
-      if (this.isLabelActivation(e.originalEvent)) {
-        this.airportManager.activateAirport(
-          airport,
-          this.touchClock.isTouchClick(e.originalEvent),
-        );
-      }
-      return;
-    }
 
     const replay = this.replayState;
     if (this.replayActive) {

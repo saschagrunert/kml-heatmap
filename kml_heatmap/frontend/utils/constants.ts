@@ -172,11 +172,9 @@ export const MAP_SOURCES = {
  * replay trail have a source and a layer each for their lines and for their
  * ribbons at their altitude in the 3D view (see calculations/lift.ts). The
  * order here is the drawing order, bottom to top. All of them sit below the
- * first label layer of the base style, but the airport labels: they are
- * labels themselves and go on top of every layer, where the map places them
- * first and the place names give way. The stand-ins of the airport dots,
- * which draw nothing, go above them and are placed before them (see
- * ui/airportLabels.ts).
+ * first label layer of the base style, but the room of the airport codes
+ * and of their dots: invisible labels on top of every layer, which the map
+ * places first, so the place names give way (see ui/airportLabels.ts).
  */
 export const MAP_LAYERS = {
   aviation: "aviation",

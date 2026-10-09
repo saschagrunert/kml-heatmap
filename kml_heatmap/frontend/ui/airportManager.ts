@@ -1,24 +1,19 @@
 /**
  * Airport Manager - Handles airport markers and popups
  */
-import {
-  Popup,
-  type GeoJSONSource,
-  type MapLayerMouseEvent,
-  type Point,
-  type PositionAnchor,
-  type Subscription,
-} from "maplibre-gl";
+import { Popup, type PositionAnchor, type Subscription } from "maplibre-gl";
 import type { MapApp } from "../mapApp";
-import { calculateVisibleAirports, findHomeBase } from "../features/airports";
+import {
+  calculateVisibleAirports,
+  findHomeBase,
+  setAirportExpanded,
+} from "../features/airports";
 import type { AirportCounts } from "../features/airports";
 import { datasetIndex, shownSelection } from "../calculations/datasetIndex";
 import type { Airport, KMLDataset } from "../types";
 import {
   AIRPORT_HIDE_MARKERS_BELOW_ZOOM,
   AIRPORT_SIZE_ZOOMS,
-  MAP_LAYERS,
-  MAP_SOURCES,
 } from "../utils/constants";
 import { ddToDms } from "../utils/geometry";
 import {
@@ -33,9 +28,9 @@ import {
   onMapReady,
   whenContextRestored,
 } from "../utils/mapHelpers";
-import { isTouchDevice } from "../utils/device";
 import { siteData } from "../state/siteData";
-import { airportLabelFeatures, setAirportLabelHover } from "./airportLabels";
+import { AirportCodes, type CodeMarker } from "./airportLabels";
+import type { CodePlace } from "../calculations/codePlacement";
 import { prefersReducedMotion } from "../utils/motion";
 import { listFlights } from "./airportFlights";
 
@@ -53,18 +48,6 @@ function siteAirports(): Airport[] {
   return siteData.airports ?? [];
 }
 
-/**
- * How far from a click an airport label still counts as hit, in pixels: a
- * little for a pointer, more for a finger. Less than for a flight (see
- * layerManager), since a label sits over the flights it would take clicks
- * from.
- */
-const LABEL_HIT_PADDING_PX = 3;
-const LABEL_TOUCH_HIT_PADDING_PX = 6;
-
-/** Class on a marker whose label is under the pointer */
-const LABEL_HOVERED_CLASS = "is-label-hovered";
-
 /** Room kept between an airport popup and the edge of the map, in pixels */
 const POPUP_PAN_PADDING_PX = 50;
 
@@ -75,35 +58,43 @@ const POPUP_PAN_PADDING_PX = 50;
  */
 const POPUP_OFFSET_PX = 12;
 
-/**
- * Distance from the middle of a marker to the top of its code, which sits
- * above the dot (ui/airportLabels.ts): a popup that hangs above the airport
- * points at the code rather than covering it
- */
-const POPUP_ABOVE_LABEL_PX = 40;
+/** Room kept between the tip of a popup and a code it clears, in pixels */
+const POPUP_CODE_GAP_PX = 4;
 
 /**
- * Distance from the middle of a marker to a popup beside it, clear of the
- * code above the dot, whose four letters are about 50 pixels wide
+ * Where the popup's tip goes for each side MapLibre hangs it on: at the
+ * edge of the marker's target, or past the airport's code where that lies
+ * on the popup's side, so the code stays in view
  */
-const POPUP_BESIDE_LABEL_PX = 30;
-
-/**
- * Where the popup's tip goes for each side MapLibre hangs it on. Below the
- * airport it points at the dot, as the code is above it; above and beside
- * it, the code stays in view.
- */
-const POPUP_OFFSETS: Record<PositionAnchor, [number, number]> = {
-  center: [0, 0],
-  top: [0, POPUP_OFFSET_PX],
-  "top-left": [0, POPUP_OFFSET_PX],
-  "top-right": [0, POPUP_OFFSET_PX],
-  bottom: [0, -POPUP_ABOVE_LABEL_PX],
-  "bottom-left": [0, -POPUP_ABOVE_LABEL_PX],
-  "bottom-right": [0, -POPUP_ABOVE_LABEL_PX],
-  left: [POPUP_BESIDE_LABEL_PX, 0],
-  right: [-POPUP_BESIDE_LABEL_PX, 0],
-};
+export function popupOffsets(
+  place: CodePlace | null,
+): Record<PositionAnchor, [number, number]> {
+  let below = POPUP_OFFSET_PX;
+  let above = POPUP_OFFSET_PX;
+  let right = POPUP_OFFSET_PX;
+  let left = POPUP_OFFSET_PX;
+  if (place) {
+    const radians = (place.angle * Math.PI) / 180;
+    const x = place.at * Math.cos(radians);
+    const y = place.at * Math.sin(radians);
+    const past = (edge: number): number => edge + POPUP_CODE_GAP_PX;
+    if (y + place.hh > 0) below = Math.max(below, past(y + place.hh));
+    if (y - place.hh < 0) above = Math.max(above, past(place.hh - y));
+    if (x + place.hw > 0) right = Math.max(right, past(x + place.hw));
+    if (x - place.hw < 0) left = Math.max(left, past(place.hw - x));
+  }
+  return {
+    center: [0, 0],
+    top: [0, below],
+    "top-left": [0, below],
+    "top-right": [0, below],
+    bottom: [0, -above],
+    "bottom-left": [0, -above],
+    "bottom-right": [0, -above],
+    left: [right, 0],
+    right: [-left, 0],
+  };
+}
 
 /** Store keys that change the popup counts and the home base */
 const POPUP_KEYS = ["currentData", "selectedYear", "selectedAircraft"] as const;
@@ -146,7 +137,7 @@ export class AirportManager {
   private readonly popup = new Popup({
     focusAfterOpen: false,
     maxWidth: "none",
-    offset: POPUP_OFFSETS,
+    offset: popupOffsets(null),
     closeOnClick: false,
   });
   /** The airport the popup is open for */
@@ -157,8 +148,16 @@ export class AirportManager {
   private labelledCounts: AirportCounts | null = null;
   /** The airports too far towards the horizon to be shown */
   private farAirports: ReadonlySet<string> = new Set();
-  /** The airport whose label is under the pointer */
-  private hoveredLabel: string | null = null;
+  /** Where the codes go, once there is a map */
+  private readonly codes: AirportCodes | null = null;
+  /** The codes in the order they are placed, and what that was worked out of */
+  private ranking: {
+    counts: AirportCounts;
+    markers: number;
+    ranked: CodeMarker[];
+  } | null = null;
+  /** Ends what follows the map: the codes' handlers */
+  private readonly following = new AbortController();
   /** The map's handlers below, once it is ready */
   private subscriptions: Subscription[] = [];
   private destroyed = false;
@@ -172,22 +171,6 @@ export class AirportManager {
     if (!isReplayCameraMove(event)) this.updateFarAirports();
   };
 
-  /**
-   * A label opens a popup like its marker, and says so: the pointer, and
-   * the hover of both the label and the marker's dot
-   */
-  private readonly handleLabelMove = (event: MapLayerMouseEvent): void => {
-    const name: unknown = event.features?.[0]?.properties["name"];
-    if (typeof name !== "string") return;
-    event.target.getCanvas().style.cursor = "pointer";
-    this.hoverLabel(name);
-  };
-
-  private readonly handleLabelLeave = (event: MapLayerMouseEvent): void => {
-    event.target.getCanvas().style.cursor = "";
-    this.hoverLabel(null);
-  };
-
   constructor(app: MapApp) {
     this.app = app;
 
@@ -199,29 +182,42 @@ export class AirportManager {
     app.store.subscribeKeys(POPUP_KEYS, () => this.updateAirportPopups());
     app.store.subscribeKeys(VISIBILITY_KEYS, () => this.showAirports(false));
 
-    // A popup would be left pointing at nothing
+    // A popup would be left pointing at nothing; the codes were left out
     app.store.subscribe("airportsVisible", (visible) => {
       if (!visible) this.closePopup();
+      // Back on, the codes take their places, once the markers show again
+      else this.codes?.schedule(true);
     });
 
     this.popup.on("close", () => this.onPopupClosed());
-    if (app.map) closeWhenBehindGlobe(app.map, this.popup);
+    if (app.map) {
+      closeWhenBehindGlobe(app.map, this.popup);
+      this.codes = new AirportCodes(
+        {
+          map: app.map,
+          ranked: () => this.rankedCodes(),
+          overview: () => app.wrappedVisible,
+          moved: (name) => {
+            if (name === this.openAirport) this.placePopupTip();
+          },
+        },
+        this.following.signal,
+      );
+      app.signal.addEventListener("abort", () => this.following.abort());
+    }
 
     // The labels are there once the map's layers are
     onMapReady(app, "Airport labels", (map) => {
       if (this.destroyed) return;
-      this.subscriptions = [
-        map.on("moveend", this.handleMoveEnd),
-        map.on("mousemove", MAP_LAYERS.airportLabels, this.handleLabelMove),
-        map.on("mouseleave", MAP_LAYERS.airportLabels, this.handleLabelLeave),
-      ];
-      // What was written while the WebGL context was lost had no source
-      // to go to, and the hover of a label went with the old one
+      this.subscriptions = [map.on("moveend", this.handleMoveEnd)];
+      // The room of the codes is there to be written now; what was written
+      // while the WebGL context was lost had no source to go to
+      this.updateLabels();
       whenContextRestored(
         map,
         () => {
           if (this.destroyed) return;
-          this.hoverLabel(null);
+          this.codes?.forgetRoom();
           this.updateLabels();
         },
         app.signal,
@@ -232,6 +228,7 @@ export class AirportManager {
   /** Stop following the map; the markers and labels stay as they are */
   destroy(): void {
     this.destroyed = true;
+    this.following.abort();
     for (const subscription of this.subscriptions) subscription.unsubscribe();
     this.subscriptions = [];
   }
@@ -298,30 +295,6 @@ export class AirportManager {
   }
 
   /**
-   * The airport whose label is drawn at a point of the map, if any. Only a
-   * label the map has placed counts: one it left out for lack of room is
-   * not there to be clicked. A click lands on whole pixels and a finger is
-   * not precise, so a label within a few pixels counts as hit: the chip is
-   * small, and a click on its edge would otherwise go to the map beneath.
-   */
-  airportLabelAt(point: Point): string | null {
-    const map = this.app.map;
-    if (!map?.getLayer(MAP_LAYERS.airportLabels)) return null;
-    const pad = isTouchDevice()
-      ? LABEL_TOUCH_HIT_PADDING_PX
-      : LABEL_HIT_PADDING_PX;
-    const [feature] = map.queryRenderedFeatures(
-      [
-        [point.x - pad, point.y - pad],
-        [point.x + pad, point.y + pad],
-      ],
-      { layers: [MAP_LAYERS.airportLabels] },
-    );
-    const name: unknown = feature?.properties["name"];
-    return typeof name === "string" ? name : null;
-  }
-
-  /**
    * Open the popup on an airport's marker.
    *
    * A popup opened from the keyboard takes focus, and closing it puts focus
@@ -340,6 +313,7 @@ export class AirportManager {
     this.openAirport = name;
     if (previous !== null && previous !== name) this.releaseKept(previous);
     this.setExpanded(name, true);
+    this.placePopupTip();
     this.popup.setLngLat(marker.getLatLng());
     // The list goes into the popup's element, which an open popup has
     const wasOpen = this.popup.isOpen();
@@ -349,7 +323,7 @@ export class AirportManager {
       this.listPopupFlights(name);
     }
 
-    if (marker.getElement().matches(":focus-visible")) {
+    if (marker.getControl().matches(":focus-visible")) {
       this.popup
         .getElement()
         ?.querySelector<HTMLElement>(".popup-container")
@@ -439,9 +413,9 @@ export class AirportManager {
 
     const active = document.activeElement;
     if (active === null || active === document.body) {
-      const marker = this.app.airportMarkers[name]?.getElement();
+      const marker = this.app.airportMarkers[name];
       // One that went with the popup leaves the focus with the map
-      if (marker && !marker.hidden) marker.focus();
+      if (marker && !marker.getElement().hidden) marker.getControl().focus();
       else this.app.map?.getCanvas().focus();
     }
   }
@@ -460,10 +434,7 @@ export class AirportManager {
   /** Tell assistive technology whether an airport's popup is open */
   private setExpanded(name: string, expanded: boolean): void {
     const element = this.app.airportMarkers[name]?.getElement();
-    if (!element) return;
-    element.setAttribute("aria-expanded", String(expanded));
-    if (expanded) element.setAttribute("aria-controls", AIRPORT_POPUP_ID);
-    else element.removeAttribute("aria-controls");
+    if (element) setAirportExpanded(element, expanded, AIRPORT_POPUP_ID);
   }
 
   /**
@@ -525,8 +496,9 @@ export class AirportManager {
         const place = { lng: airport.lon, lat: airport.lat };
         // The one the keyboard is on stays, or focus would fall to the page
         const focused =
-          this.app.airportMarkers[airport.name]?.getElement() ===
-          document.activeElement;
+          this.app.airportMarkers[airport.name]
+            ?.getElement()
+            .contains(document.activeElement) ?? false;
         if (
           !focused &&
           cameraDistanceRatio(map, place) > AIRPORT_MAX_DISTANCE_RATIO
@@ -583,59 +555,47 @@ export class AirportManager {
   }
 
   /**
-   * Hand the label layer the airports that are shown, with the counts that
-   * decide which label wins and the home base, whose label is marked. The
-   * map places, fades and hides them itself (see ui/airportLabels.ts).
+   * Place the codes of the airports shown, each at its best place: the
+   * home base and the busier airports, which place first, may have changed
+   * with them (see ui/airportLabels.ts)
    */
   updateLabels(): void {
-    const source = this.app.map?.getSource<GeoJSONSource>(
-      MAP_SOURCES.airportLabels,
-    );
-    if (!source) return;
-    const counts = this.airportFlightCounts();
-    void source.setData(
-      airportLabelFeatures(
-        siteAirports(),
-        counts,
-        findHomeBase(counts),
-        this.shownAirports(),
-      ),
-    );
-  }
-
-  /** The airports whose labels are shown, null for all */
-  private shownAirports(): ReadonlySet<string> | null {
-    const far = this.farAirports;
-    const visibleAirports = this.shownBySelection();
-    if (far.size === 0) return visibleAirports;
-    const names = new Set(
-      visibleAirports ?? siteAirports().map((airport) => airport.name),
-    );
-    for (const name of far) names.delete(name);
-    return names;
+    this.codes?.update();
   }
 
   /**
-   * The pointer is on an airport's label, or on none (null). The label
-   * shows it, and so does the marker's dot, as if the pointer were on it.
+   * The markers of the airports in the order their codes are placed: the
+   * home base, then the busier, then by name. Kept while the counts and
+   * the markers stay, as it is asked for on every frame of a move.
    */
-  private hoverLabel(name: string | null): void {
-    const map = this.app.map;
-    const previous = this.hoveredLabel;
-    if (!map || name === previous) return;
-    this.hoveredLabel = name;
-    if (previous !== null) {
-      setAirportLabelHover(map, previous, false);
-      this.app.airportMarkers[previous]
-        ?.getElement()
-        .classList.remove(LABEL_HOVERED_CLASS);
+  private rankedCodes(): readonly CodeMarker[] {
+    const counts = this.airportFlightCounts();
+    const markers = this.app.airportMarkers;
+    const total = Object.keys(markers).length;
+    const known = this.ranking;
+    if (known?.counts === counts && known.markers === total) {
+      return known.ranked;
     }
-    if (name !== null) {
-      setAirportLabelHover(map, name, true);
-      this.app.airportMarkers[name]
-        ?.getElement()
-        .classList.add(LABEL_HOVERED_CLASS);
-    }
+    const home = findHomeBase(counts);
+    const rank = (name: string): number =>
+      name === home ? Infinity : (counts[name] ?? 0);
+    const ranked = Object.entries(markers)
+      .map(([name, marker]) => {
+        const { lat, lng } = marker.getLatLng();
+        return { name, element: marker.getElement(), lat, lng };
+      })
+      .sort(
+        (a, b) => rank(b.name) - rank(a.name) || a.name.localeCompare(b.name),
+      );
+    this.ranking = { counts, markers: total, ranked };
+    return ranked;
+  }
+
+  /** Point the popup past its airport's code, wherever that is now */
+  private placePopupTip(): void {
+    const name = this.openAirport;
+    if (name === null) return;
+    this.popup.setOffset(popupOffsets(this.codes?.placeOf(name) ?? null));
   }
 
   updateAirportMarkerSizes(): void {

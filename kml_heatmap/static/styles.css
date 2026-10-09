@@ -183,6 +183,9 @@
   /* What a finger gets, whatever the dot measures: WCAG asks for 24 */
   --marker-target: 24px;
   --marker-border: 1px;
+  --code-size: 11px;
+  --code-angle: -90deg;
+  --code-glide: 0.24s;
 
   /* Motion */
   --duration-fast: 0.2s;
@@ -789,6 +792,10 @@ main {
 .maplibregl-marker-covered:not(:focus-within) {
   visibility: hidden;
 }
+/* MapLibre fades a covered marker out inline; the one with focus shows */
+.maplibregl-marker-covered:focus-within {
+  opacity: 1 !important;
+}
 
 /* ==========================================================================
    Color legends
@@ -1234,7 +1241,8 @@ main > #map .maplibregl-ctrl-bottom-right {
 /* Focus rings on the map canvas and on the markers, which are buttons */
 .maplibregl-canvas:focus:not(:focus-visible),
 .maplibregl-marker:focus:not(:focus-visible),
-.airport-marker-root:focus:not(:focus-visible) {
+.airport-marker-container:focus:not(:focus-visible),
+.airport-code:focus:not(:focus-visible) {
   outline: none;
 }
 .maplibregl-canvas:focus-visible {
@@ -1242,9 +1250,13 @@ main > #map .maplibregl-ctrl-bottom-right {
   outline-offset: -2px;
 }
 .maplibregl-marker:focus-visible,
-.airport-marker-root:focus-visible {
+.airport-marker-container:focus-visible,
+.airport-code:focus-visible > * {
   outline: var(--focus-ring);
   outline-offset: 1px;
+}
+.airport-code:focus-visible {
+  outline: none;
 }
 
 /* Popup styles - dark theme. The content box is the only element of a
@@ -1342,8 +1354,8 @@ main > #map .maplibregl-ctrl-bottom-right {
 }
 
 /* ==========================================================================
-   Airport markers (sizes come from the --marker-* tokens; the codes beside
-   them are a layer of the map, see ui/airportLabels.ts)
+   Airport markers (sizes come from the --marker-* and --code-* tokens; the
+   codes are placed round their dots in ui/airportLabels.ts)
    ========================================================================== */
 [data-zoom-size="small"] {
   --marker-size: 7px;
@@ -1356,14 +1368,17 @@ main > #map .maplibregl-ctrl-bottom-right {
 [data-zoom-size="medium"] {
   --marker-size: 10px;
   --marker-border: 2px;
+  --code-size: 12px;
 }
 [data-zoom-size="large"] {
   --marker-size: 11px;
   --marker-border: 2px;
+  --code-size: 12px;
 }
 [data-zoom-size="xlarge"] {
   --marker-size: 12px;
   --marker-border: 2px;
+  --code-size: 13px;
 }
 /* Zoomed out to a continent and beyond, the airports are a clump of dots
    on the heat (AIRPORT_HIDE_MARKERS_BELOW_ZOOM); one that has the focus
@@ -1395,11 +1410,25 @@ main > #map .maplibregl-ctrl-bottom-right {
   background-color: var(--color-home-blue);
 }
 
-/* The element MapLibre positions is a real button, so a marker can be
-   tabbed to and pressed. It is stripped back to nothing: the container
-   inside draws the marker. No `position` or `transform` here, both are
-   MapLibre's. */
+/* The element MapLibre positions holds the button round the dot and the
+   code. No `position` or `transform` here, both are MapLibre's. */
 .airport-marker-root {
+  transition:
+    opacity var(--duration-base) ease,
+    visibility 0s;
+}
+/* One the relief or the globe hides fades out with its code, and is hidden
+   once it has */
+.airport-marker-root.maplibregl-marker-covered {
+  transition-delay: 0s, var(--duration-base);
+}
+/* The airports toggle: set on #map by the layer handle */
+#map.airports-hidden .airport-marker-root {
+  display: none;
+}
+/* The square a pointer gets, around the dot that is drawn: a real button,
+   so a marker can be tabbed to and pressed, stripped back to nothing */
+.airport-marker-container {
   -webkit-appearance: none;
   appearance: none;
   margin: 0;
@@ -1410,13 +1439,6 @@ main > #map .maplibregl-ctrl-bottom-right {
   font: inherit;
   cursor: pointer;
   touch-action: manipulation;
-}
-/* The airports toggle: set on #map by the layer handle */
-#map.airports-hidden .airport-marker-root {
-  display: none;
-}
-/* The square a pointer gets, around the dot that is drawn */
-.airport-marker-container {
   position: relative;
   display: flex;
   align-items: center;
@@ -1424,23 +1446,91 @@ main > #map .maplibregl-ctrl-bottom-right {
   width: var(--marker-target);
   height: var(--marker-target);
 }
-/* The code above the dot is a label of the map (ui/airportLabels.ts), and
-   the button reaches up over it, as it did when the code was a child of
-   it: a tap on the code is one on the marker */
-.airport-marker-reach {
+/* An airport's code (ui/airportLabels.ts), a part of its button: a chip
+   at the end of an arm turned round the middle of the dot and turned
+   upright again, with a stem from the ring. Moved by its custom properties,
+   it glides round the dot and along the arm rather than jumping. */
+.airport-code-arm {
   position: absolute;
-  bottom: 100%;
-  left: 0;
-  width: 100%;
-  height: var(--marker-target);
+  top: 50%;
+  left: 50%;
+  transform: rotate(var(--code-angle));
+  pointer-events: none;
+  transition:
+    transform var(--code-glide) ease-out,
+    opacity var(--duration-base) ease,
+    visibility 0s;
+}
+.airport-code-arm.is-hidden {
+  opacity: 0;
+  visibility: hidden;
+  transition-delay: 0s, 0s, var(--duration-base);
+}
+/* Shown again, it is there at once and only fades in */
+.airport-code-arm.is-jump {
+  transition: opacity var(--duration-base) ease;
+}
+.airport-code-arm.is-jump > * {
+  transition: none;
+}
+.airport-code-stem {
+  position: absolute;
+  top: -0.75px;
+  width: 1px;
+  height: 1.5px;
+  background: var(--code-rim);
+  transform-origin: 0 50%;
+  transform: translateX(var(--code-from)) scaleX(var(--code-stem));
+  transition: transform var(--code-glide) ease-out;
+}
+/* The chip: what takes a press, at least 24px each way however it is
+   scaled, where it may be the airport's target; its face is what is drawn */
+.airport-code {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: calc(24px / var(--code-scale, 1));
+  min-height: calc(24px / var(--code-scale, 1));
+  transform-origin: 0 0;
+  transform: translateX(var(--code-at)) rotate(calc(-1 * var(--code-angle)))
+    scale(var(--code-scale, 1)) translate(-50%, -50%);
+  cursor: pointer;
+  pointer-events: auto;
+  transition: transform var(--code-glide) ease-out;
+}
+.airport-code-face {
+  padding: 1px 5px;
+  font: 500 max(var(--text-xs), var(--code-size)) / 1.2 var(--font-ui);
+  letter-spacing: 0.05em;
+  color: var(--color-text);
+  white-space: nowrap;
+  background-color: rgba(var(--color-bg-secondary-rgb), 0.92);
+  border: 1px solid var(--code-rim);
+  border-radius: var(--radius-control);
+  transition: background-color var(--duration-fast) ease;
+}
+.airport-code.is-narrow > .airport-code-face {
+  padding-inline: 3px;
+}
+.airport-marker-root {
+  --code-rim: rgba(var(--color-text-rgb), 0.35);
+}
+.airport-marker-root.is-home {
+  --code-rim: rgba(var(--color-accent-blue-rgb), 0.9);
 }
 @media (hover: hover) {
-  /* The dot under the pointer, or the dot of the label under it (a layer
-     of the map, see ui/airportLabels.ts, which lights up with it) */
-  .airport-marker-container:hover .airport-marker,
-  .airport-marker-root.is-label-hovered .airport-marker {
+  /* The dot and the code of the airport under the pointer, on either */
+  .airport-marker-root:hover .airport-marker {
     transform: scale(1.3);
     box-shadow: 0 3px 8px var(--shadow-color-strong);
+  }
+  .airport-marker-root:hover {
+    --code-rim: var(--color-accent-blue);
+  }
+  .airport-marker-root:hover .airport-code-face {
+    background-color: var(--color-bg-hover);
+    color: #fff;
   }
 }
 
@@ -2481,6 +2571,9 @@ main > #map .maplibregl-ctrl-bottom-right {
   .control-btn,
   .control-row,
   .airport-marker,
+  .airport-code-arm,
+  .airport-code-arm.is-jump,
+  .airport-code-arm > *,
   #github-footer a,
   #github-footer .github-icon,
   .toast-notification,
@@ -2539,9 +2632,21 @@ main > #map .maplibregl-ctrl-bottom-right {
   .sheet-row:has(select:disabled) {
     opacity: 0.75;
   }
+  .airport-marker-root:not(.is-home, :hover) {
+    --code-rim: rgba(var(--color-text-rgb), 0.6);
+  }
+  .airport-code-face {
+    background-color: var(--color-bg-secondary);
+  }
 }
 
 @media (forced-colors: active) {
+  /* A code's stem is a background, which forced colours paint over: it
+     takes the system's text colour, as the chip's rim does */
+  .airport-code-stem {
+    forced-color-adjust: none;
+    background: CanvasText;
+  }
   /* Forced colours drop a gradient background, which left the legend bars
      and the ramp chips as empty outlines: they are the colour key, so they
      keep their own colours, framed by the system's text colour. */

@@ -542,12 +542,7 @@ export function followCloudReadout(app: MapApp): void {
    * is the one heard).
    */
   const onClick = (e: MapMouseEvent): void => {
-    const readout =
-      active() &&
-      onCanvas(e) &&
-      app.airportManager.airportLabelAt(e.point) === null
-        ? readoutUnder(e.point)
-        : null;
+    const readout = active() && onCanvas(e) ? readoutUnder(e.point) : null;
     if (!readout) {
       tapped = null;
       return hide();

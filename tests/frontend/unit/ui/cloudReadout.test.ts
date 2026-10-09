@@ -491,9 +491,7 @@ describe("the readout of the heat cloud", () => {
 
   it("leaves a click on a marker or an airport's code to them", () => {
     enter3D();
-    app.airportManager.airportLabelAt.mockReturnValueOnce("EDAQ Halle-Oppin");
-    click(0, 0);
-    expect(shown()).toBeNull();
+    // A marker's button, the code among it, is no canvas
     click(0, 0, { target: document.createElement("div") });
     expect(shown()).toBeNull();
   });

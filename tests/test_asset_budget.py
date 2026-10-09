@@ -37,7 +37,11 @@ from kml_heatmap.site_assets import CSS_FILES, STATIC_DIR, _copy_and_minify_css
 # (38,394 B after). Raised from 40 KB to 40.75 KB for share mode: the Select
 # or Remove under the values of a tapped flight, the checkboxes of the
 # airport popup's flights, the chip's buttons that come and go and its
-# shorter form on a phone (40,844 B before, 41,622 B after).
+# shorter form on a phone (40,844 B before, 41,622 B after). Raised from
+# 40.75 KB to 43.25 KB, and from 7.875 KB to 8.375 KB gzipped, for the
+# airport codes back in the markers: the chip on its arm that glides round
+# the dot, its stem, its home, hover and raised contrast looks (41,677 B
+# and 7,897 B gzipped before, 43,336 B and 8,236 B after).
 #
 # features.css and wrapped.css are fetched with their lazy bundles, not by a
 # first visit, so they are the more forgiving. The two were one 28.8 KB sheet
@@ -63,7 +67,7 @@ from kml_heatmap.site_assets import CSS_FILES, STATIC_DIR, _copy_and_minify_css
 # and places, fetched with its bundle, was set at 4,004 B with the same 2 KB
 # of room.
 STYLESHEET_BUDGET_BYTES = {
-    "styles.css": int(40.75 * 1024),
+    "styles.css": int(43.25 * 1024),
     "features.css": int(21.5 * 1024),
     "wrapped.css": 36 * 1024,
     "search.css": int(5.75 * 1024),
@@ -78,7 +82,7 @@ STYLESHEET_BUDGET_BYTES = {
 # (wrapped.css), with the print styles taken out of the first two, and at
 # 1,192 B for search.css.
 STYLESHEET_GZIP_BUDGET_BYTES = {
-    "styles.css": int(7.875 * 1024),
+    "styles.css": int(8.375 * 1024),
     "features.css": int(3.875 * 1024),
     "wrapped.css": int(6.125 * 1024),
     "search.css": int(1.25 * 1024),

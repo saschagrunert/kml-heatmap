@@ -452,8 +452,16 @@ function compareBundles(before, after, names) {
 // deadline from the tap to the share sheet. Lowered by 7.5 KB raw and 2 KB
 // gzipped (153.65 KB and 52.91 KB gzipped in a local build after) as the
 // sheet of the phone's bar and the export moved to the extras bundle and
-// each icon's paths became one.
-const BUDGET_APP = { raw: 155.75 * 1024, gzip: 54.25 * 1024 };
+// each icon's paths became one. Raised by 10.25 KB raw and 4 KB gzipped
+// for the airport codes that glide round their dots to where there is room
+// (calculations/codePlacement.ts, ui/airportLabels.ts), clear of the other
+// markers' squares, placed again as panels come and go, the room they take
+// on the map as large on a tilted map, and drawn there as pins, by their
+// distance, and for the target each airport takes the pointer in, its
+// square or, where a neighbour's lies too close, its code's chip, so no
+// two overlap (setAirportTarget in features/airports.ts): 165.47 KB and
+// 57.71 KB gzipped in a local build.
+const BUDGET_APP = { raw: 166 * 1024, gzip: 58.25 * 1024 };
 // The feature bundle: replay and Replay all, the 3D view (relief, ribbons,
 // heat cloud), the imagery, the flight profile, the cross-section and the
 // hotspot tour. Fetched only when one of them is first used, so no part of

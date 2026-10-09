@@ -357,58 +357,209 @@ describe("airports feature", () => {
     });
   });
 
-  describe("createAirportElement", () => {
-    it("builds a plain button named after the airport", () => {
-      const element = mod.createAirportElement("Frankfurt EDDF");
+  describe("codeOwnerAt", () => {
+    /** A press at a point of the screen, on `target` */
+    function press(target: Element, detail = 1): MouseEvent {
+      const event = new MouseEvent("click", {
+        bubbles: true,
+        clientX: 10,
+        clientY: 10,
+        detail,
+      });
+      Object.defineProperty(event, "target", { value: target });
+      return event;
+    }
 
-      expect(element).toBeInstanceOf(HTMLButtonElement);
-      // Without it a button inside a form would submit; and it is the
-      // class the stylesheet resets and the airports toggle hides
-      expect(element.type).toBe("button");
+    it("hands a press on another airport's code under a marker's square to that airport", () => {
+      const pressed = mod.createAirportElement("Frankfurt EDDF", "EDDF");
+      const under = mod.createAirportElement("Egelsbach EDFE", "EDFE");
+      const code = under.querySelector(".airport-code")!;
+      const square = pressed.querySelector(".airport-marker-container")!;
+      document.elementsFromPoint = () => [square, pressed, code, under];
+      try {
+        expect(mod.codeOwnerAt(press(square), pressed)).toBe("Egelsbach EDFE");
+        // From the keyboard there is no point pressed
+        expect(mod.codeOwnerAt(press(square, 0), pressed)).toBeNull();
+        // On its own dot, or its own code, it is its own
+        const dot = pressed.querySelector(".airport-marker")!;
+        document.elementsFromPoint = () => [dot, square, code];
+        expect(mod.codeOwnerAt(press(square), pressed)).toBeNull();
+        const own = pressed.querySelector(".airport-code")!;
+        expect(mod.codeOwnerAt(press(own), pressed)).toBeNull();
+      } finally {
+        Reflect.deleteProperty(document, "elementsFromPoint");
+      }
+    });
+  });
+
+  describe("createAirportElement", () => {
+    it("builds a plain button named after the airport round its dot", () => {
+      const element = mod.createAirportElement("Frankfurt EDDF", "EDDF");
+      const button = element.firstElementChild as HTMLButtonElement;
+
+      // The class the airports toggle hides
       expect(element.className).toBe("airport-marker-root");
-      expect(element.title).toBe("Frankfurt EDDF");
-      expect(element.getAttribute("aria-label")).toBe("Frankfurt EDDF");
+      expect(button).toBeInstanceOf(HTMLButtonElement);
+      // Without it a button inside a form would submit
+      expect(button.type).toBe("button");
+      expect(button.title).toBe("Frankfurt EDDF");
+      expect(button.getAttribute("aria-label")).toBe("Frankfurt EDDF");
+      expect(button.getAttribute("aria-expanded")).toBe("false");
+      expect(mod.airportControl(element)).toBe(button);
     });
 
-    it("draws only the dot and marks the home base", () => {
-      const element = mod.createAirportElement("Frankfurt EDDF", true);
-      const container = element.firstElementChild!;
+    it("draws the dot and its code, and marks the home base", () => {
+      const element = mod.createAirportElement("Frankfurt EDDF", "EDDF", true);
+      const [container, arm] = element.children;
 
-      expect(element.children).toHaveLength(1);
-      expect(container.className).toBe("airport-marker-container");
-      // The code is a label of the map (see ui/airportLabels.ts)
-      expect([...container.children].map((child) => child.className)).toEqual([
+      expect(element.children).toHaveLength(2);
+      expect(container!.className).toBe("airport-marker-container");
+      expect(container!.firstElementChild!.className).toBe(
         "airport-marker airport-marker-home",
-        "airport-marker-reach",
+      );
+      expect(element.classList.contains("is-home")).toBe(true);
+      // Left out until it is placed (see ui/airportLabels.ts), and no part
+      // of the button's name
+      expect(arm!.className).toBe("airport-code-arm is-hidden");
+      expect(arm!.getAttribute("aria-hidden")).toBe("true");
+      expect([...arm!.children].map((child) => child.className)).toEqual([
+        "airport-code-stem",
+        "airport-code",
       ]);
-      expect(element.textContent).toBe("");
+      expect(arm!.querySelector(".airport-code")!.innerHTML).toBe(
+        '<span class="airport-code-face">EDDF</span>',
+      );
+      expect(arm!.textContent).toBe("EDDF");
     });
 
     it("omits the home class for any other airport", () => {
-      const element = mod.createAirportElement("Small Airfield 123");
+      const element = mod.createAirportElement("Small Airfield 123", "APT");
 
       expect(element.querySelector(".airport-marker")).not.toBeNull();
       expect(element.querySelector(".airport-marker-home")).toBeNull();
     });
 
     it("does not read a name as markup", () => {
-      const element = mod.createAirportElement('<img src="x"> EDDF');
+      const element = mod.createAirportElement(
+        '<img src="x"> EDDF',
+        "<b>EDDF</b>",
+      );
 
-      expect(element.querySelector("img")).toBeNull();
-      expect(element.title).toBe('<img src="x"> EDDF');
+      expect(element.querySelector("img, b")).toBeNull();
+      expect(mod.airportControl(element).title).toBe('<img src="x"> EDDF');
+      expect(element.textContent).toBe("<b>EDDF</b>");
+    });
+  });
+
+  describe("setAirportTarget", () => {
+    function parts(element: HTMLElement) {
+      return {
+        dot: element.querySelector<HTMLElement>(".airport-marker-container")!,
+        chip: element.querySelector<HTMLElement>(".airport-code")!,
+        arm: element.querySelector<HTMLElement>(".airport-code-arm")!,
+      };
+    }
+
+    it("makes the chip the airport's one target, named after it, and back", () => {
+      const element = mod.createAirportElement("Frankfurt EDDF", "EDDF");
+      const { dot, chip, arm } = parts(element);
+      mod.setAirportExpanded(element, true, "popup");
+
+      mod.setAirportTarget(element, { chip: true, half: null, out: false });
+      expect(mod.airportControl(element)).toBe(chip);
+      expect(chip.getAttribute("role")).toBe("button");
+      expect(chip.tabIndex).toBe(0);
+      expect(chip.getAttribute("aria-label")).toBe("Frankfurt EDDF");
+      // The popup it has open, as the button has it
+      expect(chip.getAttribute("aria-expanded")).toBe("true");
+      expect(chip.getAttribute("aria-controls")).toBe("popup");
+      expect(arm.hasAttribute("aria-hidden")).toBe(false);
+      // The dot's square takes no pointer, no focus, no name
+      expect(dot.hasAttribute("inert")).toBe(true);
+      expect(chip.hasAttribute("inert")).toBe(false);
+
+      mod.setAirportTarget(element, { chip: false, half: null, out: false });
+      expect(mod.airportControl(element)).toBe(dot);
+      expect(dot.hasAttribute("inert")).toBe(false);
+      for (const name of ["role", "tabindex", "aria-label", "aria-expanded"]) {
+        expect(chip.hasAttribute(name)).toBe(false);
+      }
+      expect(arm.getAttribute("aria-hidden")).toBe("true");
+    });
+
+    it("shrinks the square round the dot where a neighbour's is close", () => {
+      const element = mod.createAirportElement("Frankfurt EDDF", "EDDF");
+
+      mod.setAirportTarget(element, { chip: false, half: 5, out: false });
+      expect(element.style.getPropertyValue("--marker-target")).toBe("10px");
+      mod.setAirportTarget(element, { chip: false, half: null, out: false });
+      expect(element.style.getPropertyValue("--marker-target")).toBe("");
+    });
+
+    it("takes both parts out under a panel, and never the marker itself", () => {
+      const element = mod.createAirportElement("Frankfurt EDDF", "EDDF");
+      const { dot, chip } = parts(element);
+
+      mod.setAirportTarget(element, { chip: true, half: null, out: true });
+      expect(dot.hasAttribute("inert")).toBe(true);
+      expect(chip.hasAttribute("inert")).toBe(true);
+      // A dialog's inert on the marker is the dialog's own
+      element.setAttribute("inert", "");
+      mod.setAirportTarget(element, { chip: false, half: null, out: false });
+      expect(element.hasAttribute("inert")).toBe(true);
+      expect(dot.hasAttribute("inert")).toBe(false);
+    });
+
+    it("hands the focus on to the new target", () => {
+      const element = mod.createAirportElement("Frankfurt EDDF", "EDDF");
+      document.body.append(element);
+      try {
+        const { dot, chip } = parts(element);
+        dot.focus();
+        mod.setAirportTarget(element, { chip: true, half: null, out: false });
+        expect(document.activeElement).toBe(chip);
+        mod.setAirportTarget(element, { chip: false, half: null, out: false });
+        expect(document.activeElement).toBe(dot);
+      } finally {
+        element.remove();
+      }
+    });
+
+    it("lets Enter and Space press the chip while it is the target", () => {
+      const element = mod.createAirportElement("Frankfurt EDDF", "EDDF");
+      const { chip } = parts(element);
+      const clicks = vi.fn();
+      chip.addEventListener("click", clicks);
+      const key = (key: string): KeyboardEvent => {
+        const event = new KeyboardEvent("keydown", { key, cancelable: true });
+        Object.defineProperty(event, "target", { value: chip });
+        return event;
+      };
+
+      mod.onChipKey(key("Enter"));
+      expect(clicks).not.toHaveBeenCalled();
+      mod.setAirportTarget(element, { chip: true, half: null, out: false });
+      const space = key(" ");
+      mod.onChipKey(space);
+      mod.onChipKey(key("Enter"));
+      mod.onChipKey(key("a"));
+      expect(clicks).toHaveBeenCalledTimes(2);
+      expect(space.defaultPrevented).toBe(true);
     });
   });
 
   describe("setAirportElementHome", () => {
     it("switches the home-base classes on the same element", () => {
-      const element = mod.createAirportElement("Frankfurt EDDF");
+      const element = mod.createAirportElement("Frankfurt EDDF", "EDDF");
       const dot = element.querySelector(".airport-marker")!;
 
       mod.setAirportElementHome(element, true);
       expect(dot.classList.contains("airport-marker-home")).toBe(true);
+      expect(element.classList.contains("is-home")).toBe(true);
 
       mod.setAirportElementHome(element, false);
       expect(dot.className).toBe("airport-marker");
+      expect(element.classList.contains("is-home")).toBe(false);
       // Still the nodes it started with: focus and listeners stay
       expect(element.querySelector(".airport-marker")).toBe(dot);
     });
