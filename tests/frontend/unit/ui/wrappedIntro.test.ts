@@ -6,7 +6,10 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { resetSiteData } from "../../../../kml_heatmap/frontend/state/siteData";
-import { WrappedManager } from "../../../../kml_heatmap/frontend/ui/wrappedManager";
+import {
+  INTRO_SEEN_KEY,
+  WrappedManager,
+} from "../../../../kml_heatmap/frontend/ui/wrappedManager";
 import {
   FIT_PADDING,
   INTRO_FLY_MS,
@@ -114,6 +117,8 @@ describe("Wrapped's intro", () => {
 
   /** Open from the button and let the map into the dialog */
   async function openWithIntro(): Promise<void> {
+    // As a first opening in the session, which is the one that plays it
+    sessionStorage.removeItem(INTRO_SEEN_KEY);
     wrappedManager.showWrapped(true);
     await vi.advanceTimersByTimeAsync(MAP_IN_DIALOG_MS);
   }
@@ -468,6 +473,30 @@ describe("Wrapped's intro", () => {
     wrappedManager.showWrapped(true);
     expect(modal().classList.contains("is-intro")).toBe(false);
     expect(loader.loadFeatures).not.toHaveBeenCalled();
+    // Not played, so not seen: it plays once the year has a home base
+    expect(sessionStorage.getItem(INTRO_SEEN_KEY) ?? "").not.toContain("1999");
+  });
+
+  it("plays once a session for each year, and again where the storage is blocked", async () => {
+    const opens = async (year: string): Promise<boolean> => {
+      mockApp.selectedYear = year;
+      wrappedManager.showWrapped(true);
+      const intro = modal().classList.contains("has-intro");
+      wrappedManager.closeWrapped();
+      await vi.runAllTimersAsync();
+      return intro;
+    };
+
+    expect(await opens("2024")).toBe(true);
+    expect(await opens("2024")).toBe(false);
+    expect(await opens("all")).toBe(true);
+    expect(await opens("2024")).toBe(false);
+
+    vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+      throw new DOMException("blocked", "SecurityError");
+    });
+    expect(await opens("2024")).toBe(true);
+    expect(await opens("2024")).toBe(true);
   });
 
   describe("settling beside the cards", () => {

@@ -1,22 +1,38 @@
 /**
  * UIToggles: image export, the html-to-image loader and link sharing.
  */
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import {
+  describe,
+  it,
+  expect,
+  beforeAll,
+  beforeEach,
+  afterEach,
+  vi,
+} from "vitest";
 import {
   EXPORT_FAILED_MESSAGE,
+  EXPORT_UNAVAILABLE_MESSAGE,
+  UIToggles,
+} from "../../../../kml_heatmap/frontend/ui/uiToggles";
+import {
   EXPORT_SHARE_FRAME_MS,
   EXPORT_SHARE_WAIT_MS,
-  EXPORT_UNAVAILABLE_MESSAGE,
   MAX_CANVAS_PIXELS,
-  UIToggles,
   dataUrlToBlob,
   exportScale,
   loadHtmlToImage,
   importFromVendor,
   resetHtmlToImageLoader,
   type HtmlToImage,
-} from "../../../../kml_heatmap/frontend/ui/uiToggles";
+} from "../../../../kml_heatmap/frontend/ui/mapExport";
+import {
+  loadExtras,
+  resetExtrasLoader,
+} from "../../../../kml_heatmap/frontend/services/featureLoader";
 import { logError } from "../../../../kml_heatmap/frontend/utils/logger";
+import { parseUrlParams } from "../../../../kml_heatmap/frontend/state/urlState";
+import type { SavedState } from "../../../../kml_heatmap/frontend/types";
 import { MAP_COMPLETE_TIMEOUT_MS } from "../../../../kml_heatmap/frontend/utils/mapHelpers";
 import { MAP_SOURCES } from "../../../../kml_heatmap/frontend/utils/constants";
 import {
@@ -71,10 +87,19 @@ vi.mock("../../../../kml_heatmap/frontend/utils/logger", () => ({
   logError: vi.fn(),
 }));
 
+/** The import of the extras bundle, as the app makes it */
+const importExtras = () => import("../../../../kml_heatmap/frontend/extras");
+
 describe("UIToggles export and share", () => {
   let uiToggles: UIToggles;
   let app: MockApp;
   let unmount: () => void;
+
+  // The export comes with the extras bundle (ui/mapExport.ts), here before
+  // the first export as on a phone that fetched it ahead of the tap
+  beforeAll(async () => {
+    expect(await loadExtras()).not.toBeNull();
+  });
 
   beforeEach(() => {
     unmount = mountElements(DOM);
@@ -769,6 +794,25 @@ describe("UIToggles export and share", () => {
       expect(clickSpy).not.toHaveBeenCalled();
     });
 
+    it("says so and re-enables the button when the export's code cannot be fetched", async () => {
+      resetExtrasLoader(() => Promise.reject(new Error("offline")));
+      const toJpeg = installHtmlToImage();
+      const btn = el("export-btn") as HTMLButtonElement;
+
+      try {
+        uiToggles.exportMap();
+        await finishExport();
+
+        expect(toast()?.textContent).toBe(EXPORT_UNAVAILABLE_MESSAGE);
+        expect(btn.getAttribute("aria-disabled")).not.toBe("true");
+        expect(btn.textContent).toBe("Export image");
+        expect(toJpeg).not.toHaveBeenCalled();
+      } finally {
+        resetExtrasLoader(importExtras);
+        await loadExtras();
+      }
+    });
+
     it("re-enables the button and shows a toast on html-to-image failure", async () => {
       installHtmlToImage(vi.fn().mockRejectedValue(new Error("Export failed")));
       const btn = el("export-btn") as HTMLButtonElement;
@@ -881,6 +925,16 @@ describe("UIToggles export and share", () => {
       expect(toast()?.textContent).toBe("Link copied");
     });
 
+    /** The state a save in share mode writes, which the flush returns */
+    const sharedState = (panels: boolean): SavedState => ({
+      schemaVersion: 4,
+      selectedYear: "2025",
+      selectedPathIds: [365],
+      isolateSelection: true,
+      statsPanelVisible: panels,
+      flightListVisible: panels,
+    });
+
     it("marks a link copied in share mode to play the intro of its flights", async () => {
       window.history.replaceState(null, "", "/?y=2025&p=a5&sv=4");
       const writeText = vi.fn().mockResolvedValue(undefined);
@@ -888,12 +942,34 @@ describe("UIToggles export and share", () => {
 
       await uiToggles.shareLink();
       app.isolateSelection = true;
+      app.stateManager.flush.mockReturnValue(sharedState(false));
       await uiToggles.shareLink();
 
       expect(writeText.mock.calls[0]![0]).toBe(window.location.href);
-      expect(writeText.mock.calls[1]![0]).toBe(window.location.href + "&i=1");
+      const url = new URL(writeText.mock.calls[1]![0] as string);
+      expect(url.origin + url.pathname).toBe(window.location.origin + "/");
+      expect(url.searchParams.get("p")).toBe("a5");
+      expect(url.searchParams.get("i")).toBe("1");
       // The address bar never carries it
       expect(window.location.search).toBe("?y=2025&p=a5&sv=4");
+    });
+
+    it("leaves the statistics the sender has open out of a link in share mode", async () => {
+      window.history.replaceState(null, "", "/?y=2025&p=a5&sv=4");
+      const writeText = vi.fn().mockResolvedValue(undefined);
+      defineNavigatorProperty("clipboard", { writeText });
+      app.isolateSelection = true;
+      app.stateManager.flush.mockReturnValue(sharedState(true));
+
+      await uiToggles.shareLink();
+
+      const url = new URL(writeText.mock.calls[0]![0] as string);
+      const shared = parseUrlParams(url.searchParams)!;
+      expect(shared.statsPanelVisible).toBe(false);
+      expect(url.searchParams.has("l")).toBe(false);
+      // Share mode and its flights are what the link is for
+      expect(shared.isolateSelection).toBe(true);
+      expect(shared.selectedPathIds).toEqual([365]);
     });
 
     it("marks the link of the share sheet in share mode as well", async () => {
@@ -902,13 +978,12 @@ describe("UIToggles export and share", () => {
       const share = vi.fn().mockResolvedValue(undefined);
       defineNavigatorProperty("share", share);
       app.isolateSelection = true;
+      app.stateManager.flush.mockReturnValue(sharedState(false));
 
       await uiToggles.shareLink();
 
-      expect(share).toHaveBeenCalledWith({
-        url: window.location.href + "&i=1",
-        title: document.title,
-      });
+      const { url } = share.mock.calls[0]![0] as { url: string };
+      expect(new URL(url).searchParams.get("i")).toBe("1");
     });
 
     it("shows an error toast when the clipboard is unavailable", async () => {

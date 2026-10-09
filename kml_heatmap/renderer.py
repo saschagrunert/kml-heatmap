@@ -73,7 +73,7 @@ if TYPE_CHECKING:
     from .airports import AirportData
     from .landings import FlightLandings
     from .terrain import TileSource
-    from .types import FlightPathGroup, PathMetadata
+    from .types import FlightPath, FlightPathGroup, PathMetadata
 
 __all__ = [
     "ParsedFile",
@@ -116,6 +116,9 @@ class ParsedFile:
     # The landings of every path, found with the parse and kept in the
     # parse cache (see landings.path_landings); None for an entry without
     landings: list[FlightLandings | None] | None = None
+    # For a file without a path: whether a point of it has no altitude above
+    # sea level (see no_flight_reason)
+    altitudes_missing: bool = False
 
 
 def _parse_with_error_handling(
@@ -140,7 +143,26 @@ def _parse_with_error_handling(
         # traceback says where
         logger.exception("Unexpected error processing %s", kml_file)
         return ParsedFile(kml_file)
-    return ParsedFile(kml_file, len(coordinates), path_groups, path_metadata, landings)
+    return _parsed_file(kml_file, coordinates, path_groups, path_metadata, landings)
+
+
+def _parsed_file(
+    kml_file: str,
+    coordinates: FlightPath,
+    path_groups: FlightPathGroup,
+    path_metadata: list[PathMetadata],
+    landings: list[FlightLandings | None] | None,
+) -> ParsedFile:
+    """The parse of a file as the parent gets it (see ``ParsedFile``)."""
+    return ParsedFile(
+        kml_file,
+        len(coordinates),
+        path_groups,
+        path_metadata,
+        landings,
+        altitudes_missing=not path_groups
+        and any(point.alt is None for point in coordinates),
+    )
 
 
 def load_cached(kml_file: str) -> ParsedFile | Path | None:
@@ -154,9 +176,9 @@ def load_cached(kml_file: str) -> ParsedFile | Path | None:
         return None
     if cached is None:
         return cache_path
-    return ParsedFile(
+    return _parsed_file(
         kml_file,
-        len(cached.coordinates),
+        cached.coordinates,
         cached.path_groups,
         cached.path_metadata,
         cached.landings,
@@ -296,7 +318,9 @@ def _parse_in_pool(
         # Still in a worker: a file that is too large to parse must not take
         # the main process down with it, and one at a time names the file
         with WorkerPool(
-            1, "parsing the KML files one at a time", (level, database, runways)
+            1,
+            "parsing the KML files one at a time",
+            (level, database, runways, fingerprint),
         ) as executor:
             for kml_file in remaining:
                 try:
@@ -441,6 +465,8 @@ def _parse_kml_files(
         for parsed in results:
             total_points += parsed.point_count
             all_path_groups.extend(parsed.path_groups)
+            for metadata in parsed.path_metadata:
+                metadata["source"] = parsed.kml_file
             all_path_metadata.extend(parsed.path_metadata)
             all_landings.extend(
                 parsed.landings
@@ -478,6 +504,23 @@ def _parse_kml_files(
             f"to export ({_some_names(without_flight)}, see above); fix or "
             "remove them"
         )
+    # Their flights build, but count for no aircraft in the filter and the
+    # statistics: a name the tool exported (export.kml) says nothing
+    unnamed = [
+        parsed.kml_file
+        for parsed in results
+        if not any(
+            metadata.get("aircraft_registration") or metadata.get("aircraft_type")
+            for metadata in parsed.path_metadata
+        )
+    ]
+    if unnamed:
+        logger.warning(
+            "%d file(s) name no aircraft (%s): their flights belong to none; "
+            "name them N_REGISTRATION_TYPE.kml, such as 1_DEHYL_DA40.kml",
+            len(unnamed),
+            _some_names(unnamed),
+        )
 
     logger.info("\nTotal points: %d", total_points)
     return all_path_groups, all_path_metadata, all_landings
@@ -494,9 +537,15 @@ def no_flight_reason(parsed: ParsedFile) -> str | None:
     counts: the flight is on the site.
     """
     if not parsed.path_groups:
+        if not parsed.altitudes_missing:
+            # Every point has an altitude, so none of them was on a line of
+            # two or more valid ones: a waypoint, a field marked on the map,
+            # or a line of which only one point was valid
+            return "no track of two or more valid points (waypoints are none)"
         return (
             "no track of two or more points with altitudes above sea level "
-            "(a clampToGround or relativeToGround track has none)"
+            "(a 2D line, such as a route plan, and a clampToGround or "
+            "relativeToGround track have none)"
         )
     dated = [
         path

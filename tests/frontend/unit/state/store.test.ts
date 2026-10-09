@@ -190,26 +190,18 @@ describe("AppStore", () => {
     });
   });
 
-  describe("notifyMutation", () => {
-    it("fires listeners for in-place mutations", () => {
+  describe("a new selection", () => {
+    it("is heard of with the selection of before", () => {
       const store = new AppStore();
+      const before = store.get("selectedPathIds");
       const fn = vi.fn();
       store.subscribe("selectedPathIds", fn);
-      store.get("selectedPathIds").add(42);
-      store.notifyMutation("selectedPathIds");
+      store.set("selectedPathIds", new Set([42]));
       expect(fn).toHaveBeenCalledOnce();
-      const ids = fn.mock.calls[0]![0] as Set<number>;
+      const [ids, old] = fn.mock.calls[0] as [Set<number>, Set<number>];
       expect(ids.has(42)).toBe(true);
-    });
-
-    it("passes same reference for old and new value", () => {
-      const store = new AppStore();
-      const fn = vi.fn();
-      store.subscribe("selectedPathIds", fn);
-      store.get("selectedPathIds").add(1);
-      store.notifyMutation("selectedPathIds");
-      const [newVal, oldVal] = fn.mock.calls[0] as [unknown, unknown];
-      expect(newVal).toBe(oldVal);
+      expect(old).toBe(before);
+      expect(old.size).toBe(0);
     });
   });
 
@@ -362,25 +354,23 @@ describe("AppStore", () => {
       expect(fn).not.toHaveBeenCalled();
     });
 
-    it("defers notifyMutation during batch", () => {
+    it("defers a new selection during batch", () => {
       const store = new AppStore();
       const fn = vi.fn();
       store.subscribe("selectedPathIds", fn);
 
       store.batch(() => {
-        store.get("selectedPathIds").add(1);
-        store.notifyMutation("selectedPathIds");
+        store.set("selectedPathIds", new Set([1]));
         expect(fn).not.toHaveBeenCalled();
       });
       expect(fn).toHaveBeenCalledOnce();
     });
 
-    it("defers notifyMutation during notification", () => {
+    it("defers a new selection during notification", () => {
       const store = new AppStore();
       const pathFn = vi.fn();
       store.subscribe("selectedYear", () => {
-        store.get("selectedPathIds").add(99);
-        store.notifyMutation("selectedPathIds");
+        store.set("selectedPathIds", new Set([99]));
       });
       store.subscribe("selectedPathIds", pathFn);
 
@@ -692,8 +682,7 @@ describe("AppStore", () => {
       });
       const seen = watch(store);
 
-      store.get("selectedPathIds").clear();
-      store.notifyMutation("selectedPathIds");
+      store.set("selectedPathIds", new Set());
 
       expect(store.get("isolateSelection")).toBe(false);
       // Never an empty selection still shared
@@ -726,8 +715,7 @@ describe("AppStore", () => {
       });
       const seen = watch(store);
 
-      store.get("selectedPathIds").delete(1);
-      store.notifyMutation("selectedPathIds");
+      store.set("selectedPathIds", new Set([2]));
       expect(store.get("isolateSelection")).toBe(true);
 
       store.set("isolateSelection", false);

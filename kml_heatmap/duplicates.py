@@ -14,10 +14,15 @@ otherwise the one with fewer points (the coarser recording).
 
 Only recordings with timed points are compared; a line without times has
 nothing to tell two flights over the same route apart. Two recordings on
-real clocks are compared as they are. Obfuscated files, though, start every
-flight at midnight on January 1st, each file on its own, so two recordings
-of one flight that did not start at the same second no longer line up, and
-every flight of a year overlaps every other in time. Where one of two
+real clocks are compared as they are, and where that tells them apart,
+with the clock of one moved by what two real clocks are off by: a few
+seconds (GPS time runs 18 s ahead of UTC), or whole half hours (a
+device that writes the local time as UTC) when the two are of two files
+and took off and landed about together, lined up like the obfuscated
+ones below. Obfuscated files, though, start every flight at midnight on
+January 1st, each file on its own, so two recordings of one flight that
+did not start at the same second no longer line up, and every flight of a
+year overlaps every other in time. Where one of two
 recordings starts in those days, the clocks are lined up from where the
 recordings were instead (``_clock_shifts``), and where they are at each
 moment then tells two flights apart, since no two flights take the same way
@@ -29,6 +34,7 @@ closer to each other (``_LINED_UP_DISTANCE_KM``).
 from bisect import bisect_right
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from heapq import merge
 from math import ceil, cos, floor, radians, sqrt
 from typing import TYPE_CHECKING, NamedTuple
 
@@ -85,6 +91,27 @@ _MOVING_WINDOW_S = 10.0
 # other often enough. Two receivers in one aircraft stay within a few tens
 # of metres, and a fix every 15 s cuts a turn by 70 m.
 _LINED_UP_DISTANCE_KM = 0.15
+# What two real clocks are off by (see _real_clock_shift): a minute at
+# most (a phone on its own clock, the 18 s GPS time runs ahead), or a whole
+# number of half hours (the local time of a time zone written as UTC) and
+# no more than GPS time and a clock's drift add to it, up to the furthest
+# two zones are apart. Half hours rather than quarters: only two small
+# zones are off by a quarter, and every step more lets two flights of one
+# day that took the same way at the same pace line up at one of them.
+# Two recordings on real clocks further apart in time are of two flights.
+_ZONE_STEP_S = 1800.0
+_CLOCK_SLACK_S = 60.0
+_ZONE_SLACK_S = 25.0
+_MAX_CLOCK_OFFSET_S = 15 * 3600.0
+# Two recordings on real clocks lined up across a half hour or more are
+# of one flight only if they took off and landed about together too: two
+# circuit flights an hour apart line up at the hour as well, but not at
+# both ends once one flew a lap more than the other. About together is
+# within a share of the shorter one's time in the air, or a few samples
+# where that is less: a logger started after the takeoff, or stopped
+# before the landing, misses a part of the flight but rarely that much.
+_ENDS_SLACK_S = 30.0
+_ENDS_SHARE = 0.15
 
 
 class _Line(NamedTuple):
@@ -124,8 +151,9 @@ class _Timed:
     lon_scale: float = field(init=False)
     # South, north, west and east, DUPLICATE_DISTANCE_KM beyond the fixes
     box: tuple[float, float, float, float] = field(init=False)
-    # Made when first needed: two recordings on real clocks are compared
-    # without them. The lines between the fixes that pass through each cell
+    # Made when first needed: two recordings on real clocks that agree as
+    # they are, or that cannot be lined up (see _clocks_may_line_up), are
+    # compared without them. The lines between the fixes that pass through each cell
     # (see _index_lines), the cells of ``reach``, the part of the
     # recording ``moving`` returns, and the moments of ``samples``.
     _cells: dict[tuple[int, int], list[_Line]] | None = None
@@ -451,16 +479,98 @@ def _clock_shifts(first: _Timed, second: _Timed) -> list[float]:
     ]
 
 
-def _one_flight(first: _Timed, second: _Timed) -> bool:
+def _real_clock_shift(
+    shift: float, shorter: _Timed, longer: _Timed, one_clock: bool
+) -> bool:
+    """Whether two real clocks may be off by ``shift`` seconds.
+
+    By a few seconds, or a whole number of half hours (see
+    ``_ZONE_STEP_S``), up to ``_MAX_CLOCK_OFFSET_S``. Off by half
+    hours only for recordings of two files (``one_clock`` is that they are
+    of one, whose logger wrote them by one clock), and only when the two
+    took off and landed about together once lined up (see
+    ``_ENDS_SLACK_S``). ``shorter`` and ``longer`` are the times they
+    moved (see ``_Timed.moving``).
+    """
+    steps = round(shift / _ZONE_STEP_S)
+    off_step = abs(shift - _ZONE_STEP_S * steps)
+    if steps == 0:
+        return off_step <= _CLOCK_SLACK_S
+    if abs(shift) > _MAX_CLOCK_OFFSET_S or off_step > _ZONE_SLACK_S:
+        return False
+    slack = max(_ENDS_SLACK_S, _ENDS_SHARE * shorter.duration)
+    return (
+        not one_clock
+        and abs(longer.times[0] - shorter.times[0] - shift) <= slack
+        and abs(longer.times[-1] - shorter.times[-1] - shift) <= slack
+    )
+
+
+def _clocks_may_line_up(shorter: _Timed, longer: _Timed, one_clock: bool) -> bool:
+    """Whether any shift ``_real_clock_shift`` allows may line two real
+    clocks up, judged by the times the two moved alone.
+
+    Off by a minute at most, the two moved at about one time. Off by a
+    whole number of half hours, they took off about that far apart (see
+    ``_ENDS_SLACK_S``). Two recordings that do neither are not lined up at
+    all, which saves finding the shifts of two flights of one day.
+    """
+    if (
+        longer.times[0] - _CLOCK_SLACK_S <= shorter.times[-1]
+        and shorter.times[0] - _CLOCK_SLACK_S <= longer.times[-1]
+    ):
+        return True
+    if one_clock:
+        return False
+    takeoff = longer.times[0] - shorter.times[0]
+    slack = max(_ENDS_SLACK_S, _ENDS_SHARE * shorter.duration) + _ZONE_SLACK_S
+    low = floor(takeoff / _ZONE_STEP_S)
+    return any(
+        steps != 0 and abs(takeoff - _ZONE_STEP_S * steps) <= slack
+        for steps in (low, low + 1)
+    )
+
+
+def _apart_in_time(first: _Timed, second: _Timed) -> bool:
+    """Whether two recordings on real clocks are too far apart in time.
+
+    Further than any two real clocks are off by (``_MAX_CLOCK_OFFSET_S``):
+    two flights of other days.
+    """
+    return (
+        second.times[0] - first.times[-1] > _MAX_CLOCK_OFFSET_S
+        or first.times[0] - second.times[-1] > _MAX_CLOCK_OFFSET_S
+    )
+
+
+def _one_flight(
+    first: _Timed,
+    second: _Timed,
+    one_clock: bool = False,
+    two_aircraft: bool = False,
+) -> bool:
     """Whether two recordings are of one flight.
 
-    Two real clocks agree: the recordings are compared as they are, and
-    two flights of other days never overlap in time. Where one of them may
-    be obfuscated, the clocks are lined up first (see ``_clock_shifts``),
-    and only the time the aircraft moved counts (see ``_Timed.moving``).
+    Two real clocks agree, or are off by what real clocks are off by (see
+    ``_real_clock_shift``): the recordings are compared as they are, then
+    lined up like the others where the times they moved allow it (see
+    ``_clocks_may_line_up``), and two flights of other days are never
+    compared. Where one of them may be obfuscated, the clocks are lined up
+    first (see ``_clock_shifts``), and only the time the aircraft moved
+    counts (see ``_Timed.moving``). ``one_clock`` is whether the two are of
+    one file, ``two_aircraft`` whether they name two aircraft (see
+    ``_two_aircraft``), which are never one flight: two aircraft flying in
+    formation are as close as one flight on two loggers, and two flying one
+    circuit an hour apart line up as well as one flight on two clocks.
     """
-    if first.clock_known and second.clock_known:
-        return same_flight(first, second)
+    if two_aircraft:
+        return False
+    real_clocks = first.clock_known and second.clock_known
+    if real_clocks:
+        if _apart_in_time(first, second):
+            return False
+        if same_flight(first, second):
+            return True
     first_moving, second_moving = first.moving(), second.moving()
     if first_moving is None or second_moving is None:
         return False
@@ -478,10 +588,33 @@ def _one_flight(first: _Timed, second: _Timed) -> bool:
     shorter, longer = sorted(
         (first_moving, second_moving), key=lambda recording: recording.duration
     )
+    if real_clocks and not _clocks_may_line_up(shorter, longer, one_clock):
+        return False
     return any(
         same_flight(shorter, longer, shift, _LINED_UP_DISTANCE_KM)
         for shift in _clock_shifts(shorter, longer)
+        if not real_clocks or _real_clock_shift(shift, shorter, longer, one_clock)
     )
+
+
+def _one_file(first: PathMetadata, second: PathMetadata) -> bool:
+    """Whether two recordings are of one input file.
+
+    By its path where the run set it (``source``): two folders may hold
+    files of one name, recorded by two loggers. By the file name otherwise.
+    """
+    if "source" in first and "source" in second:
+        return first["source"] == second["source"]
+    name = first.get("filename")
+    return bool(name) and name == second.get("filename")
+
+
+def _two_aircraft(first: PathMetadata, second: PathMetadata) -> bool:
+    """Whether two recordings name two aircraft: both a registration, not
+    the same one."""
+    one = (first.get("aircraft_registration") or "").upper()
+    other = (second.get("aircraft_registration") or "").upper()
+    return bool(one) and bool(other) and one != other
 
 
 def _name(metadata: Sequence[PathMetadata], index: int) -> str:
@@ -504,7 +637,11 @@ def drop_overlapping_paths(
     the choice does not depend on the order they are compared in. Every
     recording of a year is compared with every other one: those on real
     clocks by time, and the others with every one whose area they touch
-    (see the module). A year left without an exported path is left out.
+    (see the module). Two on real clocks that are further apart in time
+    than two real clocks are off by are not compared at all: the kept ones
+    are gone through in the order they started, and one that ended long
+    before a recording on a real clock started did so before every later
+    one. A year left without an exported path is left out.
     """
     dropped: set[int] = set()
     for indices in paths_by_year.values():
@@ -514,10 +651,38 @@ def drop_overlapping_paths(
             if index in exported
             and (recording := _Timed.of(all_path_groups[index])) is not None
         }
-        kept: list[int] = []
-        for index in sorted(timed, key=lambda index: (timed[index].times[0], index)):
-            for other in list(kept):
-                if not _one_flight(timed[other], timed[index]):
+
+        # The order the recordings started in, and a recording's place in it
+        started = {
+            index: (recording.times[0], index) for index, recording in timed.items()
+        }
+        # The kept recordings, each in the order they started: those on
+        # real clocks, of which the first ``open_from`` ended too long ago
+        # for any later one on a real clock, and the others
+        real: list[int] = []
+        open_from = 0
+        other_clocks: list[int] = []
+        for index in sorted(timed, key=started.__getitem__):
+            recording = timed[index]
+            if recording.clock_known:
+                while (
+                    open_from < len(real)
+                    and recording.times[0] - timed[real[open_from]].times[-1]
+                    > _MAX_CLOCK_OFFSET_S
+                ):
+                    open_from += 1
+                candidates = merge(
+                    other_clocks, real[open_from:], key=started.__getitem__
+                )
+            else:
+                candidates = merge(other_clocks, real, key=started.__getitem__)
+            for other in list(candidates):
+                if other in dropped or not _one_flight(
+                    timed[other],
+                    recording,
+                    _one_file(all_path_metadata[other], all_path_metadata[index]),
+                    _two_aircraft(all_path_metadata[other], all_path_metadata[index]),
+                ):
                     continue
                 keep, drop = sorted(
                     (other, index),
@@ -535,7 +700,6 @@ def drop_overlapping_paths(
                 )
                 if drop == index:
                     break
-                kept.remove(other)
             if index not in dropped:
-                kept.append(index)
+                (real if recording.clock_known else other_clocks).append(index)
     return without_paths(paths_by_year, dropped, exported)

@@ -325,7 +325,10 @@ export type FitPoints = Pick<ReplayAllPoints, "points" | "count" | "origin">;
  * Both ends of every one of `segments`, where they are, as the points of a
  * run for a fit of them (see fitTilted): the curves of a run are thinned
  * for the zoom they were cut for, and cut for a map far out, a point every
- * 18 km or so, they cut the turn of a short flight short of the frame
+ * 18 km or so, they cut the turn of a short flight short of the frame.
+ * Each fix is taken to the copy of the world nearest the one before: a
+ * flight across the antimeridian lay a world apart on either side of it,
+ * and the fit of it was the whole world.
  */
 export function fixPoints(segments: readonly PathSegment[]): FitPoints {
   const count = segments.length * 2;
@@ -333,11 +336,13 @@ export function fixPoints(segments: readonly PathSegment[]): FitPoints {
   const first = segments[0]?.coords[0];
   const origin = first ? mercatorOf(first) : ([0, 0] as [number, number]);
   let k = 0;
+  let x = 0;
   for (const { coords } of segments) {
     for (const fix of coords) {
-      const [x, y] = mercatorOf(fix);
-      points[k] = x - origin[0];
-      points[k + 1] = y - origin[1];
+      const [fx, fy] = mercatorOf(fix);
+      x = fx - origin[0] - Math.round(fx - origin[0] - x);
+      points[k] = x;
+      points[k + 1] = fy - origin[1];
       k += REPLAY_ALL_POINT_FLOATS;
     }
   }
@@ -408,9 +413,12 @@ export function fitTilted(
   const turn = (map.bearing ?? 0) * DEGREES_TO_RADIANS;
   const c = Math.cos(turn);
   const s = Math.sin(turn);
-  // The centre in Mercator units from the origin of the points
+  // The centre in Mercator units from the origin of the points, on the
+  // copy of the world they lie on: across the antimeridian the centre of
+  // their bounds comes wrapped to the other side of it
   const [mx, my] = mercatorOf([camera.center[1], camera.center[0]]);
   let x = mx - origin[0];
+  x -= Math.round(x);
   let y = my - origin[1];
   let zoom = camera.zoom;
   for (let round = 0; round < FIT_ROUNDS; round++) {

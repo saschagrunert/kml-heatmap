@@ -9,6 +9,7 @@ import { describe, expect, it } from "vitest";
 import {
   formatBytes,
   inputDeltas,
+  joinPathData,
   largestInputs,
   overrunSummary,
   parseBuildArgs,
@@ -195,5 +196,29 @@ describe("the popups the unit tests import", () => {
     const { generateAirportPopupHtml } =
       await import("../../../kml_heatmap/frontend/utils/htmlGenerators");
     expect(String(generateAirportPopupHtml)).not.toMatch(/\n\s+</);
+  });
+});
+
+describe("joinPathData", () => {
+  it("draws a relative start where it drew as a path of its own", () => {
+    // Lucide's X: two strokes, not one from the end of the first
+    expect(joinPathData("M18 6 6 18", "m6 6 12 12")).toBe(
+      "M18 6 6 18M6 6l12 12",
+    );
+  });
+
+  it("keeps the pairs after a relative start relative, and an absolute start as it is", () => {
+    expect(joinPathData("M1 1h2", "m-1.5.5,2 2-3 1")).toBe(
+      "M1 1h2M-1.5 .5l2 2-3 1",
+    );
+    expect(joinPathData("M1 1h2", "m3 4")).toBe("M1 1h2M3 4");
+    expect(joinPathData("M1 1h2", "M3 4h5")).toBe("M1 1h2M3 4h5");
+    expect(joinPathData("M1 1h2", "m3 4a2 2 0 0 1 2 2")).toBe(
+      "M1 1h2M3 4a2 2 0 0 1 2 2",
+    );
+  });
+
+  it("refuses path data it cannot read", () => {
+    expect(() => joinPathData("M1 1", "m3")).toThrow("Unexpected path data");
   });
 });

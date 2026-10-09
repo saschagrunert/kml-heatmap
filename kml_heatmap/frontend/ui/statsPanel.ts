@@ -96,7 +96,7 @@ export function followStatsPanel(app: MapApp): void {
         app.statsPanelVisible &&
         !app.wrappedVisible &&
         app.mobileBar?.isVisible() &&
-        !app.mobileBar.sheet.isOpen()
+        !app.mobileBar.sheetOpen()
       ) {
         event.preventDefault();
         app.statsPanelVisible = false;

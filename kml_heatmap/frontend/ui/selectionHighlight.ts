@@ -20,6 +20,7 @@ import { MAP_LAYERS, MAP_SOURCES } from "../utils/constants";
 import { highlightsSelection } from "./layerVisibility";
 import {
   toLngLat,
+  onMapReady,
   whenContextRestored,
   type LngLatTuple,
 } from "../utils/mapHelpers";
@@ -133,11 +134,8 @@ export function followSelectionHighlight(app: MapApp): void {
     update,
   );
   update();
-  void app.mapReady.then(
-    (map) => {
-      write();
-      whenContextRestored(map, write);
-    },
-    () => {},
-  );
+  onMapReady(app, "The selection's lines", (map) => {
+    write();
+    whenContextRestored(map, write, app.signal);
+  });
 }

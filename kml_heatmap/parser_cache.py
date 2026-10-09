@@ -33,7 +33,12 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, NamedTuple
 
 from .airport_lookup import database_fingerprint
-from .cache import CACHE_DIR, atomic_bytes_write
+from .cache import (
+    CACHE_DIR,
+    PRIVATE_FILE_MODE,
+    atomic_bytes_write,
+    private_directory,
+)
 from .landings import FlightLandings
 from .logger import logger
 from .types import FlightPath, FlightPathGroup, PathMetadata, TrackPoint
@@ -139,14 +144,19 @@ def _cache_name(kml_path: Path) -> str | None:
 def get_cache_key(
     kml_file: str, cache_dir: Path | None = None
 ) -> tuple[Path | None, bool]:
-    """Return the cache path for a KML file and whether a cache entry exists."""
+    """Return the cache path for a KML file and whether a cache entry exists.
+
+    The entries hold the raw flights, real dates and times among them, so
+    the directory is this user's alone (see ``cache.private_directory``);
+    without one there is no cache.
+    """
     if cache_dir is None:
         cache_dir = KML_CACHE_DIR
 
-    try:
-        cache_dir.mkdir(parents=True, exist_ok=True)
-    except OSError as e:
-        logger.debug("Parse cache unavailable (%s): %s", cache_dir, e)
+    if not private_directory(cache_dir):
+        logger.debug(
+            "Parse cache unavailable: %s is no directory of this user's own", cache_dir
+        )
         return None, False
 
     cache_name = _cache_name(Path(kml_file))
@@ -373,7 +383,7 @@ def save_to_cache(
         entry["landings"] = [_landings_to_json(item) for item in landings]
     data = encode_entry(entry)
     try:
-        atomic_bytes_write(cache_path, data)
+        atomic_bytes_write(cache_path, data, mode=PRIVATE_FILE_MODE)
     except OSError as e:
         # The next run parses the file again, that is all
         logger.debug("Failed to write cache file %s: %s", cache_path, e)

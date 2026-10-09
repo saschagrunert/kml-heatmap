@@ -2,6 +2,7 @@
 
 import logging
 import os
+import re
 import zipfile
 import zlib
 from pathlib import Path
@@ -228,34 +229,87 @@ def _refuse_entity_declarations(tree: etree._ElementTree, kml_file: str) -> None
         )
 
 
-def _parse_kml_tree(kml_file: str) -> etree._Element:
-    """Parse a KML (or KMZ) file and return the XML root element."""
+# The namespace of the gx: elements, which a file that uses them may not
+# declare (see _repaired)
+_GX_DECLARATION = b'xmlns:gx="http://www.google.com/kml/ext/2.2"'
+# The start tag of the root, with the prefix of a writer that gives the KML
+# namespace one (<kml:kml>)
+_KML_START = re.compile(rb"<((?:[\w.-]+:)?kml)(?=[\s/>])")
+
+
+def _xml_parser(*, recover: bool = False) -> etree.XMLParser:
+    """The parser of a document: no entities, no network, no comments.
+
+    huge_tree lifts libxml2's 10 MB limit per text node, which a single
+    long <coordinates> reaches well below the accepted file size. Entities
+    stay unresolved and the amplification limit still applies. Comments
+    and processing instructions are dropped while parsing, so the text
+    around one is a single text again: elem.text stopped at a comment
+    inside a <coordinates>, a <gx:coord>, a <when> or a <name> and lost the
+    points or the words after it. ``recover`` reads what it can of a
+    damaged document (see ``_parse_kml_tree``).
+    """
+    return etree.XMLParser(
+        resolve_entities=False,
+        no_network=True,
+        huge_tree=True,
+        remove_comments=True,
+        remove_pis=True,
+        recover=recover,
+    )
+
+
+def _repaired(data: bytes) -> bytes | None:
+    """A document with the slips of some writers mended, None if it has none.
+
+    White space before the XML declaration, which allows nothing before
+    it, and gx: elements without the declaration of their namespace.
+    """
+    repaired = data
+    if data[:1].isspace() and data.lstrip().startswith(b"<?xml"):
+        repaired = repaired.lstrip()
+    if b"<gx:" in repaired and b"xmlns:gx" not in repaired:
+        repaired = _KML_START.sub(rb"<\1 " + _GX_DECLARATION, repaired, count=1)
+    return repaired if repaired != data else None
+
+
+def _parse_kml_tree(kml_file: str) -> tuple[etree._Element, KMLParseError | None]:
+    """Parse a KML (or KMZ) file into its XML root element.
+
+    A document that is no well-formed XML is read once more with the slips
+    of some writers mended (see ``_repaired``), and then for what it holds
+    up to where it is damaged: a logger whose battery ran out leaves a
+    file cut off in the middle of its track. The second value is the error
+    of such a damaged one (None for a sound one), which the caller raises
+    when no path came of it.
+    """
+    damage: KMLParseError | None = None
+    data: bytes | None = None
     try:
-        # huge_tree lifts libxml2's 10 MB limit per text node, which a single
-        # long <coordinates> reaches well below the accepted file size.
-        # Entities stay unresolved and the amplification limit still applies.
-        # Comments and processing instructions are dropped while parsing, so
-        # the text around one is a single text again: elem.text stopped at a
-        # comment inside a <coordinates>, a <gx:coord>, a <when> or a <name>
-        # and lost the points or the words after it.
-        parser = etree.XMLParser(
-            resolve_entities=False,
-            no_network=True,
-            huge_tree=True,
-            remove_comments=True,
-            remove_pis=True,
-        )
         if kml_file.lower().endswith(".kmz"):
-            tree = etree.fromstring(_read_kmz(kml_file), parser).getroottree()
+            data = _read_kmz(kml_file)
+            tree = etree.fromstring(data, _xml_parser()).getroottree()
         else:
             # As bytes: libxml2 wants the name in UTF-8, and one that is not
             # (unzipped from a Windows archive, copied off an old FAT drive)
             # holds surrogates Python cannot encode
-            tree = etree.parse(os.fsencode(kml_file), parser)
+            tree = etree.parse(os.fsencode(kml_file), _xml_parser())
     except etree.ParseError as e:
-        raise KMLParseError(
-            f"XML parsing error: {e}", file_path=kml_file, line_number=e.lineno
-        ) from e
+        # The message of lxml without the file it appends (see KMLParseError)
+        damage = KMLParseError(
+            f"XML parsing error: {e.msg}", file_path=kml_file, line_number=e.lineno
+        )
+        try:
+            if data is None:
+                with open(os.fsencode(kml_file), "rb") as file:
+                    data = file.read()
+            tree, mended = _parse_damaged(data)
+        except OSError as error:
+            raise KMLParseError(f"File I/O error: {error}", file_path=kml_file) from e
+        if tree is None:
+            raise damage from e
+        if mended:
+            damage = None
     except OSError as e:
         raise KMLParseError(f"File I/O error: {e}", file_path=kml_file) from e
 
@@ -266,7 +320,71 @@ def _parse_kml_tree(kml_file: str) -> etree._Element:
         logger.debug("Root attrib: %s", root.attrib)
         all_tags = {local_name(elem.tag) for elem in root.iter()}
         logger.debug("All unique tags in file: %s", sorted(all_tags))
-    return root
+    return root, damage
+
+
+def _parse_damaged(data: bytes) -> tuple[etree._ElementTree | None, bool]:
+    """The tree of a document that is no well-formed XML, and whether mended.
+
+    Mended (see ``_repaired``), when that makes it well-formed: True. Else
+    what libxml2 recovers of it, which holds what comes before the damage:
+    False, and None for the tree when nothing is left of it.
+    """
+    repaired = _repaired(data)
+    if repaired is not None:
+        try:
+            return etree.fromstring(repaired, _xml_parser()).getroottree(), True
+        except etree.ParseError:
+            pass
+    # The mended document first, whose gx: elements are in their namespace,
+    # then the file as it is, should mending have left nothing to recover
+    for document in (repaired, data):
+        if document is None:
+            continue
+        parser = _xml_parser(recover=True)
+        try:
+            root = etree.fromstring(document, parser)
+        except etree.ParseError:  # pragma: no cover - recovering returns None
+            root = None
+        if root is not None:
+            break
+    else:
+        return None, False
+    # Cut off: the document ended with elements still open. Damage
+    # anywhere else (content after the end, a stray "&" in a name) leaves
+    # the last value whole, and libxml2 reads on past it.
+    if any(
+        error.type == etree.ErrorTypes.ERR_TAG_NOT_FINISHED
+        for error in parser.error_log
+    ):
+        _drop_cut_value(root)
+    return root.getroottree(), False
+
+
+def _drop_cut_value(root: etree._Element) -> None:
+    """Leave out the value a recovered document may hold only the start of.
+
+    The last element read (the last child of the last child, and so on:
+    the last to start) is where a cut-off file ends, in the middle of a
+    value: "8.12" of "8.1234", 2 km off. A <coordinates> loses its last
+    point, any other element (a <gx:coord>, a <when>, one cut in its name)
+    goes as a whole. Only for a document that ended with elements still
+    open (see ``_parse_damaged``): one cut off just after a value costs
+    that point.
+    """
+    last = root
+    while len(last):
+        last = last[-1]
+    if last is root:
+        return
+    if local_name(last.tag) == "coordinates":
+        text = (last.text or "").rstrip()
+        points = text.split()
+        last.text = text[: len(text) - len(points[-1])] if points else text
+        return
+    parent = last.getparent()
+    if parent is not None:
+        parent.remove(last)
 
 
 def _document_namespaces(root: etree._Element) -> dict[str, str]:
@@ -498,7 +616,7 @@ def _parse_kml(kml_file: str) -> ParseResult:
     path_groups: FlightPathGroup = []
     path_metadata: list[PathMetadata] = []
 
-    root = _parse_kml_tree(kml_file)
+    root, damage = _parse_kml_tree(kml_file)
     namespaces = _document_namespaces(root)
 
     coord_elements, tracks, placemarks = _extract_kml_elements(
@@ -538,6 +656,16 @@ def _parse_kml(kml_file: str) -> ParseResult:
         path_metadata,
         aircraft_info,
     )
+
+    if damage is not None:
+        if not path_groups:
+            raise damage
+        # Loud: what the file held after the damage may be missing
+        logger.warning(
+            "%s: damaged, the points after it may be missing (%s)",
+            Path(kml_file).name,
+            damage,
+        )
 
     _log_parse_result(kml_file, coordinates, path_groups, cached=False)
 

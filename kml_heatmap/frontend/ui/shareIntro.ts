@@ -9,7 +9,8 @@
  * it (takeShareIntro in state/urlState.ts), so neither a reload nor a link
  * copied from the address bar plays it again.
  *
- * It is not to be in the way: any input skips to its end, and input
+ * It is not to be in the way: any input skips to its end (a Tab or a
+ * modifier on its own is none, see KEYS_NOT_INPUT), and input
  * before it could start, the data and this bundle still on their way,
  * keeps it from playing at all (MapApp.initialize); under reduced
  * motion the flights are only framed, and it does not start while a replay,
@@ -27,27 +28,24 @@
  * behind the flights by the same clock, as in the replay of all flights
  * (growHeatCloud in ui/heatCloud.ts), and is the heatmap again at the end.
  *
- * The camera frames the flights as the replay of all flights fits them,
- * tilted as the map is (fitTilted), measured at every fix (fixPoints): in
- * the 3D view a fit of their bounds took no account of the tilt, and left
- * them in the far part of the map.
+ * The camera frames the flights as share mode frames them, tilted as the
+ * map is (see ui/frameFlights.ts): in the 3D view a fit of their bounds
+ * took no account of the tilt, and left them in the far part of the map.
  * The player cuts the curves for the zoom it is on its way to (aim): cut
  * for the zoom the link opens at, they were straight spokes until the
  * camera came to rest.
  */
-import type { LngLat, Map as MapLibreMap } from "maplibre-gl";
+import type { Map as MapLibreMap } from "maplibre-gl";
 import type { MapApp } from "../mapApp";
 import { shownSelection } from "../calculations/datasetIndex";
-import { flightClockOf } from "../calculations/flightClock";
+import { flightClock } from "../calculations/flightClock";
 import { flightOrder } from "../calculations/flightProfile";
 import { segmentsForPathIds } from "../calculations/statistics";
-import { AUTO_ZOOM_FOLLOW, INPUT_EVENTS } from "../utils/constants";
-import { segmentBounds } from "../utils/geometry";
-import { fitTilted, fixPoints } from "../calculations/replayAll";
+import { INPUT_EVENTS, KEYS_NOT_INPUT } from "../utils/constants";
+import { flightsCamera } from "./frameFlights";
 import { growHeatCloud } from "./heatCloud";
-import { toBounds, whenMapComplete } from "../utils/mapHelpers";
+import { whenMapComplete } from "../utils/mapHelpers";
 import { prefersReducedMotion } from "../utils/motion";
-import { mapChromePadding } from "./pathSelection";
 import { SHARE_INTRO_LAYER } from "./replayAllLayer";
 import { ReplayAllPlayer } from "./replayAllPlayer";
 
@@ -146,39 +144,10 @@ export function playShareIntro(app: MapApp): void {
   ) {
     return;
   }
-  const segments = segmentsForPathIds(data.path_segments, shown);
-  const bounds = segmentBounds(segments);
-  const padding = mapChromePadding(map);
-  // As the selection is framed (PathSelection.frame), the bearing kept
-  const bearing = map.getBearing();
-  const flat = bounds
-    ? map.cameraForBounds(toBounds(bounds), {
-        padding,
-        maxZoom: AUTO_ZOOM_FOLLOW,
-        bearing,
-      })
-    : undefined;
-  if (!flat) return;
-  // Fitted to every fix of the flights at the tilt of the map, from the fit
-  // of their bounds, which it is on a flat map
-  const { width, height } = map.getContainer().getBoundingClientRect();
-  const { lng, lat } = flat.center as LngLat;
-  const camera = {
-    ...fitTilted(
-      fixPoints(segments),
-      { center: [lng, lat], zoom: flat.zoom! },
-      {
-        width,
-        height,
-        padding,
-        pitch: map.getPitch(),
-        fov: map.getVerticalFieldOfView(),
-        bearing,
-      },
-      AUTO_ZOOM_FOLLOW,
-    ),
-    bearing,
-  };
+  // As the selection is framed, the tilt and the bearing kept
+  const theirs = segmentsForPathIds(data.path_segments, shown);
+  const camera = flightsCamera(map, theirs);
+  if (!camera) return;
   if (prefersReducedMotion()) {
     map.jumpTo(camera);
     return;
@@ -197,7 +166,8 @@ export function playShareIntro(app: MapApp): void {
   player.aim(camera.zoom, true);
   player.pause();
   growHeatCloud(app, player, camera.zoom);
-  const durations = flightClockOf(data.path_segments).duration;
+  // Of the shared flights alone, not of every flight of the dataset
+  const durations = flightClock(theirs).duration;
   let begun: number | null = null;
   let frame = 0;
   let over = false;
@@ -234,11 +204,12 @@ export function playShareIntro(app: MapApp): void {
   // pointerdown and a touchstart, a wheel turn many wheels): a replay, the
   // tour or Wrapped it opens takes them away below
   for (const type of INPUT_EVENTS) {
-    window.addEventListener(type, () => finish(true), {
-      capture: true,
-      passive: true,
-      signal: input.signal,
-    });
+    window.addEventListener(
+      type,
+      (event) =>
+        KEYS_NOT_INPUT.has((event as KeyboardEvent).key) || finish(true),
+      { capture: true, passive: true, signal: input.signal },
+    );
   }
   app.signal.addEventListener("abort", stop, { signal: input.signal });
   // A replay, the tour or Wrapped, which the app may open as the input

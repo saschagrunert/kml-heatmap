@@ -46,6 +46,7 @@ import type { ReplayAllPlayer } from "./replayAllPlayer";
 import { datasetIndex } from "../calculations/datasetIndex";
 import { ribbonWidthZoom } from "../calculations/liftZoom";
 import { loadFeatures } from "../services/featureLoader";
+import { featurePart } from "./lazyBundles";
 import { domCache } from "../utils/domCache";
 import { logError } from "../utils/logger";
 import { segmentBounds, type Coordinate } from "../utils/geometry";
@@ -122,12 +123,6 @@ const INTRO_REPLAY_SPEED = 300;
 const INTRO_REPLAY_SCALE = 1.8;
 
 /**
- * The player of each app's intro, made the first time the intro plays and
- * kept for the next: each listens to its map for as long as the map lives
- */
-const introPlayers = new WeakMap<MapApp, ReplayAllPlayer>();
-
-/**
  * Step 3 of the storyboard: the flights of the overview start to play from
  * their first second, all at once, at INTRO_REPLAY_SPEED times real speed,
  * as the camera sets off for the home base at the map zoom `zoom`, so they
@@ -145,11 +140,13 @@ function startIntroReplay(
 ): ReplayAllPlayer | null {
   const data = app.currentData;
   if (!data || app.replayActive || prefersReducedMotion()) return null;
-  let player = introPlayers.get(app);
-  if (!player) {
-    player = new features.ReplayAllPlayer(app);
-    introPlayers.set(app, player);
-  }
+  // Made the first time the intro plays and kept for the next: it listens
+  // to the map for as long as the app lives
+  const player = featurePart(
+    app,
+    "wrappedIntro",
+    () => new features.ReplayAllPlayer(app),
+  );
   const { pathIds } = datasetIndex(data).filter(
     app.selectedYear,
     app.selectedAircraft,

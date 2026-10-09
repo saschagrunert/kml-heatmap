@@ -796,6 +796,33 @@ class TestRewriteGaps:
 
 
 class TestObfuscateFile:
+    def test_a_cut_off_track_moves_like_a_whole_one(self, tmp_path):
+        """A logger whose battery ran out: the parser reads what comes
+        before the cut (see parser._parse_kml_tree), which starts at
+        midnight on January 1st like the flight of a whole file."""
+        whens = "".join(
+            f"<when>2025-06-01T10:{i // 60:02d}:{i % 60:02d}Z</when>\n"
+            for i in range(100)
+        )
+        coords = "".join(
+            f"<gx:coord>8.{i:04d} 50.0 {500 + i}</gx:coord>\n" for i in range(60)
+        )
+        kml_file = tmp_path / "cut.kml"
+        kml_file.write_text(
+            '<?xml version="1.0" encoding="UTF-8"?>\n'
+            '<kml xmlns="http://www.opengis.net/kml/2.2" '
+            'xmlns:gx="http://www.google.com/kml/ext/2.2">\n'
+            f"<Placemark><gx:Track>\n{whens}{coords}<gx:coord>8.00",
+            encoding="utf-8",
+        )
+
+        assert obfuscate_kml_file(kml_file) is True
+
+        assert check_kml_obfuscated(kml_file) == []
+        _, paths, _ = parse_kml_file(str(kml_file))
+        assert len(paths[0]) == 60
+        assert paths[0][0].ts == datetime(2025, 1, 1, tzinfo=UTC).timestamp()
+
     def test_crlf_line_endings_are_kept(self, tmp_path):
         kml_file = tmp_path / "test.kml"
         kml_file.write_bytes(SAMPLE_KML.replace("\n", "\r\n").encode())

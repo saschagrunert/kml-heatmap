@@ -18,7 +18,7 @@ import { HEAT_LINES } from "../utils/constants";
 import { isTouchDevice } from "../utils/device";
 import { domCache } from "../utils/domCache";
 import { DEGREES_TO_RADIANS } from "../utils/geometry";
-import { isReplayCameraMove } from "../utils/mapHelpers";
+import { isReplayCameraMove, onMapReady } from "../utils/mapHelpers";
 import { storedFlag, storeFlag } from "../utils/storedFlag";
 import { dismissToast, showToast, TOAST_DURATION_MS } from "../utils/toast";
 
@@ -173,13 +173,10 @@ export class MapOrientation {
     // The projection is part of the style, so it waits for one. `mapReady`
     // resolves in the turn the data layers are added in, before the map
     // has drawn a frame with them: a link to a globe opens as one.
-    app.mapReady
-      .then((styled) => {
-        this.styled = styled;
-        this.applyProjection();
-      })
-      // The start-up reports a map that never got ready
-      .catch(() => {});
+    onMapReady(app, "The projection", (styled) => {
+      this.styled = styled;
+      this.applyProjection();
+    });
   }
 
   destroy(): void {
@@ -225,13 +222,13 @@ export class MapOrientation {
   private listenForTip(): void {
     const app = this.app;
     const signal = this.tipMoments.signal;
-    let before = new Set(app.selectedPathIds);
+    let before = app.selectedPathIds;
     app.store.subscribe(
       "selectedPathIds",
       (ids) => {
         let added = 0;
         for (const id of ids) if (!before.has(id)) added++;
-        before = new Set(ids);
+        before = ids;
         if (added !== 1 || app.isInitializing) return;
         // Nor over the phone's statistics sheet, whose lists tick flights
         // too: the tip comes with a later pick on the map instead

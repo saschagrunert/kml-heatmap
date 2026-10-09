@@ -358,8 +358,7 @@ describe("layer visibility", () => {
       (selected, altitude, airspeed, replay, isolate, expected) => {
         app.store.batch(() => {
           if (selected) {
-            app.selectedPathIds.add(1);
-            app.store.notifyMutation("selectedPathIds");
+            app.selectedPathIds = new Set([...app.selectedPathIds, 1]);
           }
           app.altitudeVisible = altitude;
           app.airspeedVisible = airspeed;
@@ -435,20 +434,18 @@ describe("layer visibility", () => {
       followLayerVisibility(asMapApp(app));
       app.dataManager.applyHeatmapEmphasis.mockClear();
 
-      app.selectedPathIds.add(1);
-      app.store.notifyMutation("selectedPathIds");
+      app.selectedPathIds = new Set([...app.selectedPathIds, 1]);
       expect(highlight()).toBe("visible");
       expect(app.dataManager.applyHeatmapEmphasis).toHaveBeenCalledTimes(1);
 
-      app.selectedPathIds.clear();
-      app.store.notifyMutation("selectedPathIds");
+      app.selectedPathIds = new Set();
       expect(highlight()).toBe("none");
       expect(dimsHeatmap(asMapApp(app))).toBe(false);
       expect(app.dataManager.applyHeatmapEmphasis).toHaveBeenCalledTimes(2);
     });
 
     it("give way to a colour layer and a replay, and come back after them", () => {
-      app.selectedPathIds.add(1);
+      app.selectedPathIds = new Set([...app.selectedPathIds, 1]);
       followLayerVisibility(asMapApp(app));
       expect(highlight()).toBe("visible");
 

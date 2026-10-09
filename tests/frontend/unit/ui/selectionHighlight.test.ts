@@ -80,9 +80,7 @@ describe("selection highlight", () => {
         .data as GeoJSON.FeatureCollection<GeoJSON.LineString>
     ).features.map((feature) => feature.geometry.coordinates);
   const select = (...ids: number[]): void => {
-    app.selectedPathIds.clear();
-    for (const id of ids) app.selectedPathIds.add(id);
-    app.store.notifyMutation("selectedPathIds");
+    app.selectedPathIds = new Set(ids);
   };
 
   beforeEach(() => {

@@ -102,8 +102,16 @@ export interface ToastAction {
   run: () => boolean | void;
 }
 
-/** How long an info toast stays on screen (ms) */
+/** How long an info toast stays on screen at least (ms) */
 export const TOAST_DURATION_MS = 4000;
+
+/**
+ * How long one with `message` stays: the time to read it, at about a
+ * dozen characters a second, where that is longer
+ */
+export function toastDuration(message: string): number {
+  return Math.max(TOAST_DURATION_MS, message.length * 80);
+}
 
 /**
  * Take a toast off the screen. One that holds focus hands it to the map's
@@ -150,7 +158,7 @@ export function dismissToast(message?: string): void {
 }
 
 /**
- * Show a message. Info goes after TOAST_DURATION_MS; an error stays until it
+ * Show a message. Info goes after toastDuration; an error stays until it
  * is dismissed, since it says something is wrong until someone acts on it,
  * and it can carry the action that puts it right. Info with an action stays
  * as well: a button that went away after a few seconds could not be reached
@@ -179,7 +187,7 @@ export function showToast(
   if (type === "info" && !action) {
     // The live region speaks the message; this is only its picture
     toast.setAttribute("aria-hidden", "true");
-    setTimeout(() => removeToast(toast), TOAST_DURATION_MS);
+    setTimeout(() => removeToast(toast), toastDuration(message));
   } else {
     if (action) {
       toast.append(toastButton(toast, action.run, action.label));

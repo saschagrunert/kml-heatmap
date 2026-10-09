@@ -53,6 +53,35 @@ files, though, start every flight at midnight on January 1st, so two recordings
 of one flight line up only if they were started in the same second, and every
 flight of a year overlaps every other.
 
+Two real clocks may be off, though: a phone on its own clock, a logger that
+writes GPS time (18 s ahead of UTC), or one that writes the local time as UTC.
+Two recordings on real clocks that the comparison as they are tells apart are
+therefore lined up as below as well, but only by a shift two real clocks are off
+by (`_real_clock_shift`): up to a minute, or within 25 s of a whole number of
+half hours up to 15 hours. Two that neither moved at about one time nor took off
+about a whole number of half hours apart are not lined up at all
+(`_clocks_may_line_up`), which spares finding the shifts of most pairs of
+flights of one day. Two flights of one day the same way at the same pace would
+line up at some shift; the rule keeps them apart unless they flew that close to
+a whole number of half hours apart, took off and landed together within 15 % of
+the shorter one's time in the air (30 s at least), and stayed within 150 m all
+the way. A shift of half hours lines up recordings of two files only: one file
+was written by one clock, so the circuits of a session in it never line up with
+each other. Two files are two by their paths, folders and all (`source`, set by
+the run): two folders may hold files of one name. No shift lines up two
+recordings that name two registrations (`_two_aircraft`), nor does any
+comparison: two aircraft flying in formation are as close as one flight on two
+loggers, and two flying one circuit an hour apart line up as well as one flight
+on two clocks. Two circuit flights of one aircraft, or of files that name none,
+flown an hour apart to within 25 s with as many laps at the same pace, would
+still count once. Only Nepal and the Chatham Islands keep a time zone off by a
+quarter hour; a logger there writing the local time as UTC counts its flight
+twice. Recordings on real clocks more than 15 hours apart are never compared:
+the kept ones are gone through in the order they started, and one that ended
+that long before a recording started is passed over for it and every later one
+(`_MAX_CLOCK_OFFSET_S`). That took a year of 8,000 flights from one field from
+17.8 s to 1.5 s, where every recording was compared with every other before.
+
 Where one of two recordings starts in the first three days of its year
 (`_clock_known`), only the time from its takeoff run to its last landing counts
 (`_Timed.moving`, faster than 20 m/s over 10 s), since two flights from one
@@ -180,7 +209,8 @@ module worker, which parses and decodes the year files off the main thread and
 hands the columns back as typed arrays; the page builds its dataset from them a
 few milliseconds at a time (`services/yearDecoder.ts`,
 `services/yearDataset.ts`). The worker also draws the heatmap's heat and writes
-the GeoJSON of the heat sources, which MapLibre's worker reads from Blob URLs
-(see
+the GeoJSON of the heat sources and of the lines along the flights (the heat
+lines and the colour layers' lines, `services/flightLines.ts`), which MapLibre's
+worker reads from Blob URLs (see
 [The heat sources and the year worker](heat.md#the-heat-sources-and-the-year-worker)).
 Where the worker cannot be used, the same code runs on the main thread.

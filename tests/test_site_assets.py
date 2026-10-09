@@ -45,8 +45,8 @@ BOUNDS = CoordinateExtent(49.0, 51.0, 7.0, 9.0)
 def bundle(tmp_path_factory, monkeypatch):
     """Stand-ins for the built JavaScript bundles.
 
-    Returns the main one; the feature, Wrapped and search bundles sit next
-    to it, the way `npm run build` leaves them.
+    Returns the main one; the feature, Wrapped, search and extras bundles
+    sit next to it, the way `npm run build` leaves them.
     """
     static = tmp_path_factory.mktemp("static")
     bundle = static / "mapApp.bundle.js"
@@ -57,12 +57,16 @@ def bundle(tmp_path_factory, monkeypatch):
     wrapped.write_text("// wrapped\n")
     search = static / "search.bundle.js"
     search.write_text("// search\n")
+    extras = static / "extras.bundle.js"
+    extras.write_text("// extras\n")
     monkeypatch.setattr("kml_heatmap.site_assets.BUNDLE_FILE", bundle)
     monkeypatch.setattr("kml_heatmap.site_assets.FEATURES_BUNDLE_FILE", features)
     monkeypatch.setattr("kml_heatmap.site_assets.WRAPPED_BUNDLE_FILE", wrapped)
     monkeypatch.setattr("kml_heatmap.site_assets.SEARCH_BUNDLE_FILE", search)
+    monkeypatch.setattr("kml_heatmap.site_assets.EXTRAS_BUNDLE_FILE", extras)
     monkeypatch.setattr(
-        "kml_heatmap.site_assets.BUNDLE_FILES", (bundle, features, wrapped, search)
+        "kml_heatmap.site_assets.BUNDLE_FILES",
+        (bundle, features, wrapped, search, extras),
     )
     return bundle
 
@@ -354,12 +358,13 @@ class TestPackageAssets:
         assert (tmp_path / "styles.css").stat().st_size > 0
         assert (tmp_path / "mapApp.bundle.js").read_text() == bundle.read_text()
         assert not (tmp_path / "mapApp.bundle.js.map").exists()
-        # Replay, Wrapped and the search are fetched on demand, each from a
-        # bundle and a stylesheet of its own, so the page needs them next to
-        # it as well
+        # Replay, Wrapped, the search and the extras are fetched on demand,
+        # each from a bundle (and all but the extras a stylesheet) of its
+        # own, so the page needs them next to it as well
         assert (tmp_path / "features.bundle.js").read_text() == "// features\n"
         assert (tmp_path / "wrapped.bundle.js").read_text() == "// wrapped\n"
         assert (tmp_path / "search.bundle.js").read_text() == "// search\n"
+        assert (tmp_path / "extras.bundle.js").read_text() == "// extras\n"
         assert (tmp_path / "features.css").stat().st_size > 0
         assert (tmp_path / "wrapped.css").stat().st_size > 0
         assert (tmp_path / "search.css").stat().st_size > 0

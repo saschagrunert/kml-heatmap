@@ -682,8 +682,10 @@ interface DrawnPath {
  *
  * From the sources' data and not from `querySourceFeatures`: that answers for
  * the tiles in view only, cut up at their edges, so the count would follow
- * the camera. Only the filter shapes the app writes are understood; anything
- * else throws rather than counting wrong.
+ * the camera. A source given a Blob URL (the lines of every flight, which
+ * the year worker writes) is read from that URL: getData() of one never
+ * answers (see scripts/vendor.js). Only the filter shapes the app writes
+ * are understood; anything else throws rather than counting wrong.
  */
 async function drawnPaths(page: Page, layer: ColorLayer): Promise<DrawnPath[]> {
   await waitForMapIdle(page);
@@ -721,7 +723,11 @@ async function drawnPaths(page: Page, layer: ColorLayer): Promise<DrawnPath[]> {
       if (map.getLayoutProperty(id, "visibility") === "none") continue;
       const source = map.getSource(style.source);
       if (source?.type !== "geojson") throw new Error(`"${id}" is not GeoJSON`);
-      const data = await (source as GeoJSONSource).getData();
+      const { data: url } = (source as GeoJSONSource).serialize();
+      const data =
+        typeof url === "string"
+          ? ((await (await fetch(url)).json()) as GeoJSON.GeoJSON)
+          : await (source as GeoJSONSource).getData();
       if (data.type !== "FeatureCollection") {
         throw new Error(`the source of "${id}" is not a FeatureCollection`);
       }
@@ -1027,7 +1033,10 @@ export interface FlightsOnMap {
   layers: string[];
   /** The app's layers as the map reports them: layout, paint and filter */
   looks: unknown[];
-  /** Features per GeoJSON source of the app, as handed to the map */
+  /**
+   * Features per GeoJSON source of the app, as handed to the map: as data,
+   * or as the text behind a Blob URL
+   */
   features: Record<string, number>;
   /** Features of the heat and the altitude source in the tiles in view */
   drawn: { heat: number; paths: number };
@@ -1041,7 +1050,7 @@ export interface FlightsOnMap {
  */
 export async function flightsOnMap(page: Page): Promise<FlightsOnMap> {
   await waitForMapIdle(page);
-  return page.evaluate(() => {
+  return page.evaluate(async () => {
     const app = window.mapApp!;
     const map = app.map!;
     const style = map.getStyle();
@@ -1062,10 +1071,13 @@ export async function flightsOnMap(page: Page): Promise<FlightsOnMap> {
     }
     const features: Record<string, number> = {};
     for (const [id, source] of Object.entries(style.sources)) {
-      if (source.type !== "geojson" || typeof source.data === "string")
-        continue;
-      const data = source.data as GeoJSON.FeatureCollection;
-      if (own.includes(id)) features[id] = data.features.length;
+      if (source.type !== "geojson" || !own.includes(id)) continue;
+      const data = (
+        typeof source.data === "string"
+          ? await (await fetch(source.data)).json()
+          : source.data
+      ) as GeoJSON.FeatureCollection;
+      features[id] = data.features.length;
     }
     return {
       layers: style.layers.map((layer) => layer.id),

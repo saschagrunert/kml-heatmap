@@ -210,8 +210,8 @@ Targets (`make help` prints this list with the current variable values):
 - `serve` - Serve `OUTPUT_DIR` on `http://HOST_BIND:PORT` (run `make build`
   first)
 - `serve-build` - Run `build`, then `serve`
-- `test` - Build the frontend bundles, then run the JavaScript and Python test
-  suites with coverage
+- `test` - Build the frontend bundles and the site in docs/, then run the
+  JavaScript and Python test suites with coverage
 - `lint` - Run the linters, formatters (check only), type checkers and typos of
   the CI lint job
 - `format` - Run formatters
@@ -220,9 +220,10 @@ Targets (`make help` prints this list with the current variable values):
   `requirements-tools.lock`) from `pyproject.toml` and `requirements-tools.in`
   with pip-compile
 - `obfuscate` - Rewrite the KML files in `INPUT_DIR` in place so they carry no
-  real dates (irreversible)
+  real dates (irreversible); with the host's `python` when it is Python 3.14,
+  else in the container image
 - `check-obfuscation` - Check that the KML files in `INPUT_DIR` and the fixture
-  flights of the visual snapshots are obfuscated
+  flights of the visual snapshots are obfuscated, where `obfuscate` runs
 - `hooks` - Install the pre-push hook that refuses to push KML files with real
   dates, and the pre-commit hooks
 - `clean` - Remove the container image (when a runtime is available) and local
@@ -492,9 +493,14 @@ One broken file stops the whole run, so a site never silently misses a flight:
 
 - `<file>: No valid coordinates found` or `Error processing <file>`, followed by
   `<n> of <m> file(s) failed to parse`: the file holds no track the parser
-  reads, or it is not valid KML (cut off, or not XML at all). Only `LineString`
-  and `gx:Track` geometry (also inside a `MultiGeometry`) forms a flight;
-  polygons are skipped with a warning. So is a track whose `altitudeMode` is
+  reads, or it is not valid KML (not XML at all, or cut off before its first
+  track). A file cut off later, as a logger whose battery ran out leaves it, is
+  read up to where it ends, with a warning that gives the parser's message with
+  the line (`<file>: damaged, the points after it may be missing (...)`); white
+  space before the XML declaration and `gx:` elements without the declaration of
+  their namespace are read as if they were right. Only `LineString` and
+  `gx:Track` geometry (also inside a `MultiGeometry`) forms a flight; polygons
+  are skipped with a warning. So is a track whose `altitudeMode` is
   `clampToGround` or `relativeToGround`, because its altitudes are not above sea
   level. A track without `altitudeMode` is read as absolute, which is what
   flight logs write.
@@ -502,8 +508,11 @@ One broken file stops the whole run, so a site never silently misses a flight:
   the file has coordinates, but nothing of it would reach the site. A file whose
   flight is only skipped as a copy of one in another file (see below) does not
   stop the run. The reason says why:
+  - `no track of two or more valid points (waypoints are none)`: a waypoint file
+    or one that marks places on the map, which holds no flight, or a line of
+    which only one point is valid
   - `no track of two or more points with altitudes above sea level`: it holds
-    only points, lines without altitudes, or tracks clamped to or relative to
+    lines without altitudes (a route plan), or tracks clamped to or relative to
     the ground
   - `no track with a determinable year`: see above for where the year comes from
   - `every track with a year stays on one spot`: a recording that never moved
@@ -568,10 +577,16 @@ panel GPS or exported by two tools: two recordings with times that overlap by
 more than half of the shorter one, and are in the same place at the times they
 share, are one flight. The clocks of obfuscated files need not agree, since each
 starts at midnight: such recordings are lined up by where they flew, and then
-have to be within 150 m of each other. The one whose file name gives the
-aircraft stays, otherwise the one with more points, and the warning names both
-files. The skipped one adds no airport and does not widen the map. Delete the
-copy from `data/`.
+have to be within 150 m of each other. So are two on real clocks that are off by
+a few seconds (GPS time runs 18 s ahead of UTC), or two files whose clocks are
+off by whole half hours (a device that writes the local time as UTC) and whose
+takeoffs and landings agree once lined up. Two recordings that name two
+registrations are never one flight: two aircraft flying in formation are as
+close as one flight on two loggers, and two flying one circuit an hour apart
+would line up as well. The one whose file name gives the aircraft stays,
+otherwise the one with more points, and the warning names both files. The
+skipped one adds no airport and does not widen the map. Delete the copy from
+`data/`.
 
 ### One flight shows as several, or two as one
 

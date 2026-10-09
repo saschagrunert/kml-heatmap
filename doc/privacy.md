@@ -43,11 +43,20 @@ That is the site. A repository the KML files are committed to keeps its own
 dates: a public one dates every committed flight to the day of its commit, in
 the commit itself, in the Actions run it started and in the Pages deployment
 that followed, however well the files are obfuscated. Whoever publishes their
-flights in a public repository should therefore commit them in batches, some
-time after the last of them, or with coarse commit dates (`GIT_AUTHOR_DATE` and
-`GIT_COMMITTER_DATE` set to the first of the month, say), so that no commit
-dates a flight. The pre-push hook (`make hooks`) warns when a push adds a single
-flight.
+flights in a public repository should therefore push them in batches, some time
+after the last of them, so that no push dates a flight. Coarse commit dates
+(`GIT_AUTHOR_DATE` and `GIT_COMMITTER_DATE` set to the first of the month, say)
+only hide the date inside the commit: when it was pushed is public whatever the
+commit says, in the Actions run the push starts, in the events GitHub lists for
+the repository and in the Pages deployment that follows. So are the title and
+the description of a pull request, and the name of the branch it comes from. The
+pre-push hook (`make hooks`) warns when a push adds the flights of one trip: up
+to three flights, or legs that each start where the one before ended and come
+back to the field of the first only at the end. It refuses a push to a branch
+whose name holds a date, a weekday or a holiday when the commits pushed to that
+branch add or change a flight (`flights-2026-08-16`); a branch of code pushed
+along with them passes. To a remote never fetched from it only warns: it cannot
+tell new flights from those the remote already has.
 
 ## Your input files
 
@@ -55,6 +64,11 @@ flight.
 `--obfuscate-inputs`, which cannot be undone.
 
 ## Requests to other servers
+
+Every server the page asks (below) sees the visitor's address and which site
+asks: the browser names the origin of the page (`https://<user>.github.io`,
+without its path) in every request the page makes to another site, so a tile
+server knows whose map a visitor looks at.
 
 **The page asks CARTO for the base map on every view**: the map tiles of the
 area in view and the fonts of their labels (`*.basemaps.cartocdn.com`), at every
@@ -91,10 +105,12 @@ in lower case, to Photon of komoot (`photon.komoot.io`), which looks it up in
 OpenStreetMap. Photon sees that text, the visitor's address and which site asks
 (the browser names the page's origin in a request to another site), but no
 cookie, no address of the page and nothing about the flights or the map in view.
-The site's own airports are matched on the page and never sent. Nothing is sent
-while the search is closed or holds fewer than three characters, and the page
-keeps the answers to the last 50 texts for the visit, so it does not send one of
-them again.
+The site's own airports are matched on the page, and a text that is the code or
+the name of one of them (`EDAQ`, `Halle-Oppin`) is not sent; one that only
+starts like one (`EDA`, `Halle`) is, as it may name a place as well. Nothing is
+sent while the search is closed or holds fewer than three characters, and the
+page keeps the answers to the last 50 texts for the visit, so it does not send
+one of them again.
 
 **The page asks open flightmaps for the aviation charts of the area in view**
 while the Aviation switch is on and the map is zoomed in far enough to draw them
@@ -190,7 +206,10 @@ repository is as public as the files.
 
 Kept in the site:
 
-- Coordinates, altitudes, distances, groundspeeds
+- Coordinates, altitudes, distances, groundspeeds, to five decimals (about a
+  metre), from the start of a recording to its end: the taxiing as well, so the
+  spot the flights from a home field start and end at, where the aircraft is
+  parked, can be read off to within a few metres
 - Airport visit counts
 - Per flight, the number of full-stop landings, touch-and-goes and go-arounds,
   and the field and runway of each touchdown, without a time

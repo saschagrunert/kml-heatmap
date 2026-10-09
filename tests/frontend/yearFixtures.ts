@@ -24,6 +24,8 @@ import type {
  */
 export class FakeYearWorker {
   requests: YearRequest[] = [];
+  /** What each request handed over (see postMessage) */
+  transfers: (Transferable[] | StructuredSerializeOptions)[] = [];
   terminate = vi.fn();
   /** Cleared by a test that wants to answer, or not to answer, by itself */
   answers = true;
@@ -33,8 +35,12 @@ export class FakeYearWorker {
     this.listeners.set(type, [...(this.listeners.get(type) ?? []), listener]);
   }
 
-  postMessage(request: YearRequest): void {
+  postMessage(
+    request: YearRequest,
+    transfer: Transferable[] | StructuredSerializeOptions = [],
+  ): void {
     this.requests.push(request);
+    this.transfers.push(transfer);
     if (this.answers) queueMicrotask(() => this.answer(request));
   }
 

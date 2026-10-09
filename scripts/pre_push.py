@@ -22,15 +22,23 @@ The messages of the commits that add or change a flight in data/ are
 published with it: one that names a date or a weekday ("Add flight 16 Aug
 2026") is refused as well.
 
-A push that adds exactly one flight to data/ gets a warning, not a refusal:
-the files carry no date, but the commit does, and a commit with one new
-flight in it dates that flight to about the day it was pushed.
+So are the names of the refs pushed to: a branch named after the day of
+its flights ("flights-2026-08-16") is refused when its commits add or
+change one.
+
+A push that adds the flights of one trip to data/ gets a warning, not a
+refusal: the files carry no date, but the push does, and dates the trip to
+about the day it was pushed. One trip is up to three flights (a day's
+flying), or legs that each start where the one before ended and come back
+to the field of the first only at the end (see ``one_trip``).
 """
 
+import re
 import shutil
 import subprocess
 import sys
 import tempfile
+from itertools import pairwise
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -42,6 +50,15 @@ KML_PATHSPECS = (":(glob,icase)**/*.kml", ":(glob,icase)**/*.kmz")
 FLIGHT_PATHSPECS = (":(glob,icase)data/**/*.kml", ":(glob,icase)data/**/*.kmz")
 # What git sends for a ref that is deleted rather than pushed
 ZERO_SHA = "0" * 40
+# As many flights as a day of flying has, which a push dates together
+TRIP_MAX_FLIGHTS = 3
+# Two ends of flights this close (km) are at one field: a leg starts where
+# the one before it ended
+SAME_FIELD_KM = 3.0
+# The first and the last point of a track: a <gx:coord>, or the first and
+# the last tuple of a <coordinates>
+_GX_COORD = re.compile(r"<(?:[\w.-]+:)?coord>\s*(\S+)\s+(\S+)")
+_COORDINATES = re.compile(r"<(?:[\w.-]+:)?coordinates>([^<]*)<")
 # Said by a refusal of a push to a remote the clone has no tracking branches
 # of, which counts as having only what the refs pushed to point at there
 # (see published): its first push checks history that may be public
@@ -185,6 +202,130 @@ def added_flights(repo: Path, exclude: list[str], pushed_shas: list[str]) -> lis
     return list(dict.fromkeys(name for name in names if name))
 
 
+def _where(lon: str, lat: str) -> tuple[float, float] | None:
+    try:
+        return float(lat), float(lon)
+    except ValueError:
+        return None
+
+
+def flight_ends(
+    content: str,
+) -> tuple[tuple[float, float], tuple[float, float]] | None:
+    """Where the track of a flight file starts and ends, as (lat, lon).
+
+    Read from the text, not parsed: the hook needs nothing but the Python
+    the project requires. None for a file without a point it can read.
+    """
+    points: list[tuple[int, tuple[float, float] | None]] = [
+        (match.start(), _where(match[1], match[2]))
+        for match in _GX_COORD.finditer(content)
+    ]
+    for match in _COORDINATES.finditer(content):
+        tuples = match[1].split()
+        if tuples:
+            first, last = tuples[0].split(","), tuples[-1].split(",")
+            if len(first) >= 2 and len(last) >= 2:
+                points.append((match.start(), _where(first[0], first[1])))
+                points.append((match.start() + 1, _where(last[0], last[1])))
+    if not points:
+        return None
+    points.sort(key=lambda point: point[0])
+    start, end = points[0][1], points[-1][1]
+    return None if start is None or end is None else (start, end)
+
+
+def one_trip(ends: list[tuple[tuple[float, float], tuple[float, float]]]) -> bool:
+    """Whether flights, in the order of their files, are the legs of one trip.
+
+    Each starts where the one before it ended, and none but the first
+    starts at the field the first started at: a trip away from home, or
+    under way, rather than the flights of weeks at home with a trip among
+    them, which come back to that field in between.
+    """
+    from kml_heatmap.geometry import haversine_distance  # noqa: PLC0415
+
+    def near(first: tuple[float, float], second: tuple[float, float]) -> bool:
+        return haversine_distance(*first, *second) <= SAME_FIELD_KM
+
+    home = ends[0][0]
+    return all(
+        near(before[1], after[0]) and not near(after[0], home)
+        for before, after in pairwise(ends)
+    )
+
+
+def _blob(repo: Path, commits: list[str], name: str) -> str | None:
+    """The content of ``name`` in the first of ``commits`` that has it."""
+    for commit in commits:
+        try:
+            return _text(_git(repo, "cat-file", "blob", f"{commit}:{name}"))
+        except subprocess.CalledProcessError:
+            continue
+    return None
+
+
+def trip_of(repo: Path, pushed: list[str], added: list[str]) -> bool:
+    """Whether the flights a push adds date one trip (see the module).
+
+    ``pushed`` are the commits pushed, which hold them; ``added`` is in the
+    order of their numbers, the order they were flown in.
+    """
+    if len(added) <= TRIP_MAX_FLIGHTS:
+        return True
+    ends = []
+    for name in added:
+        content = _blob(repo, pushed, name)
+        found = None if content is None else flight_ends(content)
+        if found is None:
+            return False
+        ends.append(found)
+    return one_trip(ends)
+
+
+def dated_refs(lines: list[str]) -> list[str]:
+    """The dates, weekdays and holidays in the names of the refs pushed to."""
+    # Imported here: main() puts the checkout on the path first
+    from kml_heatmap.date_tokens import (  # noqa: PLC0415
+        find_date_tokens,
+        find_holiday_tokens,
+        find_partial_date_tokens,
+        find_weekday_tokens,
+    )
+
+    found: list[str] = []
+    for line in lines:
+        fields = line.split()
+        if len(fields) != 4 or fields[1] == ZERO_SHA:
+            continue
+        name = fields[2]
+        found.extend(
+            f"{name}: {token}"
+            for token in find_date_tokens(name, skip_near_jan_first=True)
+            + find_partial_date_tokens(name)
+            + find_weekday_tokens(name)
+            + find_holiday_tokens(name)
+        )
+    return list(dict.fromkeys(found))
+
+
+def touches_flights(repo: Path, exclude: list[str], pushed_shas: list[str]) -> bool:
+    """Whether a commit being pushed adds or changes a flight in data/."""
+    if not pushed_shas:
+        return False
+    output = _git(
+        repo,
+        "rev-list",
+        "--max-count=1",
+        "--full-history",
+        *pushed_shas,
+        *exclude,
+        "--",
+        *FLIGHT_PATHSPECS,
+    )
+    return bool(output.strip())
+
+
 def dated_messages(
     repo: Path, exclude: list[str], pushed_shas: list[str]
 ) -> list[tuple[str, str]]:
@@ -289,12 +430,47 @@ def check(repo: Path, lines: list[str], remote: str = "origin") -> int:
             file=sys.stderr,
         )
         return 1
-    added = added_flights(repo, exclude, pushed_shas(lines))
-    if len(added) == 1:
+    shas = pushed_shas(lines)
+    # Each ref by its own commits: a dated branch of code pushed together
+    # with flights on another branch dates none of them
+    refs = [
+        ref
+        for line in lines
+        if touches_flights(repo, exclude, pushed_shas([line]))
+        for ref in dated_refs([line])
+    ]
+    for ref in refs:
+        _report(f"  ref {ref}")
+    if refs and not tracked:
+        # Every commit the remote has not been seen to have counts as
+        # pushed here, the flights of long ago among them, so a branch of
+        # code would be refused for them: a warning, not a refusal
         print(
-            f"pre-push: warning: this push adds one flight ({added[0]}); a "
-            "commit with a single flight dates it to about the day it was "
-            "pushed, so consider adding it together with others.",
+            "pre-push: warning: the names of the refs above may date the\n"
+            "flights their commits add or change. This remote was never\n"
+            "fetched from, so the hook cannot tell new flights from published\n"
+            "ones; if the push adds flights, push them to a branch named\n"
+            "without the dates and weekdays.",
+            file=sys.stderr,
+        )
+    elif refs:
+        print(
+            "\nPush refused: the names of the refs above date the flights their\n"
+            "commits add or change, and the repository is public. Push them to\n"
+            "a branch named without the dates and weekdays.",
+            file=sys.stderr,
+        )
+        return 1
+    # Imported here: main() puts the checkout on the path first
+    from kml_heatmap.helpers import numeric_filename_key  # noqa: PLC0415
+
+    added = sorted(added_flights(repo, exclude, shas), key=numeric_filename_key)
+    if added and trip_of(repo, shas, added):
+        print(
+            f"pre-push: warning: this push adds the flights of one trip "
+            f"({', '.join(added)}); a push dates the flights it adds to about "
+            "the day it was made, so consider adding them together with "
+            "others, some time after the last of them.",
             file=sys.stderr,
         )
     return 0

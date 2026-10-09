@@ -10,9 +10,9 @@ import {
   REPLAY_ALL_UNAVAILABLE_MESSAGE,
   ReplayAllControls,
   replayAllClock,
-  replayAllTime,
   toggleReplayAll,
 } from "../../../../kml_heatmap/frontend/ui/replayAll";
+import { featurePart } from "../../../../kml_heatmap/frontend/ui/lazyBundles";
 import { flightClock } from "../../../../kml_heatmap/frontend/calculations/flightClock";
 import {
   REPLAY_ALL_SPEED,
@@ -30,7 +30,11 @@ import {
 import { HEAT_CLOUD_LAYER } from "../../../../kml_heatmap/frontend/ui/heatCloudLayer";
 import { REPLAY_PANEL_HEIGHT_VAR } from "../../../../kml_heatmap/frontend/ui/replayManager";
 import { restingPitch } from "../../../../kml_heatmap/frontend/ui/replayState";
-import { heldGroundedFlights } from "../../../../kml_heatmap/frontend/calculations/groundProfile";
+import {
+  groundedFlights,
+  heldGroundedFlights,
+  releaseGroundedFlights,
+} from "../../../../kml_heatmap/frontend/calculations/groundProfile";
 import { REPLAY_CAMERA_MOVE } from "../../../../kml_heatmap/frontend/utils/mapHelpers";
 import {
   fitTilted,
@@ -246,8 +250,7 @@ describe("the replay of all flights", () => {
 
     it("plays the isolated selection alone", () => {
       app.store.batch(() => {
-        app.selectedPathIds.add(2);
-        app.store.notifyMutation("selectedPathIds");
+        app.selectedPathIds = new Set([...app.selectedPathIds, 2]);
         app.isolateSelection = true;
       });
 
@@ -434,8 +437,19 @@ describe("the replay of all flights", () => {
       );
     });
 
-    it("lets go of the smoothed flights on the flat map as it stops", () => {
+    it("smooths a few of the flights alone, holding none of the dataset", () => {
+      // Of the runs before
+      releaseGroundedFlights();
+      void player.start({ pathIds: [1, 3] });
+
+      expect(player.flights).toBe(2);
+      expect(heldGroundedFlights()).toBeNull();
+    });
+
+    it("draws along the flights held for the 3D view, and lets go of them on the flat map as it stops", () => {
+      groundedFlights(DATA.path_segments, app.terrainActive, app.reliefLevel);
       void player.start();
+      expect(player.flights).toBe(3);
       expect(heldGroundedFlights()).toBe(DATA.path_segments);
 
       player.stop();
@@ -587,8 +601,7 @@ describe("the replay of all flights", () => {
       app.store.batch(() => {
         app.altitudeVisible = false;
         app.airspeedVisible = true;
-        app.selectedPathIds.add(2);
-        app.store.notifyMutation("selectedPathIds");
+        app.selectedPathIds = new Set([...app.selectedPathIds, 2]);
         app.isolateSelection = true;
       });
       void player.start({ colour: true });
@@ -1129,13 +1142,15 @@ describe("the replay of all flights", () => {
     });
 
     it("tells the heat its clock only while it is open", () => {
-      expect(replayAllTime(asMapApp(app))).toBeNull();
+      // As the heat cloud reads it (ui/heatCloud.ts)
+      const time = () => featurePart(asMapApp(app), "replayAll")?.time ?? null;
+      expect(time()).toBeNull();
       toggleReplayAll(asMapApp(app));
-      expect(replayAllTime(asMapApp(app))).toBe(0);
+      expect(time()).toBe(0);
 
       toggleReplayAll(asMapApp(app));
 
-      expect(replayAllTime(asMapApp(app))).toBeNull();
+      expect(time()).toBeNull();
     });
 
     it("turns the orbit on and off, and a camera the user moves turns it off", () => {

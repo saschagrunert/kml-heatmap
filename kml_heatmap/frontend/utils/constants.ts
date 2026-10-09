@@ -20,7 +20,8 @@ export const DAY_MAX_FLIGHTS = 8;
 
 /**
  * The input of a visitor that the intro of a link to shared flights gives
- * way to (ui/shareIntro.ts): any key, click, touch, drag or wheel. Before
+ * way to (ui/shareIntro.ts): a key (KEYS_NOT_INPUT aside), click, touch,
+ * drag or wheel. Before
  * it starts the app listens for them too, as the view is the visitor's
  * once they have moved it (MapApp.initialize)
  */
@@ -30,6 +31,20 @@ export const INPUT_EVENTS = [
   "keydown",
   "touchstart",
 ] as const;
+
+/**
+ * Keys that are no input of that kind: Tab moves on through the page, with
+ * Shift and the other modifiers on their own, as a switch to another
+ * window (Alt or Cmd and Tab) or a screen reader's keys press them. Escape
+ * is one, and ends the intro.
+ */
+export const KEYS_NOT_INPUT = new Set([
+  "Tab",
+  "Shift",
+  "Control",
+  "Alt",
+  "Meta",
+]);
 
 /**
  * Heights up to this get the phone layout too, whatever the width: a phone

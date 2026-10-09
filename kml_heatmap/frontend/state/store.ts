@@ -26,7 +26,7 @@ export interface Range {
 export interface StoreState extends ToggleFlags {
   selectedYear: string;
   selectedAircraft: string;
-  selectedPathIds: Set<number>;
+  selectedPathIds: ReadonlySet<number>;
   /**
    * Whether the 3D view draws the relief, and the flights stand on the
    * sampled ground (see LayerManager.syncTerrain, its only writer)
@@ -215,8 +215,6 @@ export class AppStore {
   private listeners: Map<keyof StoreState, Listener<unknown>[]>;
   private batchDepth: number;
   private pendingOldValues: Map<keyof StoreState, unknown>;
-  /** Keys whose value was changed in place (notifyMutation) while pending */
-  private pendingMutations = new Set<keyof StoreState>();
   private isNotifying: boolean;
   private flushDepth: number;
   /** subscribeKeys listeners that already ran in the current flush pass */
@@ -246,19 +244,6 @@ export class AppStore {
       }
     } else {
       this.notify(key, value, oldVal);
-    }
-  }
-
-  notifyMutation<K extends keyof StoreState>(key: K): void {
-    this.settle(key);
-    const val = this.state[key];
-    if (this.batchDepth > 0 || this.isNotifying) {
-      if (!this.pendingOldValues.has(key)) {
-        this.pendingOldValues.set(key, val);
-      }
-      this.pendingMutations.add(key);
-    } else {
-      this.notify(key, val, val);
     }
   }
 
@@ -418,11 +403,9 @@ export class AppStore {
         }
         roundKeys.delete(key);
         this.pendingOldValues.delete(key);
-        const mutated = this.pendingMutations.delete(key);
         const currentVal = this.state[key];
-        // A value set and set back within a batch changed nothing; one
-        // changed in place keeps its reference and is announced anyway
-        if (currentVal !== oldVal || mutated) {
+        // A value set and set back within a batch changed nothing
+        if (currentVal !== oldVal) {
           this.notify(key, currentVal, oldVal as StoreState[keyof StoreState]);
         }
       }

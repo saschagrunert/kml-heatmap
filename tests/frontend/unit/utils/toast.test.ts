@@ -8,6 +8,7 @@ import {
   announceStatus,
   dismissToast,
   showToast,
+  TOAST_DURATION_MS,
 } from "../../../../kml_heatmap/frontend/utils/toast";
 
 describe("showToast", () => {
@@ -138,6 +139,19 @@ describe("showToast", () => {
 
     toast.dispatchEvent(new Event("transitionend"));
     expect(document.querySelector(".toast-notification")).toBeNull();
+  });
+
+  it("keeps a long message for as long as it takes to read", () => {
+    const message =
+      "1 selected flight is hidden by the filter and was deselected, " +
+      "and shows again with the filter";
+    showToast(message);
+    const toast = document.querySelector(".toast-notification")!;
+
+    vi.advanceTimersByTime(TOAST_DURATION_MS);
+    expect(toast.classList.contains("toast-visible")).toBe(true);
+    vi.advanceTimersByTime(message.length * 80 - TOAST_DURATION_MS);
+    expect(toast.classList.contains("toast-visible")).toBe(false);
   });
 
   describe("an error", () => {

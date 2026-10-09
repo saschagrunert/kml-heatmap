@@ -203,7 +203,7 @@ describe("StatsManager", () => {
     });
 
     it("shows statistics for the selected paths only", () => {
-      mockApp.selectedPathIds.add(2);
+      mockApp.selectedPathIds = new Set([...mockApp.selectedPathIds, 2]);
 
       statsManager.updateStatsForSelection();
 
@@ -221,8 +221,7 @@ describe("StatsManager", () => {
 
     it("counts the selected flights the filter shows, as the map and the chip do", () => {
       // Share mode keeps a flight the filter hides, which is not drawn
-      mockApp.selectedPathIds.add(1);
-      mockApp.selectedPathIds.add(2); // path 2 is from 2024
+      mockApp.selectedPathIds = new Set([1, 2]); // path 2 is from 2024
       mockApp.isolateSelection = true;
 
       statsManager.updateStatsForSelection();
@@ -234,15 +233,16 @@ describe("StatsManager", () => {
       expect(statsPanel.textContent).not.toContain("D-EFGH");
 
       // All of them hidden: the statistics of the selection, of nothing
-      mockApp.selectedPathIds.delete(1);
-      mockApp.store.notifyMutation("selectedPathIds");
+      mockApp.selectedPathIds = new Set(
+        [...mockApp.selectedPathIds].filter((id) => id !== 1),
+      );
       statsManager.updateStatsForSelection();
       expect(leadValue(statsPanel, "Flights")).toBe("0");
     });
 
     it("renders an empty selection instead of the previous flight", () => {
       statsPanel.innerHTML = "before";
-      mockApp.selectedPathIds.add(999);
+      mockApp.selectedPathIds = new Set([...mockApp.selectedPathIds, 999]);
 
       statsManager.updateStatsForSelection();
 
@@ -416,6 +416,28 @@ describe("StatsManager", () => {
       );
       expect(leadValue(statsPanel, "Total flight time")).toBe("—");
       expect(leadValue(statsPanel, "Flights")).toBe("50");
+    });
+
+    it("names the year and the aircraft of the filter the figures are of", () => {
+      const note = (): string =>
+        statsPanel.querySelector(".kh-stats-note")!.textContent;
+      mockApp.selectedYear = "all";
+      mockApp.selectedAircraft = "all";
+      statsManager.updateStatsPanel(mockStats, false);
+      expect(note()).toBe("All years · All aircraft");
+
+      mockApp.selectedYear = "2025";
+      mockApp.selectedAircraft = "D-<b>X</b>";
+      statsManager.updateStatsPanel(mockStats, false);
+      expect(note()).toBe("2025 · D-<b>X</b>");
+      expect(statsPanel.querySelector(".kh-stats-note b")).toBeNull();
+
+      // A year from the link, before it is checked against the years
+      mockApp.selectedYear = '<a href="x">2025</a>';
+      mockApp.selectedAircraft = "all";
+      statsManager.updateStatsPanel(mockStats, false);
+      expect(note()).toBe('<a href="x">2025</a> · All aircraft');
+      expect(statsPanel.querySelector(".kh-stats-note a")).toBeNull();
     });
 
     it("renders the selection indicator", () => {
@@ -818,8 +840,7 @@ describe("StatsManager", () => {
       expect(leadValue(statsPanel, "Flights")).toBe("0");
 
       mockApp.selectedAircraft = "all";
-      mockApp.selectedPathIds.add(2);
-      mockApp.store.notifyMutation("selectedPathIds");
+      mockApp.selectedPathIds = new Set([...mockApp.selectedPathIds, 2]);
       expect(
         document.getElementById("stats-rail-title")!.textContent,
       ).toContain("Statistics of the selection");
@@ -870,8 +891,7 @@ describe("StatsManager", () => {
       mockApp.store.batch(() => {
         mockApp.selectedYear = "2025";
         mockApp.selectedAircraft = "D-ABCD";
-        mockApp.selectedPathIds.add(1);
-        mockApp.store.notifyMutation("selectedPathIds");
+        mockApp.selectedPathIds = new Set([...mockApp.selectedPathIds, 1]);
       });
 
       expect(spy).toHaveBeenCalledTimes(1);
@@ -906,10 +926,8 @@ describe("StatsManager", () => {
       const filterSpy = vi.spyOn(panelStats, "filterStatisticsInSlices");
 
       mockApp.selectedYear = "2025";
-      mockApp.selectedPathIds.add(1);
-      mockApp.store.notifyMutation("selectedPathIds");
-      mockApp.selectedPathIds.clear();
-      mockApp.store.notifyMutation("selectedPathIds");
+      mockApp.selectedPathIds = new Set([...mockApp.selectedPathIds, 1]);
+      mockApp.selectedPathIds = new Set();
 
       expect(spy).not.toHaveBeenCalled();
       expect(filterSpy).not.toHaveBeenCalled();
@@ -969,7 +987,6 @@ describe("StatsManager", () => {
 
       statsManager.updateStatsForSelection();
       // A mutation notification without an actual change is also a no-op
-      mockApp.store.notifyMutation("selectedPathIds");
 
       expect(spy).not.toHaveBeenCalled();
       expect(filterSpy).not.toHaveBeenCalled();
@@ -980,17 +997,14 @@ describe("StatsManager", () => {
     it("recomputes when the selection changes and again when it is cleared", () => {
       const spy = vi.spyOn(panelStats, "calculateFilteredStatistics");
 
-      mockApp.selectedPathIds.add(1);
-      mockApp.store.notifyMutation("selectedPathIds");
+      mockApp.selectedPathIds = new Set([...mockApp.selectedPathIds, 1]);
       expect(spy).toHaveBeenCalledTimes(1);
 
-      mockApp.selectedPathIds.add(2);
-      mockApp.store.notifyMutation("selectedPathIds");
+      mockApp.selectedPathIds = new Set([...mockApp.selectedPathIds, 2]);
       expect(spy).toHaveBeenCalledTimes(2);
 
       // Back to the filter's statistics, computed when the panel opened
-      mockApp.selectedPathIds.clear();
-      mockApp.store.notifyMutation("selectedPathIds");
+      mockApp.selectedPathIds = new Set();
       expect(spy).toHaveBeenCalledTimes(2);
       expect(leadValue(statsPanel, "Flights")).toBe("2");
       spy.mockRestore();
@@ -1001,10 +1015,8 @@ describe("StatsManager", () => {
       const filterSpy = vi.spyOn(panelStats, "filterStatisticsInSlices");
 
       for (let i = 0; i < 3; i++) {
-        mockApp.selectedPathIds.add(1);
-        mockApp.store.notifyMutation("selectedPathIds");
-        mockApp.selectedPathIds.clear();
-        mockApp.store.notifyMutation("selectedPathIds");
+        mockApp.selectedPathIds = new Set([...mockApp.selectedPathIds, 1]);
+        mockApp.selectedPathIds = new Set();
       }
 
       // The filter's statistics were computed when the panel opened and are
@@ -1021,9 +1033,8 @@ describe("StatsManager", () => {
     });
 
     it("treats the same ids in another order as the same selection", () => {
-      mockApp.selectedPathIds.add(2);
-      mockApp.selectedPathIds.add(1);
-      mockApp.store.notifyMutation("selectedPathIds");
+      mockApp.selectedPathIds = new Set([...mockApp.selectedPathIds, 2]);
+      mockApp.selectedPathIds = new Set([...mockApp.selectedPathIds, 1]);
       const spy = vi.spyOn(panelStats, "calculateFilteredStatistics");
 
       mockApp.selectedPathIds = new Set([1, 2]);

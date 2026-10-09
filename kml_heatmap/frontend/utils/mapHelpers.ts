@@ -13,6 +13,7 @@ import type {
 } from "maplibre-gl";
 import { ZOOM_OFFSET } from "./constants";
 import { DEGREES_TO_RADIANS, focalLengthPx } from "./geometry";
+import { logError } from "./logger";
 import { withTimeout } from "./withTimeout";
 import { safeAreaInsets } from "./safeArea";
 
@@ -122,18 +123,56 @@ export function whenStyleReady(map: MapLibreMap): Promise<MapLibreMap> {
 }
 
 /**
+ * Run `ready` with the map once it has its sources and layers (the app's
+ * `mapReady`), unless the app was destroyed by then. A map that never gets
+ * ready is no business of the caller: the start-up reports it and takes
+ * the app down (MapApp.initialize). What `ready` throws is logged, with
+ * `what` it was setting up: it runs in a promise nobody waits for, where
+ * it would surface as an unhandled rejection without a word of where it
+ * came from.
+ */
+export function onMapReady(
+  app: {
+    readonly mapReady: Promise<MapLibreMap>;
+    readonly signal?: AbortSignal;
+  },
+  what: string,
+  ready: (map: MapLibreMap) => void,
+): void {
+  app.mapReady.then(
+    (map) => {
+      if (app.signal?.aborted) return;
+      try {
+        ready(map);
+      } catch (error) {
+        logError(`${what}: the map got ready, but not for them`, error);
+      }
+    },
+    () => {},
+  );
+}
+
+/**
  * Call `onRestored` whenever the map has its style back after it lost its
  * WebGL context. MapLibre builds the style anew from what it held at the
  * loss, every source with the data it had then, and loads it a frame after
  * `webglcontextrestored`; data handed over in between had no source to go
- * to and has to be written again. For as long as the map lives: a caller
- * that goes before it ignores the call.
+ * to and has to be written again. For as long as the map lives, or until
+ * `signal` aborts: the app is destroyed with the map left as it is.
  */
 export function whenContextRestored(
   map: MapLibreMap,
   onRestored: () => void,
+  signal?: AbortSignal,
 ): void {
-  map.on("webglcontextrestored", () => void map.once("style.load", onRestored));
+  const restored = map.on("webglcontextrestored", () => {
+    void map.once("style.load", () => {
+      if (!signal?.aborted) onRestored();
+    });
+  });
+  signal?.addEventListener("abort", () => restored.unsubscribe(), {
+    once: true,
+  });
 }
 
 /** Maps that have lost their WebGL context and not had their style back */

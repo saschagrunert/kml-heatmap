@@ -16,7 +16,8 @@
  * the rest of the visit, and the years are decoded on the main thread.
  *
  * The same worker writes the content of the heat sources
- * (services/heatSource.ts), with the same fallback: a heat the worker
+ * (services/heatSource.ts) and of the lines along the flights
+ * (services/flightLines.ts), with the same fallback: a source the worker
  * cannot be asked for is written on the main thread, which still spares it
  * the objects MapLibre would otherwise have been given.
  */
@@ -24,12 +25,20 @@
 import { logError } from "../utils/logger";
 import { DATA_FORMAT_VERSION, decodeYearBytes } from "./yearDecode";
 import { buildDatasetInSlices, combineYearData } from "./yearDataset";
-import { drawHeat, flatLines, linesSource, type DrawnHeat } from "./heatSource";
+import { drawHeat, type DrawnHeat } from "./heatSource";
+import {
+  columnBuffers,
+  flatRuns,
+  flightColumns,
+  heatLinesSource,
+  runsSource,
+  type LineRun,
+} from "./flightLines";
 import { heatColumns } from "../calculations/heatExposure";
-import { heatLinesAlong } from "../calculations/heatLines";
-import type { KMLDataset } from "../types";
+import { flatCurves } from "../calculations/curves";
+import type { KMLDataset, PathSegment } from "../types";
 import type { Coordinate } from "../utils/geometry";
-import type { YearRequest, YearResponse } from "./yearWorker";
+import type { LinesRequest, YearRequest, YearResponse } from "./yearWorker";
 
 /**
  * How long the worker may go without answering while requests wait. It
@@ -69,11 +78,29 @@ export interface YearDecoder {
     weights: readonly number[],
   ): Promise<DrawnHeat>;
   /**
-   * The content of the heat line source: the lines of heatLinesAlong in
-   * calculations/heatLines.ts, worked out here, on the page, from its
-   * arguments, and written by the worker
+   * The content of the heat line source (see heatLinesSource in
+   * services/flightLines.ts)
+   * @param segments - The flights of the heat
+   * @param keep - The paths it keeps, null for all of them
+   * @param exposure - What the heat is scaled by, see heatExposure
    */
-  linesSource(...lines: Parameters<typeof heatLinesAlong>): Promise<Blob>;
+  heatLines(
+    segments: readonly PathSegment[],
+    keep: ReadonlySet<number> | null,
+    exposure: number,
+  ): Promise<Blob>;
+  /**
+   * The content of a colour layer's source: its runs as lines (see
+   * runsSource in services/flightLines.ts)
+   * @param segments - The segments the runs index into
+   * @param runs - The runs
+   * @param g - Their generation, see RunTable.g in ui/pathRuns.ts
+   */
+  runsSource(
+    segments: readonly PathSegment[],
+    runs: readonly LineRun[],
+    g: number,
+  ): Promise<Blob>;
   /** combineYearData of services/yearDataset.ts */
   combine: typeof combineYearData;
   /** End the worker, and the wait of whoever still waits for it */
@@ -146,6 +173,7 @@ export function createYearDecoder(
   const askWorker = (
     target: YearWorkerLike,
     body: DistributiveOmit<YearRequest, "id">,
+    transfer: Transferable[],
   ): Promise<YearResponse | null> =>
     new Promise((resolve, reject) => {
       const id = nextId++;
@@ -157,11 +185,13 @@ export function createYearDecoder(
       };
       pending.set(id, settle);
       if (watchdog === undefined) watch();
-      // Copied, not transferred: the copy is a fraction of a millisecond,
-      // and the bytes are still here if the worker fails over them
+      // The bytes of a year file are copied, not transferred: the copy is a
+      // fraction of a millisecond, and the bytes are still here if the
+      // worker fails over them. The columns of flights are handed over:
+      // what the worker cannot draw is drawn from the segments.
       const request: YearRequest = { id, ...body };
       try {
-        target.postMessage(request);
+        target.postMessage(request, transfer);
       } catch (error) {
         giveUpOnWorker(error);
       }
@@ -188,6 +218,7 @@ export function createYearDecoder(
    * work fails the same way, with the error and not its text. An error
    * the work would only meet again (`final` of the worker's answer) is not
    * worked for twice: it is thrown as the worker's, by its name and message.
+   * `transfer` is handed over with the body.
    */
   const answerOf = async <T>(
     what: string,
@@ -195,9 +226,10 @@ export function createYearDecoder(
     take: (response: YearResponse) => T | undefined,
     work: () => T,
     final: (answer: { name: string; format: number }) => boolean = () => false,
+    transfer: Transferable[] = [],
   ): Promise<T> => {
     if (destroyed) throw new Error("year decoder destroyed");
-    const response = worker ? await askWorker(worker, body) : null;
+    const response = worker ? await askWorker(worker, body, transfer) : null;
     const taken = response ? take(response) : undefined;
     if (taken !== undefined) return taken;
     if (response && "error" in response) {
@@ -209,6 +241,41 @@ export function createYearDecoder(
       logError(`Year worker could not ${what}:`, response.error);
     }
     return work();
+  };
+
+  /** A number for each segment array, the one the worker holds as `held` */
+  const arrays = new WeakMap<readonly PathSegment[], number>();
+  let arrayCount = 0;
+  let held = -1;
+
+  /**
+   * Lines along the flights of `segments` (see services/flightLines.ts):
+   * the worker is handed them with the first lines asked of them, and keeps
+   * them for the next. Drawn here instead, `work` draws them along the
+   * curves of the page, and the worker is handed them again next time.
+   */
+  const linesOf = (
+    what: string,
+    segments: readonly PathSegment[],
+    ask: DistributiveOmit<LinesRequest, "flights">,
+    work: () => Blob,
+  ): Promise<Blob> => {
+    let key = arrays.get(segments);
+    if (key === undefined) arrays.set(segments, (key = arrayCount++));
+    const flights =
+      worker && key !== held ? flightColumns(segments) : undefined;
+    held = key;
+    return answerOf(
+      what,
+      flights ? { flights, ...ask } : ask,
+      (response) => ("source" in response ? response.source : undefined),
+      () => {
+        held = -1;
+        return work();
+      },
+      undefined,
+      flights && columnBuffers(flights),
+    );
   };
 
   return {
@@ -241,13 +308,16 @@ export function createYearDecoder(
         () => drawHeat(heat),
       );
     },
-    linesSource(...heatLines) {
-      const lines = flatLines(heatLinesAlong(...heatLines));
-      return answerOf(
-        "draw the heat lines",
-        { lines },
-        (response) => ("source" in response ? response.source : undefined),
-        () => linesSource(lines),
+    heatLines(segments, keep, exposure) {
+      const heatLines = { keep: keep && Float64Array.from(keep), exposure };
+      return linesOf("draw the heat lines", segments, { heatLines }, () =>
+        heatLinesSource({ segments, curves: flatCurves(segments) }, heatLines),
+      );
+    },
+    runsSource(segments, runs, g) {
+      const flat = flatRuns(runs, g);
+      return linesOf("draw the lines", segments, { runs: flat }, () =>
+        runsSource({ segments, curves: flatCurves(segments) }, flat),
       );
     },
     combine: combineYearData,

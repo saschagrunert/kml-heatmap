@@ -25,6 +25,10 @@ import * as pathSelection from "../../../../kml_heatmap/frontend/ui/pathSelectio
 import type { PathSegment } from "../../../../kml_heatmap/frontend/types";
 import { mercatorOf } from "../../../../kml_heatmap/frontend/utils/mercator";
 import {
+  heldGroundedFlights,
+  releaseGroundedFlights,
+} from "../../../../kml_heatmap/frontend/calculations/groundProfile";
+import {
   asMapApp,
   createDataset,
   createMockApp,
@@ -254,8 +258,7 @@ describe("playShareIntro", () => {
   /** Share the flights `pathIds` */
   function share(...pathIds: number[]): void {
     app.store.batch(() => {
-      for (const pathId of pathIds) app.selectedPathIds.add(pathId);
-      app.store.notifyMutation("selectedPathIds");
+      app.selectedPathIds = new Set([...app.selectedPathIds, ...pathIds]);
       app.isolateSelection = true;
     });
   }
@@ -496,6 +499,49 @@ describe("playShareIntro", () => {
     });
   }
 
+  it("is not skipped by Tab or a modifier on its own", () => {
+    // Alt or Cmd and Tab to the browser, or a screen reader's keys, ended it
+    share(1, 2);
+    playShareIntro(asMapApp(app));
+    frames.run();
+    map().isMoving.mockReturnValue(true);
+    map().jumpTo.mockClear();
+
+    for (const key of ["Tab", "Shift", "Control", "Alt", "Meta"]) {
+      window.dispatchEvent(new KeyboardEvent("keydown", { key }));
+    }
+
+    expect(map().jumpTo).not.toHaveBeenCalled();
+    expect(frames.pending()).toBe(1);
+    expect(lines()).toBe("none");
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp" }));
+    expect(frames.pending()).toBe(0);
+  });
+
+  it("is skipped by Escape", () => {
+    share(1, 2);
+    playShareIntro(asMapApp(app));
+    frames.run();
+
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+
+    expect(frames.pending()).toBe(0);
+  });
+
+  it("smooths the shared flights alone, not every flight of the dataset", () => {
+    // Of the tests before
+    releaseGroundedFlights();
+    share(1, 2);
+
+    playShareIntro(asMapApp(app));
+    frames.run();
+
+    expect(points().flights).toBe(2);
+    // On the flat map nothing else draws along the curves of every flight,
+    // which for all years took seconds on a phone as the camera set out
+    expect(heldGroundedFlights()).toBeNull();
+  });
+
   it("keeps the trails through the rest of the gesture that skipped it", async () => {
     // A tap is a pointerdown and a touchstart: the second took the trails
     // away before the lines were drawn again, and the flights blinked out
@@ -631,8 +677,7 @@ describe("playShareIntro", () => {
   });
 
   it("does not play without share mode", () => {
-    app.selectedPathIds.add(1);
-    app.store.notifyMutation("selectedPathIds");
+    app.selectedPathIds = new Set([...app.selectedPathIds, 1]);
 
     playShareIntro(asMapApp(app));
 

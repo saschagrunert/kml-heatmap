@@ -16,6 +16,7 @@
     "kml_heatmap/frontend/features.ts!",
     "kml_heatmap/frontend/wrapped.ts!",
     "kml_heatmap/frontend/search.ts!",
+    "kml_heatmap/frontend/extras.ts!",
     "scripts/*.js",
     "tests/**/*.test.ts",
     "tests/e2e/*.spec.ts"

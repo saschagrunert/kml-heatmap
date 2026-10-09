@@ -166,11 +166,20 @@ it has taken the next one, which is revoked then, and the page's CSP allows
 `blob:` in `connect-src` for a browser that holds MapLibre's worker to it
 (Chrome does not) and for the e2e tests, which read the sources' URLs.
 
-The heat lines take the same way: the page works them out with the code of the
-worker's bundle (`heatLinesAlong`, along the curves the colour lines keep),
-which leaves them out of the first visit, and the worker writes their text. A
-heat is drawn once (`Heat.drawn`), so a selection and isolation reuse it, and a
-source is not sent what it holds (`heatWritten`).
+The heat lines take the same way, and so do the lines of every flight the colour
+layers draw (`services/flightLines.ts`). The page packs the segments of a
+dataset into columns (`flightColumns`) and hands them over with the first lines
+asked of them; the worker keeps them, smooths the flights once
+(`calculations/curves.ts`, a flight smoothed for one dataset is not smoothed
+again for another) and writes the lines along them. A request for heat lines
+then carries no more than the paths the heat keeps and its exposure, one for the
+colour lines the runs (`flatRuns`). On a desktop, for all years of `data/`, that
+took off the main thread about 60 ms of curves, 95 to 105 ms of heat lines and
+50 to 75 ms for MapLibre's copy of the colour lines handed over as objects, at
+each write. The selection's few lines are still drawn on the page, along the
+curves of their flights alone (`flightCurves`), so a click does not wait for the
+worker. A heat is drawn once (`Heat.drawn`), so a selection and isolation reuse
+it, and a source is not sent what it holds (`heatWritten`).
 
 The legend takes the new exposure as the worker answers, with the heat it stands
 for; until then both stay as they were, and so does the heatmap an isolated
@@ -734,29 +743,30 @@ not what the pixels look like.
 ## The replay of all flights
 
 The replay of all flights builds its heat up with the cloud: while it is open
-(`replayAllTime` gives its clock, and is null otherwise) the cloud is drawn at
-full strength up to the replay's clock (`HeatCloudStyle.until`, `u_until` in the
-vertex shader, which leaves out a stretch not begun and cuts the one under way
-where the clock is), on the flat map as well, in place of the flat heatmap, and
-under the replay's trails. With the Heatmap switch off it draws none. The trails
-are drawn at their height there too, and the heat with them: flat on the map,
-the replay drew lines on the ground under Wrapped's intro, whose camera flies
-and tilts over them through the lifted cloud, and a tilted map showed no height
-either. Both are lifted as the cloud is (`heatCloudLevel`: the 3D view's relief
-level, and outside it the level of the zoom the map last came to rest at), so
-the heads fly in the heat, and the cloud's shadow marks the ground. With the
-heat left flat under lifted trails, each trail lay beside its heat by its height
-(some 100 px at `z` 10 tilted by 60 degrees) and read as the track of another
-flight. A map tilted by less than 20 degrees (`TILT_MIN_PITCH`) is tilted to the
-3D view's 50 (`TILT_PITCH`) as the replay opens, and laid back as it closes,
-unless the user tilted it meanwhile (by more than 5 degrees (`TILT_BY_HAND_DEG`)
-in one gesture: a right drag that turns the map tilts it as the pointer strays
-up or down) or turned the 3D view on. Meanwhile the link and the saved state
-keep the tilt from before (`ReplayState.pitchBefore`), and until the map is laid
-back, what opens then and keeps the user's view (Wrapped, the hotspot tour, the
-replay of all flights again) takes the tilt it goes back to rather than the one
-half way there (`restingPitch`, `ReplayState.layingBack`, forgotten as that move
-ends).
+(`ReplayAllControls.time` gives its clock, read through
+`featurePart(app, "replayAll")?.time`, and is null otherwise) the cloud is drawn
+at full strength up to the replay's clock (`HeatCloudStyle.until`, `u_until` in
+the vertex shader, which leaves out a stretch not begun and cuts the one under
+way where the clock is), on the flat map as well, in place of the flat heatmap,
+and under the replay's trails. With the Heatmap switch off it draws none. The
+trails are drawn at their height there too, and the heat with them: flat on the
+map, the replay drew lines on the ground under Wrapped's intro, whose camera
+flies and tilts over them through the lifted cloud, and a tilted map showed no
+height either. Both are lifted as the cloud is (`heatCloudLevel`: the 3D view's
+relief level, and outside it the level of the zoom the map last came to rest
+at), so the heads fly in the heat, and the cloud's shadow marks the ground. With
+the heat left flat under lifted trails, each trail lay beside its heat by its
+height (some 100 px at `z` 10 tilted by 60 degrees) and read as the track of
+another flight. A map tilted by less than 20 degrees (`TILT_MIN_PITCH`) is
+tilted to the 3D view's 50 (`TILT_PITCH`) as the replay opens, and laid back as
+it closes, unless the user tilted it meanwhile (by more than 5 degrees
+(`TILT_BY_HAND_DEG`) in one gesture: a right drag that turns the map tilts it as
+the pointer strays up or down) or turned the 3D view on. Meanwhile the link and
+the saved state keep the tilt from before (`ReplayState.pitchBefore`), and until
+the map is laid back, what opens then and keeps the user's view (Wrapped, the
+hotspot tour, the replay of all flights again) takes the tilt it goes back to
+rather than the one half way there (`restingPitch`, `ReplayState.layingBack`,
+forgotten as that move ends).
 
 The camera is fitted to the flights on the tilted map, not to their bounds: a
 fit of the bounds with the tilt (`fitBounds` with `pitch`) fits the corners of

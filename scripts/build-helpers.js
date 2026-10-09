@@ -216,6 +216,38 @@ export function tightenMarkup(source, path = "markup.ts") {
   return contents;
 }
 
+/** A number of SVG path data, with what separates it from the one before */
+const PATH_NUMBER = /^[\s,]*([-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?)/;
+
+/**
+ * The path data `second` drawn after `first` in one path, as each draws as
+ * a path of its own: what the Lucide plugin of build.js makes of an icon's
+ * paths. A path that starts with a relative moveto (`m`) starts at its
+ * point as if it were absolute, and the pairs after that point are
+ * relative linetos; after a subpath the same `m` is relative to where that
+ * one ends, which drew Lucide's X as one stroke. So it is written as an
+ * absolute moveto, with an `l` for the pairs after it.
+ * @param {string} first
+ * @param {string} second
+ * @returns {string}
+ */
+export function joinPathData(first, second) {
+  const data = second.trim();
+  if (!data.startsWith("m")) return first + data;
+  let rest = data.slice(1);
+  /** @type {string[]} */
+  const point = [];
+  for (let i = 0; i < 2; i++) {
+    const number = PATH_NUMBER.exec(rest);
+    if (!number?.[1]) throw new Error(`Unexpected path data: ${second}`);
+    point.push(number[1]);
+    rest = rest.slice(number[0].length);
+  }
+  rest = rest.replace(/^[\s,]+/, "");
+  const lines = PATH_NUMBER.test(rest) ? "l" : "";
+  return `${first}M${point.join(" ")}${lines}${rest}`;
+}
+
 /**
  * Format bytes to human-readable size
  * @param {number} bytes

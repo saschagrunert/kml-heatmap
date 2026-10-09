@@ -3,12 +3,23 @@
  *
  * Every manager is replaced by a mock instance so the tests see exactly
  * what MapApp itself does with them; the store, the MapLibre mock and the
- * DOM are real. This module imports nothing from the application, so a
- * test file can load it through `vi.hoisted` before it registers the
- * module mocks whose factories hand out these instances.
+ * DOM are real. This module imports nothing but types from the
+ * application, so a test file can load it through `vi.hoisted` before it
+ * registers the module mocks whose factories (`modules`) hand out these
+ * instances.
  */
 import { vi } from "vitest";
 import type { MapApp } from "../../../../kml_heatmap/frontend/mapApp";
+import type { AirportManager } from "../../../../kml_heatmap/frontend/ui/airportManager";
+import type { DataManager } from "../../../../kml_heatmap/frontend/ui/dataManager";
+import type { FilterManager } from "../../../../kml_heatmap/frontend/ui/filterManager";
+import type { LayerManager } from "../../../../kml_heatmap/frontend/ui/layerManager";
+import type { PathSelection } from "../../../../kml_heatmap/frontend/ui/pathSelection";
+import type { ReplayManager } from "../../../../kml_heatmap/frontend/ui/replayManager";
+import type { StateManager } from "../../../../kml_heatmap/frontend/ui/stateManager";
+import type { StatsManager } from "../../../../kml_heatmap/frontend/ui/statsManager";
+import type { UIToggles } from "../../../../kml_heatmap/frontend/ui/uiToggles";
+import type { WrappedManager } from "../../../../kml_heatmap/frontend/ui/wrappedManager";
 import type {
   Airport,
   KMLDataset,
@@ -16,6 +27,13 @@ import type {
   SavedState,
 } from "../../../../kml_heatmap/frontend/types";
 import type { Map as MockMap } from "../../../mocks/maplibre-gl";
+
+/**
+ * A stand-in for `T`, a class instance or a module: it may leave out what
+ * the tests never reach, but names nothing `T` lacks, so a rename there
+ * fails `npm run typecheck:tests` instead of leaving a member nobody calls
+ */
+type StandIn<T> = { [K in keyof T]?: unknown };
 
 export const mockDataManagerInstance = {
   loadAirports: vi.fn(),
@@ -27,7 +45,7 @@ export const mockDataManagerInstance = {
   destroy: vi.fn(),
   applyHeatmapEmphasis: vi.fn(),
   showHeatmap: vi.fn(),
-};
+} satisfies StandIn<DataManager>;
 
 export const mockFilterManagerInstance = {
   updateAircraftDropdown: vi.fn(),
@@ -37,13 +55,13 @@ export const mockFilterManagerInstance = {
   loadShownYear: vi.fn(),
   loading: false,
   onLoadChange: null as (() => void) | null,
-};
+} satisfies StandIn<FilterManager>;
 
 export const mockStatsManagerInstance = {
   updateStatsPanel: vi.fn(),
   updateStatsForSelection: vi.fn(),
   destroy: vi.fn(),
-};
+} satisfies StandIn<StatsManager>;
 
 export const mockAirportManagerInstance = {
   updateAirportPopups: vi.fn(),
@@ -53,7 +71,7 @@ export const mockAirportManagerInstance = {
   activateAirport: vi.fn(),
   airportLabelAt: vi.fn((): string | null => null),
   destroy: vi.fn(),
-};
+} satisfies StandIn<AirportManager>;
 
 export const mockReplayManagerInstance = {
   state: {
@@ -62,7 +80,6 @@ export const mockReplayManagerInstance = {
       closePopup: ReturnType<typeof vi.fn>;
     },
   },
-  updateReplayButtonState: vi.fn(),
   toggleReplay: vi.fn(),
   playReplay: vi.fn(),
   pauseReplay: vi.fn(),
@@ -71,7 +88,7 @@ export const mockReplayManagerInstance = {
   changeReplaySpeed: vi.fn(),
   toggleAutoZoom: vi.fn(),
   destroy: vi.fn(),
-};
+} satisfies StandIn<ReplayManager>;
 
 export const mockLayerManagerInstance = {
   updateAirspeedLegend: vi.fn(),
@@ -81,7 +98,7 @@ export const mockLayerManagerInstance = {
   onPathClick: vi.fn(),
   closeSegmentPopup: vi.fn(),
   destroy: vi.fn(),
-};
+} satisfies StandIn<LayerManager>;
 
 export const mockStateManagerInstance = {
   loadState: vi.fn((): SavedState | null => null),
@@ -89,13 +106,14 @@ export const mockStateManagerInstance = {
   scheduleSave: vi.fn(),
   flush: vi.fn(),
   cancelSave: vi.fn(),
-};
+  visiting: false,
+} satisfies StandIn<StateManager>;
 
 export const mockWrappedManagerInstance = {
   showWrapped: vi.fn(),
   closeWrapped: vi.fn(),
   destroy: vi.fn(),
-};
+} satisfies StandIn<WrappedManager>;
 
 /** The feature bundle's toggle of the replay of all flights */
 export const toggleReplayAll = vi.fn();
@@ -106,6 +124,10 @@ export const toggleCrossSection = vi.fn();
 export const toggleHotspotTour = vi.fn();
 /** The search bundle's toggle of the search */
 export const toggleSearch = vi.fn();
+/** The feature bundle's intro of a link to shared flights */
+export const playShareIntro = vi.fn();
+/** The phone's bottom bar, which none of these tests mounts by default */
+export const mobileBar = { mountFor: vi.fn() };
 
 export const mockUITogglesInstance = {
   toggleHeatmap: vi.fn(),
@@ -115,7 +137,7 @@ export const mockUITogglesInstance = {
   toggleAviation: vi.fn(),
   exportMap: vi.fn(),
   shareLink: vi.fn(),
-};
+} satisfies StandIn<UIToggles>;
 
 export const mockPathSelectionInstance = {
   updateIsolateButton: vi.fn(),
@@ -123,6 +145,177 @@ export const mockPathSelectionInstance = {
   selectPathsByAirport: vi.fn(),
   togglePathSelection: vi.fn(),
   toggleIsolateSelection: vi.fn(),
+} satisfies StandIn<PathSelection>;
+
+/**
+ * The stand-ins of the modules MapApp builds on, for the `vi.mock` calls of
+ * the test files: Vitest hoists those calls in the file that makes them, so
+ * each file still makes its own, with the factory from here. A manager's
+ * class hands out its instance above.
+ */
+export const modules = {
+  logger: () =>
+    ({
+      logError: vi.fn(),
+      logDebug: vi.fn(),
+      initLogger: vi.fn(),
+    }) satisfies StandIn<
+      typeof import("../../../../kml_heatmap/frontend/utils/logger")
+    >,
+  domCache: () =>
+    ({
+      domCache: {
+        get: vi.fn((id: string, ctor?: new () => HTMLElement) => {
+          const element = document.getElementById(id);
+          if (!element || !ctor) return element;
+          return element instanceof ctor ? element : null;
+        }),
+        clear: vi.fn(),
+      },
+    }) satisfies StandIn<
+      typeof import("../../../../kml_heatmap/frontend/utils/domCache")
+    >,
+  toast: () =>
+    ({
+      showToast: vi.fn(),
+      announceStatus: vi.fn(),
+      dismissToast: vi.fn(),
+      TOAST_DURATION_MS: 4000,
+    }) satisfies StandIn<
+      typeof import("../../../../kml_heatmap/frontend/utils/toast")
+    >,
+  // The real bar registers a window resize listener it never removes, so
+  // every test would leak one along with the MapApp it pins
+  mobileBar: () =>
+    ({ MobileBar: mobileBar }) satisfies StandIn<
+      typeof import("../../../../kml_heatmap/frontend/ui/mobileBar")
+    >,
+  dataManager: () =>
+    ({
+      DataManager: vi.fn(function () {
+        return mockDataManagerInstance;
+      }),
+    }) satisfies StandIn<
+      typeof import("../../../../kml_heatmap/frontend/ui/dataManager")
+    >,
+  filterManager: () =>
+    ({
+      FilterManager: vi.fn(function () {
+        return mockFilterManagerInstance;
+      }),
+    }) satisfies StandIn<
+      typeof import("../../../../kml_heatmap/frontend/ui/filterManager")
+    >,
+  airportManager: () =>
+    ({
+      AirportManager: vi.fn(function () {
+        return mockAirportManagerInstance;
+      }),
+    }) satisfies StandIn<
+      typeof import("../../../../kml_heatmap/frontend/ui/airportManager")
+    >,
+  replayManager: () =>
+    ({
+      ReplayManager: vi.fn(function () {
+        return mockReplayManagerInstance;
+      }),
+    }) satisfies StandIn<
+      typeof import("../../../../kml_heatmap/frontend/ui/replayManager")
+    >,
+  layerManager: () =>
+    ({
+      LayerManager: vi.fn(function () {
+        return mockLayerManagerInstance;
+      }),
+    }) satisfies StandIn<
+      typeof import("../../../../kml_heatmap/frontend/ui/layerManager")
+    >,
+  stateManager: () =>
+    ({
+      StateManager: vi.fn(function () {
+        return mockStateManagerInstance;
+      }),
+    }) satisfies StandIn<
+      typeof import("../../../../kml_heatmap/frontend/ui/stateManager")
+    >,
+  wrappedManager: () =>
+    ({
+      WrappedManager: vi.fn(function () {
+        return mockWrappedManagerInstance;
+      }),
+    }) satisfies StandIn<
+      typeof import("../../../../kml_heatmap/frontend/ui/wrappedManager")
+    >,
+  featureLoader: () =>
+    ({
+      loadedFeatures: () => null,
+      // Replay and Wrapped come from lazily loaded bundles of their own;
+      // here they are the doubles the stand-ins above return
+      loadFeatures: vi.fn(() =>
+        Promise.resolve({
+          ReplayManager: vi.fn(function () {
+            return mockReplayManagerInstance;
+          }),
+          // The satellite switch hands itself over to the bundle
+          followSatellite: vi.fn(),
+          toggleReplayAll,
+          toggleCrossSection,
+          toggleHotspotTour,
+          // And the selected flights to their profile
+          followFlightProfile: vi.fn(),
+          // A link to shared flights plays their intro
+          playShareIntro,
+        } satisfies StandIn<
+          typeof import("../../../../kml_heatmap/frontend/features")
+        >),
+      ),
+      loadWrapped: vi.fn(() =>
+        Promise.resolve({
+          WrappedManager: vi.fn(function () {
+            return mockWrappedManagerInstance;
+          }),
+          // The statistics panel rides in the Wrapped bundle
+          StatsManager: vi.fn(function () {
+            return mockStatsManagerInstance;
+          }),
+        } satisfies StandIn<
+          typeof import("../../../../kml_heatmap/frontend/wrapped")
+        >),
+      ),
+      loadSearch: vi.fn(() =>
+        Promise.resolve({ toggleSearch } satisfies StandIn<
+          typeof import("../../../../kml_heatmap/frontend/search")
+        >),
+      ),
+      wasSiteUpdated: vi.fn(() => false),
+      noticeSiteUpdate: vi.fn(() => null),
+    }) satisfies StandIn<
+      typeof import("../../../../kml_heatmap/frontend/services/featureLoader")
+    >,
+  uiToggles: () =>
+    ({
+      UIToggles: vi.fn(function () {
+        return mockUITogglesInstance;
+      }),
+    }) satisfies StandIn<
+      typeof import("../../../../kml_heatmap/frontend/ui/uiToggles")
+    >,
+  pathSelection: () =>
+    ({
+      PathSelection: vi.fn(function () {
+        return mockPathSelectionInstance;
+      }),
+      // The start view keeps 48 pixels off every edge where no panel is
+      mapChromePadding: vi.fn(() => ({
+        top: 48,
+        right: 48,
+        bottom: 48,
+        left: 48,
+      })),
+      CONTROL_COLUMNS: "#left-buttons, #right-buttons",
+    }) satisfies StandIn<
+      typeof import("../../../../kml_heatmap/frontend/ui/pathSelection")
+    >,
 };
 
 /** The map configuration every MapApp in these tests is built with */

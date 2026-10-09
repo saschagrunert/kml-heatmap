@@ -38,7 +38,7 @@ type SegmentRange = [start: number, end: number];
 export type SegmentRanges = Map<number, SegmentRange> | null;
 
 /** One index per segment array; the arrays never change after expansion */
-const segmentRangesCache = new WeakMap<PathSegment[], SegmentRanges>();
+const segmentRangesCache = new WeakMap<readonly PathSegment[], SegmentRanges>();
 
 /**
  * Locate every path's segments in one pass. The exporter writes the
@@ -47,7 +47,9 @@ const segmentRangesCache = new WeakMap<PathSegment[], SegmentRanges>();
  * a different one is not indexable and yields null, which makes the callers
  * fall back to a filter.
  */
-export function buildSegmentRanges(segments: PathSegment[]): SegmentRanges {
+export function buildSegmentRanges(
+  segments: readonly PathSegment[],
+): SegmentRanges {
   const ranges = new Map<number, SegmentRange>();
   let current = -1;
   for (let i = 0; i < segments.length; i++) {
@@ -68,7 +70,9 @@ export function buildSegmentRanges(segments: PathSegment[]): SegmentRanges {
  * loader produces gets exactly one; temporary arrays are indexed on demand
  * and dropped with the array.
  */
-export function segmentRangesFor(segments: PathSegment[]): SegmentRanges {
+export function segmentRangesFor(
+  segments: readonly PathSegment[],
+): SegmentRanges {
   const cached = segmentRangesCache.get(segments);
   if (cached !== undefined) return cached;
   const ranges = buildSegmentRanges(segments);

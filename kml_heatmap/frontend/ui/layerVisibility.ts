@@ -16,6 +16,7 @@ import {
   HEAT_SHOWN_STATE,
 } from "../mapLayers";
 import { dismissToast, showToast } from "../utils/toast";
+import { onMapReady } from "../utils/mapHelpers";
 
 /** Said when the imagery's code cannot be fetched and the switch goes off */
 export const SATELLITE_UNAVAILABLE_MESSAGE =
@@ -171,37 +172,32 @@ export function followLayerVisibility(app: MapApp): void {
   // strength (see HEAT_SHOWN_STATE), which needs the style. A style built
   // anew (the base style where its difference failed, or after a lost
   // WebGL context) starts from its own state, so it is set again on each
-  void app.mapReady.then(
-    (map) => {
-      const labels = (): void => {
-        try {
-          map.setGlobalStateProperty(
-            HEAT_SHOWN_STATE,
-            app.heatmapVisible &&
-              !app.replayActive &&
-              !dimsHeatmapAtAnyZoom(app),
-          );
-          map.setGlobalStateProperty(AVIATION_SHOWN_STATE, app.aviationVisible);
-        } catch {
-          // A style still loading: it is set when it has loaded
-        }
-      };
-      app.store.subscribeKeys(LAYER_KEYS, labels);
-      map.on("style.load", labels);
-      labels();
-      // Where the map comes to rest, which the heat's legend and the heat
-      // cloud follow (the paint of the heat follows the zoom itself): the
-      // store only tells when the zoom crosses into or out of the chart's
-      // band
-      const zoomed = (): void => {
-        app.aviationInView = aviationDrawsAt(map.getZoom());
-      };
-      const zooms = map.on("zoomend", zoomed);
-      app.signal.addEventListener("abort", () => zooms.unsubscribe());
-      zoomed();
-    },
-    () => {},
-  );
+  onMapReady(app, "The labels of the base map", (map) => {
+    const labels = (): void => {
+      try {
+        map.setGlobalStateProperty(
+          HEAT_SHOWN_STATE,
+          app.heatmapVisible && !app.replayActive && !dimsHeatmapAtAnyZoom(app),
+        );
+        map.setGlobalStateProperty(AVIATION_SHOWN_STATE, app.aviationVisible);
+      } catch {
+        // A style still loading: it is set when it has loaded
+      }
+    };
+    app.store.subscribeKeys(LAYER_KEYS, labels);
+    map.on("style.load", labels);
+    labels();
+    // Where the map comes to rest, which the heat's legend and the heat
+    // cloud follow (the paint of the heat follows the zoom itself): the
+    // store only tells when the zoom crosses into or out of the chart's
+    // band
+    const zoomed = (): void => {
+      app.aviationInView = aviationDrawsAt(map.getZoom());
+    };
+    const zooms = map.on("zoomend", zoomed);
+    app.signal.addEventListener("abort", () => zooms.unsubscribe());
+    zoomed();
+  });
 }
 
 /**

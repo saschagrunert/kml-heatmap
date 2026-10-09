@@ -111,6 +111,14 @@ export class StateManager {
   private saveTimer: ReturnType<typeof setTimeout> | null = null;
   /** Store keys that changed since the state was restored */
   private changed = new Set<keyof StoreState>();
+  /**
+   * Whether the page was opened from a link to shared flights (see
+   * takeShareIntro) and still shares them: the sender's flights in share
+   * mode, which the visitor's next visit without a link opened on as if
+   * they were theirs. Nothing is saved for that visit until share mode
+   * ends; the link in the address bar follows the state as ever.
+   */
+  visiting = false;
 
   constructor(app: MapApp) {
     this.app = app;
@@ -165,14 +173,15 @@ export class StateManager {
 
   /**
    * Save right now instead of after the debounce. Only the share action
-   * needs this: it reads the URL the moment the user asks for it.
+   * needs this: it reads the URL the moment the user asks for it, or the
+   * state saved, which it returns (none without a map).
    */
-  flush(): void {
+  flush(): SavedState | undefined {
     this.cancelSave();
-    this.saveMapState();
+    return this.saveMapState();
   }
 
-  saveMapState(): void {
+  saveMapState(): SavedState | undefined {
     if (!this.app.map) return;
 
     // While Wrapped has the map fitted to all the data, the view worth
@@ -219,13 +228,16 @@ export class StateManager {
           : (kept[toggle.key] ?? this.app[toggle.key]);
     }
     try {
-      localStorage.setItem(storageKey(), JSON.stringify(state));
+      if (!(this.visiting &&= this.app.isolateSelection)) {
+        localStorage.setItem(storageKey(), JSON.stringify(state));
+      }
     } catch (_e) {
       // Silently fail if localStorage is not available
     }
 
     // Update URL to reflect current state (for shareable links)
     this.updateUrl(state);
+    return state;
   }
 
   loadMapState(): SavedState | null {

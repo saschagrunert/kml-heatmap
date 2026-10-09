@@ -14,11 +14,18 @@
  *
  * When replay activates, or the hotspot tour starts, the bar steps aside
  * entirely: their panel takes the bottom edge, so the two never stack.
+ *
+ * The sheet itself comes with the extras bundle (extras.ts), which a phone
+ * fetches as soon as the page has a moment after the bar is mounted: no
+ * part of a first visit, and on a desktop not fetched at all. A tap on a
+ * sheet tab before it has arrived opens the sheet once it has.
  */
 import type { MapApp } from "../mapApp";
-import type { SheetRow, SheetSwitchRow } from "./mobileSheet";
-import { MobileSheet } from "./mobileSheet";
+import type { MobileSheet, SheetRow, SheetSwitchRow } from "./mobileSheet";
+import { loadExtras, loadedExtras } from "../services/featureLoader";
+import { TRY_AGAIN } from "../services/lazyImport";
 import { icon, type IconName } from "../utils/icons";
+import { whenIdle } from "../utils/whenIdle";
 import {
   followPhoneLayout,
   isPhoneLayout,
@@ -38,6 +45,14 @@ import {
   runAction,
 } from "./actions";
 import { focusStatsRail } from "./appChrome";
+import { loadLazyBundle } from "./lazyBundles";
+
+/** The id of the sheet, which the tabs that open it name before it exists */
+const SHEET_ID = "mobile-sheet";
+
+/** Said when the sheet's code cannot be fetched (see loadLazyBundle) */
+export const SHEET_UNAVAILABLE_MESSAGE =
+  "The menu is unavailable: its code could not be loaded" + TRY_AGAIN;
 
 /** Control columns the bar replaces while it is mounted */
 const LEGACY_CONTROL_IDS = ["left-buttons", "right-buttons"];
@@ -112,7 +127,8 @@ const TABS: TabSpec[] = [
 
 export class MobileBar {
   readonly root: HTMLElement;
-  readonly sheet: MobileSheet;
+  /** Made once the extras bundle has arrived (see mountSheet) */
+  private sheet: MobileSheet | null = null;
 
   private readonly app: MapApp;
   private readonly tabs = new Map<TabId, HTMLButtonElement>();
@@ -129,7 +145,6 @@ export class MobileBar {
 
   constructor(app: MapApp) {
     this.app = app;
-    this.sheet = new MobileSheet("mobile-sheet");
 
     this.root = document.createElement("nav");
     this.root.className = "mobile-bar";
@@ -224,7 +239,7 @@ export class MobileBar {
     this.mounted = true;
 
     if (!this.edgeTaken()) insertBeforeMap(this.root);
-    this.sheet.mount(document.body);
+    this.mountSheet();
 
     // The floating button groups are what the bar replaces
     setLegacyControlsHidden(true);
@@ -238,7 +253,7 @@ export class MobileBar {
     this.mounted = false;
 
     this.closeSheet();
-    this.sheet.destroy();
+    this.sheet?.destroy();
     this.root.remove();
 
     setLegacyControlsHidden(false);
@@ -251,6 +266,7 @@ export class MobileBar {
     const store = this.app.store;
     this.unsubscribes.push(
       store.subscribe("statsPanelVisible", () => this.syncTabs()),
+      store.subscribe("selectedYear", () => this.syncTabs()),
       store.subscribe("wrappedVisible", (visible) => {
         this.syncTabs();
         // A bar mounted while Wrapped held the map went to the end of the
@@ -270,7 +286,42 @@ export class MobileBar {
    * camera move, which the app passes on (see MapApp.syncResetButton).
    */
   refreshSheet(): void {
-    if (this.sheet.isOpen()) this.sheet.refresh();
+    if (this.sheet?.isOpen()) this.sheet.refresh();
+  }
+
+  /** Whether a sheet is open */
+  sheetOpen(): boolean {
+    return this.sheet?.isOpen() ?? false;
+  }
+
+  /**
+   * Put the sheet into the page with the bar: at once if its code is
+   * there, or once the page has a moment to fetch it, ahead of a tap
+   */
+  private mountSheet(): void {
+    const extras = loadedExtras();
+    if (!this.sheet && extras) this.sheet = new extras.MobileSheet(SHEET_ID);
+    if (this.sheet) {
+      this.sheet.mount(document.body);
+      // The tabs name the sheet they open once it is in the page
+      for (const spec of TABS) {
+        if (spec.kind === "sheet") {
+          this.tabs.get(spec.id)?.setAttribute("aria-controls", SHEET_ID);
+        }
+      }
+      return;
+    }
+    // A failure says nothing here: a tap on a sheet tab asks again, and
+    // says so (openSheet)
+    whenIdle(() => {
+      if (this.mounted) void loadExtras().then(() => this.ensureSheet());
+    });
+  }
+
+  /** The sheet, made and mounted if its code has arrived and none is yet */
+  private ensureSheet(): MobileSheet | null {
+    if (!this.sheet && this.mounted && loadedExtras()) this.mountSheet();
+    return this.sheet;
   }
 
   private createTab(spec: TabSpec): HTMLButtonElement {
@@ -292,9 +343,9 @@ export class MobileBar {
 
     if (spec.kind === "sheet") {
       // No aria-expanded: the sheet is modal and covers the whole bar, so
-      // the tab is not an operable disclosure once it is open
+      // the tab is not an operable disclosure once it is open. It controls
+      // the sheet once that is in the page (mountSheet).
       tab.setAttribute("aria-haspopup", "dialog");
-      tab.setAttribute("aria-controls", this.sheet.root.id);
     } else if (spec.kind === "dialog") {
       tab.setAttribute("aria-haspopup", "dialog");
     } else {
@@ -318,13 +369,9 @@ export class MobileBar {
     }
     switch (id) {
       case "layers":
-        this.openSheet(id, "Layers", this.toggleRows("layers"));
-        break;
       case "filter":
-        this.openSheet(id, "Filter", this.filterRows());
-        break;
       case "more":
-        this.openSheet(id, "More", this.moreRows());
+        this.openSheet(id);
         break;
       // The statistics sheet sits below the scrim and Wrapped's dialog above
       // the bar, so an open sheet would stay on top of the one or open (and
@@ -350,17 +397,42 @@ export class MobileBar {
     this.syncTabs();
   }
 
-  private openSheet(id: TabId, title: string, rows: SheetRow[]): void {
-    this.sheet.clearCloseCallback();
+  /**
+   * Open the sheet of tab `id`. Before its code has arrived the tab is
+   * marked open at once, as a tap on it again closes it, and the sheet
+   * opens once the code is there, unless the tab was closed or another
+   * one tapped meanwhile.
+   */
+  private openSheet(id: "layers" | "filter" | "more"): void {
     this.openTab = id;
-    this.sheet.openWith(title, rows, () => {
+    const sheet = this.ensureSheet();
+    if (!sheet) {
+      void loadLazyBundle(loadExtras, SHEET_UNAVAILABLE_MESSAGE).then(
+        (extras) => {
+          if (this.openTab !== id) return;
+          if (extras && this.ensureSheet()) this.openSheet(id);
+          else this.closeSheet();
+        },
+      );
+      return;
+    }
+    // Its rows as they are now: the year may have finished loading while
+    // the code of the sheet was on its way
+    const [title, rows] =
+      id === "layers"
+        ? ["Layers", this.toggleRows("layers")]
+        : id === "filter"
+          ? ["Filter", this.filterRows()]
+          : ["More", this.moreRows()];
+    sheet.clearCloseCallback();
+    sheet.openWith(title, rows, () => {
       this.openTab = null;
       this.syncTabs();
     });
   }
 
   private closeSheet(): void {
-    this.sheet.close();
+    this.sheet?.close();
     this.openTab = null;
     this.syncTabs();
   }
@@ -378,6 +450,14 @@ export class MobileBar {
       tab.classList.toggle("active", active);
       if (spec.kind === "disclosure") {
         tab.setAttribute("aria-expanded", String(active));
+      }
+      // The Filter tab says the year the map shows, which nothing else on
+      // a phone did; named as the tab still
+      if (spec.id === "filter") {
+        const year = this.app.selectedYear;
+        const all = year === "all";
+        tab.lastChild!.textContent = all ? spec.label : year;
+        tab.setAttribute("aria-label", all ? spec.label : "Filter, " + year);
       }
       // Statistics and Wrapped are made of the flights; an open rail can
       // still be closed (runAction)

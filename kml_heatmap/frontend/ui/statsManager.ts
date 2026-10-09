@@ -653,12 +653,20 @@ export class StatsManager {
 
     let html = '<div class="kh-stats">';
 
-    if (isSelection) {
-      html +=
-        '<div class="kh-stats-note">Showing statistics for ' +
-        pluralize(stats.num_paths, "selected flight") +
-        "</div>";
-    }
+    // What the figures are of: the selection, or the year and aircraft of
+    // the filter, which neither the phone's sheet nor the rail said
+    const { selectedYear: year, selectedAircraft: aircraft } = this.app;
+    html +=
+      '<div class="kh-stats-note">' +
+      (isSelection
+        ? "Showing statistics for " +
+          pluralize(stats.num_paths, "selected flight")
+        : // The year as the link or the saved view had it, which is
+          // checked against the years only once they are known
+          (year === "all" ? "All years" : escapeHtml(year)) +
+          " · " +
+          (aircraft === "all" ? "All aircraft" : escapeHtml(aircraft))) +
+      "</div>";
 
     // Lead figures: what the flying adds up to
     const distanceKm = stats.total_distance_nm * NAUTICAL_MILES_TO_KM;

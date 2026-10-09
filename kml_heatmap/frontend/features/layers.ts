@@ -130,26 +130,52 @@ export function rankValues(
  * the median in the middle of the ramp, where the legend names it.
  * Negative altitudes (below the MSL reference) are kept in the data but drawn
  * with the lowest colour: the scale's lower bound is clamped at 0 ft so the
- * legend and colours match the previous (clamped) exports.
+ * legend and colours match the previous (clamped) exports. Kept for the
+ * array and its paths, its ranks worked out once they are read (see
+ * altitudeRanges).
  */
 export function calculateAltitudeRange(
   segments: PathSegment[],
   defaultRange: Range,
   paths: PathInfo[],
 ): Range {
-  const range = altitudeRangeFt(segments, paths);
-  if (range === null) return defaultRange;
-
-  const min = Math.max(range.min, 0);
-  const max = Math.max(range.max, 0);
-  const altitudes = new Float64Array(segments.length);
-  segments.forEach((segment, i) => (altitudes[i] = segment.altitude_ft));
-  // Only the values the ramp reads are put in their place: a sort of all of
-  // them took 10 ms for every year on a desktop at each change of the
-  // dataset or the filter, with the altitude layer off as well
-  selectRanks(altitudes, rankIndices(segments.length - 1));
-  return { min, max, ranks: rankValues(altitudes, min, max) };
+  const held = altitudeRanges.get(segments);
+  if (held?.[0] === paths) return held[1];
+  const ends = altitudeRangeFt(segments, paths);
+  if (ends === null) return defaultRange;
+  const min = Math.max(ends.min, 0);
+  const max = Math.max(ends.max, 0);
+  let ranks: number[] | undefined;
+  const range: Range = {
+    min,
+    max,
+    get ranks() {
+      if (!ranks) {
+        const altitudes = new Float64Array(segments.length);
+        segments.forEach((segment, i) => (altitudes[i] = segment.altitude_ft));
+        // Only the values the ramp reads are put in their place: a sort of
+        // all of them took 10 ms for every year on a desktop
+        selectRanks(altitudes, rankIndices(segments.length - 1));
+        ranks = rankValues(altitudes, min, max);
+      }
+      return ranks;
+    },
+  };
+  altitudeRanges.set(segments, [paths, range]);
+  return range;
 }
+
+/**
+ * calculateAltitudeRange of each segment array: the range of a dataset was
+ * worked out at every change of the filter, which it does not follow, 23
+ * ms for all years on a desktop. Its ranks, most of that, are worked out
+ * once they are read, which only the colours of the altitude do: the 3D
+ * view reads `max` alone.
+ */
+const altitudeRanges = new WeakMap<
+  readonly PathSegment[],
+  [paths: PathInfo[], range: Range]
+>();
 
 /** Share of the speeds that falls below and above the ends of the scale */
 const AIRSPEED_RANGE_TAIL = 0.05;
@@ -225,7 +251,7 @@ export function rangeMiddle(range: Range): number {
  */
 export function calculateSegmentProperties(options: {
   pathId: number;
-  selectedPathIds?: Set<number>;
+  selectedPathIds?: ReadonlySet<number>;
   isolateSelection?: boolean;
   colorFunction?: (value: number, min: number, max: number) => string;
   colorMin?: number;

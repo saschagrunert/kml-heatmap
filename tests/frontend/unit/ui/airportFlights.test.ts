@@ -6,6 +6,7 @@ import type { Popup } from "maplibre-gl";
 import {
   listFlights,
   runwayUse,
+  flightLabel,
 } from "../../../../kml_heatmap/frontend/ui/airportFlights";
 import type { PathInfo } from "../../../../kml_heatmap/frontend/types";
 import type { PickList } from "../../../../kml_heatmap/frontend/ui/pathSelection";
@@ -13,6 +14,7 @@ import {
   asMapApp,
   createDataset,
   createMockApp,
+  segmentOf,
   type MockApp,
 } from "../../testHelpers";
 import { Popup as MockPopup } from "../../../mocks/maplibre-gl";
@@ -93,7 +95,7 @@ describe("listFlights", () => {
     resetSiteData();
   });
 
-  it("names each flight by route, aircraft and year only", () => {
+  it("names each flight by route, aircraft and year, and no distance it has not", () => {
     const { popup, container } = openPopup();
 
     listFlights(asMapApp(mockApp), popup, "EDDP Leipzig");
@@ -118,6 +120,67 @@ describe("listFlights", () => {
       "Select EDDP → EDAQ · D-ESST · 2024",
       "Select EDDP → Somewhere <b>odd</b> · 2025",
     ]);
+  });
+
+  it("tells flights of one route, aircraft and year apart by their distance", () => {
+    const twice: PathInfo[] = [11, 14].map((id) => ({
+      ...pathInfo[0]!,
+      id,
+    }));
+    // One degree of latitude is 60 nm, half of one 30 nm
+    mockApp.currentData = createDataset(twice, [
+      segmentOf({
+        path_id: 11,
+        coords: [
+          [51, 12],
+          [52, 12],
+        ],
+      }),
+      segmentOf({
+        path_id: 14,
+        coords: [
+          [51, 12],
+          [51.25, 12],
+        ],
+      }),
+      segmentOf({
+        path_id: 14,
+        coords: [
+          [51.25, 12],
+          [51.5, 12],
+        ],
+      }),
+    ]);
+    const { popup, container } = openPopup();
+
+    listFlights(asMapApp(mockApp), popup, "EDDP Leipzig");
+
+    expect(buttons(container).map((b) => b.textContent)).toEqual([
+      "EDAQ → EDDP · D-EAGJ · 2025 · 60 nm",
+      "EDAQ → EDDP · D-EAGJ · 2025 · 30 nm",
+    ]);
+    expect(
+      [...container.querySelectorAll(".kh-pick")].map((box) =>
+        box.getAttribute("aria-label"),
+      ),
+    ).toEqual([
+      "Select EDAQ → EDDP · D-EAGJ · 2025 · 60 nm",
+      "Select EDAQ → EDDP · D-EAGJ · 2025 · 30 nm",
+    ]);
+  });
+
+  it("names no distance under half a mile, rather than 0 nm", () => {
+    const path = {
+      id: 1,
+      start_airport: "EDAQ",
+      end_airport: "EDAQ",
+      aircraft_registration: "D-EAGJ",
+      year: 2025,
+    } as PathInfo;
+
+    expect(flightLabel(path, 0.4)).toBe("EDAQ → EDAQ · D-EAGJ · 2025");
+    expect(flightLabel(path)).toBe("EDAQ → EDAQ · D-EAGJ · 2025");
+    expect(flightLabel(path, 1.9)).toBe("EDAQ → EDAQ · D-EAGJ · 2025 · 1 nm");
   });
 
   it("lists only the flights the filter keeps", () => {

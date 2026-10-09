@@ -7,11 +7,18 @@ import {
 import { logError } from "../../../../kml_heatmap/frontend/utils/logger";
 import { drawHeat } from "../../../../kml_heatmap/frontend/services/heatSource";
 import { heatColumns } from "../../../../kml_heatmap/frontend/calculations/heatExposure";
-import { flatCurves } from "../../../../kml_heatmap/frontend/calculations/curves";
 import {
   heatLineFeatures,
   heatWeight,
 } from "../../../../kml_heatmap/frontend/calculations/heatLines";
+import { heatLineTone } from "../../../../kml_heatmap/frontend/calculations/heatTone";
+import {
+  flatRuns,
+  flightColumns,
+  flightsOf,
+  runsSource,
+} from "../../../../kml_heatmap/frontend/services/flightLines";
+import type { PathSegment } from "../../../../kml_heatmap/frontend/types";
 import { createSegment } from "../../testHelpers";
 import {
   dataset,
@@ -70,8 +77,8 @@ describe("createYearDecoder", () => {
 
     await decoder.decode(bytes);
 
-    // No transfer list: a transferred buffer would be empty on this side
-    expect(postMessage).toHaveBeenCalledWith({ id: 0, bytes });
+    // Nothing handed over: a transferred buffer would be empty on this side
+    expect(postMessage).toHaveBeenCalledWith({ id: 0, bytes }, []);
     expect(bytes.byteLength).toBeGreaterThan(0);
   });
 
@@ -324,16 +331,28 @@ describe("createYearDecoder", () => {
         ],
       }),
     );
-    /** The arguments of linesSource for all of `segments` */
-    const lines = (): Parameters<
-      ReturnType<typeof createYearDecoder>["linesSource"]
-    > => [
-      flatCurves(segments),
-      segments,
-      () => true,
-      heatWeight,
-      (seconds) => seconds,
-    ];
+    const runs = [{ start: 0, end: 2, pathId: 1, color: "#123456" }];
+
+    /** The text of the heat lines of all of `of` at an exposure of 2 */
+    const heatLinesOf = (of: readonly PathSegment[]): string =>
+      JSON.stringify(
+        heatLineFeatures(
+          of,
+          () => true,
+          (segment, next) => heatWeight(segment, next) * 2,
+          heatLineTone,
+        ),
+        (key, value: unknown) =>
+          key === "coordinates"
+            ? (value as number[][]).map((position) =>
+                position.map((degrees) => Math.round(degrees * 1e7) / 1e7),
+              )
+            : value,
+      );
+
+    /** The text of the lines of `runs` along `of` */
+    const runsOf = (of: readonly PathSegment[]): Promise<string> =>
+      runsSource(flightsOf(flightColumns(of)), flatRuns(runs, 4)).text();
 
     /** Whether `drawn` is `points` drawn as drawHeat draws them */
     async function expectDrawn(
@@ -350,22 +369,74 @@ describe("createYearDecoder", () => {
 
       await expectDrawn(await decoder.drawHeat(points, weights));
 
-      const [request] = postMessage.mock.calls[0]!;
+      const [request, transfer] = postMessage.mock.calls[0]!;
       expect(request).toEqual({ id: 0, heat: heatColumns(points, weights) });
-      expect(postMessage.mock.calls[0]).toHaveLength(1);
+      expect(transfer).toEqual([]);
       expect(logError).not.toHaveBeenCalled();
     });
 
-    it("works the heat lines out here and has the worker write them", async () => {
+    it("hands the worker the flights once, and has it draw the lines along them", async () => {
       const decoder = createYearDecoder({ createWorker });
+      const postMessage = vi.spyOn(worker, "postMessage");
 
-      const source = await decoder.linesSource(...lines());
+      const heat = await decoder.heatLines(segments, null, 2);
+      const lines = await decoder.runsSource(segments, runs, 4);
 
-      expect(worker.requests[0]).toMatchObject({ id: 0 });
-      expect("lines" in worker.requests[0]!).toBe(true);
-      expect(await source.text()).toBe(
-        JSON.stringify(heatLineFeatures(segments, () => true)),
+      expect(await heat.text()).toBe(heatLinesOf(segments));
+      expect(await lines.text()).toBe(await runsOf(segments));
+      const [first, transfer] = postMessage.mock.calls[0]!;
+      expect(first).toMatchObject({
+        id: 0,
+        flights: flightColumns(segments),
+        heatLines: { keep: null, exposure: 2 },
+      });
+      // Handed over: the page draws from the segments if it has to
+      expect(transfer).toHaveLength(4);
+      // The worker keeps them for the next lines
+      expect("flights" in postMessage.mock.calls[1]![0]).toBe(false);
+      expect(postMessage.mock.calls[1]![0]).toMatchObject({
+        runs: flatRuns(runs, 4),
+      });
+    });
+
+    it("hands the worker the flights of another array, and a heat's paths", async () => {
+      const decoder = createYearDecoder({ createWorker });
+      const fewer = segments.slice(0, 2);
+
+      await decoder.heatLines(segments, null, 2);
+      await decoder.heatLines(fewer, new Set([1]), 2);
+      await decoder.heatLines(segments, null, 2);
+
+      expect(worker.requests.map((request) => "flights" in request)).toEqual([
+        true,
+        true,
+        true,
+      ]);
+      expect(worker.requests[1]).toMatchObject({
+        heatLines: { keep: new Float64Array([1]) },
+      });
+    });
+
+    it("draws here the lines the worker failed over, and hands it the flights again", async () => {
+      worker.answers = false;
+      const decoder = createYearDecoder({ createWorker });
+      const owed = decoder.heatLines(segments, null, 2);
+
+      worker.say({
+        id: 0,
+        error: "no flights to draw lines along",
+        name: "Error",
+        format: DATA_FORMAT_VERSION,
+      });
+
+      expect(await (await owed).text()).toBe(heatLinesOf(segments));
+      expect(logError).toHaveBeenCalledWith(
+        "Year worker could not draw the heat lines:",
+        "no flights to draw lines along",
       );
+      worker.answers = true;
+      await decoder.runsSource(segments, runs, 4);
+      expect("flights" in worker.requests[1]!).toBe(true);
     });
 
     it("draws and writes here where there are no workers", async () => {
@@ -373,8 +444,11 @@ describe("createYearDecoder", () => {
       const decoder = createYearDecoder();
 
       await expectDrawn(await decoder.drawHeat(points, weights));
-      expect(await (await decoder.linesSource(...lines())).text()).toBe(
-        JSON.stringify(heatLineFeatures(segments, () => true)),
+      expect(await (await decoder.heatLines(segments, null, 2)).text()).toBe(
+        heatLinesOf(segments),
+      );
+      expect(await (await decoder.runsSource(segments, runs, 4)).text()).toBe(
+        await runsOf(segments),
       );
     });
 
@@ -406,7 +480,7 @@ describe("createYearDecoder", () => {
       await expect(decoder.drawHeat(points, weights)).rejects.toThrow(
         "year decoder destroyed",
       );
-      await expect(decoder.linesSource(...lines())).rejects.toThrow(
+      await expect(decoder.heatLines(segments, null, 1)).rejects.toThrow(
         "year decoder destroyed",
       );
       expect(worker.requests).toEqual([]);

@@ -88,7 +88,7 @@ export function resolveColorRange(
     full,
     data.path_info,
   );
-  state.selectionRange = { data, full, selected: new Set(selected), range };
+  state.selectionRange = { data, full, selected, range };
   return range;
 }
 
@@ -104,8 +104,9 @@ export function applyLook(
   config: LayerConfig,
 ): void {
   const state = states[config.mode];
+  // A selection is never changed in place (see PathSelection.select)
   const shown: ShownSelection = {
-    selected: new Set(app.selectedPathIds),
+    selected: app.selectedPathIds,
     isolate: app.isolateSelection,
   };
   state.shown = shown;

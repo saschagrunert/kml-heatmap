@@ -23,119 +23,58 @@ import {
 } from "../../../../kml_heatmap/frontend/services/featureLoader";
 import * as motion from "../../../../kml_heatmap/frontend/utils/motion";
 import { INPUT_EVENTS } from "../../../../kml_heatmap/frontend/utils/constants";
+import * as toast from "../../../../kml_heatmap/frontend/utils/toast";
 
 // The instances the mocked manager constructors hand out live in the setup
 // module, which is loaded before the mocks are registered
 const m = await vi.hoisted(() => import("./mapAppTestSetup"));
 
-vi.mock("../../../../kml_heatmap/frontend/utils/logger", () => ({
-  logError: vi.fn(),
-  logDebug: vi.fn(),
-  initLogger: vi.fn(),
-}));
-vi.mock("../../../../kml_heatmap/frontend/utils/domCache", () => ({
-  domCache: {
-    get: vi.fn((id: string, ctor?: new () => HTMLElement) => {
-      const element = document.getElementById(id);
-      if (!element || !ctor) return element;
-      return element instanceof ctor ? element : null;
-    }),
-    clear: vi.fn(),
-  },
-}));
-const toastMock = vi.hoisted(() => ({
-  showToast: vi.fn(),
-  announceStatus: vi.fn(),
-  dismissToast: vi.fn(),
-  TOAST_DURATION_MS: 4000,
-}));
-vi.mock("../../../../kml_heatmap/frontend/utils/toast", () => toastMock);
-// The real bar registers a window resize listener it never removes, so every
-// test would leak one along with the MapApp it pins
-const mobileBarMock = vi.hoisted(() => ({ mountFor: vi.fn() }));
-vi.mock("../../../../kml_heatmap/frontend/ui/mobileBar", () => ({
-  MobileBar: mobileBarMock,
-}));
-vi.mock("../../../../kml_heatmap/frontend/ui/dataManager", () => ({
-  DataManager: vi.fn(function () {
-    return m.mockDataManagerInstance;
-  }),
-}));
-vi.mock("../../../../kml_heatmap/frontend/ui/filterManager", () => ({
-  FilterManager: vi.fn(function () {
-    return m.mockFilterManagerInstance;
-  }),
-}));
-vi.mock("../../../../kml_heatmap/frontend/ui/airportManager", () => ({
-  AirportManager: vi.fn(function () {
-    return m.mockAirportManagerInstance;
-  }),
-}));
-vi.mock("../../../../kml_heatmap/frontend/ui/replayManager", () => ({
-  ReplayManager: vi.fn(function () {
-    return m.mockReplayManagerInstance;
-  }),
-}));
-vi.mock("../../../../kml_heatmap/frontend/ui/layerManager", () => ({
-  LayerManager: vi.fn(function () {
-    return m.mockLayerManagerInstance;
-  }),
-}));
-vi.mock("../../../../kml_heatmap/frontend/ui/stateManager", () => ({
-  StateManager: vi.fn(function () {
-    return m.mockStateManagerInstance;
-  }),
-}));
-vi.mock("../../../../kml_heatmap/frontend/ui/wrappedManager", () => ({
-  WrappedManager: vi.fn(function () {
-    return m.mockWrappedManagerInstance;
-  }),
-}));
-const shareIntroMock = vi.hoisted(() => vi.fn());
-vi.mock("../../../../kml_heatmap/frontend/services/featureLoader", () => ({
-  loadedFeatures: () => null,
-  // Replay and Wrapped come from lazily loaded bundles of their own; here
-  // they are the doubles the module mocks above return
-  loadFeatures: vi.fn(() =>
-    Promise.resolve({
-      ReplayManager: vi.fn(function () {
-        return m.mockReplayManagerInstance;
-      }),
-      // The satellite switch hands itself over to the bundle
-      followSatellite: vi.fn(),
-      // And the selected flights to their profile
-      followFlightProfile: vi.fn(),
-      // A link to shared flights plays their intro
-      playShareIntro: shareIntroMock,
-    }),
-  ),
-  loadWrapped: vi.fn(() =>
-    Promise.resolve({
-      WrappedManager: vi.fn(function () {
-        return m.mockWrappedManagerInstance;
-      }),
-      // The statistics panel rides in the Wrapped bundle
-      StatsManager: vi.fn(function () {
-        return m.mockStatsManagerInstance;
-      }),
-    }),
-  ),
-}));
-vi.mock("../../../../kml_heatmap/frontend/ui/uiToggles", () => ({
-  UIToggles: vi.fn(function () {
-    return m.mockUITogglesInstance;
-  }),
-}));
+vi.mock("../../../../kml_heatmap/frontend/utils/logger", () =>
+  m.modules.logger(),
+);
+vi.mock("../../../../kml_heatmap/frontend/utils/domCache", () =>
+  m.modules.domCache(),
+);
+vi.mock("../../../../kml_heatmap/frontend/utils/toast", () =>
+  m.modules.toast(),
+);
+vi.mock("../../../../kml_heatmap/frontend/ui/mobileBar", () =>
+  m.modules.mobileBar(),
+);
+vi.mock("../../../../kml_heatmap/frontend/ui/dataManager", () =>
+  m.modules.dataManager(),
+);
+vi.mock("../../../../kml_heatmap/frontend/ui/filterManager", () =>
+  m.modules.filterManager(),
+);
+vi.mock("../../../../kml_heatmap/frontend/ui/airportManager", () =>
+  m.modules.airportManager(),
+);
+vi.mock("../../../../kml_heatmap/frontend/ui/replayManager", () =>
+  m.modules.replayManager(),
+);
+vi.mock("../../../../kml_heatmap/frontend/ui/layerManager", () =>
+  m.modules.layerManager(),
+);
+vi.mock("../../../../kml_heatmap/frontend/ui/stateManager", () =>
+  m.modules.stateManager(),
+);
+vi.mock("../../../../kml_heatmap/frontend/ui/wrappedManager", () =>
+  m.modules.wrappedManager(),
+);
+vi.mock("../../../../kml_heatmap/frontend/services/featureLoader", () =>
+  m.modules.featureLoader(),
+);
+vi.mock("../../../../kml_heatmap/frontend/ui/uiToggles", () =>
+  m.modules.uiToggles(),
+);
+vi.mock("../../../../kml_heatmap/frontend/ui/pathSelection", () =>
+  m.modules.pathSelection(),
+);
 /** What the start view keeps off the edges with no panels over them */
 const START_PADDING = { top: 48, right: 48, bottom: 48, left: 48 };
-vi.mock("../../../../kml_heatmap/frontend/ui/pathSelection", () => ({
-  PathSelection: vi.fn(function () {
-    return m.mockPathSelectionInstance;
-  }),
-  // The start view keeps 48 pixels off every edge where no panel is
-  mapChromePadding: vi.fn(() => ({ top: 48, right: 48, bottom: 48, left: 48 })),
-  CONTROL_COLUMNS: "#left-buttons, #right-buttons",
-}));
+
+const toastMock = vi.mocked(toast);
 
 const {
   createApp,
@@ -167,7 +106,7 @@ describe("MapApp.initialize", () => {
 
   beforeEach(() => {
     resetManagerMocks();
-    mobileBarMock.mountFor.mockReturnValue(null);
+    m.mobileBar.mountFor.mockReturnValue(null);
     setupDOM();
     app = createApp(MapApp);
   });
@@ -247,7 +186,7 @@ describe("MapApp.initialize", () => {
     const original = window.location.pathname + window.location.search;
     afterEach(() => {
       window.history.replaceState(null, "", original);
-      shareIntroMock.mockClear();
+      m.playShareIntro.mockClear();
       vi.restoreAllMocks();
     });
 
@@ -283,7 +222,9 @@ describe("MapApp.initialize", () => {
       // Before the state is read, let alone saved 300 ms on
       expect(restoredFrom).toBe("?y=2025&p=a5&sv=4");
       expect(window.location.search).toBe("?y=2025&p=a5&sv=4");
-      await vi.waitFor(() => expect(shareIntroMock).toHaveBeenCalledWith(app));
+      await vi.waitFor(() =>
+        expect(m.playShareIntro).toHaveBeenCalledWith(app),
+      );
       // Listened for input until it started, and no longer
       expect(listeners()).toHaveLength(INPUT_EVENTS.length);
       expect(listeners().every((signal) => signal?.aborted)).toBe(true);
@@ -302,9 +243,56 @@ describe("MapApp.initialize", () => {
       await initializeApp(app);
       await new Promise((resolve) => setTimeout(resolve, 0));
 
-      expect(shareIntroMock).not.toHaveBeenCalled();
+      expect(m.playShareIntro).not.toHaveBeenCalled();
       expect(listeners()).toHaveLength(INPUT_EVENTS.length);
       expect(listeners().every((signal) => signal?.aborted)).toBe(true);
+    });
+
+    it("plays after Tab or a modifier on its own, which move no view", async () => {
+      window.history.replaceState(null, "", "/?y=2025&p=a5&sv=4&i=1");
+      // Alt or Cmd and Tab from the app the link came in to
+      mockStateManagerInstance.loadState.mockImplementation(() => {
+        for (const key of ["Tab", "Alt", "Meta", "Shift", "Control"]) {
+          window.dispatchEvent(new KeyboardEvent("keydown", { key }));
+        }
+        return null;
+      });
+
+      await initializeApp(app);
+
+      await vi.waitFor(() =>
+        expect(m.playShareIntro).toHaveBeenCalledWith(app),
+      );
+    });
+
+    it("does not play after Escape, which the visitor pressed to have none", async () => {
+      window.history.replaceState(null, "", "/?y=2025&p=a5&sv=4&i=1");
+      mockStateManagerInstance.loadState.mockImplementation(() => {
+        window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+        return null;
+      });
+
+      await initializeApp(app);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(m.playShareIntro).not.toHaveBeenCalled();
+    });
+
+    it("keeps the sender's flights out of what the visitor's next visit opens on, and the statistics closed", async () => {
+      window.history.replaceState(null, "", "/?y=2025&p=a5&sv=4&i=1");
+      mockStateManagerInstance.loadState.mockReturnValueOnce({
+        selectedYear: "2025",
+        selectedPathIds: [365],
+        isolateSelection: true,
+        statsPanelVisible: true,
+      });
+
+      await initializeApp(app);
+
+      expect(mockStateManagerInstance.visiting).toBe(true);
+      // The sheet of a phone would hide the map the intro plays on
+      expect(app.statsPanelVisible).toBe(false);
+      expect(app.savedState).not.toHaveProperty("statsPanelVisible");
     });
 
     it("does not fetch it over a load that failed, the mark gone all the same", async () => {
@@ -316,7 +304,7 @@ describe("MapApp.initialize", () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
 
       expect(window.location.search).toBe("?y=2025&p=a5&sv=4");
-      expect(shareIntroMock).not.toHaveBeenCalled();
+      expect(m.playShareIntro).not.toHaveBeenCalled();
       expect(loadFeatures).not.toHaveBeenCalled();
       // Nor does it listen for input any longer
       expect(listeners().every((signal) => signal?.aborted)).toBe(true);
@@ -324,14 +312,17 @@ describe("MapApp.initialize", () => {
 
     it("does not play from a link without the mark", async () => {
       window.history.replaceState(null, "", "/?y=2025&p=a5&sv=4");
+      mockStateManagerInstance.visiting = false;
 
       const listeners = inputListeners();
       await initializeApp(app);
       await new Promise((resolve) => setTimeout(resolve, 0));
 
-      expect(shareIntroMock).not.toHaveBeenCalled();
+      expect(m.playShareIntro).not.toHaveBeenCalled();
       // Nor listens for input on its account
       expect(listeners()).toHaveLength(0);
+      // The flights of a link of the visitor's own are theirs to keep
+      expect(mockStateManagerInstance.visiting).toBe(false);
     });
   });
 
@@ -589,8 +580,7 @@ describe("MapApp.initialize", () => {
       app.store.batch(() => {
         app.selectedYear = "2024";
         app.selectedAircraft = "D-ABCD";
-        app.selectedPathIds.add(1);
-        app.store.notifyMutation("selectedPathIds");
+        app.selectedPathIds = new Set([...app.selectedPathIds, 1]);
         app.isolateSelection = true;
         app.heatmapVisible = false;
         app.altitudeVisible = true;
@@ -611,8 +601,7 @@ describe("MapApp.initialize", () => {
       changeEverything();
       // As PathSelection clears it
       mockPathSelectionInstance.clearSelection.mockImplementationOnce(() => {
-        app.selectedPathIds.clear();
-        app.store.notifyMutation("selectedPathIds");
+        app.selectedPathIds = new Set();
       });
       const defaults = createDefaultState();
       const keys = [
@@ -776,8 +765,7 @@ describe("MapApp.initialize", () => {
       [
         "a selection",
         () => {
-          app.selectedPathIds.add(1);
-          app.store.notifyMutation("selectedPathIds");
+          app.selectedPathIds = new Set([...app.selectedPathIds, 1]);
         },
       ],
       ["a pan", () => moveCamera({ center: [9.5, 51] })],
@@ -794,7 +782,7 @@ describe("MapApp.initialize", () => {
 
     it("has the phone's open sheet read its row again", async () => {
       const bar = { refreshSheet: vi.fn(), destroy: vi.fn() };
-      mobileBarMock.mountFor.mockReturnValue(bar);
+      m.mobileBar.mountFor.mockReturnValue(bar);
       await initializeApp(app);
       bar.refreshSheet.mockClear();
 
@@ -1099,10 +1087,6 @@ describe("MapApp.initialize", () => {
 
       expect([...app.selectedPathIds]).toEqual([1, 2]);
       expect(app.isolateSelection).toBe(true);
-      // The replay button follows the store inside the replay manager
-      expect(
-        mockReplayManagerInstance.updateReplayButtonState,
-      ).not.toHaveBeenCalled();
     });
 
     // What the first load keeps of a restored selection is FilterManager's

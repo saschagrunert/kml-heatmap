@@ -30,6 +30,7 @@ import {
   closeWhenBehindGlobe,
   isReplayCameraMove,
   panPopupIntoView,
+  onMapReady,
   whenContextRestored,
 } from "../utils/mapHelpers";
 import { isTouchDevice } from "../utils/device";
@@ -207,24 +208,25 @@ export class AirportManager {
     if (app.map) closeWhenBehindGlobe(app.map, this.popup);
 
     // The labels are there once the map's layers are
-    app.mapReady
-      .then((map) => {
-        if (this.destroyed) return;
-        this.subscriptions = [
-          map.on("moveend", this.handleMoveEnd),
-          map.on("mousemove", MAP_LAYERS.airportLabels, this.handleLabelMove),
-          map.on("mouseleave", MAP_LAYERS.airportLabels, this.handleLabelLeave),
-        ];
-        // What was written while the WebGL context was lost had no source
-        // to go to, and the hover of a label went with the old one
-        whenContextRestored(map, () => {
+    onMapReady(app, "Airport labels", (map) => {
+      if (this.destroyed) return;
+      this.subscriptions = [
+        map.on("moveend", this.handleMoveEnd),
+        map.on("mousemove", MAP_LAYERS.airportLabels, this.handleLabelMove),
+        map.on("mouseleave", MAP_LAYERS.airportLabels, this.handleLabelLeave),
+      ];
+      // What was written while the WebGL context was lost had no source
+      // to go to, and the hover of a label went with the old one
+      whenContextRestored(
+        map,
+        () => {
           if (this.destroyed) return;
           this.hoverLabel(null);
           this.updateLabels();
-        });
-      })
-      // The start-up reports a map that never got ready
-      .catch(() => {});
+        },
+        app.signal,
+      );
+    });
   }
 
   /** Stop following the map; the markers and labels stay as they are */

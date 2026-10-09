@@ -135,9 +135,12 @@ git commit -s -m "chore: add flight 104"
 ```
 
 `git add data/` picks up renamed files and `aircraft.json` as well, and the
-originals the renames removed. Write the commit message without a date or a
-weekday: the pre-push hook refuses one that dates the flights it adds. Install
-the hooks once: with the pre-commit hooks (see
+originals the renames removed. Write the commit message, and the name of a
+branch you push it to, without a date or a weekday: the pre-push hook refuses
+one that dates the flights it adds (a branch name only when the commits pushed
+to that branch add flights), and warns when a push adds the flights of one trip,
+which it dates (see [Privacy](privacy.md#what-the-site-carries)). Install the
+hooks once: with the pre-commit hooks (see
 [CONTRIBUTING.md](../CONTRIBUTING.md)) the commit fails while a file in `data/`
 is not obfuscated, and the pre-push hook (`make hooks`, which needs only Python)
 refuses to push a commit that carries one. The CI lint job catches the same

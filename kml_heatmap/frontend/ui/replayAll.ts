@@ -17,15 +17,13 @@
  * does, fits the camera to the flights north up, tilted as the 3D view
  * tilts it, and turns it slowly round them on request. The heat builds up
  * behind the flights instead of the heatmap, as far as the clock has come
- * (see replayAllTime) and at the height of the flights, unless the
+ * (see ReplayAllControls.time) and at the height of the flights, unless the
  * Heatmap switch is off.
  *
  * A selection of several flights plays one after another in the replay of
  * one flight (ui/replayManager.ts), not here.
  */
-import type { LngLat } from "maplibre-gl";
 import type { MapApp } from "../mapApp";
-import { fitTilted } from "../calculations/replayAll";
 import { pluralFlights } from "../utils/htmlGenerators";
 import { MAP_MAX_ZOOM } from "../utils/constants";
 import { applyToggleButtonState } from "../utils/buttonState";
@@ -42,8 +40,10 @@ import { prefersReducedMotion } from "../utils/motion";
 import { announceInRegion, announceStatus, showToast } from "../utils/toast";
 import { nameButton } from "./crossSectionElements";
 import { followPanelHeight } from "./replayManager";
+import { featurePart } from "./lazyBundles";
 import { restingPitch } from "./replayState";
 import { mapChromePadding } from "./pathSelection";
+import { fitCamera } from "./frameFlights";
 import { REPLAY_ALL_SPEED, ReplayAllPlayer } from "./replayAllPlayer";
 
 /** The speeds the panel offers, in seconds of flight per second */
@@ -168,6 +168,15 @@ export class ReplayAllControls {
   /** Whether it is open */
   get isOpen(): boolean {
     return this.open;
+  }
+
+  /**
+   * The seconds into every flight while it is open, which the heat is
+   * drawn up to (see ui/heatCloud.ts), and null otherwise: Wrapped's intro
+   * plays its own player under the whole year
+   */
+  get time(): number | null {
+    return this.open ? this.player.time : null;
   }
 
   toggle(): void {
@@ -319,7 +328,7 @@ export class ReplayAllControls {
    * Where the camera shows the flights of the run as large as the map
    * allows, north up and tilted by `pitch`: clear of the panels along its
    * edges (mapChromePadding) and of the replay's own, `panel`, below them.
-   * The fit of their bounds is where it starts from (see fitTilted), and
+   * The fit of their bounds is where it starts from (see fitCamera), and
    * its zoom, `flat`, the one of a flat map.
    */
   private fit(pitch: number, panel: HTMLElement) {
@@ -333,28 +342,19 @@ export class ReplayAllControls {
       padding.bottom,
       box.bottom - panel.getBoundingClientRect().top + FIT_MARGIN_PX,
     );
-    const start = map.cameraForBounds(
+    const camera = fitCamera(
+      map,
+      run,
       [
         [bounds[0], bounds[1]],
         [bounds[2], bounds[3]],
       ],
-      { padding, bearing: 0 },
-    );
-    if (!start) return null;
-    const { lng, lat } = start.center as LngLat;
-    const camera = fitTilted(
-      run,
-      { center: [lng, lat], zoom: start.zoom! },
-      {
-        width: box.width,
-        height: box.height,
-        padding,
-        pitch,
-        fov: map.getVerticalFieldOfView(),
-      },
+      padding,
+      pitch,
+      0,
       MAP_MAX_ZOOM,
     );
-    return { ...camera, bearing: 0, pitch, flat: start.zoom! };
+    return camera && { ...camera, pitch };
   }
 
   private setOrbit(on: boolean): void {
@@ -500,25 +500,7 @@ export class ReplayAllControls {
   }
 }
 
-/** The controls of each app, made the first time they are used */
-const controlsOf = new WeakMap<MapApp, ReplayAllControls>();
-
-/**
- * The seconds into every flight while the replay of all flights of `app`
- * is open, which the heat is drawn up to (see ui/heatCloud.ts), and null
- * otherwise: Wrapped's intro plays its own player under the whole year
- */
-export function replayAllTime(app: MapApp): number | null {
-  const controls = controlsOf.get(app);
-  return controls?.isOpen ? controls.player.time : null;
-}
-
-/** Open or close the replay of all flights of `app` */
+/** Open or close the replay of all flights of `app`, made the first time */
 export function toggleReplayAll(app: MapApp): void {
-  let controls = controlsOf.get(app);
-  if (!controls) {
-    controls = new ReplayAllControls(app);
-    controlsOf.set(app, controls);
-  }
-  controls.toggle();
+  featurePart(app, "replayAll", () => new ReplayAllControls(app)).toggle();
 }

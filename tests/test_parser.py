@@ -446,10 +446,11 @@ class TestParseKmlCoordinates:
 
         set_debug_mode(True)
         try:
-            root = _parse_kml_tree(_write(tmp_path, "dbg.kml", LINESTRING_KML))
+            root, damage = _parse_kml_tree(_write(tmp_path, "dbg.kml", LINESTRING_KML))
         finally:
             set_debug_mode(False)
         assert root is not None
+        assert damage is None
         assert "All unique tags in file" in capsys.readouterr().out
         assert not logging.getLogger("kml_heatmap").isEnabledFor(logging.DEBUG)
 
@@ -925,6 +926,145 @@ KMZ_TRACK = (
     "12.05,51.55,110 12.10,51.60,500 12.15,51.65,900"
     "</coordinates></LineString></Placemark></kml>"
 )
+
+
+def _track(points):
+    """A gx:Track of ``points`` fixes east, a second apart."""
+    whens = "".join(
+        f"<when>2025-06-01T10:{i // 60:02d}:{i % 60:02d}Z</when>\n"
+        for i in range(points)
+    )
+    coords = "".join(
+        f"<gx:coord>8.{i:04d} 50.0 {500 + i}</gx:coord>\n" for i in range(points)
+    )
+    return (
+        f"{KML_HEADER}\n<Document><Placemark><name>Track</name><gx:Track>\n"
+        f"{whens}{coords}</gx:Track></Placemark></Document></kml>\n"
+    )
+
+
+class TestDamagedDocuments:
+    """A file a logger left cut off, and the slips of some writers."""
+
+    def test_a_cut_off_track_keeps_what_comes_before_the_cut(self, tmp_path, caplog):
+        kml = _track(100)
+        cut = kml[: kml.index("<gx:coord>8.0060") + len("<gx:coord>8.00")]
+        with caplog.at_level(logging.WARNING, logger="kml_heatmap"):
+            _, paths, _ = parse_kml_coordinates(_write(tmp_path, "cut.kml", cut))
+        # The fix cut in the middle is left out, not read as 8.00
+        assert [round(p.lon, 4) for p in paths[0]] == [
+            round(8 + i / 10000, 4) for i in range(60)
+        ]
+        assert paths[0][59].ts is not None
+        line = cut.count("\n") + 1
+        assert "cut.kml: damaged, the points after it may be missing" in caplog.text
+        # The message of lxml, which names the line once and not the file again
+        assert caplog.text.count(f"line {line}, column") == 1
+        assert "(cut.kml" not in caplog.text
+
+    @pytest.mark.parametrize("end", ["8.12", "8.1234,50", "8.1234,50.1,5"])
+    def test_the_point_a_line_is_cut_in_is_left_out(self, tmp_path, end):
+        line = " ".join(f"8.{i:04d},50.0,{500 + i}" for i in range(10))
+        kml = f"{KML_HEADER}<Placemark><LineString><coordinates>{line} {end}"
+        _, paths, _ = parse_kml_coordinates(_write(tmp_path, "cut.kml", kml))
+        assert len(paths[0]) == 10
+        assert paths[0][-1].alt == 509.0
+
+    def test_content_after_the_end_leaves_every_point(self, tmp_path, caplog):
+        kml = _track(10) + "\ngarbage<x>"
+        with caplog.at_level(logging.WARNING, logger="kml_heatmap"):
+            _, paths, _ = parse_kml_coordinates(_write(tmp_path, "junk.kml", kml))
+        assert len(paths[0]) == 10
+        assert "junk.kml: damaged," in caplog.text
+
+    def test_a_stray_ampersand_in_a_name_leaves_every_point(self, tmp_path):
+        line = "8.1,50.1,300 8.2,50.2,310"
+        kml = (
+            f"{KML_HEADER}<Document><Placemark><name>EDAQ & back</name>"
+            f"<LineString><coordinates>{line}</coordinates></LineString>"
+            "</Placemark></Document></kml>"
+        )
+        _, paths, _ = parse_kml_coordinates(_write(tmp_path, "amp.kml", kml))
+        assert len(paths[0]) == 2
+
+    def test_a_damaged_file_without_a_path_still_fails(self, tmp_path):
+        kml = f"{KML_HEADER}<Document><Placemark><name>Trac"
+        with pytest.raises(KMLParseError, match="XML parsing error") as excinfo:
+            parse_kml_coordinates(_write(tmp_path, "cut.kml", kml))
+        assert excinfo.value.line_number == 2
+
+    def test_white_space_before_the_declaration_is_no_damage(self, tmp_path, caplog):
+        with caplog.at_level(logging.WARNING, logger="kml_heatmap"):
+            _, paths, _ = parse_kml_coordinates(
+                _write(tmp_path, "lead.kml", "\n  " + GX_TRACK_KML)
+            )
+        assert len(paths[0]) == 2
+        assert "damaged" not in caplog.text
+
+    def test_a_mended_file_that_is_cut_off_is_recovered(self, tmp_path, caplog):
+        kml = "\n" + _track(100)
+        cut = kml[: kml.index("<gx:coord>8.0060")]
+        with caplog.at_level(logging.WARNING, logger="kml_heatmap"):
+            _, paths, _ = parse_kml_coordinates(_write(tmp_path, "cut.kml", cut))
+        assert len(paths[0]) == 59
+        assert "cut.kml: damaged," in caplog.text
+
+    def test_nothing_to_recover_fails_with_the_first_error(self, tmp_path):
+        with pytest.raises(KMLParseError, match="XML parsing error"):
+            parse_kml_coordinates(_write(tmp_path, "bad.kml", "\n<?xml oops"))
+
+    def test_a_file_that_cannot_be_read_again(self, tmp_path, monkeypatch):
+        kml_file = _write(tmp_path, "cut.kml", _track(10)[:-40])
+
+        def unreadable(*args, **kwargs):
+            raise OSError("gone")
+
+        monkeypatch.setattr("builtins.open", unreadable)
+        with pytest.raises(KMLParseError, match="File I/O error: gone"):
+            _parse_kml_tree(kml_file)
+
+    def test_gx_without_its_namespace_is_read(self, tmp_path, caplog):
+        kml = GX_TRACK_KML.replace(' xmlns:gx="http://www.google.com/kml/ext/2.2"', "")
+        with caplog.at_level(logging.WARNING, logger="kml_heatmap"):
+            _, paths, _ = parse_kml_coordinates(_write(tmp_path, "nogx.kml", kml))
+        assert [p.alt for p in paths[0]] == [300.0, 400.0]
+        assert "damaged" not in caplog.text
+
+    def test_gx_without_its_namespace_under_a_prefixed_root_is_read(self, tmp_path):
+        """A root in the KML namespace by a prefix of its own: the gx:
+        declaration goes into that start tag, which stays whole."""
+        kml = (
+            GX_TRACK_KML.replace(' xmlns:gx="http://www.google.com/kml/ext/2.2"', "")
+            .replace("<kml xmlns=", "<kml:kml xmlns:kml=")
+            .replace("</kml>", "</kml:kml>")
+        )
+        root = _parse_kml_tree(_write(tmp_path, "prefixed.kml", kml))[0]
+        assert root.tag == "{http://www.opengis.net/kml/2.2}kml"
+        cut = kml[: kml.index("</kml:kml>") - 40]
+        root, damage = _parse_kml_tree(_write(tmp_path, "cut.kml", cut))
+        assert damage is not None
+        assert root.tag == "{http://www.opengis.net/kml/2.2}kml"
+        tracks = root.iter("{http://www.google.com/kml/ext/2.2}Track")
+        assert next(tracks, None) is not None
+
+    def test_a_cut_off_archive_member_is_read_once(self, tmp_path, caplog):
+        kml = _track(100)
+        kmz = _kmz(
+            tmp_path / "cut.kmz",
+            {"doc.kml": kml[: kml.index("<gx:coord>8.0060")], "extra.kml": kml},
+        )
+        with caplog.at_level(logging.WARNING, logger="kml_heatmap"):
+            _, paths, _ = parse_kml_coordinates(kmz)
+        assert len(paths[0]) == 59
+        assert caplog.text.count("holds 1 more KML file") == 1
+
+    def test_entity_declarations_in_a_damaged_file_are_refused(self, tmp_path):
+        kml = (
+            '<?xml version="1.0"?><!DOCTYPE kml [<!ENTITY a "b">]>'
+            f"<kml>{_line_string('8.5,50.0,300 9.0,51.0,400')}<Placemark>"
+        )
+        with pytest.raises(KMLParseError, match="Entity"):
+            parse_kml_coordinates(_write(tmp_path, "cut.kml", kml))
 
 
 def _kmz(path, members):

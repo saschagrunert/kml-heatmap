@@ -28,6 +28,7 @@ ASSETS = (
     "features.bundle.js",
     "wrapped.bundle.js",
     "search.bundle.js",
+    "extras.bundle.js",
     "shared.bundle.js",
     "yearWorker.bundle.js",
     "styles.css",

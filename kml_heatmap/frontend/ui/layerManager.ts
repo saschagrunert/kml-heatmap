@@ -60,13 +60,11 @@ import type {
   PathHitTester,
   PathRunProperties,
 } from "../types";
-import { logError } from "../utils/logger";
 import {
   isReplayCameraMove,
-  toLngLat,
   hasLostContext,
+  onMapReady,
   whenContextRestored,
-  type LngLatTuple,
 } from "../utils/mapHelpers";
 import { loadedFeatures, loadFeatures } from "../services/featureLoader";
 import {
@@ -74,7 +72,6 @@ import {
   reliefLevel,
   ribbonWidthZoom,
 } from "../calculations/liftZoom";
-import { appendCurve, flatCurves } from "../calculations/curves";
 import type { FeatureModule } from "../features";
 import { PathHover, type DrawnRuns, type RunsOnLayer } from "./pathHover";
 import {
@@ -85,6 +82,7 @@ import {
   MODES,
   readyMap,
   RUN_SETS,
+  runLines,
   runsOnLayer,
   type LayerConfig,
   type LayerMode,
@@ -99,6 +97,12 @@ import {
   resolveColorRange,
   updateLegend,
 } from "./pathLook";
+
+/** What a source is given that has no runs to show */
+const NO_FEATURES: GeoJSON.FeatureCollection = {
+  type: "FeatureCollection",
+  features: [],
+};
 
 export class LayerManager implements PathHitTester {
   private app: MapApp;
@@ -239,24 +243,12 @@ export class LayerManager implements PathHitTester {
 
   /**
    * Run `onReady` once the map has its sources, unless the manager is gone
-   * by then. A map that never gets ready is no business of this class:
-   * `initialize()` reports it and takes the app down, this manager with it.
-   * What `onReady` throws is logged: it runs in a promise nobody waits for,
-   * where it would surface as an unhandled rejection without a word of
-   * where it came from.
+   * by then (see onMapReady)
    */
   private whenMapReady(onReady: () => void): void {
-    void this.app.mapReady.then(
-      () => {
-        if (this.destroyed) return;
-        try {
-          onReady();
-        } catch (error) {
-          logError("Path layers: the map got ready, but not for them", error);
-        }
-      },
-      () => {},
-    );
+    onMapReady(this.app, "Path layers", () => {
+      if (!this.destroyed) onReady();
+    });
   }
 
   private listen(map: MapLibreMap): void {
@@ -264,7 +256,7 @@ export class LayerManager implements PathHitTester {
     this.pathHover.listen(map);
     map.on("zoomend", this.handleZoomEnd);
     map.on("moveend", this.handleMoveEnd);
-    whenContextRestored(map, () => this.restoreModes());
+    whenContextRestored(map, () => this.restoreModes(), this.app.signal);
     // A link or a saved view can open in 3D and close in: the store had
     // its 3D view before this manager subscribed, and a map built at a
     // zoom fires no zoomend
@@ -552,6 +544,9 @@ export class LayerManager implements PathHitTester {
     const table = state.tables[set];
     table.runs = runs;
     table.behind = false;
+    // The lines of the runs before, which the year worker may still be
+    // writing, are not written after these
+    const write = ++table.writes;
     // Before the map is asked: without a WebGL context it has no sources,
     // and it comes back with the data of before, whose features must not
     // index into these runs (see restoreModes). A source that never had
@@ -577,10 +572,9 @@ export class LayerManager implements PathHitTester {
     const ribbons = threeD && isLiftedAt(map.getZoom()) ? this.features : null;
     const id = ribbons ? config.ribbons[set] : config.sources[set];
     // Lifted or flat, the runs are in one source, and leave the other
-    if (table.written !== null && table.written !== id) {
-      void map
-        .getSource<GeoJSONSource>(table.written)
-        ?.setData({ type: "FeatureCollection", features: [] });
+    const left = table.written && map.getSource<GeoJSONSource>(table.written);
+    if (left && table.written !== id) {
+      void this.app.dataManager.writeSource(left, NO_FEATURES);
     }
 
     const moved = table.written !== null && table.written !== id;
@@ -593,51 +587,65 @@ export class LayerManager implements PathHitTester {
     table.box = box;
     // In the 3D view each run is a ribbon at its height, at every zoom
     // (see ui/pathRibbons.ts); flat, a line along the curve through the
-    // fixes (see calculations/curves.ts)
+    // fixes (see calculations/curves.ts). The lines of every flight are
+    // written by the year worker (see services/flightLines.ts), which
+    // spares the main thread their curves and MapLibre's copy of them; the
+    // selection's few here, in the frame of the click.
+    const byWorker = !ribbons && set === "main" && runs.length > 0;
     const features: GeoJSON.Feature<
       GeoJSON.LineString | GeoJSON.MultiPolygon,
       PathRunProperties
     >[] = ribbons
       ? ribbons.ribbonFeatures(this.app, segments, runs, g, widthZoom, box)
-      : [];
-    const curves = ribbons ? null : flatCurves(segments);
-    if (curves) {
-      runs.forEach((run, r) => {
-        const coordinates: LngLatTuple[] = [
-          toLngLat(segments[run.start]!.coords[0]),
-        ];
-        for (let i = run.start; i < run.end; i++) {
-          appendCurve(coordinates, curves, i);
-        }
-        features.push({
-          type: "Feature",
-          properties: { r, g, pathId: run.pathId, color: run.color },
-          geometry: { type: "LineString", coordinates },
-        });
-      });
-    }
+      : byWorker
+        ? []
+        : runLines(segments, runs, g);
     table.written = runs.length === 0 ? null : id;
-    const source = map.getSource<GeoJSONSource>(id);
-    if (!source) return;
+    if (!map.getSource(id)) return;
     // A recut into the source that has the runs changes nothing a click
     // or the pointer could find; into the other one, it has none of them
     // until its tiles are cut. Around the view only, what was not written
     // before is found once they are: nothing found is no word of the
     // empty map until then.
-    if (recut && !moved && !box) {
-      void source.setData({ type: "FeatureCollection", features });
+    const quiet = recut && !moved && !box;
+    if (!quiet) table.landing = "worker";
+    const land = (content: Blob | GeoJSON.FeatureCollection): void => {
+      // A later call has taken over, and answers for itself; the source
+      // is asked for again after the worker, for a style that came since
+      const target = map.getSource<GeoJSONSource>(id);
+      if (table.writes !== write || !target) return;
+      const written = this.app.dataManager.writeSource(target, content);
+      // A recut that took over from a write still on its way lands for
+      // it: the answer for that one was dropped above
+      if (quiet && table.landing !== "worker") return;
+      // The promise never rejects: a failure arrives as the map's error
+      // event. It settles once the worker has the data of the last call,
+      // also for a call that was queued behind another; the tiles in view
+      // are cut from it after that, unless no layer in use draws the
+      // source.
+      void written.then(() => {
+        if (table.g !== g) return;
+        table.landing = map.isSourceLoaded(id) ? null : "tiles";
+      });
+    };
+    if (!byWorker) {
+      land({ type: "FeatureCollection", features });
       return;
     }
-    table.landing = "worker";
-    // The promise never rejects: a failure arrives as the map's error
-    // event. It settles once the worker has the data of the last call,
-    // also for a call that was queued behind another; the tiles in view
-    // are cut from it after that, unless no layer in use draws the source.
-    void source.setData({ type: "FeatureCollection", features }).then(() => {
-      // A later call has taken over, and answers for itself
-      if (table.g !== g) return;
-      table.landing = map.isSourceLoaded(id) ? null : "tiles";
-    });
+    this.app.dataManager.askWorker(
+      (decoder) => decoder.runsSource(segments, runs, g),
+      land,
+      // Without the worker the lines are written here, as they were before
+      // it wrote them: the source never keeps the lines of runs gone by
+      () => {
+        if (table.writes !== write) return;
+        land({
+          type: "FeatureCollection",
+          features: runLines(segments, runs, g),
+        });
+      },
+      "the lines of the flights",
+    );
   }
 
   /** Draw every flight of a mode, and the selection on top of them */
@@ -857,12 +865,8 @@ export class LayerManager implements PathHitTester {
         this.redrawPaths(mode);
         continue;
       }
-      const { selected } = state.shown;
-      const current = this.app.selectedPathIds;
-      if (
-        selected.size === current.size &&
-        [...current].every((id) => selected.has(id))
-      ) {
+      // A new selection is a new set (see PathSelection.select)
+      if (state.shown.selected === this.app.selectedPathIds) {
         applyLook(this.app, this.state, config);
       } else this.showSelection(config, data);
       const main = state.tables.main;

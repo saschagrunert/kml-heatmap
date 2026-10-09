@@ -7,8 +7,8 @@
  * flight alone, and its checkbox adds it to the selection or takes it out:
  * that is how flights of the airport join a selection made already, or the
  * flights of share mode (see PathSelection.pickFromList). Each flight is
- * named by its route, aircraft and year only: a date or a time of day
- * would say when somebody flew.
+ * named by its route, aircraft, year and distance only: a date or a time
+ * of day would say when somebody flew.
  *
  * AirportManager adds it whenever the popup is open with new content (see
  * listPopupFlights), and lays the popup out again afterwards. The runways
@@ -21,6 +21,8 @@ import type { Popup } from "maplibre-gl";
 import type { MapApp } from "../mapApp";
 import type { PathInfo } from "../types";
 import { datasetIndex } from "../calculations/datasetIndex";
+import { flightTotals } from "../calculations/flightTotals";
+import { KM_TO_NAUTICAL_MILES } from "../utils/constants";
 import { escapeHtml } from "../utils/htmlGenerators";
 import { airportCode } from "../features/airports";
 import { watchScrollEnd, type ScrollEndWatcher } from "../utils/scrollFade";
@@ -46,12 +48,21 @@ export function flightRoute(path: PathInfo): string {
 }
 
 /**
- * How a list names a flight: its route, aircraft and year. The airport
- * popup's rows and the checkboxes of both lists say it, so a row of the
- * flight list is not one of several "EDXX → EDXX" circuits alike.
+ * How a list names a flight: its route, aircraft, year and the `km` it
+ * covered, in nautical miles. The airport popup's rows and the checkboxes
+ * of both lists say it, so a row is not one of several "EDXX → EDXX"
+ * circuits of one aircraft alike.
  */
-export function flightLabel(path: PathInfo): string {
-  return [flightRoute(path), path.aircraft_registration, path.year]
+export function flightLabel(path: PathInfo, km = 0): string {
+  // Under half a mile says nothing a row could tell apart: none rather
+  // than "0 nm"
+  const nm = Math.round(km * KM_TO_NAUTICAL_MILES);
+  return [
+    flightRoute(path),
+    path.aircraft_registration,
+    path.year,
+    nm && nm + " nm",
+  ]
     .filter(Boolean)
     .join(" · ");
 }
@@ -93,6 +104,8 @@ export function listFlights(app: MapApp, popup: Popup, name: string): void {
   };
 
   const byId = datasetIndex(data).pathInfoById;
+  // The distances of the flight list, worked out once per dataset
+  const totals = flightTotals(data);
   let html = "";
   /** The flights in the order of the rows, for a Shift click's range */
   const order: number[] = [];
@@ -101,7 +114,7 @@ export function listFlights(app: MapApp, popup: Popup, name: string): void {
     const path = byId.get(id);
     if (!path) continue;
     order.push(id);
-    const label = escapeHtml(flightLabel(path));
+    const label = escapeHtml(flightLabel(path, totals.get(id)?.km));
     html +=
       "<div>" +
       pickBox(id, label) +

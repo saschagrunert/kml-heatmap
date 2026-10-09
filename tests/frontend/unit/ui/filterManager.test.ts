@@ -312,18 +312,18 @@ describe("FilterManager", () => {
 
     it("keeps the selected flights the new year shows and drops the others", async () => {
       // It cleared them all, also the ones of the year picked
-      mockApp.selectedPathIds.add(1);
-      mockApp.selectedPathIds.add(3);
+      mockApp.selectedPathIds = new Set([1, 3]);
       addYearOption("2024");
       (document.getElementById("year-select") as HTMLSelectElement).value =
         "2024";
       mockApp.dataManager.loadData.mockResolvedValue(year2024Data());
-      const notify = vi.spyOn(mockApp.store, "notifyMutation");
+      const listener = vi.fn();
+      mockApp.store.subscribe("selectedPathIds", listener);
 
       await filterManager.filterByYear();
 
       expect([...mockApp.selectedPathIds]).toEqual([3]);
-      expect(notify).toHaveBeenCalledWith("selectedPathIds");
+      expect(listener).toHaveBeenCalled();
       // Said, rather than gone without a word
       // Said as it is: the file of 2024 cannot tell another year's flight
       // from one the site lost
@@ -333,8 +333,8 @@ describe("FilterManager", () => {
     });
 
     it("says how many selected flights the year lacks", async () => {
-      mockApp.selectedPathIds.add(1);
-      mockApp.selectedPathIds.add(2);
+      mockApp.selectedPathIds = new Set([...mockApp.selectedPathIds, 1]);
+      mockApp.selectedPathIds = new Set([...mockApp.selectedPathIds, 2]);
       addYearOption("2024");
       (document.getElementById("year-select") as HTMLSelectElement).value =
         "2024";
@@ -349,8 +349,8 @@ describe("FilterManager", () => {
 
     it("keeps every shared flight, the ones the year hides as well", async () => {
       // The flights of a day shared from all years, and then their year
-      mockApp.selectedPathIds.add(1);
-      mockApp.selectedPathIds.add(3);
+      mockApp.selectedPathIds = new Set([...mockApp.selectedPathIds, 1]);
+      mockApp.selectedPathIds = new Set([...mockApp.selectedPathIds, 3]);
       mockApp.isolateSelection = true;
       addYearOption("2024");
       (document.getElementById("year-select") as HTMLSelectElement).value =
@@ -367,7 +367,7 @@ describe("FilterManager", () => {
     });
 
     it("keeps share mode where the year hides every shared flight", async () => {
-      mockApp.selectedPathIds.add(1);
+      mockApp.selectedPathIds = new Set([...mockApp.selectedPathIds, 1]);
       mockApp.isolateSelection = true;
       addYearOption("2024");
       (document.getElementById("year-select") as HTMLSelectElement).value =
@@ -444,8 +444,8 @@ describe("FilterManager", () => {
       yearSelect.value = "2024";
       mockApp.dataManager.loadData.mockResolvedValue(null);
       const listener = followDrawnKeys();
-      const sheet = { refresh: vi.fn() };
-      mockApp.mobileBar = { sheet } as unknown as MockApp["mobileBar"];
+      const bar = { refreshSheet: vi.fn() };
+      mockApp.mobileBar = bar as unknown as MockApp["mobileBar"];
 
       await filterManager.filterByYear();
 
@@ -456,7 +456,7 @@ describe("FilterManager", () => {
       expect(listener).not.toHaveBeenCalled();
       // The Filter sheet mirrors the dropdown, not the store, which did not
       // change; without this it kept showing the year that failed
-      expect(sheet.refresh).toHaveBeenCalledTimes(1);
+      expect(bar.refreshSheet).toHaveBeenCalledTimes(1);
     });
 
     it("discards stale completions when a newer year change arrives", async () => {
@@ -574,8 +574,8 @@ describe("FilterManager", () => {
       ) as HTMLSelectElement;
       yearSelect.value = "2024";
       mockApp.dataManager.loadData.mockResolvedValue(null);
-      const sheet = { refresh: vi.fn() };
-      mockApp.mobileBar = { sheet } as unknown as MockApp["mobileBar"];
+      const bar = { refreshSheet: vi.fn() };
+      mockApp.mobileBar = bar as unknown as MockApp["mobileBar"];
 
       await filterManager.filterByYear();
 
@@ -583,7 +583,7 @@ describe("FilterManager", () => {
       expect([...yearSelect.options].some((option) => option.disabled)).toBe(
         false,
       );
-      expect(sheet.refresh).toHaveBeenCalled();
+      expect(bar.refreshSheet).toHaveBeenCalled();
     });
 
     it("retries the year the dropdown shows, the last that failed", async () => {
@@ -610,8 +610,8 @@ describe("FilterManager", () => {
       addYearOption("2024");
       (document.getElementById("year-select") as HTMLSelectElement).value =
         "2024";
-      mockApp.selectedPathIds.add(3);
-      mockApp.selectedPathIds.add(99);
+      mockApp.selectedPathIds = new Set([...mockApp.selectedPathIds, 3]);
+      mockApp.selectedPathIds = new Set([...mockApp.selectedPathIds, 99]);
       mockApp.dataManager.loadData.mockResolvedValue(year2024Data());
 
       expect(await filterManager.loadShownYear()).toBe(true);
@@ -631,8 +631,8 @@ describe("FilterManager", () => {
     it("retries every year and says what the link named that the site lost", async () => {
       mockApp.currentData = null;
       mockApp.selectedYear = "all";
-      mockApp.selectedPathIds.add(3);
-      mockApp.selectedPathIds.add(99);
+      mockApp.selectedPathIds = new Set([...mockApp.selectedPathIds, 3]);
+      mockApp.selectedPathIds = new Set([...mockApp.selectedPathIds, 99]);
       mockApp.dataManager.loadData.mockResolvedValue(year2024Data());
 
       expect(await filterManager.loadShownYear()).toBe(true);
@@ -648,7 +648,7 @@ describe("FilterManager", () => {
       // others had nothing to load them again with
       mockApp.currentData = null;
       mockApp.selectedYear = "all";
-      mockApp.selectedPathIds.add(3);
+      mockApp.selectedPathIds = new Set([...mockApp.selectedPathIds, 3]);
       mockApp.dataManager.loadData.mockResolvedValue({
         ...year2024Data(),
         incomplete: true,
@@ -717,7 +717,7 @@ describe("FilterManager", () => {
       const yearSelect = document.getElementById(
         "year-select",
       ) as HTMLSelectElement;
-      mockApp.selectedPathIds.add(1);
+      mockApp.selectedPathIds = new Set([...mockApp.selectedPathIds, 1]);
       const previous = mockApp.currentData;
       let resolve: (d: KMLDataset) => void = () => {};
       mockApp.dataManager.loadData.mockImplementation(
@@ -811,7 +811,7 @@ describe("FilterManager", () => {
         { run: () => void },
       ];
       const previous = mockApp.currentData;
-      mockApp.selectedPathIds.add(1);
+      mockApp.selectedPathIds = new Set([...mockApp.selectedPathIds, 1]);
       mockApp.replayActive = true;
       mockApp.dataManager.loadData.mockClear();
       mockApp.dataManager.loadData.mockResolvedValue(year2024Data());
@@ -889,7 +889,7 @@ describe("FilterManager", () => {
       option.value = "D-ABCD";
       select.appendChild(option);
       select.value = "D-ABCD";
-      mockApp.selectedPathIds.add(1);
+      mockApp.selectedPathIds = new Set([...mockApp.selectedPathIds, 1]);
       const redraws = followDrawnKeys();
 
       filterManager.filterByAircraft();
@@ -904,7 +904,7 @@ describe("FilterManager", () => {
       option.value = "D-ABCD";
       select.appendChild(option);
       select.value = "D-ABCD";
-      mockApp.selectedPathIds.add(2);
+      mockApp.selectedPathIds = new Set([...mockApp.selectedPathIds, 2]);
       const seen: number[] = [];
       mockApp.store.subscribe("selectedAircraft", () => {
         seen.push(mockApp.selectedPathIds.size);
@@ -916,8 +916,8 @@ describe("FilterManager", () => {
     });
 
     it("keeps the selected flights of the aircraft picked", () => {
-      mockApp.selectedPathIds.add(1);
-      mockApp.selectedPathIds.add(2);
+      mockApp.selectedPathIds = new Set([...mockApp.selectedPathIds, 1]);
+      mockApp.selectedPathIds = new Set([...mockApp.selectedPathIds, 2]);
       const select = aircraftSelect();
       select.add(new Option("D-ABCD", "D-ABCD"));
       select.value = "D-ABCD";
@@ -928,8 +928,8 @@ describe("FilterManager", () => {
     });
 
     it("keeps every shared flight, the ones of another aircraft as well", () => {
-      mockApp.selectedPathIds.add(1);
-      mockApp.selectedPathIds.add(2);
+      mockApp.selectedPathIds = new Set([...mockApp.selectedPathIds, 1]);
+      mockApp.selectedPathIds = new Set([...mockApp.selectedPathIds, 2]);
       mockApp.isolateSelection = true;
       const select = aircraftSelect();
       select.add(new Option("D-ABCD", "D-ABCD"));
@@ -945,8 +945,8 @@ describe("FilterManager", () => {
       // A link to all years with one of them missing: its flights are not
       // in the dataset, and a Retry would bring them
       mockApp.currentData = { ...mockApp.currentData!, incomplete: true };
-      mockApp.selectedPathIds.add(2);
-      mockApp.selectedPathIds.add(99);
+      mockApp.selectedPathIds = new Set([...mockApp.selectedPathIds, 2]);
+      mockApp.selectedPathIds = new Set([...mockApp.selectedPathIds, 99]);
       const select = aircraftSelect();
       select.add(new Option("D-ABCD", "D-ABCD"));
       select.value = "D-ABCD";
@@ -958,8 +958,8 @@ describe("FilterManager", () => {
     });
 
     it("keeps every selected flight for every aircraft", () => {
-      mockApp.selectedPathIds.add(1);
-      mockApp.selectedPathIds.add(2);
+      mockApp.selectedPathIds = new Set([...mockApp.selectedPathIds, 1]);
+      mockApp.selectedPathIds = new Set([...mockApp.selectedPathIds, 2]);
       const updates = vi.fn();
       mockApp.store.subscribe("selectedPathIds", updates);
 
@@ -970,7 +970,7 @@ describe("FilterManager", () => {
     });
 
     it("keeps share mode with its one flight of another aircraft", () => {
-      mockApp.selectedPathIds.add(2);
+      mockApp.selectedPathIds = new Set([...mockApp.selectedPathIds, 2]);
       mockApp.isolateSelection = true;
       const select = aircraftSelect();
       const option = document.createElement("option");

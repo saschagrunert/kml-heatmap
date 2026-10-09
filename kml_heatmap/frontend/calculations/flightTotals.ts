@@ -1,6 +1,7 @@
 /**
  * Flight time and distance of every flight of a dataset, which the flight
- * list of the statistics rail shows and sorts by (ui/flightList.ts).
+ * list of the statistics rail shows and sorts by (ui/flightList.ts), and
+ * the rows of an airport's popup name (ui/airportFlights.ts).
  *
  * path_info carries neither, so both are worked out from the segments in
  * one pass over all of them, by the rules the statistics use: the time is
@@ -9,7 +10,7 @@
  * lengths (segmentDistance, which the other statistics share). The result
  * is kept for as long as the dataset's index is (calculations/
  * datasetIndex.ts), so every filter, search and sort of the list reads it
- * again for free. Part of the lazily loaded Wrapped bundle.
+ * again for free. Part of the first visit, for the airport popups.
  */
 import type { KMLDataset, PathSegment } from "../types";
 import { datasetIndex, type DatasetIndex } from "./datasetIndex";

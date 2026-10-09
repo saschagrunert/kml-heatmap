@@ -444,6 +444,21 @@ describe("what it finds", () => {
     expect(fetcher).not.toHaveBeenCalled();
   });
 
+  it("asks Photon nothing about the code or the name of an airport of the site", async () => {
+    toggleSearch(asMapApp(app));
+
+    for (const text of ["EDDS", "edds ", "EDDS Stuttgart", "stuttgart STRIP"]) {
+      type(text);
+      await vi.advanceTimersByTimeAsync(PLACE_DEBOUNCE_MS);
+    }
+    expect(fetcher).not.toHaveBeenCalled();
+
+    // A part of a name is a place it may be
+    type("Stuttgart");
+    await vi.advanceTimersByTimeAsync(PLACE_DEBOUNCE_MS);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
   it("finds airports that loaded after the panel was made", () => {
     siteData.airports = null;
     toggleSearch(asMapApp(app));

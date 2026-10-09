@@ -230,17 +230,88 @@ class TestCheck:
         assert run_check(repo, lines) == 0
 
 
-class TestSingleFlightWarning:
+# Fields a leg flies between, (lon, lat)
+HOME, AWAY, FURTHER = "12.05,51.55", "13.76,51.13", "11.79,50.32"
+
+
+def leg(start: str, end: str) -> str:
+    """A clean flight from ``start`` to ``end``."""
+    return CLEAN_KML.replace(
+        "</kml>",
+        f"<Placemark><LineString><coordinates>{start},300 {end},400"
+        "</coordinates></LineString></Placemark></kml>",
+    )
+
+
+class TestTripWarning:
+    """A push dates the flights it adds to about the day it was made."""
+
     def test_warns_when_one_flight_is_added(self, repo, capsys):
         sha = commit(repo, {"data/2.kml": CLEAN_KML})
         assert run_check(repo, push_of(sha)) == 0
         err = capsys.readouterr().err
         assert err.count("\n") == 1
-        assert "adds one flight (data/2.kml)" in err
+        assert "adds the flights of one trip (data/2.kml)" in err
 
-    def test_no_warning_for_several_flights(self, repo, capsys):
+    def test_warns_for_the_flights_of_a_day(self, repo, capsys):
         commit(repo, {"data/2.kml": CLEAN_KML})
-        sha = commit(repo, {"data/3.kml": CLEAN_KML})
+        sha = commit(repo, {"data/3.kml": CLEAN_KML, "data/4.kml": CLEAN_KML})
+        assert run_check(repo, push_of(sha)) == 0
+        assert "(data/2.kml, data/3.kml, data/4.kml)" in capsys.readouterr().err
+
+    def test_warns_for_the_legs_of_one_trip(self, repo, capsys):
+        """Each leg starts where the one before ended, away from home."""
+        sha = commit(
+            repo,
+            {
+                "data/2.kml": leg(HOME, AWAY),
+                "data/10.kml": leg(FURTHER, HOME),
+                "data/3.kml": leg(AWAY, FURTHER),
+                "data/4.kml": leg(FURTHER, FURTHER),
+            },
+        )
+        assert run_check(repo, push_of(sha)) == 0
+        assert "flights of one trip" in capsys.readouterr().err
+
+    def test_no_warning_for_flights_that_come_home_in_between(self, repo, capsys):
+        """Weeks of flights at home, with a trip among them."""
+        sha = commit(
+            repo,
+            {
+                "data/2.kml": leg(HOME, HOME),
+                "data/3.kml": leg(HOME, AWAY),
+                "data/4.kml": leg(AWAY, HOME),
+                "data/5.kml": leg(HOME, HOME),
+            },
+        )
+        assert run_check(repo, push_of(sha)) == 0
+        assert capsys.readouterr().err == ""
+
+    def test_no_warning_for_flights_that_do_not_follow_on(self, repo, capsys):
+        files: dict[str, str | None] = {
+            f"data/{n}.kml": leg(HOME, AWAY) for n in range(2, 6)
+        }
+        sha = commit(repo, files)
+        assert run_check(repo, push_of(sha)) == 0
+        assert capsys.readouterr().err == ""
+
+    def test_no_warning_for_a_flight_the_push_removes_again(self, repo, capsys):
+        commit(
+            repo,
+            {
+                "data/2.kml": leg(HOME, AWAY),
+                "data/3.kml": leg(AWAY, FURTHER),
+                "data/4.kml": leg(FURTHER, AWAY),
+                "data/5.kml": leg(AWAY, FURTHER),
+            },
+        )
+        sha = commit(repo, {"data/5.kml": None})
+        assert run_check(repo, push_of(sha)) == 0
+        assert capsys.readouterr().err == ""
+
+    def test_no_warning_for_flights_without_a_point_to_read(self, repo, capsys):
+        files: dict[str, str | None] = {f"data/{n}.kml": CLEAN_KML for n in range(2, 6)}
+        sha = commit(repo, files)
         assert run_check(repo, push_of(sha)) == 0
         assert capsys.readouterr().err == ""
 
@@ -319,6 +390,84 @@ class TestCommitMessages:
         git(repo, "update-ref", "refs/remotes/origin/main", sha)
         later = commit(repo, {"README.md": "x"})
         assert run_check(repo, push_of(later)) == 0
+
+
+class TestRefNames:
+    """The name of a branch pushed to is published with its flights."""
+
+    def test_refuses_a_dated_branch_with_flights(self, repo, capsys):
+        sha = commit(repo, {"data/2.kml": CLEAN_KML, "data/3.kml": CLEAN_KML})
+        lines = [
+            f"refs/heads/x {sha} refs/heads/flights-2026-08-16 {pre_push.ZERO_SHA}"
+        ]
+        assert run_check(repo, lines) == 1
+        err = capsys.readouterr().err
+        assert "ref refs/heads/flights-2026-08-16: 2026-08-16" in err
+        assert "named without the dates" in err
+
+    def test_refuses_a_branch_named_after_a_weekday(self, repo):
+        sha = commit(repo, {"data/2.kml": CLEAN_KML, "data/3.kml": CLEAN_KML})
+        lines = [f"refs/heads/x {sha} refs/heads/sunday-trip {pre_push.ZERO_SHA}"]
+        assert run_check(repo, lines) == 1
+
+    def test_passes_a_dated_branch_without_flights(self, repo):
+        sha = commit(repo, {"README.md": "x"})
+        lines = [f"refs/heads/x {sha} refs/heads/fix-2026-10-06 {pre_push.ZERO_SHA}"]
+        assert run_check(repo, lines) == 0
+
+    def test_passes_a_dated_branch_of_code_pushed_with_flights(self, repo):
+        """Each ref by its own commits, not by those of the whole push."""
+        git(repo, "switch", "-q", "-c", "fix")
+        code = commit(repo, {"README.md": "x"})
+        git(repo, "switch", "-q", "main")
+        flights = commit(repo, {"data/2.kml": CLEAN_KML})
+        lines = [
+            *push_of(flights),
+            f"refs/heads/fix {code} refs/heads/fix-2026-10-09 {pre_push.ZERO_SHA}",
+        ]
+        assert run_check(repo, lines) == 0
+
+    def test_warns_of_a_dated_branch_to_a_remote_never_fetched_from(self, repo, capsys):
+        """Its whole history counts as pushed there, old flights and all."""
+        sha = commit(repo, {"README.md": "x"})
+        lines = [f"refs/heads/x {sha} refs/heads/fix-2026-10-09 {pre_push.ZERO_SHA}"]
+        assert pre_push.check(repo, lines, remote="fork") == 0
+        err = capsys.readouterr().err
+        assert "ref refs/heads/fix-2026-10-09: 2026-10-09" in err
+        assert "warning" in err
+        assert "never\nfetched from" in err
+
+    def test_a_dated_branch_deleted_along_with_a_push_of_flights(self, repo):
+        sha = commit(repo, {"data/2.kml": CLEAN_KML, "data/3.kml": CLEAN_KML})
+        head = git(repo, "rev-parse", "HEAD~1")
+        lines = [
+            *push_of(sha),
+            f"(delete) {pre_push.ZERO_SHA} refs/heads/flights-2026-08-16 {head}",
+        ]
+        assert run_check(repo, lines) == 0
+
+    def test_passes_the_deletion_of_a_dated_branch(self, repo):
+        head = git(repo, "rev-parse", "HEAD")
+        lines = [f"(delete) {pre_push.ZERO_SHA} refs/heads/flights-2026-08-16 {head}"]
+        assert run_check(repo, lines) == 0
+
+
+class TestFlightEnds:
+    def test_of_a_track_and_of_lines(self):
+        content = (
+            "<kml><gx:Track><gx:coord>8.5 50.0 300</gx:coord>"
+            "<gx:coord>9.0 51.0 400</gx:coord></gx:Track>"
+            "<LineString><coordinates>9.0,51.0,400 10.0,52.0,500</coordinates>"
+            "</LineString></kml>"
+        )
+        assert pre_push.flight_ends(content) == ((50.0, 8.5), (52.0, 10.0))
+
+    @pytest.mark.parametrize(
+        "content",
+        [CLEAN_KML, "<coordinates>x,y</coordinates>", "<coordinates> </coordinates>"],
+    )
+    def test_none_without_a_point(self, content):
+        assert pre_push.flight_ends(content) is None
 
 
 class TestMain:

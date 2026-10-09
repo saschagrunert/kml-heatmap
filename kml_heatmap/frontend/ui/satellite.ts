@@ -16,7 +16,7 @@
 import type { Map as MapLibreMap } from "maplibre-gl";
 import type { MapApp } from "../mapApp";
 import { MAP_LAYERS, MAP_SOURCES } from "../utils/constants";
-import { cssVar } from "../utils/mapHelpers";
+import { cssVar, onMapReady } from "../utils/mapHelpers";
 
 /** WMTS in EPSG:3857, which names the row before the column */
 const SATELLITE_TILE_URL =
@@ -63,8 +63,7 @@ export function followSatellite(app: MapApp): void {
   const map = app.map;
   if (!map) return;
   const apply = (): void => show(map, app.satelliteVisible);
-  void app.mapReady.then(() => {
-    if (app.signal.aborted) return;
+  onMapReady(app, "The imagery", () => {
     app.store.subscribe("satelliteVisible", apply);
     // A new base style drops the layer, which is none of the app's for
     // `withDataLayers` to carry; it goes back where it belongs in it. For

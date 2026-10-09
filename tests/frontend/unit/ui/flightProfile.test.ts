@@ -230,12 +230,10 @@ describe("flight profile", () => {
       expect(root.hidden).toBe(true);
       expect(toggle.hidden).toBe(true);
 
-      app.selectedPathIds.add(7);
-      app.store.notifyMutation("selectedPathIds");
+      app.selectedPathIds = new Set([...app.selectedPathIds, 7]);
       expect(root.hidden).toBe(false);
 
-      for (const id of more) app.selectedPathIds.add(id);
-      app.store.notifyMutation("selectedPathIds");
+      app.selectedPathIds = new Set([...app.selectedPathIds, ...more]);
       expect(root.hidden).toBe(true);
       expect(toggle.hidden).toBe(true);
       expect(document.body.classList.contains("profile-open")).toBe(false);
@@ -828,8 +826,7 @@ describe("flight profile", () => {
       const touch = { pointerType: "touch" };
       plot.dispatchEvent(pointer("pointerdown", 0.5, touch));
 
-      app.selectedPathIds.clear();
-      app.store.notifyMutation("selectedPathIds");
+      app.selectedPathIds = new Set();
       window.dispatchEvent(pointer("pointermove", 0.6, touch));
       window.dispatchEvent(pointer("pointerup", 0.5, touch));
 

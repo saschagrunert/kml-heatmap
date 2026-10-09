@@ -142,20 +142,24 @@ close it as they start.
 
 ### Statistics
 
-View statistics (distance, altitude, landings, airports, flight time). Flight
-time runs from the first to the last recorded point that moved at the exported
-precision (about 1 m), so standing perfectly still before and after is not
-counted, while GPS noise on the ground still is.
+View statistics (distance, altitude, landings, airports, flight time). A line at
+the top says what they are of: the year and the aircraft of the filter ("2026 ·
+All aircraft"), or the selected flights. Flight time runs from the first to the
+last recorded point that moved at the exported precision (about 1 m), so
+standing perfectly still before and after is not counted, while GPS noise on the
+ground still is.
 
 The panel's Flights tab lists every flight of the year and aircraft filter with
 its route, aircraft, year, flight time, distance, highest altitude and full-stop
-landings (a year, never a date); the landings cell names the touch-and-goes as
-well when the pointer rests on it, and flights without timestamps have no
-landings. The rows start in the order of the flight files; a column header sorts
-by it, up, down and back. The search keeps the flights whose airports (code or
-name), registration or type match every word typed. A click on a row selects
-that flight alone; its checkbox, or a click with Ctrl or Cmd held, adds it to
-the selection or takes it out, which is also how a phone puts several flights
+landings (a year, never a date; the year column only while all years are shown);
+each row's checkbox is named after the flight with its distance, so flights of
+one route tell apart; the landings cell names the touch-and-goes as well when
+the pointer rests on it, and flights without timestamps have no landings. The
+rows start in the order of the flight files; a column header sorts by it, up,
+down and back. The search keeps the flights whose airports (code or name),
+registration or type match every word typed. A click on a row selects that
+flight alone; its checkbox, or a click with Ctrl or Cmd held, adds it to the
+selection or takes it out, which is also how a phone puts several flights
 together. Shift sets every flight from the row clicked last in that list to this
 one, in the order the list shows, to what this row's checkbox goes to: in, or
 out where it was ticked. A sort, a search or a closed list starts the range
@@ -187,20 +191,21 @@ dialog, the More sheet's row says **Share link** and opens that instead.
 
 ### Wrapped
 
-View the year-in-review summary; Escape closes it. Opened from its button, it
-starts with the map filling the dialog and the title of the year over the globe,
-and, in an intro of about ten seconds, a flight down towards your home base, two
-zoom levels closer than the overview, so the routes of the year show around it,
-over the heat cloud of the year (every flight the year and aircraft filters
-keep, at full strength, whatever the Heatmap switch, share mode or a colour
-layer say), while the flights of the summary play underneath at 300x, as in
-Replay all (at their height in the heat) but drawn larger; then the cloud fades
-into the heatmap, back on the map's own projection, and it settles on the
-overview as the cards come in one after another and the map draws back into its
-panel beside them (below 1024 px wide, where the cards are stacked, it fades
-from over them instead); Skip intro, or a press, wheel or key on the map, goes
-straight to the summary, and the flight does not play while the system asks for
-reduced motion.
+View the year-in-review summary; Escape closes it. Opened from its button for
+the first time in a session for that year, it starts with the map filling the
+dialog and the title of the year over the globe, and, in an intro of about ten
+seconds, a flight down towards your home base, two zoom levels closer than the
+overview, so the routes of the year show around it, over the heat cloud of the
+year (every flight the year and aircraft filters keep, at full strength,
+whatever the Heatmap switch, share mode or a colour layer say), while the
+flights of the summary play underneath at 300x, as in Replay all (at their
+height in the heat) but drawn larger; then the cloud fades into the heatmap,
+back on the map's own projection, and it settles on the overview as the cards
+come in one after another and the map draws back into its panel beside them
+(below 1024 px wide, where the cards are stacked, it fades from over them
+instead); Skip intro, or a press, wheel or key on the map, goes straight to the
+summary, and the flight does not play while the system asks for reduced motion.
+Opened again for the same year in the same tab, it goes straight to the summary.
 
 Beside the map the cards scroll in a column of their own, each as tall as its
 content, and **More below** at the foot of the first takes the column to the
@@ -550,16 +555,17 @@ sheet; during a replay it is disabled like the filters.
   at the start of the page goes past them to the map and its airport markers
 - Below 768 px, or at 480 px of height and less (a phone held sideways), the two
   control columns are replaced by a bottom bar with five tabs. Layers, Filter
-  and More open a sheet; Stats and Wrapped open their panel directly. A sheet
-  closes with its close button, a tap beside it, or a drag down on its top edge
-  (the grabber and the title) past a third of its height or a quick flick; a
-  shorter drag lets it spring back, and under reduced motion it closes or
-  returns at once. Escape closes an open sheet, and Tab stays inside it. The
-  Layers sheet takes half the height, so the map above it shows what a switch
-  did, and scrolls. Replay, Replay all and the hotspot tour take over the bottom
-  edge and the bar steps aside until they end. The map shows no colour legend
-  there, the heat's included; the Layers sheet shows the scales of altitude and
-  groundspeed beside their switches
+  and More open a sheet; Stats and Wrapped open their panel directly. The Filter
+  tab shows the year the map shows ("Filter" for all years). A sheet closes with
+  its close button, a tap beside it, or a drag down on its top edge (the grabber
+  and the title) past a third of its height or a quick flick; a shorter drag
+  lets it spring back, and under reduced motion it closes or returns at once.
+  Escape closes an open sheet, and Tab stays inside it. The Layers sheet takes
+  half the height, so the map above it shows what a switch did, and scrolls.
+  Replay, Replay all and the hotspot tour take over the bottom edge and the bar
+  steps aside until they end. The map shows no colour legend there, the heat's
+  included; the Layers sheet shows the scales of altitude and groundspeed beside
+  their switches
 - Added to the home screen, the site opens as an app of its own (the manifest's
   `standalone` display), and on an iPhone the map fills the whole screen, under
   the status bar and around the Dynamic Island or the notch; the controls, the
@@ -643,13 +649,13 @@ replay has no Escape: its close button or a click on the map closes it.
   tap, the click only opens its popup, whose checkboxes select (a tap never
   changes the selection). The airport popup shows how the flights of the filter
   used its runways ("RWY 29 · 65%, RWY 11 · 35%") and lists those flights
-  (route, aircraft and year), each a button that selects that one flight and a
-  checkbox that adds it to the selection or takes it out, with Shift, Ctrl and
-  share mode as in the flight list (the rows are marked as selected once the
-  selection is not all of them, and a lone flight always), so a single flight
-  and Replay are reachable from the keyboard: Tab to a marker, Enter opens the
-  popup and moves focus into it, Escape closes it and returns focus to the
-  marker
+  (route, aircraft, year and distance), each a button that selects that one
+  flight and a checkbox that adds it to the selection or takes it out, with
+  Shift, Ctrl and share mode as in the flight list (the rows are marked as
+  selected once the selection is not all of them, and a lone flight always), so
+  a single flight and Replay are reachable from the keyboard: Tab to a marker,
+  Enter opens the popup and moves focus into it, Escape closes it and returns
+  focus to the marker
 - **Year and aircraft filter with a selection** - A change of the filter keeps
   the selected flights it still shows and deselects the others, which a toast
   says: "1 selected flight is hidden by the filter and was deselected" for one
@@ -688,14 +694,17 @@ replay has no Escape: its close button or a click on the map closes it.
   their files, about five seconds for all of them (each flight takes a part by
   how long it took, and at least 0.6 s so a short hop is seen being drawn); a
   flight without times shows at the end. The camera keeps the tilt and the
-  bearing of the link and frames the flights at that tilt as Replay all does,
+  bearing of the link and frames the flights at that tilt as share mode does,
   the lines are drawn as Replay all draws its trails (in the colour layer's
   colours, amber without one), and with the Heatmap on their heat builds up
   behind them, as the cloud of the 3D view on the flat map too, which fades into
-  the heatmap at the end. Any key, click, touch or wheel skips to the end, and
-  one before the intro could start keeps it from playing; with reduced motion
-  the flights are only framed. A reload, a link copied from the address bar and
-  the saved state do not play it again (see `i` below)
+  the heatmap at the end. Any key (but Tab or a modifier on its own), click,
+  touch or wheel skips to the end, and one before the intro could start keeps it
+  from playing; with reduced motion the flights are only framed. A reload, a
+  link copied from the address bar and the saved state do not play it again (see
+  `i` below). Such a link leaves out the statistics panel the sender had open,
+  and opens without it, and while it shares the sender's flights nothing is
+  saved for the visitor's next visit, which opens on their own view as before
 
 ## Shareable URLs
 

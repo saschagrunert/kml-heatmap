@@ -6,7 +6,7 @@
  */
 
 import * as esbuild from "esbuild";
-import { fileURLToPath } from "url";
+import { fileURLToPath, pathToFileURL } from "url";
 import { dirname, join } from "path";
 import { readFileSync, writeFileSync } from "fs";
 import { readFile } from "fs/promises";
@@ -14,6 +14,7 @@ import {
   assertExpectedOutputs,
   formatBytes,
   inputDeltas,
+  joinPathData,
   largestInputs,
   measure,
   outputNamed,
@@ -79,7 +80,7 @@ const maplibreVendorPlugin = {
       external: true,
     }));
     // html-to-image likewise: only an export needs it, so the app imports
-    // it on the first one (ui/uiToggles.ts). Pointing the import() at the
+    // it on the first one (ui/mapExport.ts). Pointing the import() at the
     // vendored module keeps it out of the bundles without making esbuild
     // write a second chunk, which would need a name (assertExpectedOutputs).
     build.onResolve({ filter: /^html-to-image$/ }, () => ({
@@ -160,6 +161,49 @@ const shaderPlugin = {
 };
 
 /**
+ * Each Lucide icon the page draws (utils/icons.ts) with its run of plain
+ * paths as one: a path of several subpaths strokes as the paths do one by
+ * one, with the outline the page draws its icons in, and each path of a
+ * node list was a `["path",{d:"..."}]` of its own, 77 of them in the first
+ * visit. Each icon module is also no longer listed by name under the
+ * license the bundle carries, which comes with the package's own module
+ * (lucide.mjs) as before. Minified builds only.
+ * @type {import("esbuild").Plugin}
+ */
+const lucidePathsPlugin = {
+  name: "lucide-paths",
+  setup(build) {
+    build.onLoad(
+      { filter: /[\\/]lucide[\\/]dist[\\/]esm[\\/]icons[\\/][\w-]+\.mjs$/ },
+      async (args) => {
+        /** @type {[string, Record<string, string>][]} */
+        const nodes = (await import(pathToFileURL(args.path).href)).default;
+        /** A path of nothing but its outline */
+        const plain = (/** @type {[string, Record<string, string>]} */ node) =>
+          node[0] === "path" && Object.keys(node[1]).join() === "d";
+        /** @type {[string, Record<string, string>][]} */
+        const merged = [];
+        for (const node of nodes) {
+          const last = merged.at(-1);
+          if (last && plain(last) && plain(node)) {
+            last[1] = {
+              d: joinPathData(last[1]["d"] ?? "", node[1]["d"] ?? ""),
+            };
+          } else {
+            // A copy: the module's own list stays as it is
+            merged.push([node[0], { ...node[1] }]);
+          }
+        }
+        return {
+          contents: `export default ${JSON.stringify(merged)};`,
+          loader: "js",
+        };
+      },
+    );
+  },
+};
+
+/**
  * The popups of utils/htmlGenerators.ts without the line breaks and the
  * indentation of their template literals (tightenMarkup), which esbuild
  * keeps as they are written. Minified builds only; the unit tests run the
@@ -184,13 +228,14 @@ const markupPlugin = {
 // quarter of the frontend and most visits open neither, so features.ts
 // (replay) and wrapped.ts (Wrapped and the statistics panel) are entry
 // points of their own that the app imports the first time each is used
-// (services/featureLoader.ts), and so is search.ts (the search of airports
-// and places). With splitting, what the entry points have in common is moved
-// into a chunk that each of them imports, so there is a single instance of
-// every module that holds state (the DOM cache, the toast live region).
+// (services/featureLoader.ts), and so are search.ts (the search of airports
+// and places) and extras.ts (the phone's sheet and the export). With
+// splitting, what the entry points have in common is moved into a chunk that
+// each of them imports, so there is a single instance of every module that
+// holds state (the DOM cache, the toast live region).
 //
 // esbuild makes one chunk for every set of entry points that reach a module,
-// so four entry points could share code in up to eleven chunks. Every lazy
+// so five entry points could share code in up to twenty-six chunks. Every lazy
 // entry point imports mapApp.ts for that reason: everything the app reaches
 // is then reached by all of them, and the one chunk that holds it (the app
 // itself; mapApp.bundle.js only starts it) can carry a fixed name instead of
@@ -206,6 +251,7 @@ const buildOptions = {
     join(FRONTEND_DIR, "features.ts"),
     join(FRONTEND_DIR, "wrapped.ts"),
     join(FRONTEND_DIR, "search.ts"),
+    join(FRONTEND_DIR, "extras.ts"),
   ],
   outdir: STATIC_DIR,
   entryNames: "[name].bundle",
@@ -241,7 +287,7 @@ const buildOptions = {
   plugins: [
     maplibreVendorPlugin,
     yearWorkerPlugin,
-    ...(minify ? [shaderPlugin, markupPlugin] : []),
+    ...(minify ? [shaderPlugin, markupPlugin, lucidePathsPlugin] : []),
   ],
 };
 
@@ -403,8 +449,11 @@ function compareBundles(before, after, names) {
 // gzipped budget about 1.4 % over that for CI's zlib) for the heat and the base
 // map's labels that dim across the aviation chart's band of zooms in their
 // paint, through a pinch, and the export that waits for the map within one
-// deadline from the tap to the share sheet.
-const BUDGET_APP = { raw: 163.25 * 1024, gzip: 56.25 * 1024 };
+// deadline from the tap to the share sheet. Lowered by 7.5 KB raw and 2 KB
+// gzipped (153.65 KB and 52.91 KB gzipped in a local build after) as the
+// sheet of the phone's bar and the export moved to the extras bundle and
+// each icon's paths became one.
+const BUDGET_APP = { raw: 155.75 * 1024, gzip: 54.25 * 1024 };
 // The feature bundle: replay and Replay all, the 3D view (relief, ribbons,
 // heat cloud), the imagery, the flight profile, the cross-section and the
 // hotspot tour. Fetched only when one of them is first used, so no part of
@@ -437,23 +486,40 @@ const BUDGET_APP = { raw: 163.25 * 1024, gzip: 56.25 * 1024 };
 // without a jump, a colour per point of the replay's curves, the glow round
 // its trails and no trail where the Groundspeed layer draws no line
 // (154.73 KB and 58.65 KB gzipped in a local build, about 58.95 KB in CI,
-// which leaves 1.3 % of the gzipped budget).
-const BUDGET_FEATURES = { raw: 155 * 1024, gzip: 59.75 * 1024 };
+// which leaves 1.3 % of the gzipped budget). Raised by 1 KB raw, the
+// gzipped budget kept, for the frame of share mode and of a flight picked
+// from a list at the tilt of the map, which moved here from the first
+// visit (ui/frameFlights.ts, which the intro and the replay of all flights
+// frame with too), and for a few shared flights smoothed alone rather
+// than every flight of the dataset (keptGrounded): 155.69 KB and 58.99 KB
+// gzipped in a local build.
+const BUDGET_FEATURES = { raw: 156 * 1024, gzip: 59.75 * 1024 };
 // The Wrapped bundle: the Wrapped dialog with its intro, and the statistics
 // rail, fetched the first time either opens. It shares nothing with the
-// feature bundle that the app does not have as well. About 14.1 KB gzipped
-// in CI when it was last set.
-const BUDGET_WRAPPED = { raw: 43 * 1024, gzip: 15 * 1024 };
+// feature bundle that the app does not have as well. Raised by 0.5 KB raw
+// for the rail's note of the year and aircraft it counts, the distance in
+// the names of the flight list's rows and the intro played once a year per
+// session: 43.28 KB and 14.87 KB gzipped in a local build after.
+const BUDGET_WRAPPED = { raw: 43.5 * 1024, gzip: 15 * 1024 };
 // The search bundle: the panel of the search of airports and places, the
 // matching of the site's airports and the client of Photon, fetched the
 // first time the search opens. About 5.3 KB gzipped (13.25 KB raw) in a
 // local build when it was set.
 const BUDGET_SEARCH = { raw: 14 * 1024, gzip: 5.75 * 1024 };
+// The extras bundle: the sheet of the phone's bar and the export of the map
+// as an image, which were part of the first visit, fetched as soon as a
+// phone's page has a moment and on the first export. 8.88 KB and 3.39 KB
+// gzipped in a local build when it was set.
+const BUDGET_EXTRAS = { raw: 11 * 1024, gzip: 4.5 * 1024 };
 // The year worker (services/yearWorker.ts): fetched by every visit, preloaded
 // in the page head beside the app and started with the first year file. It
-// decodes the year files and draws the heat sources off the main thread.
-// About 4.2 KB gzipped when it was last set.
-const BUDGET_WORKER = { raw: 10 * 1024, gzip: 5 * 1024 };
+// decodes the year files and draws the heat sources off the main thread,
+// and the lines along the flights: the heat lines and the colour layers'
+// lines, with the smoothing of the curves they run along
+// (services/flightLines.ts) and the curves it keeps of the flights shown.
+// About 15.48 KB and 6.79 KB gzipped in a local build when it was last
+// set, raised for those from 9.77 KB and 4.49 KB.
+const BUDGET_WORKER = { raw: 16 * 1024, gzip: 7 * 1024 };
 
 // The vendored files are copied as they are but for a few bytes of fixes
 // (VENDOR_PATCHES in scripts/vendor.js) and the styles of the controls the
@@ -472,6 +538,7 @@ const APP_BUNDLE = "mapApp.bundle.js";
 const FEATURES_BUNDLE = "features.bundle.js";
 const WRAPPED_BUNDLE = "wrapped.bundle.js";
 const SEARCH_BUNDLE = "search.bundle.js";
+const EXTRAS_BUNDLE = "extras.bundle.js";
 const SHARED_BUNDLE = "shared.bundle.js";
 const WORKER_BUNDLE = "yearWorker.bundle.js";
 
@@ -493,6 +560,7 @@ function analyzeBundleSizes() {
     ["✨ Features", [FEATURES_BUNDLE], BUDGET_FEATURES],
     ["🎁 Wrapped", [WRAPPED_BUNDLE], BUDGET_WRAPPED],
     ["🔎 Search", [SEARCH_BUNDLE], BUDGET_SEARCH],
+    ["🧰 Extras", [EXTRAS_BUNDLE], BUDGET_EXTRAS],
     ["🧵 Year worker", [WORKER_BUNDLE], BUDGET_WORKER],
     [
       "🧭 MapLibre",
@@ -589,7 +657,7 @@ async function build() {
         esbuild.build(buildOptions),
         esbuild.build(workerBuildOptions),
       ]);
-      // The site publishes the six by name (see assertExpectedOutputs)
+      // The site publishes the seven by name (see assertExpectedOutputs)
       assertExpectedOutputs(
         [result.metafile, workerResult.metafile],
         [
@@ -597,6 +665,7 @@ async function build() {
           FEATURES_BUNDLE,
           WRAPPED_BUNDLE,
           SEARCH_BUNDLE,
+          EXTRAS_BUNDLE,
           SHARED_BUNDLE,
           WORKER_BUNDLE,
         ],
@@ -612,6 +681,7 @@ async function build() {
         FEATURES_BUNDLE,
         WRAPPED_BUNDLE,
         SEARCH_BUNDLE,
+        EXTRAS_BUNDLE,
       ];
       if (result.metafile) {
         for (const name of composed) {

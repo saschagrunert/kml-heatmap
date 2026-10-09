@@ -22,7 +22,10 @@ import {
   airplaneLiftPx,
   heightAtZoomFt,
 } from "../../../../kml_heatmap/frontend/calculations/airplaneLift";
-import { smoothGrounded } from "../../../../kml_heatmap/frontend/calculations/smoothGrounded";
+import {
+  keptGrounded,
+  smoothGrounded,
+} from "../../../../kml_heatmap/frontend/calculations/smoothGrounded";
 import {
   smoothFlights,
   smoothLine,
@@ -1461,6 +1464,17 @@ describe("lift", () => {
         expect(alone).toEqual(flights);
         expect(alone.chains[0]!.points).not.toBe(flights.chains[0]!.points);
         expect(groundedFlights(dataset, true, 8)).toBe(flights);
+      });
+
+      it("keep the few flights of keptGrounded until the flights are let go of", () => {
+        const first = dataset[0]!.path_id;
+        const one = (id: number) => id === first;
+        const kept = keptGrounded(dataset, one, true, 8);
+        expect(kept.segments.every((s) => s.path_id === first)).toBe(true);
+        expect(keptGrounded(dataset, one, true, 8)).toBe(kept);
+        // Gone with the flights of the dataset, all years among them
+        releaseGroundedFlights();
+        expect(keptGrounded(dataset, one, true, 8)).not.toBe(kept);
       });
     });
   });

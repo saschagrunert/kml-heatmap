@@ -6,7 +6,13 @@
  * that interface; the behaviour the columns cover on wider viewports is
  * exercised here through the bar instead.
  */
-import { test, expect, THREE_D_TIP_KEY, type Page } from "./fixtures";
+import {
+  test,
+  expect,
+  holdElevationTiles,
+  THREE_D_TIP_KEY,
+  type Page,
+} from "./fixtures";
 import {
   activateReplay,
   attachErrorCollectors,
@@ -107,10 +113,17 @@ test.describe("Mobile bar", () => {
 
     const tabs = page.locator(".mobile-tab");
     await expect(tabs).toHaveCount(TABS.length);
+    // Filter says the year the map shows, still named as the tab
+    const year = await page.evaluate(() => window.mapApp!.selectedYear);
     for (const [index, spec] of TABS.entries()) {
       const tab = tabs.nth(index);
       await expect(tab).toHaveAttribute("id", `mobile-tab-${spec.id}`);
-      await expect(tab).toHaveText(spec.label);
+      if (spec.id === "filter" && year !== "all") {
+        await expect(tab).toHaveText(year);
+        await expect(tab).toHaveAccessibleName(`${spec.label}, ${year}`);
+      } else {
+        await expect(tab).toHaveText(spec.label);
+      }
     }
 
     // The columns the bar stands in for are gone, and out of the tab order
@@ -161,6 +174,8 @@ test.describe("Mobile bar", () => {
     for (const id of ["layers", "filter", "more"]) {
       const tab = page.locator(`#mobile-tab-${id}`);
       await expect(tab).toHaveAttribute("aria-haspopup", "dialog");
+      // Once the sheet is in the page, which a phone fetches the code of
+      // as soon as the page has a moment
       await expect(tab).toHaveAttribute("aria-controls", "mobile-sheet");
       // Not a disclosure: the sheet covers the bar and traps focus, so the
       // tab can never be operated while its sheet is open
@@ -920,6 +935,10 @@ test.describe("Mobile bar", () => {
     test("comes with the first flight picked, and its 3D button turns 3D on", async ({
       page,
     }) => {
+      // The 3D view the tip turns on is not what is looked at, and its
+      // relief on a phone's pixel ratio in software WebGL took this test
+      // to within seconds of its timeout
+      await holdElevationTiles(page);
       const tip = toastMessage(page, "Turn on 3D to lift the flights");
       await toggleStatsPanel(page);
       await page.locator("#flights-tab").click();

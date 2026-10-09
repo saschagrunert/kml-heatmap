@@ -111,6 +111,20 @@ which `make serve` runs, sends `Cache-Control: no-store` on every file. That is
 for development, where every reload must show the newest build, not a policy for
 a published site.
 
+The page brings its own Content-Security-Policy and referrer policy as meta tags
+(see [SECURITY.md](../SECURITY.md)); GitHub Pages lets you set no headers. A
+host that does can add what a meta tag cannot do:
+
+| Header                    | Value                                                          | Why                                                                                                                                                                         |
+| ------------------------- | -------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Content-Security-Policy` | `frame-ancestors 'none'`                                       | No other site can frame the page (`'self'` to allow your own); a meta CSP cannot say it                                                                                     |
+| `X-Content-Type-Options`  | `nosniff`                                                      | A data file is never read as a script or a page by type sniffing                                                                                                            |
+| `Referrer-Policy`         | `strict-origin-when-cross-origin`                              | The same as the meta tag, and for the MapLibre worker as well, which takes its policy from the header of its script: a CARTO key restricted to your domain needs the origin |
+| `Permissions-Policy`      | `camera=(), microphone=(), geolocation=(), payment=(), usb=()` | The page uses none of them; leave `web-share` and `clipboard-write` allowed, which sharing a link needs                                                                     |
+
+A second `Content-Security-Policy` header adds to the meta tag rather than
+replacing it: a request has to pass both, so `frame-ancestors` alone is enough.
+
 ## Link previews need --site-url
 
 A link to the site, a year or a flight unfolds in a chat or a post from Open

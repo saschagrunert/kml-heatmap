@@ -1,7 +1,8 @@
 ---
 # Tests every pull request, every entry of the merge queue and every push
-# to main. A push to main (or a manual run on main) also builds the site and
-# publishes it to GitHub Pages, but only once every test job has passed. The
+# to main. A push to main (or a manual run on main) also builds the site,
+# alongside the tests, and publishes it to GitHub Pages, but only once every
+# test job has passed. The
 # weekly run only repeats the security job, so a new advisory for a pinned
 # dependency or a leaked secret shows up without a push. The checks job at
 # the end is the one status a ruleset on main requires (see there).
@@ -70,21 +71,20 @@ jobs:
         uses: ./.github/actions/setup-toolchain
         with:
           python-lock: requirements-test.lock
-      # Before the dependencies: it needs none, and a misspelling should
-      # show even when an install fails
-      - name: Check the spelling
-        uses: crate-ci/typos@00f422f3b19c57bc6338715ebfe3316d38768461 # v1.50.3
       # requirements-test.lock pins the runtime dependencies as well, to the
       # same versions (scripts/check_locks.py checks that)
-      # Also after a misspelling, so the steps below still report
       - name: Install dependencies
         id: deps
-        if: ${{ !cancelled() }}
         run: |
           pip install --require-hashes -r requirements-test.lock
           npm ci
       # Every check below runs even when an earlier one failed, so a single
       # run reports all of them
+      # typos comes with the dev extra in requirements-test.lock, the same
+      # release `make lint` and the pre-commit hook run
+      - name: Check the spelling
+        if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
+        run: typos
       - name: Check that the lock files match pyproject.toml
         if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
         run: python scripts/check_locks.py
@@ -593,7 +593,27 @@ jobs:
         with:
           python-lock: requirements-test.lock
           npm-cache: "false"
+      # A pull request or an entry of the merge queue audits the
+      # dependencies only when it changes them: an advisory for a version the
+      # base already pins turned pull requests red that were fine, and the
+      # next push to main or the weekly run reports it anyway. A base the
+      # clone cannot compare with audits as well: the step fails closed
+      - name: Check whether the dependencies changed
+        id: deps
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
+        run: |
+          if [ -n "$BASE_SHA" ] &&
+            changed="$(git diff --name-only "$BASE_SHA" HEAD -- \
+              'requirements*.lock' package-lock.json package.json)" &&
+            [ -z "$changed" ]; then
+            echo "audit=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::no lock file changed; skipping the dependency audits"
+          else
+            echo "audit=true" >> "$GITHUB_OUTPUT"
+          fi
       - name: Install Python dependencies
+        if: steps.deps.outputs.audit == 'true'
         run: pip install --require-hashes -r requirements-test.lock
       # pip-audit is pinned in requirements-test.lock like every other tool.
       # Every lock file, also the ones only the packaging job and `make lock`
@@ -604,11 +624,13 @@ jobs:
       # resolving anything: --no-deps warned on every call, and left out a
       # package (packaging) the locks pin.
       - name: Audit the Python lock files
+        if: steps.deps.outputs.audit == 'true'
         run: |
           pip-audit --disable-pip --require-hashes -r requirements.lock -r requirements-test.lock
           pip-audit --disable-pip --require-hashes -r requirements-build.lock
           pip-audit --disable-pip --require-hashes -r requirements-tools.lock
       - name: Audit npm dependencies
+        if: steps.deps.outputs.audit == 'true'
         run: npm audit --audit-level=high
       # The same gitleaks release as the pre-commit hook, whose rev Dependabot
       # bumps, pulled by digest like every other image and action here. The
@@ -714,10 +736,12 @@ jobs:
 
   # Builds the published site from the sources and the KML files in data/.
   # Nothing generated is committed, so every deployment is exactly what the
-  # tested commit produces. Only this job sees the real tile API key.
+  # tested commit produces. Only this job sees the real tile API key. It runs
+  # alongside the tests rather than after them, under the condition of
+  # publishable: the build only uploads an artifact, and the deploy job
+  # publishes it once publishable says the tests passed on the head of main.
   site:
-    needs: publishable
-    if: needs.publishable.outputs.publish == 'true'
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     # pages: read for the address of the site, see "Look up the address"
@@ -765,7 +789,10 @@ jobs:
           path: site
 
   deploy:
-    needs: site
+    needs:
+      - publishable
+      - site
+    if: needs.publishable.outputs.publish == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     # Deployments never overlap and are never cancelled half way

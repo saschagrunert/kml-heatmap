@@ -11,11 +11,16 @@ import {
   DATA_FORMAT_VERSION,
   decodeYear,
 } from "../../../../kml_heatmap/frontend/services/yearDecode";
+import { drawHeat } from "../../../../kml_heatmap/frontend/services/heatSource";
 import {
-  drawHeat,
-  linesSource,
-} from "../../../../kml_heatmap/frontend/services/heatSource";
+  flatRuns,
+  flightColumns,
+  flightsOf,
+  heatLinesSource,
+  runsSource,
+} from "../../../../kml_heatmap/frontend/services/flightLines";
 import { heatColumns } from "../../../../kml_heatmap/frontend/calculations/heatExposure";
+import { createSegment } from "../../testHelpers";
 import { path, rawYear, yearBytes } from "../../yearFixtures";
 
 const year = rawYear(2025, { "1": path([50, 8], [[50.1, 8.1, 500, 100]]) });
@@ -112,18 +117,78 @@ describe("handleRequest for the heat sources", () => {
     expect(transfer).toEqual([]);
   });
 
-  it("writes the heat lines, a Blob and nothing to hand over", async () => {
-    const lines = {
-      coordinates: new Float64Array([8, 50, 8.1, 50.1]),
-      ends: new Uint32Array([2]),
-      heats: new Float64Array([4]),
-    };
+  describe("lines along the flights", () => {
+    const segments = [0, 1, 2].map((i) =>
+      createSegment({
+        path_id: 1 + Math.floor(i / 2),
+        time: i * 4,
+        coords: [
+          [50 + i / 100, 8 + i / 100],
+          [50 + (i + 1) / 100, 8 + (i + 1) / 100],
+        ],
+      }),
+    );
+    const flights = flightsOf(flightColumns(segments));
+    const heatLines = { keep: new Float64Array([2]), exposure: 2 };
+    const runs = flatRuns(
+      [{ start: 0, end: 2, pathId: 1, color: "#123456" }],
+      3,
+    );
 
-    const { response, transfer } = handleRequest({ id: 4, lines });
+    /** The text of the source of the answer to `request` */
+    async function written(request: YearRequest): Promise<string> {
+      const { response, transfer } = handleRequest(request);
+      if (!("source" in response)) throw new Error("not written");
+      expect(transfer).toEqual([]);
+      return response.source.text();
+    }
 
-    if (!("source" in response)) throw new Error("not written");
-    expect(await response.source.text()).toBe(await linesSource(lines).text());
-    expect(transfer).toEqual([]);
+    it("writes the heat lines and the runs along the flights handed over", async () => {
+      expect(
+        await written({
+          id: 4,
+          flights: flightColumns(segments),
+          heatLines,
+        }),
+      ).toBe(await heatLinesSource(flights, heatLines).text());
+      // Along the flights handed over last, which the worker keeps
+      expect(await written({ id: 5, runs })).toBe(
+        await runsSource(flights, runs).text(),
+      );
+    });
+
+    it("keeps no flights of before when the new ones fail to arrive", async () => {
+      await written({ id: 7, flights: flightColumns(segments), heatLines });
+      const broken = {
+        ...flightColumns(segments),
+        coords: null as unknown as Float64Array,
+      };
+
+      expect(
+        "error" in handleRequest({ id: 8, flights: broken, runs }).response,
+      ).toBe(true);
+      // Asked for without flights, as the page does for the same ones: not
+      // along those of before, so the page draws them and hands them again
+      expect(handleRequest({ id: 9, runs }).response).toEqual(
+        expect.objectContaining({
+          id: 9,
+          error: "no flights to draw lines along",
+        }),
+      );
+    });
+
+    it("answers lines asked for before any flights with the reason", async () => {
+      vi.resetModules();
+      const fresh =
+        await import("../../../../kml_heatmap/frontend/services/yearWorker");
+
+      expect(fresh.handleRequest({ id: 6, runs }).response).toEqual({
+        id: 6,
+        error: "no flights to draw lines along",
+        name: "Error",
+        format: DATA_FORMAT_VERSION,
+      });
+    });
   });
 
   it("answers a heat it fails over with the reason", () => {

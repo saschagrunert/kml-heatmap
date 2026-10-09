@@ -44,6 +44,8 @@ from kml_heatmap.renderer import (
     _parse_with_error_handling,
     _serve_hint,
     create_progressive_heatmap,
+    load_cached,
+    no_flight_reason,
 )
 from kml_heatmap.site_output import STABLE_MTIMES_ENV, STAGING_PREFIX
 from kml_heatmap.types import PathMetadata, TrackPoint
@@ -103,6 +105,30 @@ PARKED_KML = """<?xml version="1.0" encoding="UTF-8"?>
   </gx:Track></Placemark></Document></kml>
 """
 
+# A waypoint file: places marked on the map, no flight
+WAYPOINTS_KML = """<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2"><Document>
+  <Placemark><name>EDAQ</name><Point><coordinates>12.05,51.55,110</coordinates></Point></Placemark>
+  <Placemark><name>EDDC</name><Point><coordinates>13.76,51.13,230</coordinates></Point></Placemark>
+</Document></kml>
+"""
+
+# A line of which only one point is valid: the other is off the globe
+ONE_POINT_LINE_KML = """<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2"><Document><Placemark>
+  <name>EDAQ - EDDC</name><TimeStamp><when>{year}-03-15</when></TimeStamp>
+  <LineString><coordinates>12.05,51.55,110 512.5,151.4,300</coordinates></LineString>
+</Placemark></Document></kml>
+"""
+
+# A route plan: a line without altitudes
+ROUTE_PLAN_KML = """<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2"><Document><Placemark>
+  <name>EDAQ - EDDC</name><TimeStamp><when>{year}-03-15</when></TimeStamp>
+  <LineString><coordinates>12.05,51.55 12.5,51.4 13.76,51.13</coordinates></LineString>
+</Placemark></Document></kml>
+"""
+
 MAP_BOUNDS = re.compile(r'"bounds":\[\[([-\d.]+),([-\d.]+)\],\[([-\d.]+),([-\d.]+)\]\]')
 
 
@@ -149,12 +175,16 @@ def bundle(tmp_path_factory, monkeypatch):
     wrapped.write_text("/* test wrapped */", encoding="utf-8")
     search = static / "search.bundle.js"
     search.write_text("/* test search */", encoding="utf-8")
+    extras = static / "extras.bundle.js"
+    extras.write_text("/* test extras */", encoding="utf-8")
     monkeypatch.setattr("kml_heatmap.site_assets.BUNDLE_FILE", bundle)
     monkeypatch.setattr("kml_heatmap.site_assets.FEATURES_BUNDLE_FILE", features)
     monkeypatch.setattr("kml_heatmap.site_assets.WRAPPED_BUNDLE_FILE", wrapped)
     monkeypatch.setattr("kml_heatmap.site_assets.SEARCH_BUNDLE_FILE", search)
+    monkeypatch.setattr("kml_heatmap.site_assets.EXTRAS_BUNDLE_FILE", extras)
     monkeypatch.setattr(
-        "kml_heatmap.site_assets.BUNDLE_FILES", (bundle, features, wrapped, search)
+        "kml_heatmap.site_assets.BUNDLE_FILES",
+        (bundle, features, wrapped, search, extras),
     )
     return bundle
 
@@ -213,6 +243,8 @@ class TestParseWithoutAPool:
         with patch("kml_heatmap.workers.ProcessPoolExecutor", _NoPool):
             _, metadata, _ = _parse_kml_files(files)
         assert [m["year"] for m in metadata] == [2026, 2025]
+        # Which file each path is of, folders and all (see duplicates._one_file)
+        assert [m["source"] for m in metadata] == files
 
     def test_cached_files_are_read_here_and_only_the_rest_goes_to_the_pool(
         self, tmp_path, monkeypatch
@@ -378,6 +410,30 @@ class TestParseWithoutAPool:
         assert "Unexpected error processing" in capsys.readouterr().err
 
 
+class TestNoFlightReason:
+    """Why a file with coordinates gives the export no path."""
+
+    @pytest.mark.parametrize(
+        ("template", "reason"),
+        [
+            (WAYPOINTS_KML, "no track of two or more valid points"),
+            (ONE_POINT_LINE_KML, "no track of two or more valid points"),
+            (ROUTE_PLAN_KML, "no track of two or more points with altitudes above"),
+            (CLAMPED_KML, "no track of two or more points with altitudes above"),
+        ],
+    )
+    def test_says_what_the_file_holds(self, tmp_path, template, reason):
+        kml_file = _write_kml(tmp_path / "1_DEAGJ_DA20.kml", template=template)
+        entry = load_cached(kml_file)
+        assert isinstance(entry, Path)
+        parsed = _parse_with_error_handling(kml_file, entry)
+        assert (no_flight_reason(parsed) or "").startswith(reason)
+        # The same from the parse cache
+        cached = load_cached(kml_file)
+        assert isinstance(cached, ParsedFile)
+        assert cached == parsed
+
+
 class TestParseWithErrorHandling:
     def test_nonexistent_file_returns_empty_result(self):
         parsed = _parse_with_error_handling("/nonexistent/file.kml")
@@ -503,6 +559,24 @@ class TestParseKmlFiles:
             _parse_kml_files([clamped, good])
         assert f"{clamped}: no track of two or more points" in capsys.readouterr().err
 
+    def test_files_that_name_no_aircraft_are_named_in_one_line(self, tmp_path, capsys):
+        """An export left as the tool named it builds, but belongs to no
+        aircraft in the filter and the statistics."""
+        files = [
+            _write_kml(tmp_path / "1_DEAGJ_DA20.kml"),
+            _write_kml(tmp_path / "export.kml"),
+            _write_kml(tmp_path / "flight.kml", 2026),
+        ]
+
+        _parse_kml_files(files)
+
+        err = capsys.readouterr().err
+        assert (
+            "2 file(s) name no aircraft (export.kml, flight.kml): their flights "
+            "belong to none; name them N_REGISTRATION_TYPE.kml" in err
+        )
+        assert err.count("name no aircraft") == 1
+
     def test_a_path_without_a_year_next_to_a_flight_is_no_error(self, tmp_path):
         """The file still has a flight to export; the path is left out later."""
         paths, metadata, _ = _parse_kml_files(
@@ -519,12 +593,19 @@ class TestParseKmlFiles:
             _write_kml(tmp_path / "2_DEAGJ_DA20.kml", 2026),
         ]
         pools = iter([_FakeExecutor(BrokenProcessPool("crashed")), _InlineExecutor()])
-        with patch(
-            "kml_heatmap.workers.ProcessPoolExecutor",
-            side_effect=lambda *args, **kwargs: next(pools),
-        ):
+        initargs = []
+
+        def pool(*args, **kwargs):
+            initargs.append(kwargs["initargs"])
+            return next(pools)
+
+        with patch("kml_heatmap.workers.ProcessPoolExecutor", side_effect=pool):
             paths, metadata, _ = _parse_kml_files(files)
 
+        # Both pools get the databases and their fingerprint (see init_worker)
+        assert len(initargs) == 2
+        assert initargs[1] == initargs[0]
+        assert len(initargs[1]) == 4
         assert len(paths) == 2
         assert [m["filename"] for m in metadata] == [
             "1_DEAGJ_DA20.kml",
@@ -1392,6 +1473,7 @@ class TestCreateProgressiveHeatmap:
         assert (out / "features.bundle.js").exists()
         assert (out / "wrapped.bundle.js").exists()
         assert (out / "search.bundle.js").exists()
+        assert (out / "extras.bundle.js").exists()
         assert (out / "CNAME").read_text() == "maps.example.org"
 
     @pytest.mark.usefixtures("bundle")
@@ -1705,7 +1787,8 @@ class TestListFlights:
                 "4_DEAGJ_DA20.kml",
                 (
                     "no track of two or more points with altitudes above sea "
-                    "level (a clampToGround or relativeToGround track has none)"
+                    "level (a 2D line, such as a route plan, and a clampToGround "
+                    "or relativeToGround track have none)"
                 ),
             ),
             ("5.kml", "failed to parse"),

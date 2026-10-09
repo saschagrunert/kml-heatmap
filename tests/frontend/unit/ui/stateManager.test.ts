@@ -381,6 +381,34 @@ describe("StateManager", () => {
     });
   });
 
+  describe("a visit from a link to shared flights", () => {
+    it("saves nothing for the next visit while it shares the sender's flights, and from the end of share mode on", () => {
+      mockApp.selectedPathIds = new Set([7]);
+      mockApp.isolateSelection = true;
+      stateManager.visiting = true;
+
+      const shared = stateManager.saveMapState();
+
+      expect(localStorage.setItem).not.toHaveBeenCalled();
+      // The link follows the state as ever, and Copy link gets it
+      expect(history.replaceState).toHaveBeenCalledTimes(1);
+      expect(shared).toMatchObject({
+        isolateSelection: true,
+        selectedPathIds: [7],
+      });
+
+      // Out of share mode the flights are the visitor's own, and so they
+      // stay, should they share some again
+      mockApp.isolateSelection = false;
+      stateManager.saveMapState();
+      expect(savedState()["selectedPathIds"]).toEqual([7]);
+      mockApp.isolateSelection = true;
+      stateManager.saveMapState();
+      expect(savedState()["isolateSelection"]).toBe(true);
+      expect(stateManager.visiting).toBe(false);
+    });
+  });
+
   describe("saveMapState", () => {
     it("wraps a centre panned past the antimeridian into the link", () => {
       // The map reports the unwrapped longitude after a pan across 180
@@ -604,8 +632,8 @@ describe("StateManager", () => {
 
     it("saves current state to localStorage and the URL", () => {
       mockApp.selectedYear = "2025";
-      mockApp.selectedPathIds.add(1);
-      mockApp.selectedPathIds.add(2);
+      mockApp.selectedPathIds = new Set([...mockApp.selectedPathIds, 1]);
+      mockApp.selectedPathIds = new Set([...mockApp.selectedPathIds, 2]);
 
       stateManager.saveMapState();
 
@@ -780,7 +808,7 @@ describe("StateManager", () => {
     it("never writes the mark of the intro of shared flights back", () => {
       // A link opened with it, if the app had not taken it off yet
       setLocation("?y=2025&p=1&sv=4&v=100100001&i=1");
-      mockApp.selectedPathIds.add(1);
+      mockApp.selectedPathIds = new Set([...mockApp.selectedPathIds, 1]);
       mockApp.isolateSelection = true;
 
       stateManager.saveMapState();

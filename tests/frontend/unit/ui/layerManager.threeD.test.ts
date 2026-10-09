@@ -308,7 +308,7 @@ describe("LayerManager 3D view", () => {
       await landed();
       settled();
       mockApp.altitudeVisible = true;
-      mockApp.selectedPathIds.add(1);
+      mockApp.selectedPathIds = new Set([...mockApp.selectedPathIds, 1]);
       layerManager.updateSelectionStyles();
 
       expect(mockApp.map!.layer(RIBBONS).filter).toEqual([
@@ -407,7 +407,7 @@ describe("LayerManager 3D view", () => {
       // the main ribbons are still those of the level before
       mockApp.map!.jumpTo({ zoom: 8.1 });
       mockApp.altitudeVisible = true;
-      mockApp.selectedPathIds.add(1);
+      mockApp.selectedPathIds = new Set([...mockApp.selectedPathIds, 1]);
       layerManager.updateSelectionStyles();
       mockApp.map!.emit("zoomend");
 
@@ -419,7 +419,7 @@ describe("LayerManager 3D view", () => {
       await drawClimb();
       await terrainCode();
       mockApp.altitudeVisible = true;
-      mockApp.selectedPathIds.add(1);
+      mockApp.selectedPathIds = new Set([...mockApp.selectedPathIds, 1]);
       layerManager.updateSelectionStyles();
       /** The writes of a source that held any ribbon */
       const drawnWrites = (id: string): number =>
@@ -459,6 +459,41 @@ describe("LayerManager 3D view", () => {
       expect(selectionFilter(RIBBONS)).not.toEqual(["literal", false]);
       layerManager.updateSelectionStyles();
       expect(drawnWrites(RIBBONS)).toBe(main + 1);
+    });
+
+    it("lands a write of the worker that a recut took over from", async () => {
+      // Flat in the 3D view, the year worker writes the lines of every
+      // flight; held here, as on a slow phone
+      mockApp.map!.jumpTo({ zoom: 17.2 });
+      await drawClimb();
+      await landed();
+      settled();
+      const answers: (() => void)[] = [];
+      mockApp.dataManager.askWorker.mockImplementation(
+        (_ask: unknown, take: (answer: unknown) => void) =>
+          answers.push(() => take({ type: "FeatureCollection", features: [] })),
+      );
+      mockApp.altitudeVisible = true;
+      mockApp.selectedPathIds = new Set([1]);
+      mockApp.isolateSelection = true;
+      drawMode(layerManager, "altitude");
+
+      // A zoom while share mode hides the flights leaves them behind, and
+      // its end writes them again, cut for the zoom, before the worker
+      // has answered for the first write
+      mockApp.map!.jumpTo({ zoom: 18.1 });
+      mockApp.map!.emit("zoomend");
+      mockApp.isolateSelection = false;
+      layerManager.updateSelectionStyles();
+      expect(answers).toHaveLength(2);
+      answers[0]!();
+      answers[1]!();
+      await landed();
+      settled();
+
+      // The empty map is the empty map again
+      mockApp.map!.renderedFeatures = [];
+      expect(layerManager.hitTest(pointAt(48, 16.5))).toBeNull();
     });
 
     it("leaves a mode the replay hides as it is, and draws it again as it shows", async () => {

@@ -162,7 +162,10 @@ function placeOf(feature: unknown): Place | null {
     lng,
     lat,
     ...(bounds ? { bounds } : {}),
-    zoom: ZOOM_BY_TYPE[type] ?? DEFAULT_PLACE_ZOOM,
+    // Its own kinds only: a `type` such as "constructor" is inherited
+    zoom: Object.hasOwn(ZOOM_BY_TYPE, type)
+      ? ZOOM_BY_TYPE[type]!
+      : DEFAULT_PLACE_ZOOM,
   };
 }
 

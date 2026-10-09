@@ -260,6 +260,22 @@ export interface SmoothFlightsOptions {
    * of each segment, as offsets to it by level (see groundProfilesFt)
    */
   offsets?: readonly ArrayLike<number>[] | null | undefined;
+  /**
+   * The curves of chains smoothed before, which are not smoothed again:
+   * only for curves of the points alone, as the flat ones are (see
+   * flatCurves in calculations/curves.ts)
+   */
+  chains?: ChainCache | undefined;
+}
+
+/**
+ * Curves smoothed before, by the first segment of their chain (an index
+ * into the segments being smoothed). One of another number of segments is
+ * smoothed anew.
+ */
+export interface ChainCache {
+  get(first: number): SmoothedLine | undefined;
+  set(first: number, line: SmoothedLine): void;
 }
 
 /**
@@ -276,7 +292,7 @@ export function smoothFlights(
     coords: readonly [Coordinate, Coordinate];
   }[],
   heightOf: (index: number) => number,
-  { turnStepDeg, groundOf, offsets }: SmoothFlightsOptions = {},
+  { turnStepDeg, groundOf, offsets, chains: held }: SmoothFlightsOptions = {},
 ): SmoothedFlights {
   const count = segments.length;
   const chainOf = new Int32Array(count);
@@ -300,25 +316,29 @@ export function smoothFlights(
       members.push(i + members.length);
       end = next.coords[1];
     }
-    const points: Coordinate[] = [first.coords[0]];
-    const heights: number[] = [heightOf(i)];
-    const ground = groundOf && [groundOf(i)];
-    const around = groundOf && offsets?.map((level) => [level[i]!]);
-    for (const m of members) {
-      // Across the antimeridian the curve goes on past 180 rather than
-      // round the world, through the spline points it would add there
-      const end = segments[m]!.coords[1];
-      const lng = unwrapLng(end[1], points[points.length - 1]![1]);
-      points.push(lng === end[1] ? end : [end[0], lng]);
-      heights.push(heightOf(m));
-      ground?.push(groundOf!(m));
-      around?.forEach((level, l) => level.push(offsets![l]![m]!));
+    let line = held?.get(i);
+    if (line?.vertex.length !== members.length + 1) {
+      const points: Coordinate[] = [first.coords[0]];
+      const heights: number[] = [heightOf(i)];
+      const ground = groundOf && [groundOf(i)];
+      const around = groundOf && offsets?.map((level) => [level[i]!]);
+      for (const m of members) {
+        // Across the antimeridian the curve goes on past 180 rather than
+        // round the world, through the spline points it would add there
+        const end = segments[m]!.coords[1];
+        const lng = unwrapLng(end[1], points[points.length - 1]![1]);
+        points.push(lng === end[1] ? end : [end[0], lng]);
+        heights.push(heightOf(m));
+        ground?.push(groundOf!(m));
+        around?.forEach((level, l) => level.push(offsets![l]![m]!));
+      }
+      line = smoothLine(points, heights, {
+        turnStepDeg,
+        ground,
+        offsets: around,
+      });
+      held?.set(i, line);
     }
-    const line = smoothLine(points, heights, {
-      turnStepDeg,
-      ground,
-      offsets: around,
-    });
     members.forEach((m, j) => {
       chainOf[m] = chains.length;
       from[m] = line.vertex[j]!;

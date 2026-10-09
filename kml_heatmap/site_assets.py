@@ -38,6 +38,7 @@ __all__ = [
     "BUNDLE_FILE",
     "BUNDLE_FILES",
     "CODE_FILES",
+    "EXTRAS_BUNDLE_FILE",
     "FEATURES_BUNDLE_FILE",
     "FLAGS_DIR_NAME",
     "SEARCH_BUNDLE_FILE",
@@ -69,15 +70,16 @@ STATIC_DIR = Path(__file__).parent / "static"
 TEMPLATES_DIR = Path(__file__).parent / "templates"
 # Built by `npm run build` and not committed
 BUNDLE_FILE = STATIC_DIR / "mapApp.bundle.js"
-# Replay, imported by the page the first time it is opened, and Wrapped and
-# the search, likewise (frontend/services/featureLoader.ts). Built by the same
-# `npm run build`, so a site without them is a site built wrong rather than a
-# choice.
+# Replay, imported by the page the first time it is opened, and Wrapped, the
+# search and the extras (the phone's sheet and the export), likewise
+# (frontend/services/featureLoader.ts). Built by the same `npm run build`, so
+# a site without them is a site built wrong rather than a choice.
 FEATURES_BUNDLE_FILE = STATIC_DIR / "features.bundle.js"
 WRAPPED_BUNDLE_FILE = STATIC_DIR / "wrapped.bundle.js"
 SEARCH_BUNDLE_FILE = STATIC_DIR / "search.bundle.js"
-# The app and every module the three lazy bundles above use of it, which all
-# four entry points import
+EXTRAS_BUNDLE_FILE = STATIC_DIR / "extras.bundle.js"
+# The app and every module the four lazy bundles above use of it, which all
+# five entry points import
 SHARED_BUNDLE_FILE = STATIC_DIR / "shared.bundle.js"
 # The year worker, which parses and decodes the year files off the main
 # thread; the page imports the same file for what it does to year data itself
@@ -88,6 +90,7 @@ BUNDLE_FILES = (
     FEATURES_BUNDLE_FILE,
     WRAPPED_BUNDLE_FILE,
     SEARCH_BUNDLE_FILE,
+    EXTRAS_BUNDLE_FILE,
     SHARED_BUNDLE_FILE,
     YEAR_WORKER_BUNDLE_FILE,
 )

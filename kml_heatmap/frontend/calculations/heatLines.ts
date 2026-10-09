@@ -217,7 +217,7 @@ function smoothAlongFlights(
  * calculations/curves.ts), the way the colour lines do; the time is added
  * up at the fixes, where it was logged. `tone` rolls the time around a
  * segment off before it is smoothed (see heatLineTone in
- * ui/heatmapPaint.ts).
+ * calculations/heatTone.ts).
  */
 export function heatLineFeatures(
   segments: readonly PathSegment[],
@@ -230,10 +230,9 @@ export function heatLineFeatures(
 
 /**
  * heatLineFeatures along `curves`, the curves of `segments` (see
- * flatCurves). The page works the lines out with the code of the year
- * worker's bundle (see linesSource in services/yearDecoder.ts), which
- * leaves them out of what a first visit downloads, and hands it the curves
- * the colour lines keep for the same segments.
+ * flatCurves). The year worker works the lines out along the flights it
+ * holds (see heatLinesSource in services/flightLines.ts), which leaves them
+ * out of what a first visit downloads and off the main thread.
  */
 export function heatLinesAlong(
   curves: SmoothedFlights,

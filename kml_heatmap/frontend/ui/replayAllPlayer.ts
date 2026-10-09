@@ -14,10 +14,8 @@ import {
   calculateAltitudeRange,
 } from "../features/layers";
 import { getColorForAirspeed, getColorForAltitude } from "../utils/colors";
-import {
-  groundedFlights,
-  releaseGroundedFlights,
-} from "../calculations/groundProfile";
+import { releaseGroundedFlights } from "../calculations/groundProfile";
+import { keptGrounded } from "../calculations/smoothGrounded";
 import { isLiftedAt, liftExaggeration } from "../calculations/lift";
 import {
   replayAllPoints,
@@ -594,9 +592,10 @@ export class ReplayAllPlayer {
     if (points) {
       this.cuts.delete(key);
     } else {
-      const segments = data.path_segments;
-      const flights = groundedFlights(
-        segments,
+      // A few flights, shared, alone: not every flight of the dataset
+      const { segments, flights } = keptGrounded(
+        data.path_segments,
+        keep,
         app.terrainActive,
         app.reliefLevel,
       );

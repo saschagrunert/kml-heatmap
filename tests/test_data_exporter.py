@@ -35,17 +35,23 @@ from kml_heatmap.exceptions import KMLHeatmapError, OutputRefusedError
 from kml_heatmap.helpers import parse_timestamp_epoch
 from kml_heatmap.path_content import (
     PATH_ID_BITS,
+    _content_id,
+    _path_content,
     assign_path_ids,
     drop_duplicate_paths,
     exported_contents,
     is_exportable_path,
-    path_content_id,
 )
 from kml_heatmap.segment_codec import FORMAT_VERSION, decode_ground
 from kml_heatmap.site_output import STAGING_PREFIX, SiteOutput, day_start
 from kml_heatmap.types import PathMetadata, TrackPoint
 from kml_heatmap.validation import protected_directories
 from tests.conftest import FlatTiles, decoded_segments
+
+
+def path_content_id(path):
+    """The id ``path`` gets unless an earlier path holds it (see assign_path_ids)."""
+    return _content_id(_path_content(path))
 
 
 def _metadata(entries: list[dict[str, Any]]) -> list[PathMetadata]:

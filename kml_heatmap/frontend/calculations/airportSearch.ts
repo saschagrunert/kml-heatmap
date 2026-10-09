@@ -125,6 +125,20 @@ function rankOf(
 }
 
 /**
+ * Whether `query` is the code or the whole name of one of the `airports`:
+ * the search has found it, and asks the geocoder nothing about it
+ */
+export function namesAirport(
+  airports: readonly Airport[],
+  query: string,
+): boolean {
+  const folded = foldText(query);
+  return searchable(airports).some(
+    (entry) => entry.code === folded || entry.name === folded,
+  );
+}
+
+/**
  * The airports that answer `query`, best first, at most `limit` of them;
  * none for a query of nothing but spaces
  */
