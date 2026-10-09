@@ -32,6 +32,7 @@ import {
   cssVar,
   hasLostContext,
   isReplayCameraMove,
+  onMapReady,
   whenContextRestored,
 } from "../utils/mapHelpers";
 import { aboveGround } from "./satellite";
@@ -106,9 +107,8 @@ export function followTerrain(app: MapApp): void {
     map.setTerrain({ source: MAP_SOURCES.terrain, exaggeration });
   };
   // The relief is part of the style, so it waits for one
-  void app.mapReady.then(() => {
+  onMapReady(app, "The relief", () => {
     const signal = app.signal;
-    if (signal.aborted) return;
     paintRibbons(map);
     const settle = settleRibbons(app, map, signal);
     const labels = thinFarLabels(app, map);
@@ -131,13 +131,16 @@ export function followTerrain(app: MapApp): void {
     // MapLibre restores the relief with the style after a lost WebGL
     // context, but some of what it draws onto it stays black until the
     // relief is built anew
-    whenContextRestored(map, () => {
-      if (signal.aborted) return;
-      map.setTerrain(null);
-      ribbons(null);
-      settle.restyle();
-      apply();
-    });
+    whenContextRestored(
+      map,
+      () => {
+        map.setTerrain(null);
+        ribbons(null);
+        settle.restyle();
+        apply();
+      },
+      signal,
+    );
     // A move ends on ground whose elevation tiles land after it: the map
     // raises its centre onto them then, and everything drawn shifts on the
     // screen, without a move event. The markers and popups follow the

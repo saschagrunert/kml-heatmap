@@ -457,7 +457,7 @@ describe("LayerManager hitTest", () => {
 
     it("lets a selected run win a tie", () => {
       const [, fast] = drawMergedRun();
-      mockApp.selectedPathIds.add(1);
+      mockApp.selectedPathIds = new Set([...mockApp.selectedPathIds, 1]);
       mockApp.altitudeVisible = true;
       layerManager.updateSelectionStyles();
       // The selection's runs are cut on its own range, like the main ones
@@ -479,7 +479,7 @@ describe("LayerManager hitTest", () => {
     it("ignores the main runs of other paths in share mode", async () => {
       addSecondPath();
       mockApp.altitudeLayer.setVisible(true);
-      mockApp.selectedPathIds.add(1);
+      mockApp.selectedPathIds = new Set([...mockApp.selectedPathIds, 1]);
       mockApp.isolateSelection = true;
       drawMode(layerManager, "altitude");
       await landed();

@@ -19,9 +19,10 @@ run in the Playwright image only, in
 `tests/frontend/contract/exportContract.test.ts` checks the data files the
 generator writes against the types the frontend reads them with: its own
 fixtures, and the `data/` of a site built from this checkout in `docs/`. A local
-`npm test` or `make test` skips that second half when `docs/` is missing or was
-built from other sources (Vitest counts its tests as skipped, and gives the
-reason for a stale site). Build the site first to run it:
+`npm test` skips that second half when `docs/` is missing or was built from
+other sources (Vitest counts its tests as skipped, and gives the reason for a
+stale site). `make test` builds the site first, as the CI unit job does; to run
+it with `npm test`, build it yourself:
 
 ```bash
 npm run build && python -m kml_heatmap data --output-dir docs

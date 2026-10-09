@@ -5,25 +5,22 @@ import {
 } from "../../../../kml_heatmap/frontend/ui/dataManager";
 import {
   heatLineFeatures,
-  heatLinesAlong,
   heatWeight,
   segmentSeconds,
 } from "../../../../kml_heatmap/frontend/calculations/heatLines";
+import { heatLineTone } from "../../../../kml_heatmap/frontend/calculations/heatTone";
+import { flatCurves } from "../../../../kml_heatmap/frontend/calculations/curves";
+import { heatLinesSource } from "../../../../kml_heatmap/frontend/services/flightLines";
 import {
   exposedHeat,
   heatColumns,
   heatExposure,
 } from "../../../../kml_heatmap/frontend/calculations/heatExposure";
-import {
-  drawHeat,
-  flatLines,
-  linesSource,
-} from "../../../../kml_heatmap/frontend/services/heatSource";
+import { drawHeat } from "../../../../kml_heatmap/frontend/services/heatSource";
 import type { Coordinate } from "../../../../kml_heatmap/frontend/utils/geometry";
 import { logError } from "../../../../kml_heatmap/frontend/utils/logger";
 import {
   heatLinesPaint,
-  heatLineTone,
   heatmapPaint,
   HEATMAP_RADIUS_PX,
 } from "../../../../kml_heatmap/frontend/ui/heatmapPaint";
@@ -41,6 +38,7 @@ import { domCache } from "../../../../kml_heatmap/frontend/utils/domCache";
 import type {
   KMLDataset,
   LoadingState,
+  PathSegment,
 } from "../../../../kml_heatmap/frontend/types";
 import type { DataLoaderOptions } from "../../../../kml_heatmap/frontend/services/dataLoader";
 import {
@@ -95,8 +93,18 @@ const decoder = {
   drawHeat: vi.fn((points: readonly Coordinate[], weights: readonly number[]) =>
     Promise.resolve(drawHeat(heatColumns(points, weights))),
   ),
-  linesSource: vi.fn((...lines: Parameters<typeof heatLinesAlong>) =>
-    Promise.resolve(linesSource(flatLines(heatLinesAlong(...lines)))),
+  heatLines: vi.fn(
+    (
+      segments: readonly PathSegment[],
+      keep: ReadonlySet<number> | null,
+      exposure: number,
+    ) =>
+      Promise.resolve(
+        heatLinesSource(
+          { segments, curves: flatCurves(segments) },
+          { keep: keep && Float64Array.from(keep), exposure },
+        ),
+      ),
   ),
 };
 
@@ -1003,6 +1011,33 @@ describe("DataManager", () => {
       expect(heatLinePoints()).toEqual(ALL_FIXES);
     });
 
+    it("asks the year worker for the heat lines of the paths a heat keeps", async () => {
+      mockApp.map!.jumpTo({ zoom: HEAT_LINES.fromZoom });
+      mockApp.heatmapLayer.setVisible(true);
+      const data = baseData();
+      publish(data);
+      await answered();
+      const exposure = mockApp.heatmapExposure;
+
+      expect(decoder.heatLines).toHaveBeenLastCalledWith(
+        data.path_segments,
+        null,
+        exposure,
+      );
+      mockApp.store.batch(() => {
+        mockApp.selectedPathIds = new Set([2, 3]);
+        mockApp.selectedAircraft = "D-EFGH";
+        mockApp.isolateSelection = true;
+      });
+      await answered();
+
+      // Of the whole dataset, which the worker holds already, the selected
+      // flights the filter shows
+      const [segments, keep] = decoder.heatLines.mock.lastCall!;
+      expect(segments).toBe(data.path_segments);
+      expect([...keep!]).toEqual([2]);
+    });
+
     it("filters heatmap coordinates by selected aircraft", async () => {
       publish(baseData());
 
@@ -1017,8 +1052,7 @@ describe("DataManager", () => {
       await answered();
 
       mockApp.store.batch(() => {
-        mockApp.selectedPathIds.add(2);
-        mockApp.store.notifyMutation("selectedPathIds");
+        mockApp.selectedPathIds = new Set([...mockApp.selectedPathIds, 2]);
         mockApp.isolateSelection = true;
       });
       await answered();
@@ -1034,8 +1068,8 @@ describe("DataManager", () => {
       // path 2, so the heatmap must not draw path 1 beside it
       mockApp.selectedAircraft = "D-EFGH";
       mockApp.isolateSelection = true;
-      mockApp.selectedPathIds.add(1);
-      mockApp.selectedPathIds.add(2);
+      mockApp.selectedPathIds = new Set([...mockApp.selectedPathIds, 1]);
+      mockApp.selectedPathIds = new Set([...mockApp.selectedPathIds, 2]);
 
       publish(baseData());
       await answered();
@@ -1048,8 +1082,7 @@ describe("DataManager", () => {
       await answered();
       vi.mocked(mockApp.layerManager.syncModes).mockClear();
 
-      mockApp.selectedPathIds.add(1);
-      mockApp.store.notifyMutation("selectedPathIds");
+      mockApp.selectedPathIds = new Set([...mockApp.selectedPathIds, 1]);
       await answered();
 
       expect(mockApp.layerManager.updateSelectionStyles).toHaveBeenCalledTimes(
@@ -1060,15 +1093,14 @@ describe("DataManager", () => {
     });
 
     it("gives the heatmap its points for a selection in share mode, and restyles the paths", async () => {
-      mockApp.selectedPathIds.add(1);
+      mockApp.selectedPathIds = new Set([...mockApp.selectedPathIds, 1]);
       mockApp.isolateSelection = true;
       publish(baseData());
       await answered();
       vi.mocked(mockApp.layerManager.syncModes).mockClear();
 
       // The colour layers keep their runs: isolation is a filter on them
-      mockApp.selectedPathIds.add(2);
-      mockApp.store.notifyMutation("selectedPathIds");
+      mockApp.selectedPathIds = new Set([...mockApp.selectedPathIds, 2]);
       await answered();
 
       expect(drawnHeatPoints()).toEqual(HEAT_POINTS);
@@ -1077,8 +1109,9 @@ describe("DataManager", () => {
       );
 
       // Leaving it, and coming back
-      mockApp.selectedPathIds.delete(1);
-      mockApp.store.notifyMutation("selectedPathIds");
+      mockApp.selectedPathIds = new Set(
+        [...mockApp.selectedPathIds].filter((id) => id !== 1),
+      );
       await answered();
       mockApp.isolateSelection = false;
       // Back to the dataset's own points
@@ -1100,8 +1133,7 @@ describe("DataManager", () => {
         mockApp.selectedYear = "2025";
         mockApp.currentData = baseData();
         mockApp.selectedAircraft = "D-ABCD";
-        mockApp.selectedPathIds.clear();
-        mockApp.store.notifyMutation("selectedPathIds");
+        mockApp.selectedPathIds = new Set();
       });
 
       expect(mockApp.layerManager.syncModes).toHaveBeenCalledTimes(1);
@@ -1340,7 +1372,7 @@ describe("DataManager", () => {
       const answer = held<ReturnType<typeof drawHeat>>();
       decoder.drawHeat.mockReturnValueOnce(answer.promise);
 
-      mockApp.selectedPathIds.add(2);
+      mockApp.selectedPathIds = new Set([...mockApp.selectedPathIds, 2]);
       mockApp.isolateSelection = true;
       await answered();
 
@@ -1372,7 +1404,7 @@ describe("DataManager", () => {
       mockApp.heatmapLayer.setVisible(true);
       mockApp.map!.jumpTo({ zoom: HEAT_LINES.fullZoom });
       const first = held<Blob>();
-      decoder.linesSource.mockReturnValueOnce(first.promise);
+      decoder.heatLines.mockReturnValueOnce(first.promise);
       mockApp.currentData = baseData();
       await answered();
 
@@ -1460,12 +1492,12 @@ describe("DataManager", () => {
       dataManager.updateLayers();
       await answered();
       expect(heatLinesSource().setData).toHaveBeenCalledTimes(1);
-      expect(decoder.linesSource).toHaveBeenCalledOnce();
+      expect(decoder.heatLines).toHaveBeenCalledOnce();
     });
 
     it("are asked for again at the next zoom when the worker failed over them", async () => {
       mockApp.map!.jumpTo({ zoom: HEAT_LINES.fullZoom });
-      decoder.linesSource.mockRejectedValueOnce(new Error("no answer"));
+      decoder.heatLines.mockRejectedValueOnce(new Error("no answer"));
       mockApp.currentData = baseData();
       await answered();
       expect(logError).toHaveBeenCalledWith(
@@ -1477,21 +1509,21 @@ describe("DataManager", () => {
       mockApp.map!.emit("zoomend");
       await answered();
 
-      expect(decoder.linesSource).toHaveBeenCalledTimes(2);
+      expect(decoder.heatLines).toHaveBeenCalledTimes(2);
       expect(heatLinePoints()).toEqual(ALL_FIXES);
     });
 
     it("are not asked for again after a failure over lines asked for before them", async () => {
       mockApp.map!.jumpTo({ zoom: HEAT_LINES.fullZoom });
       let fail!: (error: unknown) => void;
-      decoder.linesSource.mockReturnValueOnce(
+      decoder.heatLines.mockReturnValueOnce(
         new Promise<Blob>((_, no) => (fail = no)),
       );
       mockApp.currentData = baseData();
       await answered();
       mockApp.selectedYear = "2025";
       await answered();
-      expect(decoder.linesSource).toHaveBeenCalledTimes(2);
+      expect(decoder.heatLines).toHaveBeenCalledTimes(2);
 
       fail(new Error("no answer"));
       await answered();
@@ -1499,7 +1531,7 @@ describe("DataManager", () => {
       await answered();
 
       // The lines of the year shown were written, and stay
-      expect(decoder.linesSource).toHaveBeenCalledTimes(2);
+      expect(decoder.heatLines).toHaveBeenCalledTimes(2);
       expect(heatLinesSource().setData).toHaveBeenCalledOnce();
     });
 
@@ -1507,7 +1539,7 @@ describe("DataManager", () => {
       mockApp.map!.jumpTo({ zoom: HEAT_LINES.fullZoom });
       mockApp.currentData = baseData();
       await answered();
-      expect(decoder.linesSource).toHaveBeenCalledOnce();
+      expect(decoder.heatLines).toHaveBeenCalledOnce();
 
       // The heat of a selection isolated
       decoder.drawHeat.mockRejectedValueOnce(new Error("no answer"));
@@ -1521,7 +1553,7 @@ describe("DataManager", () => {
       mockApp.map!.emit("zoomend");
       await answered();
 
-      expect(decoder.linesSource).toHaveBeenCalledOnce();
+      expect(decoder.heatLines).toHaveBeenCalledOnce();
     });
 
     it("are not worked out for a hidden heatmap, and are once it shows", async () => {
@@ -1967,7 +1999,7 @@ describe("DataManager", () => {
 
     it("steps back under the lines of a selection, and only while they show", () => {
       mockApp.currentData = baseData();
-      mockApp.selectedPathIds.add(1);
+      mockApp.selectedPathIds = new Set([...mockApp.selectedPathIds, 1]);
       dataManager.applyHeatmapEmphasis();
       expect(opacity()).toBe(0.35);
 
@@ -1977,7 +2009,7 @@ describe("DataManager", () => {
       expect(opacity()).toBe(1);
 
       mockApp.replayActive = false;
-      mockApp.selectedPathIds.clear();
+      mockApp.selectedPathIds = new Set();
       dataManager.applyHeatmapEmphasis();
       expect(opacity()).toBe(1);
     });

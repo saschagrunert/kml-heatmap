@@ -80,6 +80,7 @@ import {
   DEFAULT_ZOOM,
   HEATMAP_LAYER_IDS,
   INPUT_EVENTS,
+  KEYS_NOT_INPUT,
   MAP_LAYERS,
   MAP_MAX_PITCH,
   MAP_MAX_ZOOM,
@@ -514,17 +515,26 @@ export class MapApp {
     const input = new AbortController();
     if (intro) {
       for (const type of INPUT_EVENTS) {
-        window.addEventListener(type, () => input.abort(), {
-          capture: true,
-          passive: true,
-          signal: input.signal,
-        });
+        window.addEventListener(
+          type,
+          (event) =>
+            KEYS_NOT_INPUT.has((event as KeyboardEvent).key) || input.abort(),
+          { capture: true, passive: true, signal: input.signal },
+        );
       }
       this.signal.addEventListener("abort", () => input.abort(), {
         signal: input.signal,
       });
     }
     restoreState(this);
+    if (intro) {
+      // The sender's flights, not the visitor's: their next visit without a
+      // link opens on their own (StateManager.visiting). Nor does the link
+      // open the statistics the sender had open, which on a phone are a
+      // sheet over the map the intro plays on.
+      this.stateManager.visiting = true;
+      delete this.savedState?.statsPanelVisible;
+    }
     this.setupMap();
     this.initializeManagers();
     setupButtonSync(this);

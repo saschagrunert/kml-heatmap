@@ -12,9 +12,8 @@
  * an explicit Select, as a finger has no hover to look with (see
  * LayerManager.onPathClick).
  */
-import type { Map as MapLibreMap, PaddingOptions, Point } from "maplibre-gl";
+import type { Map as MapLibreMap, PaddingOptions } from "maplibre-gl";
 import type { MapApp } from "../mapApp";
-import { segmentsForPathIds } from "../calculations/statistics";
 import { loadFeatures } from "../services/featureLoader";
 import {
   applyToggleButtonState,
@@ -30,14 +29,14 @@ import {
   shownPathIds,
   shownSelection,
 } from "../calculations/datasetIndex";
-import { fitSelection } from "./filterManager";
-import { NO_SELECTION_MESSAGE } from "./actions";
-import { AUTO_ZOOM_FOLLOW } from "../utils/constants";
-import { domCache } from "../utils/domCache";
+import { segmentsForPathIds } from "../calculations/statistics";
 import { segmentBounds } from "../utils/geometry";
+import { toBounds } from "../utils/mapHelpers";
+import { fitSelection } from "./filterManager";
+import { loadLazyBundle, SHARE_FRAME_UNAVAILABLE_MESSAGE } from "./lazyBundles";
+import { NO_SELECTION_MESSAGE } from "./actions";
+import { domCache } from "../utils/domCache";
 import { pluralFlights } from "../utils/htmlGenerators";
-import { toBounds, unwrapLng } from "../utils/mapHelpers";
-import { prefersReducedMotion } from "../utils/motion";
 import { safeAreaInsets } from "../utils/safeArea";
 import { announceStatus, showToast } from "../utils/toast";
 
@@ -77,15 +76,6 @@ const EDGE_REACH_PX = 128;
 
 /** Room kept between the framed flights and the edge or a panel (px) */
 const FRAME_MARGIN_PX = 24;
-
-/**
- * How much of the map between the panels a flight picked on its own spans
- * at least, across or down, for the view to stay where it is
- */
-const SEEN_SPAN = 0.25;
-
-/** Time the view takes to frame the shared flights (ms) */
-const FRAME_MS = 800;
 
 type Edge = "top" | "right" | "bottom" | "left";
 
@@ -242,10 +232,20 @@ export class PathSelection {
    */
   togglePathSelection(pathId: number): void {
     if (this.held()) return;
-    const selected = this.app.selectedPathIds;
+    const selected = new Set(this.app.selectedPathIds);
+    if (!selected.delete(pathId)) selected.add(pathId);
+    this.select(selected);
+  }
+
+  /**
+   * Make `selected` the selection: a new set for every change, never the
+   * one of before changed, so that whoever holds that one holds what was
+   * selected then. Share mode may end with it (AppStore.settle), in the
+   * same update.
+   */
+  private select(selected: ReadonlySet<number>): void {
     this.app.store.batch(() => {
-      if (!selected.delete(pathId)) selected.add(pathId);
-      this.app.store.notifyMutation("selectedPathIds");
+      this.app.selectedPathIds = selected;
     });
   }
 
@@ -331,15 +331,24 @@ export class PathSelection {
       if (event.originalEvent) moved = true;
     };
     map.on("movestart", onMoveStart);
-    void loadFeatures()
-      .then(afterLayout)
-      .then(() => {
-        map.off("movestart", onMoveStart);
-        // Unless the selection moved on while the bundle loaded
-        const wanted = app.selectedPathIds.has(pathId) && still();
-        if (wanted && !moved && !app.mapHeld)
-          this.frame(new Set([pathId]), true);
-      });
+    void loadFeatures().then(async (features) => {
+      await afterLayout();
+      map.off("movestart", onMoveStart);
+      // Unless the selection moved on while the bundle loaded
+      const wanted = app.selectedPathIds.has(pathId) && still();
+      if (!wanted || moved || app.mapHeld) return;
+      if (features) {
+        features.frameFlights(app, new Set([pathId]), true);
+        return;
+      }
+      // Without the bundle, a fit of its bounds as the map is flat
+      const data = app.currentData;
+      const segments = data && segmentsForPathIds(data.path_segments, [pathId]);
+      const bounds = segments && segmentBounds(segments);
+      if (bounds) {
+        map.fitBounds(toBounds(bounds), { padding: mapChromePadding(map) });
+      }
+    });
   }
 
   /**
@@ -388,15 +397,12 @@ export class PathSelection {
 
   /** Put the flights of a Shift range in the selection, or all of them out */
   private setRange(pathIds: readonly number[], on: boolean): void {
-    const selected = this.app.selectedPathIds;
+    const selected = new Set(this.app.selectedPathIds);
     for (const id of pathIds) {
       if (on) selected.add(id);
       else selected.delete(id);
     }
-    // In one update with the end of share mode it may bring
-    this.app.store.batch(() =>
-      this.app.store.notifyMutation("selectedPathIds"),
-    );
+    this.select(selected);
   }
 
   /**
@@ -417,10 +423,7 @@ export class PathSelection {
     if (this.held()) return;
     const pathIds = this.app.airportToPaths[airportName];
     if (pathIds) {
-      pathIds.forEach((pathId) => {
-        this.app.selectedPathIds.add(pathId);
-      });
-      this.app.store.notifyMutation("selectedPathIds");
+      this.select(new Set([...this.app.selectedPathIds, ...pathIds]));
     }
   }
 
@@ -434,10 +437,7 @@ export class PathSelection {
   clearSelection(): void {
     if (this.held()) return;
     // Share mode goes with what it shared (AppStore.settle), in one update
-    this.app.store.batch(() => {
-      this.app.selectedPathIds.clear();
-      this.app.store.notifyMutation("selectedPathIds");
-    });
+    this.select(new Set());
   }
 
   /** Share the selection, or leave share mode and keep the flights */
@@ -458,64 +458,15 @@ export class PathSelection {
       // under a chip that counted them, with nothing drawn
       if (!sharing && app.currentData) fitSelection(app, app.currentData);
     });
-    // What is drawn of them: one the filter hides would widen the frame
-    if (sharing) this.frame(shownSelection(app));
-  }
-
-  /**
-   * Bring flights into view, the selected ones or one of them, clear of
-   * the panels: shared, they are all the map shows, and one could stay
-   * half off the screen or under the chip that says it is selected. The
-   * map keeps its bearing.
-   * With `unlessInView` the map stays where it is when every point of them
-   * is on it and clear of the panels already, and they span a quarter of
-   * the map between the panels either way: a circuit round the home field
-   * was a speck in the middle of the heat, and on a phone none at all. No
-   * closer than a replay follows a flight: a few fixes on a field were
-   * framed at the map's deepest zoom.
-   */
-  private frame(pathIds: ReadonlySet<number>, unlessInView = false): void {
-    const map = this.app.map;
-    const data = this.app.currentData;
-    if (!map || !data) return;
-    const segments = segmentsForPathIds(data.path_segments, pathIds);
-    const bounds = segmentBounds(segments);
-    if (!bounds) return;
-    const padding = mapChromePadding(map);
-    if (unlessInView) {
-      const { width, height } = map.getContainer().getBoundingClientRect();
-      // Each point on the world copy the map shows: across the
-      // antimeridian the other side of a flight is a world away otherwise
-      const centre = map.getCenter().lng;
-      const clear = segments.every((segment) =>
-        segment.coords.every(([lat, lng]) => {
-          const { x, y } = map.project([unwrapLng(lng, centre), lat]);
-          return (
-            x >= padding.left &&
-            x <= width - padding.right &&
-            y >= padding.top &&
-            y <= height - padding.bottom
-          );
-        }),
+    // What is drawn of them, tilted as the map is (ui/frameFlights.ts):
+    // one the filter hides would widen the frame
+    if (sharing) {
+      void loadLazyBundle(loadFeatures, SHARE_FRAME_UNAVAILABLE_MESSAGE).then(
+        (features) =>
+          app.isolateSelection &&
+          features?.frameFlights(app, shownSelection(app)),
       );
-      // How far apart the corners of their bounds are on the map
-      const [a, b] = toBounds(bounds).map((corner) => map.project(corner)) as [
-        Point,
-        Point,
-      ];
-      const seen = Math.max(
-        Math.abs(b.x - a.x) / (width - padding.left - padding.right),
-        Math.abs(b.y - a.y) / (height - padding.top - padding.bottom),
-      );
-      if (clear && seen > SEEN_SPAN) return;
     }
-    map.fitBounds(toBounds(bounds), {
-      padding,
-      maxZoom: AUTO_ZOOM_FOLLOW,
-      bearing: map.getBearing(),
-      duration: FRAME_MS,
-      animate: !prefersReducedMotion(),
-    });
   }
 
   /**

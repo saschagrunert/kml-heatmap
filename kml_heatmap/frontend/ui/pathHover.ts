@@ -37,7 +37,7 @@ import {
   type LatLon,
   type LngLatTuple,
 } from "../utils/mapHelpers";
-import { flatCurves } from "../calculations/curves";
+import { flightCurves } from "../calculations/curves";
 import { findNearestOnCurve, findNearestSegment } from "../features/layers";
 
 /** The look the hover tooltip and the tapped popup share (styles.css) */
@@ -417,23 +417,26 @@ export class PathHover {
     const lift = liftOf ? liftOf(map, properties) : 0;
     const ground = lift ? map.unproject([point.x, point.y + lift]) : pointer;
     // A line is drawn along its flight's curve, and its points belong to
-    // the segment they lie on (see calculations/curves.ts)
-    const onCurve = ribbon
-      ? null
-      : findNearestOnCurve(
-          flatCurves(drawn.segments),
-          run.start,
-          run.end,
-          ground.lat,
-          ground.lng,
-        );
-    const segment = onCurve
-      ? drawn.segments[onCurve.index]
-      : findNearestSegment(
-          drawn.segments.slice(run.start, run.end),
-          ground.lat,
-          ground.lng,
-        );
+    // the segment they lie on (see calculations/curves.ts); only the
+    // flight under the pointer is smoothed for it
+    const flight = ribbon ? null : flightCurves(drawn.segments, run.pathId);
+    const onCurve =
+      flight &&
+      findNearestOnCurve(
+        flight.curves,
+        run.start - flight.from,
+        run.end - flight.from,
+        ground.lat,
+        ground.lng,
+      );
+    const segment =
+      flight && onCurve
+        ? drawn.segments[onCurve.index + flight.from]
+        : findNearestSegment(
+            drawn.segments.slice(run.start, run.end),
+            ground.lat,
+            ground.lng,
+          );
     if (!segment) return null;
     const distance = pixelDistance(
       map,

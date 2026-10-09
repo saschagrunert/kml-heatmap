@@ -18,6 +18,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "CACHE_DIR",
+    "PRIVATE_FILE_MODE",
     "REGULAR_FILE_MODE",
     "atomic_bytes_write",
     "atomic_data_write",
@@ -47,6 +48,36 @@ def _is_private_directory(path: Path, uid: int) -> bool:
         not stat.S_ISDIR(status.st_mode)
         or status.st_uid != uid
         or status.st_mode & (stat.S_IWGRP | stat.S_IWOTH)
+    ):
+        return False
+    if stat.S_IMODE(status.st_mode) & 0o077:
+        try:
+            path.chmod(0o700)
+        except OSError:
+            return False
+    return True
+
+
+def private_directory(path: Path) -> bool:
+    """Create ``path`` for this user alone, or make one of this user's so.
+
+    For a directory of the raw flights, the parse cache: created with mode
+    0700 (as is the directory above it, when that is missing too), and one
+    of this user's that others may read, enter or write to (0755, as a
+    umask of 022 or an older version left it) is made 0700. One that is no
+    directory of this user's own (a symlink, another user's) is not used:
+    whoever owns it could read the flights or put parse results of their
+    own into it.
+    """
+    try:
+        path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        path.mkdir(mode=0o700, exist_ok=True)
+        status = path.lstat()
+    except OSError:
+        return False
+    getuid = getattr(os, "getuid", None)
+    if not stat.S_ISDIR(status.st_mode) or (
+        getuid is not None and status.st_uid != getuid()
     ):
         return False
     if stat.S_IMODE(status.st_mode) & 0o077:
@@ -138,6 +169,8 @@ def _regular_file_mode() -> int:
 
 
 REGULAR_FILE_MODE = _regular_file_mode()
+# The mode of a file of the raw flights, which nobody else may read
+PRIVATE_FILE_MODE = 0o600
 
 
 def _fsync_directory(directory: Path) -> None:
@@ -162,6 +195,7 @@ def _replace_through_temp(
     newline: str | None = None,
     durable: bool = False,
     keep_mode: bool = False,
+    mode: int | None = None,
 ) -> None:
     """Write ``path`` through a temp file in the same directory, see atomic_write."""
     tmp_path: str | None = None
@@ -183,7 +217,7 @@ def _replace_through_temp(
         if keep_mode:
             shutil.copymode(path, tmp_path)
         else:
-            os.chmod(tmp_path, REGULAR_FILE_MODE)
+            os.chmod(tmp_path, REGULAR_FILE_MODE if mode is None else mode)
         os.replace(tmp_path, path)
         tmp_path = None
     finally:
@@ -227,9 +261,12 @@ def atomic_write(
     )
 
 
-def atomic_bytes_write(path: Path, data: bytes) -> None:
-    """Write ``data`` to ``path`` atomically, like ``atomic_write`` does text."""
-    _replace_through_temp(path, lambda tmp: tmp.write(data), binary=True)
+def atomic_bytes_write(path: Path, data: bytes, *, mode: int | None = None) -> None:
+    """Write ``data`` to ``path`` atomically, like ``atomic_write`` does text.
+
+    ``mode`` is the mode of the finished file, the regular one by default.
+    """
+    _replace_through_temp(path, lambda tmp: tmp.write(data), binary=True, mode=mode)
 
 
 def atomic_text_write(path: Path, content: str) -> None:

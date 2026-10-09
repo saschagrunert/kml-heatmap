@@ -7,13 +7,16 @@
  * the heat cloud and the selection ribbons of the 3D view, the satellite
  * imagery, the profile of the selected flights, the cross-section and
  * the hotspot tour, wrapped.ts (wrapped.bundle.js) for Wrapped and the
- * statistics panel, and search.ts (search.bundle.js) for the search of
- * airports and places. They are apart because opening one says nothing
- * about the others. Each gets one shared promise, and a failure that
- * resolves rather than throws so the caller can say something useful.
+ * statistics panel, search.ts (search.bundle.js) for the search of
+ * airports and places, and extras.ts (extras.bundle.js) for what only a
+ * tap on a control needs: the phone's sheet and the export of the map as
+ * an image. They are apart because opening one says nothing about the
+ * others. Each gets one shared promise, and a failure that resolves rather
+ * than throws so the caller can say something useful.
  *
  * Their styles ride along in features.css, wrapped.css and search.css for
- * the same reason (see the header of static/styles.css). A bundle and its
+ * the same reason (see the header of static/styles.css); the extras come
+ * without, as the phone's bar is drawn before its sheet. A bundle and its
  * stylesheet have to arrive before a panel is shown, so they are fetched
  * together and a failure of either is a failure of the load: a Wrapped
  * panel without its stylesheet is worse than the toast.
@@ -35,6 +38,7 @@ import { showToast } from "../utils/toast";
 import type { FeatureModule } from "../features";
 import type { WrappedModule } from "../wrapped";
 import type { SearchModule } from "../search";
+import type { ExtrasModule } from "../extras";
 
 /** Next to the page, like every other file the site ships */
 export const FEATURES_CSS_URL = "./features.css";
@@ -104,6 +108,13 @@ const importSearch: Importer<SearchModule> = (failedImports) =>
     failedImports,
   );
 
+const importExtras: Importer<ExtrasModule> = (failedImports) =>
+  importWithRetry(
+    () => import("../extras"),
+    versioned("./extras.bundle.js"),
+    failedImports,
+  );
+
 /** One lazy bundle: its loader and what tests use to start it over */
 interface LazyBundle<T> {
   load(): Promise<T | null>;
@@ -119,7 +130,7 @@ interface LazyBundle<T> {
  */
 function lazyBundle<T extends { BUILD?: string | undefined }>(
   name: string,
-  cssUrl: string,
+  cssUrl: string | null,
   importer: Importer<T>,
 ): LazyBundle<T> {
   // An import cannot be aborted, so a stalled one is only given up on:
@@ -144,7 +155,7 @@ function lazyBundle<T extends { BUILD?: string | undefined }>(
       if (stale) return Promise.resolve(noticeSiteUpdate());
       if (pending) return pending;
 
-      pending = Promise.all([importBundle(), loadStylesheet(cssUrl)])
+      pending = Promise.all([importBundle(), cssUrl && loadStylesheet(cssUrl)])
         .then(([module]) => {
           // No build in the tests and the sources, where nothing is mixed
           if (typeof __BUILD__ === "string" && module.BUILD !== __BUILD__) {
@@ -177,6 +188,7 @@ function lazyBundle<T extends { BUILD?: string | undefined }>(
 const features = lazyBundle("feature", FEATURES_CSS_URL, importFeatures);
 const wrapped = lazyBundle("Wrapped", WRAPPED_CSS_URL, importWrapped);
 const search = lazyBundle("search", SEARCH_CSS_URL, importSearch);
+const extras = lazyBundle("extras", null, importExtras);
 
 /** The feature bundle's exports, or null when it could not be loaded */
 export function loadFeatures(): Promise<FeatureModule | null> {
@@ -201,6 +213,16 @@ export function loadSearch(): Promise<SearchModule | null> {
   return search.load();
 }
 
+/** The extras bundle's exports, or null when it could not be loaded */
+export function loadExtras(): Promise<ExtrasModule | null> {
+  return extras.load();
+}
+
+/** The extras bundle's exports if they have arrived, or null */
+export function loadedExtras(): ExtrasModule | null {
+  return extras.loaded();
+}
+
 /** Forget the cached request and replace the import (used by tests) */
 export function resetFeatureLoader(importer: Importer<FeatureModule>): void {
   features.reset(importer);
@@ -214,4 +236,9 @@ export function resetWrappedLoader(importer: Importer<WrappedModule>): void {
 /** Forget the cached request and replace the import (used by tests) */
 export function resetSearchLoader(importer: Importer<SearchModule>): void {
   search.reset(importer);
+}
+
+/** Forget the cached request and replace the import (used by tests) */
+export function resetExtrasLoader(importer: Importer<ExtrasModule>): void {
+  extras.reset(importer);
 }

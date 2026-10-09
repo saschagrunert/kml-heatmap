@@ -22,7 +22,7 @@ import {
   stripControlStyles,
   stripSourceMapComment,
 } from "../../../scripts/vendor.js";
-import { HTML_TO_IMAGE_URL } from "../../../kml_heatmap/frontend/ui/uiToggles";
+import { HTML_TO_IMAGE_URL } from "../../../kml_heatmap/frontend/ui/mapExport";
 
 const REPO_ROOT = join(__dirname, "../../..");
 const VENDOR_DIR = join(REPO_ROOT, "kml_heatmap/static/vendor");

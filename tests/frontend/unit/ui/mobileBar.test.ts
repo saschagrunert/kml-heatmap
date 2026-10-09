@@ -1,7 +1,15 @@
 /**
  * MobileBar: mounting rules, the five tabs and the sheets they open.
  */
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import {
+  describe,
+  it,
+  expect,
+  beforeAll,
+  beforeEach,
+  afterEach,
+  vi,
+} from "vitest";
 import type { MapApp } from "../../../../kml_heatmap/frontend/mapApp";
 import type { KMLDataset } from "../../../../kml_heatmap/frontend/types";
 import {
@@ -9,7 +17,14 @@ import {
   defineStoreAccessors,
   type StoreAccessors,
 } from "../../../../kml_heatmap/frontend/state/store";
-import { MobileBar } from "../../../../kml_heatmap/frontend/ui/mobileBar";
+import {
+  MobileBar,
+  SHEET_UNAVAILABLE_MESSAGE,
+} from "../../../../kml_heatmap/frontend/ui/mobileBar";
+import {
+  loadExtras,
+  resetExtrasLoader,
+} from "../../../../kml_heatmap/frontend/services/featureLoader";
 import { REPLAY_PRECONDITION_MESSAGE } from "../../../../kml_heatmap/frontend/ui/replayButton";
 import { NO_DATA_MESSAGE } from "../../../../kml_heatmap/frontend/ui/actions";
 import { MOBILE_BREAKPOINT_PX } from "../../../../kml_heatmap/frontend/utils/constants";
@@ -163,9 +178,18 @@ function dismissSheet(): void {
   document.querySelector<HTMLButtonElement>(".sheet-close")!.click();
 }
 
+/** The import of the extras bundle, as the app makes it */
+const importExtras = () => import("../../../../kml_heatmap/frontend/extras");
+
 describe("MobileBar", () => {
   let app: BarMockApp;
   let bar: MobileBar | null;
+
+  // The sheet comes with the extras bundle; here it has arrived before the
+  // bar mounts, as on a phone that fetched it while the page loaded
+  beforeAll(async () => {
+    expect(await loadExtras()).not.toBeNull();
+  });
 
   const create = (): MobileBar => {
     const created = MobileBar.mountFor(app as unknown as MapApp);
@@ -314,6 +338,72 @@ describe("MobileBar", () => {
     });
   });
 
+  describe("the sheet's code", () => {
+    /** An import of the extras bundle that answers when `arrive` is called */
+    function holdExtras(): () => void {
+      let arrive = (): void => {};
+      resetExtrasLoader(
+        () =>
+          new Promise((resolve, reject) => {
+            arrive = () => void importExtras().then(resolve, reject);
+          }),
+      );
+      return () => arrive();
+    }
+
+    afterEach(async () => {
+      resetExtrasLoader(importExtras);
+      await loadExtras();
+    });
+
+    it("opens the sheet a tab was tapped for once it has arrived", async () => {
+      const arrive = holdExtras();
+      create();
+      expect(document.querySelector(".mobile-sheet")).toBeNull();
+      // Naming no sheet while there is none in the page
+      expect(tab("layers").hasAttribute("aria-controls")).toBe(false);
+
+      tab("layers").click();
+      // Marked open at once: a second tap closes it
+      expect(tab("layers").classList.contains("active")).toBe(true);
+      arrive();
+
+      await vi.waitFor(() => expect(sheetTitle()).toBe("Layers"));
+      expect(bar!.sheetOpen()).toBe(true);
+      expect(tab("layers").getAttribute("aria-controls")).toBe("mobile-sheet");
+      expect(document.getElementById("mobile-sheet")).not.toBeNull();
+    });
+
+    it("opens nothing for a tab tapped again meanwhile", async () => {
+      const arrive = holdExtras();
+      create();
+
+      tab("filter").click();
+      tab("filter").click();
+      expect(tab("filter").classList.contains("active")).toBe(false);
+      arrive();
+
+      await vi.waitFor(() =>
+        expect(document.querySelector(".mobile-sheet")).not.toBeNull(),
+      );
+      expect(bar!.sheetOpen()).toBe(false);
+    });
+
+    it("says so and closes the tab when it cannot be fetched", async () => {
+      resetExtrasLoader(() => Promise.reject(new Error("offline")));
+      create();
+
+      tab("more").click();
+
+      await vi.waitFor(() =>
+        expect(document.querySelector(".toast-notification")?.textContent).toBe(
+          SHEET_UNAVAILABLE_MESSAGE,
+        ),
+      );
+      expect(tab("more").classList.contains("active")).toBe(false);
+    });
+  });
+
   describe("tabs", () => {
     beforeEach(() => {
       create();
@@ -331,6 +421,22 @@ describe("MobileBar", () => {
       expect(
         tabs[0]!.querySelector(":scope > svg.icon")!.getAttribute("width"),
       ).toBe("24");
+    });
+
+    it("says the year the map shows on the Filter tab", () => {
+      const label = (): string =>
+        tab("filter").querySelector(".mobile-tab-label")!.textContent;
+      expect(label()).toBe("Filter");
+      expect(tab("filter").getAttribute("aria-label")).toBe("Filter");
+
+      app.selectedYear = "2025";
+
+      expect(label()).toBe("2025");
+      expect(tab("filter").getAttribute("aria-label")).toBe("Filter, 2025");
+
+      app.selectedYear = "all";
+
+      expect(label()).toBe("Filter");
     });
 
     it("marks sheet tabs as dialog openers", () => {
@@ -410,23 +516,23 @@ describe("MobileBar", () => {
 
     it("closes an open sheet before opening the statistics", () => {
       tab("filter").click();
-      expect(bar!.sheet.isOpen()).toBe(true);
+      expect(bar!.sheetOpen()).toBe(true);
 
       tab("stats").click();
 
       // The statistics sheet sits below the scrim and would open underneath
-      expect(bar!.sheet.isOpen()).toBe(false);
+      expect(bar!.sheetOpen()).toBe(false);
       expect(tab("filter").classList.contains("active")).toBe(false);
       expect(app.store.get("statsPanelVisible")).toBe(true);
     });
 
     it("closes an open sheet before opening Wrapped", async () => {
       tab("layers").click();
-      expect(bar!.sheet.isOpen()).toBe(true);
+      expect(bar!.sheetOpen()).toBe(true);
 
       tab("wrapped").click();
 
-      expect(bar!.sheet.isOpen()).toBe(false);
+      expect(bar!.sheetOpen()).toBe(false);
       expect(tab("layers").classList.contains("active")).toBe(false);
       await vi.waitFor(() =>
         expect(app.wrappedManager.showWrapped).toHaveBeenCalledTimes(1),
@@ -820,7 +926,7 @@ describe("MobileBar", () => {
       // Reset view here used to switch the year under the load that was
       // still running, and the map ended on another year than the dropdown
       app.isInitializing = true;
-      app.selectedPathIds.add(1);
+      app.selectedPathIds = new Set([...app.selectedPathIds, 1]);
       dismissSheet();
       tab("more").click();
 

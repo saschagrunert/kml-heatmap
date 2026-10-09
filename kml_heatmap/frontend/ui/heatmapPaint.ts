@@ -17,7 +17,7 @@ import {
   MAP_LAYERS,
   MAP_MAX_ZOOM,
 } from "../utils/constants";
-import { heatTone } from "../calculations/heatTone";
+import { HEAT_LINE_FLIGHT_SECONDS } from "../calculations/heatTone";
 import {
   HEAT_FLIGHT_DENSITY,
   HEATMAP_REFERENCE_INTENSITY,
@@ -106,14 +106,6 @@ export const HEATMAP_GRADIENT: readonly (readonly [number, string, number])[] =
   ];
 
 /**
- * The seconds around a stretch (see calculations/heatLines.ts) a lone pass
- * is drawn with: the time between two fixes, about 5 s, which the lines
- * round to a power of two. The heat lines' flight's worth, as
- * HEAT_FLIGHT_DENSITY is the heatmap's.
- */
-const HEAT_LINE_FLIGHT_SECONDS = 4;
-
-/**
  * The heat lines the heatmap hands over to (see HEAT_LINES) speak its
  * colours: each stop of the gradient above, from the faintest on, stands
  * for the seconds spent around a stretch that as many flights' worth leave
@@ -126,17 +118,6 @@ const HEAT_LINE_SECONDS = HEATMAP_GRADIENT.slice(1).map(
   ([density]) => (HEAT_LINE_FLIGHT_SECONDS * density) / HEAT_FLIGHT_DENSITY,
 );
 
-/**
- * The seconds around a stretch of the heat lines, as drawn, rolled off as
- * the heatmap rolls off its heat (see heatTone): counted in flights' worth
- * of HEAT_LINE_FLIGHT_SECONDS each, so the busiest circuits and taxiways
- * keep the colours the heatmap gave them across the hand-over
- */
-export function heatLineTone(seconds: number): number {
-  return (
-    HEAT_LINE_FLIGHT_SECONDS * heatTone(seconds / HEAT_LINE_FLIGHT_SECONDS)
-  );
-}
 /**
  * The lines are drawn as a wide blurred glow and a thin core over it, both
  * in the colour of their heat; the core is fainter where less time was

@@ -1,9 +1,12 @@
 """Tests for duplicates module."""
 
 import logging
-from math import floor
+import random
+from itertools import pairwise
+from math import cos, floor, hypot, radians
 from typing import Any, ClassVar, cast
 
+import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
@@ -13,6 +16,8 @@ from kml_heatmap.duplicates import (
     _SHIFT_TOLERANCE_S,
     _clock_known,
     _clock_shifts,
+    _clocks_may_line_up,
+    _one_flight,
     _Timed,
     drop_overlapping_paths,
     same_flight,
@@ -35,6 +40,42 @@ def _recording(start_s, seconds, step_s=10.0, lat=50.0, lon=8.0, lon_per_s=SPEED
         TrackPoint(lat, lon + lon_per_s * i * step_s, 500.0, start_s + i * step_s)
         for i in range(count)
     ]
+
+
+def _circuit(start_s, laps, wide_m=0.0, seed=1):
+    """Circuits at a field at 50 degrees north, 4 by 1.5 km at 40 m/s, a
+    fix every 5 s some 8 m off, standing a minute before and after."""
+    noise = random.Random(seed)  # noqa: S311 - noise, not secrets
+    points = []
+    t = start_s
+
+    def fix(x, y):
+        nonlocal t
+        lat = 50.0 + (y + noise.gauss(0, 8)) / 111320
+        lon = 8.0 + (x + noise.gauss(0, 8)) / (111320 * cos(radians(50.0)))
+        points.append(TrackPoint(lat, lon, 300.0, t))
+        t += 5.0
+
+    for _ in range(12):
+        fix(0.0, 0.0)
+    corners = [(0, 0), (4000, 0), (4000, 1500 + wide_m), (-1500, 1500 + wide_m)]
+    corners += [(-1500, 0), (0, 0)]
+    for _ in range(laps):
+        for (x1, y1), (x2, y2) in pairwise(corners):
+            steps = int(hypot(x2 - x1, y2 - y1) / 200)
+            for i in range(steps):
+                fix(x1 + (x2 - x1) * i / steps, y1 + (y2 - y1) * i / steps)
+    for _ in range(12):
+        fix(0.0, 0.0)
+    return points
+
+
+def _with_ground(path, seconds=120.0):
+    """``path`` after standing where it starts for ``seconds``."""
+    first = path[0]
+    return [
+        first._replace(ts=first.ts - seconds + t) for t in range(0, int(seconds), 10)
+    ] + path
 
 
 def _drop(paths, names=None):
@@ -106,6 +147,141 @@ class TestDropOverlappingPaths:
             for path in (today, tomorrow)
         ]
         assert _drop(obfuscated) == {2025: [0]}
+
+    @pytest.mark.parametrize("offset", [5.0, 10.0, 18.0, -30.0, 3600.0, -7200.0])
+    def test_real_clocks_that_are_off_count_once(self, offset):
+        """A phone on its own clock, a logger on GPS time (18 s ahead of
+        UTC), or one that writes the local time as UTC."""
+        start = JUNE_2025 + 1000.0
+        coarse = _with_ground(_recording(start, 3600.0, step_s=10.0))
+        fine = _with_ground(
+            [
+                p._replace(lon=8.0 + SPEED * (p.ts - start), ts=p.ts + offset)
+                for p in _recording(start + 60.0, 3500.0, step_s=3.0, lat=50.0001)
+            ]
+        )
+        assert _drop([coarse, fine]) == {2025: [1]}
+        assert _drop([fine, coarse]) == {2025: [0]}
+
+    def test_real_clocks_are_off_by_whole_half_hours_only(self):
+        """Two flights alike in the air, 1000 s apart: no two clocks are off
+        by that, so they are two flights."""
+        start = JUNE_2025 + 1000.0
+        first = _with_ground(_recording(start, 3600.0))
+        later = _with_ground(_recording(start + 1000.0, 3600.0, lat=50.0001))
+        assert _drop([first, later]) == {2025: [0, 1]}
+
+    def test_real_clocks_further_apart_than_any_two_are_off_are_two(self):
+        start = JUNE_2025 + 1000.0
+        first = _Timed.of(_with_ground(_recording(start, 3600.0)))
+        later = _Timed.of(_with_ground(_recording(start + 86400.0, 3600.0)))
+        assert first is not None
+        assert later is not None
+        assert not _one_flight(first, later)
+        assert not _one_flight(later, first)
+
+    def test_two_flights_of_one_day_on_real_clocks_are_two(self):
+        """The same way twice in a day, a little off the first time."""
+        start = JUNE_2025 + 1000.0
+        morning = _with_ground(_recording(start, 3600.0))
+        afternoon = _with_ground(_recording(start + 3 * 3600.0, 3600.0, lat=50.003))
+        back = _with_ground(
+            [
+                p._replace(lon=8.0 + SPEED * 3600.0 - SPEED * (p.ts - start - 7200.0))
+                for p in _recording(start + 7200.0, 3600.0)
+            ]
+        )
+        assert _drop([morning, afternoon, back]) == {2025: [0, 1, 2]}
+
+    def test_circuit_flights_an_hour_apart_with_other_laps_are_two(self):
+        """Lined up at the hour, a lap is where a lap was: they did not take
+        off and land together, though."""
+        one = _circuit(JUNE_2025 + 36000.0, laps=1)
+        two = _circuit(JUNE_2025 + 36000.0 + 3620.0, laps=2, wide_m=60.0, seed=2)
+        assert _drop([one, two]) == {2025: [0, 1]}
+
+    def test_the_circuits_of_a_session_are_as_many_flights(self):
+        """A logger that ends a flight at each landing: the circuits are
+        alike and close to a half hour apart, two or four of them on."""
+        laps = []
+        start = JUNE_2025 + 36000.0
+        for k, wide in enumerate([0.0, 40.0, 70.0, 20.0, 50.0, 10.0]):
+            lap = _circuit(start, laps=1, wide_m=wide, seed=10 + k)[12:-12]
+            laps.append(lap)
+            start = lap[-1].ts + 65.0
+        everything = {2025: list(range(6))}
+        # One file, one clock
+        assert _drop(laps, ["session.kml"] * 6) == everything
+        # A file each
+        assert _drop(laps) == everything
+
+    def test_files_of_one_name_in_two_folders_are_two_clocks(self):
+        """Two loggers, their files named alike in folders of their own, one
+        writing the local time as UTC: one flight, an hour apart."""
+        start = JUNE_2025 + 1000.0
+        coarse = _with_ground(_recording(start, 3600.0, step_s=10.0))
+        fine = _with_ground(
+            [
+                p._replace(lon=8.0 + SPEED * (p.ts - start), ts=p.ts + 3600.0)
+                for p in _recording(start + 60.0, 3500.0, step_s=3.0, lat=50.0001)
+            ]
+        )
+        exported = {0: b"", 1: b"", 2: b""}
+        metadata: Any = [
+            {"filename": "1_DEHYL_DA40.kml", "source": "phone/1_DEHYL_DA40.kml"},
+            {"filename": "1_DEHYL_DA40.kml", "source": "logger/1_DEHYL_DA40.kml"},
+        ]
+        assert drop_overlapping_paths(
+            {2025: [0, 1]}, [coarse, fine], metadata, exported
+        ) == {2025: [1]}
+        # Of one file, one clock: not lined up by the hour
+        for entry in metadata:
+            entry["source"] = "1_DEHYL_DA40.kml"
+        assert drop_overlapping_paths(
+            {2025: [0, 1]}, [coarse, fine], metadata, exported
+        ) == {2025: [0, 1]}
+
+    def test_two_aircraft_on_one_circuit_an_hour_apart_are_two(self):
+        """Lined up at the hour, two aircraft flying the same circuits look
+        like one flight on two clocks; the registrations tell them apart."""
+        first = _circuit(JUNE_2025 + 36000.0, laps=3, seed=1)
+        second = _circuit(JUNE_2025 + 36000.0 + 3600.0, laps=3, seed=2)
+        metadata: Any = [
+            {"filename": "1_DEABC_C172.kml", "aircraft_registration": "D-EABC"},
+            {"filename": "2_DEXYZ_C172.kml", "aircraft_registration": "D-EXYZ"},
+        ]
+        exported = {0: b"", 1: b""}
+        paths = [first, second]
+        assert drop_overlapping_paths({2025: [0, 1]}, paths, metadata, exported) == {
+            2025: [0, 1]
+        }
+        # Obfuscated, lined up by where they flew: two aircraft still
+        obfuscated = [
+            [p._replace(ts=p.ts - path[0].ts) for p in path] for path in paths
+        ]
+        assert drop_overlapping_paths(
+            {2025: [0, 1]}, obfuscated, metadata, exported
+        ) == {2025: [0, 1]}
+
+    def test_two_aircraft_in_formation_are_two(self):
+        """Two aircraft flying in formation on real clocks, a few tens of
+        metres apart, are as close as one flight on two loggers; the
+        registrations keep them two."""
+        lead = _recording(JUNE_2025, 1800.0, step_s=5.0)
+        wing = _recording(JUNE_2025, 1800.0, step_s=5.0, lat=50.0003)
+        metadata: Any = [
+            {"filename": "1_DEABC_C172.kml", "aircraft_registration": "D-EABC"},
+            {"filename": "2_DEXYZ_C172.kml", "aircraft_registration": "D-EXYZ"},
+        ]
+        exported = {0: b"", 1: b""}
+        assert drop_overlapping_paths(
+            {2025: [0, 1]}, [lead, wing], metadata, exported
+        ) == {2025: [0, 1]}
+        # One registration, or none named: one flight on two loggers
+        metadata[1]["aircraft_registration"] = "D-EABC"
+        assert drop_overlapping_paths(
+            {2025: [0, 1]}, [lead, wing], metadata, exported
+        ) == {2025: [0]}
 
     def test_flights_that_share_the_ground_only_are_two(self):
         """Obfuscated flights from one field, standing at the same place for
@@ -392,3 +568,36 @@ class TestAntimeridian:
             ]
         )
         assert _drop([out, north]) == {2025: [0, 1]}
+
+
+class TestClocksMayLineUp:
+    """Two real clocks are lined up only where the times they moved allow
+    a shift that real clocks are off by (see _real_clock_shift)."""
+
+    @staticmethod
+    def _moved(start_s, seconds=1800.0):
+        timed = _Timed.of(_recording(start_s, seconds))
+        assert timed is not None
+        return timed
+
+    def test_at_about_one_time(self):
+        shorter = self._moved(JUNE_2025, 1200.0)
+        assert _clocks_may_line_up(shorter, self._moved(JUNE_2025 + 600.0), False)
+        # A minute apart at most, also of one file
+        assert _clocks_may_line_up(shorter, self._moved(JUNE_2025 + 1250.0), True)
+
+    @pytest.mark.parametrize("offset", [3600.0, 3610.0, -7200.0, 1800.0])
+    def test_whole_half_hours_apart_of_two_files(self, offset):
+        shorter = self._moved(JUNE_2025, 600.0)
+        longer = self._moved(JUNE_2025 + offset, 1200.0)
+        assert _clocks_may_line_up(shorter, longer, False)
+        # Of one file, one clock: never lined up by the half hour
+        assert not _clocks_may_line_up(shorter, longer, True)
+
+    @pytest.mark.parametrize("offset", [2700.0, 5000.0, -3000.0])
+    def test_not_at_a_half_hour(self, offset):
+        """Two flights of one day that took off at other times"""
+        shorter = self._moved(JUNE_2025, 600.0)
+        assert not _clocks_may_line_up(
+            shorter, self._moved(JUNE_2025 + offset, 1200.0), False
+        )

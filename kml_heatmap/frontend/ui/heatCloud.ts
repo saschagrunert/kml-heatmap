@@ -13,9 +13,9 @@
  * replay runs it stays, faintly and without its pulses, its marks showing
  * the way flown instead, so the chase camera flies through the flights of
  * before. The replay of all flights draws it at full strength instead, as
- * far as its clock has come into every flight (replayAllTime), so the heat
- * builds up behind the flights and ends as the whole of it; on the flat
- * map as well, at its height as the flights are there, where it stands in
+ * far as its clock has come into every flight (ReplayAllControls.time), so
+ * the heat builds up behind the flights and ends as the whole of it; on the
+ * flat map as well, at its height as the flights are there, where it stands in
  * for the heatmap, whose colours it glows in, until the replay closes.
  * Left on the ground, it lay beside the trails by their height and read
  * as other flights than theirs. The intro of a link to shared flights
@@ -52,9 +52,12 @@ import type { MapApp } from "../mapApp";
 import type { StoreState } from "../state/store";
 import type { KMLDataset, PathSegment } from "../types";
 import { cloudPoints, type CloudPoints } from "../calculations/heatCloud";
-import { groundedFlights, heldFlights } from "../calculations/groundProfile";
-import { smoothGrounded } from "../calculations/smoothGrounded";
-import type { SmoothedFlights } from "../calculations/smoothing";
+import { heldFlights } from "../calculations/groundProfile";
+import {
+  keptGrounded,
+  smoothGrounded,
+  type GroundedRun,
+} from "../calculations/smoothGrounded";
 import { idsKey, keptFlights } from "./keptFlights";
 import { heatWeight } from "../calculations/heatLines";
 import {
@@ -77,6 +80,7 @@ import {
 import {
   hasLostContext,
   isReplayCameraMove,
+  onMapReady,
   whenContextRestored,
 } from "../utils/mapHelpers";
 import { dimmedHeatmapOpacity } from "./dataManager";
@@ -88,7 +92,7 @@ import {
 } from "./heatCloudLayer";
 import { cloudExposure, cloudLook } from "./heatCloudShaders";
 import { followCloudReadout } from "./cloudReadout";
-import { replayAllTime } from "./replayAll";
+import { featurePart } from "./lazyBundles";
 import { REPLAY_ALL_LAYER, SHARE_INTRO_LAYER } from "./replayAllLayer";
 import { placeBelow } from "./glLayer";
 
@@ -365,10 +369,7 @@ export function followHeatCloud(app: MapApp): void {
    * The flights of Wrapped's cloud smoothed on their flat ground, the same
    * at every level, where groundedFlights holds none (see flightsFor)
    */
-  let aside: {
-    segments: readonly PathSegment[];
-    flights: SmoothedFlights;
-  } | null = null;
+  let aside: GroundedRun | null = null;
   /** Let go of the points of every level of one cloud (`forced`) */
   const forget = (forced: boolean): void => {
     const cloud = keptOf(forced);
@@ -407,7 +408,11 @@ export function followHeatCloud(app: MapApp): void {
    * up
    */
   const until = (): number | null =>
-    clock ? clock.time : app.replayActive ? replayAllTime(app) : null;
+    clock
+      ? clock.time
+      : app.replayActive
+        ? (featurePart(app, "replayAll")?.time ?? null)
+        : null;
   const growing = (): boolean => until() !== null;
 
   /** Whether the layer is on the map */
@@ -600,26 +605,28 @@ export function followHeatCloud(app: MapApp): void {
   });
 
   /**
-   * The flights of `segments` smoothed on the ground of the cloud at
-   * `level`. The 3D view's are the ribbons' curves, smoothed once for both
-   * (see groundedFlights). Wrapped's stand on flat ground and are smoothed
-   * aside, unless groundedFlights holds them: a cut ahead of time must not
-   * take the place of the curves the ribbons stand on, and in 2D nothing
-   * lets go of what groundedFlights holds.
+   * The flights `keep` takes of `segments` smoothed on the ground of the
+   * cloud at `level`, with the segments they are of. The 3D view's are the
+   * ribbons' curves, smoothed once for both (see groundedFlights), and a
+   * few shared ones are smoothed alone (keptGrounded). Wrapped's stand on
+   * flat ground and are smoothed aside, unless groundedFlights holds them:
+   * a cut ahead of time must not take the place of the curves the ribbons
+   * stand on, and in 2D nothing lets go of what groundedFlights holds.
    */
   const flightsFor = (
     segments: readonly PathSegment[],
+    keep: (pathId: number) => boolean,
     level: number,
     forced: boolean,
-  ): SmoothedFlights => {
+  ): GroundedRun => {
     const relief = onReliefIn(app, forced);
-    if (!forced) return groundedFlights(segments, relief, level);
+    if (!forced) return keptGrounded(segments, keep, relief, level);
     const held = heldFlights(segments, relief, level);
-    if (held) return held;
+    if (held) return { segments, flights: held };
     if (aside?.segments !== segments) {
       aside = { segments, flights: smoothGrounded(segments, relief, level) };
     }
-    return aside.flights;
+    return aside;
   };
 
   /**
@@ -641,8 +648,12 @@ export function followHeatCloud(app: MapApp): void {
       data,
       isolatesIn(app, forced) ? app.selectedPathIds : null,
     );
-    const segments = data.path_segments;
-    const flights = flightsFor(segments, level, forced);
+    const { segments, flights } = flightsFor(
+      data.path_segments,
+      keep,
+      level,
+      forced,
+    );
     // Rolled off for the scale of the middle of the level cut for
     const gain = cloudLook(detail + 0.5).gain;
     return cloudPoints(
@@ -754,9 +765,8 @@ export function followHeatCloud(app: MapApp): void {
   });
   app.signal.addEventListener("abort", () => zoomed.unsubscribe());
 
-  void app.mapReady.then(() => {
+  onMapReady(app, "The heat cloud", () => {
     const signal = app.signal;
-    if (signal.aborted) return;
     app.store.subscribeKeys(CLOUD_KEYS, sync, { signal });
     // Whether the aviation chart is drawn changes the cloud's strength only
     // while the chart is on (dimsHeatCloud): a zoom across the band it is
@@ -799,10 +809,14 @@ export function followHeatCloud(app: MapApp): void {
     // custom layers of before (MapLibre warns of it at the loss), and the
     // layer's buffers went with the context. The shaders are tried again in
     // the new context: what failed may have failed with the old one.
-    whenContextRestored(map, () => {
-      broken = false;
-      sync();
-    });
+    whenContextRestored(
+      map,
+      () => {
+        broken = false;
+        sync();
+      },
+      signal,
+    );
     signal.addEventListener("abort", () => {
       clearTimeout(idle);
       clearTimeout(left);

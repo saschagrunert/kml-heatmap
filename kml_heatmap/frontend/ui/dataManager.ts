@@ -17,7 +17,6 @@ import { datasetIndex } from "../calculations/datasetIndex";
 import { segmentsForPathIds } from "../calculations/statistics";
 import { calculateAltitudeRange } from "../features/layers";
 import { heatWeight, type SegmentWeight } from "../calculations/heatLines";
-import { flatCurves } from "../calculations/curves";
 import type { DrawnHeat } from "../services/heatSource";
 import type { YearDecoder } from "../services/yearDecoder";
 import { HEAT_LINES, MAP_LAYERS, MAP_SOURCES } from "../utils/constants";
@@ -25,7 +24,7 @@ import { domCache } from "../utils/domCache";
 import { formatFileSize } from "../utils/formatters";
 import { frameCoalescer } from "../utils/frameCoalescer";
 import { logError } from "../utils/logger";
-import { cssVar, whenContextRestored } from "../utils/mapHelpers";
+import { cssVar, onMapReady, whenContextRestored } from "../utils/mapHelpers";
 import { dismissToast, showToast, type ToastAction } from "../utils/toast";
 import { dimsHeatmap, dimsHeatmapAtAnyZoom } from "./layerVisibility";
 import { AVIATION_BAND } from "../mapLayers";
@@ -34,7 +33,6 @@ import {
   dimmedWithin,
   fadeOutToLines,
   heatLineOpacities,
-  heatLineTone,
   heatLinesPaint,
   heatmapPaint,
 } from "./heatmapPaint";
@@ -48,7 +46,8 @@ export interface Heat {
   /** The heat of each point, as the flights left it (see heatmapPoints) */
   weights: readonly number[];
   segments: PathSegment[];
-  keep: (pathId: number) => boolean;
+  /** The paths the heat is of, null for all of `segments` */
+  kept: ReadonlySet<number> | null;
   /**
    * How the heatmap draws the heat, its exposure and the weights scaled by
    * it and rolled off, and the content of its source: worked out by the
@@ -148,7 +147,7 @@ export class DataManager {
   private isolatedFor: {
     data: KMLDataset;
     filter: string;
-    ids: Set<number>;
+    ids: ReadonlySet<number>;
     heat: Heat;
   } | null = null;
   /**
@@ -224,16 +223,13 @@ export class DataManager {
     // changes them. Before the first dataset there is nothing to draw.
     app.store.subscribeKeys(DRAWN_KEYS, () => this.followStore());
 
-    void app.mapReady.then(
-      (map) => {
-        map.on("zoomend", this.handleZoomEnd);
-        // The sources are back with the data they held at the loss, the
-        // last written (MapLibre keeps it with the style); what could not
-        // reach them since is written now
-        whenContextRestored(map, () => this.writeHeat());
-      },
-      () => {},
-    );
+    onMapReady(app, "The heat", (map) => {
+      map.on("zoomend", this.handleZoomEnd);
+      // The sources are back with the data they held at the loss, the
+      // last written (MapLibre keeps it with the style); what could not
+      // reach them since is written now
+      whenContextRestored(map, () => this.writeHeat(), app.signal);
+    });
   }
 
   /**
@@ -478,12 +474,15 @@ export class DataManager {
   /**
    * Ask the year decoder, and hand its answer to `take` while the app is
    * still there: the worker ends with it, and takes its requests along.
-   * A question that gets no answer is told to `failed`.
+   * A question that gets no answer is told to `failed`, and logged as one
+   * of `what` was asked to draw. Counted in heatRequests until answered,
+   * as the colour layers' lines are too (see LayerManager.setRuns).
    */
-  private askWorker<T>(
+  askWorker<T>(
     ask: (decoder: YearDecoder) => Promise<T>,
     take: (answer: T) => void,
     failed?: () => void,
+    what = "the heat",
   ): void {
     this.heatRequests++;
     void this.dataLoader
@@ -493,7 +492,7 @@ export class DataManager {
         (answer) => this.destroyed || take(answer),
         (error: unknown) => {
           if (this.destroyed) return;
-          logError("Could not draw the heat:", error);
+          logError(`Could not draw ${what}:`, error);
           failed?.();
         },
       )
@@ -519,7 +518,7 @@ export class DataManager {
     this.paintHeatmap();
     if (heat.drawn && this.heatWritten !== heat) {
       this.heatWritten = heat;
-      this.writeSource(source, heat.drawn.source);
+      void this.writeSource(source, heat.drawn.source);
     }
     const isolated = this.isolated;
     const isolatedSource = map?.getSource<GeoJSONSource>(
@@ -531,7 +530,7 @@ export class DataManager {
       this.isolatedWritten !== isolated
     ) {
       this.isolatedWritten = isolated;
-      this.writeSource(isolatedSource, isolated.drawn.source);
+      void this.writeSource(isolatedSource, isolated.drawn.source);
       // Drawn from that source from now on
       this.applyHeatmapEmphasis();
     }
@@ -544,12 +543,12 @@ export class DataManager {
    * services/heatSource.ts), or GeoJSON as it is. The URL the source held
    * before is let go of once it has taken this one, and not before: a
    * source that was still reading it would fail. The one it holds stays,
-   * for as long as it holds it.
+   * for as long as it holds it. Settles once the source has taken it.
    */
-  private writeSource(
+  writeSource(
     source: GeoJSONSource,
     content: Blob | GeoJSON.FeatureCollection,
-  ): void {
+  ): Promise<unknown> {
     const { id } = source;
     const before = this.sourceUrls.get(id);
     const url =
@@ -558,7 +557,7 @@ export class DataManager {
     else this.sourceUrls.delete(id);
     // The promise is for the worker having taken the data. It does not
     // reject: a failure arrives as an `error` event of the map
-    void source
+    return source
       .setData(url ?? (content as GeoJSON.FeatureCollection))
       .then(() => {
         if (before) URL.revokeObjectURL(before);
@@ -570,11 +569,11 @@ export class DataManager {
    * can show soon: with the heatmap shown and a zoom that ended a level
    * short of where it hands over to them (see HEAT_LINES) or further in,
    * once per set of points. They are the same flights as the points, and
-   * 150000 segments take 80 to 95 ms, which a hidden or zoomed out heatmap
-   * has no use for. Worked out in a frame of the zoom, they held up the
-   * pinch that crossed into them; a zoom in from a level short of them
-   * finds them ready. The lines of other points are taken off meanwhile:
-   * a zoom from further out would show them until it ends.
+   * 150000 segments take the year worker 80 to 95 ms, which a hidden or
+   * zoomed out heatmap has no use for. Worked out in a frame of the zoom,
+   * they held up the pinch that crossed into them; a zoom in from a level
+   * short of them finds them ready. The lines of other points are taken
+   * off meanwhile: a zoom from further out would show them until it ends.
    */
   private writeHeatLines(): void {
     const map = this.app.map;
@@ -594,24 +593,20 @@ export class DataManager {
     this.heatLinesFor = shown ? heat : null;
     const request = ++this.linesRequest;
     if (!shown || !drawn) {
-      this.writeSource(source, NO_LINES);
+      void this.writeSource(source, NO_LINES);
       return;
     }
-    // Worked out and written by the code of the year worker as well (see
-    // heatLineFeatures), along the curves the colour lines keep; only the
-    // lines asked for last are written to the source
-    const { segments, keep } = heat;
+    // Worked out and written by the year worker, along the flights it holds
+    // (see services/flightLines.ts); only the lines asked for last are
+    // written to the source
+    const { segments, kept } = heat;
     this.askWorker(
-      (decoder) =>
-        decoder.linesSource(
-          flatCurves(segments),
-          segments,
-          keep,
-          (segment, next) => heatWeight(segment, next) * drawn.exposure,
-          heatLineTone,
-        ),
-      (content) =>
-        request === this.linesRequest && this.writeSource(source, content),
+      (decoder) => decoder.heatLines(segments, kept, drawn.exposure),
+      (content) => {
+        if (request === this.linesRequest) {
+          void this.writeSource(source, content);
+        }
+      },
       // Asked for again at the next zoom rather than held as if written;
       // a heat that got no answer is asked for again with the next redraw
       () => {
@@ -747,7 +742,7 @@ export class DataManager {
 
     this.drawHeatmap(data);
 
-    // Calculate altitude range from all segments
+    // The altitude range of all segments, whatever the filter keeps
     if (data.path_segments.length > 0) {
       this.app.altitudeRange = calculateAltitudeRange(
         data.path_segments,
@@ -779,39 +774,32 @@ export class DataManager {
     // own file keeps every path
     const view = datasetIndex(data).filter(year, aircraft);
     const segments = data.path_segments;
-    const keep = view.keepsAll
-      ? () => true
-      : (pathId: number): boolean => view.pathIds.has(pathId);
+    const kept = view.keepsAll ? null : view.pathIds;
     const heat =
-      same && this.heat ? this.heat : heatOf(segments, segments, keep);
+      same && this.heat ? this.heat : heatOf(segments, segments, kept);
     this.setHeatmapPoints(
       heat,
-      this.app.isolateSelection ? this.isolatedHeat(data, keep) : null,
+      this.app.isolateSelection ? this.isolatedHeat(data, kept) : null,
     );
   }
 
   /**
    * The heat of the selected paths the filter keeps, exactly what the
    * colour layers draw of an isolated selection, worked out from their
-   * segments alone; the one of before for the same selection
+   * segments alone; the one of before for the same selection (a new
+   * selection is a new set, see PathSelection)
    */
   private isolatedHeat(
     data: KMLDataset,
-    keep: (pathId: number) => boolean,
+    kept: ReadonlySet<number> | null,
   ): Heat {
-    const ids = new Set(this.app.selectedPathIds);
+    const ids = this.app.selectedPathIds;
     const filter = this.app.selectedYear + "/" + this.app.selectedAircraft;
     const held = this.isolatedFor;
-    if (
-      held?.data === data &&
-      held.filter === filter &&
-      held.ids.size === ids.size &&
-      [...ids].every((id) => held.ids.has(id))
-    ) {
+    if (held?.data === data && held.filter === filter && held.ids === ids) {
       return held.heat;
     }
-    const isolated = (pathId: number): boolean =>
-      ids.has(pathId) && keep(pathId);
+    const isolated = new Set([...ids].filter((id) => !kept || kept.has(id)));
     const segments = data.path_segments;
     const heat = heatOf(segmentsForPathIds(segments, ids), segments, isolated);
     this.isolatedFor = { data, filter, ids, heat };
@@ -820,18 +808,23 @@ export class DataManager {
 }
 
 /**
- * The heat of the flights `keep` accepts: the points of `pointSegments`
- * (all of `segments` or the part of them those flights are in) with their
- * heat, and the lines of `segments`. How the heatmap draws it, scaled by
- * its exposure and rolled off, the year worker works out (see drawHeat).
+ * The heat of the flights of `kept` (of all, for null): the points of
+ * `pointSegments` (all of `segments` or the part of them those flights are
+ * in) with their heat, and the lines of `segments`. How the heatmap draws
+ * it, scaled by its exposure and rolled off, the year worker works out (see
+ * drawHeat).
  */
 function heatOf(
   pointSegments: PathSegment[],
   segments: PathSegment[],
-  keep: (pathId: number) => boolean,
+  kept: ReadonlySet<number> | null,
 ): Heat {
-  const { points, weights } = heatmapPoints(pointSegments, keep, heatWeight);
-  return { points, weights, segments, keep, drawn: null };
+  const { points, weights } = heatmapPoints(
+    pointSegments,
+    (pathId) => !kept || kept.has(pathId),
+    heatWeight,
+  );
+  return { points, weights, segments, kept, drawn: null };
 }
 
 /**

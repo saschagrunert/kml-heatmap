@@ -21,7 +21,9 @@ output-dir/
 ├── wrapped.bundle.js.map
 ├── search.bundle.js       # The search of airports and places, imported on first use
 ├── search.bundle.js.map
-├── shared.bundle.js       # The app, which the four above import
+├── extras.bundle.js       # The phone's sheet and the export of the map, imported on first use
+├── extras.bundle.js.map
+├── shared.bundle.js       # The app, which the five above import
 ├── shared.bundle.js.map
 ├── yearWorker.bundle.js   # Decodes the year files and writes the heat sources, in a worker
 ├── yearWorker.bundle.js.map
@@ -265,8 +267,12 @@ with the user id in its name. One there that is not a directory of that user
 alone (a symlink, another user's, or one others may write to) is not used: the
 run warns and caches in a fresh directory of its own, for that run only, which
 it removes as it exits. One that others may only read is made the user's alone
-(mode 0700): the parse cache holds the raw flights. Anything in it can be
-deleted at any time; the next run fetches or computes it again.
+(mode 0700): the parse cache holds the raw flights. Wherever the cache directory
+is, its `kml/` is made the user's alone the same way (and the cache directory
+too, when the run creates it), and its entries are readable by the user alone
+(mode 0600); a `kml/` that is a symlink or another user's is not used, and the
+run parses without the cache. Anything in it can be deleted at any time; the
+next run fetches or computes it again.
 
 | Entry                         | What it holds                                                                                                                                                                                                                                                                  | How long                                                                                                                                                                                                                                                 | Delete it to                                                                                                               |
 | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |

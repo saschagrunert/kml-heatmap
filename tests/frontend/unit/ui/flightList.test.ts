@@ -159,6 +159,19 @@ describe("FlightList", () => {
     expect(count()).toBe("2 flights");
   });
 
+  it("leaves the Year column out while one year is shown", () => {
+    const table = (): HTMLElement => panel().querySelector("table")!;
+    expect(table().classList.contains("kh-one-year")).toBe(false);
+
+    mockApp.selectedYear = "2025";
+    expect(table().classList.contains("kh-one-year")).toBe(true);
+    // The column the stylesheet hides is the year's
+    expect(COLUMNS[2]!.key).toBe("year");
+
+    mockApp.selectedYear = "all";
+    expect(table().classList.contains("kh-one-year")).toBe(false);
+  });
+
   it("says the touch-and-goes with the full stops", () => {
     const landings = COLUMNS.findIndex((column) => column.key === "landings");
     const titles = rows().map((row) =>
@@ -293,15 +306,16 @@ describe("FlightList", () => {
     expect(lists.size).toBe(1);
   });
 
-  it("names a checkbox by the route, the aircraft and the year", () => {
-    // Several circuits of the home field all read "Select EDAQ → EDAQ"
+  it("names a checkbox by the route, the aircraft, the year and the distance", () => {
+    // Several circuits of the home field all read "Select EDAQ → EDAQ",
+    // also of one aircraft in one year
     expect(
       rows().map((row) =>
         row.querySelector(".kh-pick")!.getAttribute("aria-label"),
       ),
     ).toEqual([
-      "Select EDAQ → EDDP · D-EAGJ · 2025",
-      "Select EDDP → EDAQ · D-ESST · 2024",
+      "Select EDAQ → EDDP · D-EAGJ · 2025 · 11 nm",
+      "Select EDDP → EDAQ · D-ESST · 2024 · 38 nm",
       "Select EDDP → Somewhere <b>odd</b> · 2025",
     ]);
   });

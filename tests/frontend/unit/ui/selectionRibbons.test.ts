@@ -96,9 +96,7 @@ describe("the ribbons of a selection", () => {
     map().source(MAP_SOURCES.selectionHighlightRibbons).setData.mock.calls
       .length;
   const select = (...ids: number[]): void => {
-    app.selectedPathIds.clear();
-    for (const id of ids) app.selectedPathIds.add(id);
-    app.store.notifyMutation("selectedPathIds");
+    app.selectedPathIds = new Set(ids);
   };
 
   /**

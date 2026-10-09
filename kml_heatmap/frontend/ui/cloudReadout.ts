@@ -67,6 +67,7 @@ import { cloudReachPx } from "./heatCloudShaders";
 import { drawnWorlds } from "./glLayer";
 import { mercatorX } from "../utils/mercator";
 import { safeAreaInsets } from "../utils/safeArea";
+import { onMapReady } from "../utils/mapHelpers";
 
 /** The class of the box, styled in features.css */
 const READOUT_CLASS = "cloud-readout";
@@ -642,9 +643,8 @@ export function followCloudReadout(app: MapApp): void {
     if (on) prepare();
   };
 
-  void app.mapReady.then(() => {
+  onMapReady(app, "The readout of the heat cloud", () => {
     const signal = app.signal;
-    if (signal.aborted) return;
     const unsubscribe = app.store.subscribeKeys(READOUT_KEYS, sync);
     const unsubscribeSelection = app.store.subscribe("selectedPathIds", () => {
       selectionChanges++;

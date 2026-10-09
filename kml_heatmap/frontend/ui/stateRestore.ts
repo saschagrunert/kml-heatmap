@@ -96,10 +96,10 @@ export function restoreState(app: MapApp): void {
 
     // Restore selected paths BEFORE updateLayers() so paths are drawn with correct selection
     if (state.selectedPathIds && state.selectedPathIds.length > 0) {
-      state.selectedPathIds.forEach((pathId) => {
-        app.selectedPathIds.add(pathId);
-      });
-      app.store.notifyMutation("selectedPathIds");
+      app.selectedPathIds = new Set([
+        ...app.selectedPathIds,
+        ...state.selectedPathIds,
+      ]);
     }
 
     // Restore the layers and how the map is drawn

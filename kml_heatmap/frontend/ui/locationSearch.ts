@@ -45,7 +45,11 @@
 import { Marker, type Map as MapLibreMap } from "maplibre-gl";
 import type { MapApp } from "../mapApp";
 import type { Airport } from "../types";
-import { foldText, matchAirports } from "../calculations/airportSearch";
+import {
+  foldText,
+  matchAirports,
+  namesAirport,
+} from "../calculations/airportSearch";
 import {
   PhotonClient,
   PLACE_DEBOUNCE_MS,
@@ -445,14 +449,21 @@ class LocationSearch {
   /** The text changed: the airports at once, the places after a pause */
   private onInput(): void {
     const query = this.input.value;
-    this.airports = matchAirports(siteData.airports ?? [], query);
+    const airports = siteData.airports ?? [];
+    this.airports = matchAirports(airports, query);
     this.cancelPlaces();
     this.failure = "";
     const key = placeKey(query);
     const kept = this.client.cached(query);
     this.places = kept ?? [];
     this.placesFor = kept ? key : "";
-    if (!kept && key.length >= PLACE_MIN_LENGTH) {
+    // Not for the code or name of an airport of the site, which says
+    // nothing a third party needs to hear: the airport is listed already
+    if (
+      !kept &&
+      key.length >= PLACE_MIN_LENGTH &&
+      !namesAirport(airports, query)
+    ) {
       this.timer = setTimeout(() => this.searchPlaces(), PLACE_DEBOUNCE_MS);
     }
     // A new text starts again with no option active

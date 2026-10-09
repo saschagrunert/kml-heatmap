@@ -155,8 +155,10 @@ export default defineConfig<object, SiteOptions>({
       // `npx playwright install webkit`. The same specs as the mobile
       // project: the layers and the saved state set up the WebGL layers,
       // the heat lines and the 3D view, which Safari draws with a WebGL of
-      // its own.
-      testMatch: /(core|layers|mobile|state)\.spec\.ts$/,
+      // its own. Of search.spec.ts only the search on a phone, which the
+      // grepInvert below leaves: iOS zooms into a small field and keeps the
+      // page scrolled after its keyboard.
+      testMatch: /(core|layers|mobile|search|state)\.spec\.ts$/,
       grepInvert: DESKTOP_ONLY,
       // Like the mobile project: a retry would hide the flaky bar and sheet
       retries: 0,

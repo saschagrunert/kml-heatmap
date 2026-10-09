@@ -167,6 +167,78 @@ describe("LayerManager drawing", () => {
       ]);
     });
 
+    it("has the year worker write the lines of every flight, and writes the selection's itself", () => {
+      mockApp.selectedPathIds = new Set([1]);
+      const runsSource = vi.fn(() => "lines");
+      mockApp.dataManager.askWorker.mockImplementation(
+        (ask: (decoder: object) => unknown, take: (answer: unknown) => void) =>
+          take(ask({ runsSource })),
+      );
+
+      drawMode(layerManager, "altitude");
+
+      expect(runsSource).toHaveBeenCalledOnce();
+      // A failure is logged as one of the lines, not of the heat
+      expect(mockApp.dataManager.askWorker).toHaveBeenCalledWith(
+        expect.any(Function),
+        expect.any(Function),
+        expect.any(Function),
+        "the lines of the flights",
+      );
+      expect(runsSource).toHaveBeenCalledWith(
+        mockApp.currentData!.path_segments,
+        [expect.objectContaining({ start: 0, end: 1, pathId: 1 })],
+        1,
+      );
+      const source = mockApp.map!.source(ALTITUDE);
+      expect(mockApp.dataManager.writeSource).toHaveBeenCalledWith(
+        source,
+        "lines",
+      );
+      // The selection's few in the frame of the click
+      expect(features(ALTITUDE_SELECTED)).toHaveLength(1);
+    });
+
+    it("writes no lines of every flight the year worker answers for runs drawn again since", async () => {
+      const answers: ((answer: unknown) => void)[] = [];
+      mockApp.dataManager.askWorker.mockImplementation(
+        (_ask: unknown, take: (answer: unknown) => void) => answers.push(take),
+      );
+      const source = mockApp.map!.source(ALTITUDE);
+
+      drawMode(layerManager, "altitude");
+      drawMode(layerManager, "altitude");
+      answers[0]!({ type: "FeatureCollection", features: ["of before"] });
+
+      expect(source.setData).not.toHaveBeenCalled();
+      answers[1]!({ type: "FeatureCollection", features: [] });
+      expect(source.setData).toHaveBeenCalledOnce();
+      // Cleared meanwhile: the answer for the runs of before is not written
+      drawMode(layerManager, "altitude");
+      layerManager.clearLayer("altitude");
+      answers[2]!({ type: "FeatureCollection", features: ["of before"] });
+      await landed();
+      expect(features(ALTITUDE)).toEqual([]);
+    });
+
+    it("writes the lines of every flight itself when the year worker fails", () => {
+      const failures: (() => void)[] = [];
+      mockApp.dataManager.askWorker.mockImplementation(
+        (_ask: unknown, _take: unknown, fail: () => void) =>
+          failures.push(fail),
+      );
+
+      drawMode(layerManager, "altitude");
+      drawMode(layerManager, "altitude");
+      // The failure of runs drawn again since writes nothing
+      failures[0]!();
+      expect(mockApp.map!.source(ALTITUDE).setData).not.toHaveBeenCalled();
+      // That of the last ones writes their lines here, not those of before
+      failures[1]!();
+      expect(features(ALTITUDE)).toHaveLength(1);
+      expect(features(ALTITUDE)[0]!.properties.g).toBe(2);
+    });
+
     it("leaves the visibility of the layers to their handle", () => {
       drawMode(layerManager, "altitude");
 
@@ -394,7 +466,7 @@ describe("LayerManager drawing", () => {
     });
 
     it("draws a selected path on the selection's layer, on its own range", () => {
-      mockApp.selectedPathIds.add(1);
+      mockApp.selectedPathIds = new Set([...mockApp.selectedPathIds, 1]);
 
       drawMode(layerManager, "altitude");
 
@@ -435,7 +507,7 @@ describe("LayerManager drawing", () => {
 
     it("dims unselected paths when a selection exists", () => {
       addSecondPath();
-      mockApp.selectedPathIds.add(1);
+      mockApp.selectedPathIds = new Set([...mockApp.selectedPathIds, 1]);
 
       drawMode(layerManager, "altitude");
 
@@ -471,7 +543,7 @@ describe("LayerManager drawing", () => {
     it("keeps a selected path the filter hides off the selection's layer", () => {
       addSecondPath();
       mockApp.currentData!.path_info[1]!.year = 2024;
-      mockApp.selectedPathIds.add(2);
+      mockApp.selectedPathIds = new Set([...mockApp.selectedPathIds, 2]);
       mockApp.selectedYear = "2025";
 
       drawMode(layerManager, "altitude");
@@ -511,7 +583,7 @@ describe("LayerManager drawing", () => {
 
     it("shows only the selected runs in share mode, at normal weight", () => {
       addSecondPath();
-      mockApp.selectedPathIds.add(1);
+      mockApp.selectedPathIds = new Set([...mockApp.selectedPathIds, 1]);
       mockApp.isolateSelection = true;
 
       drawMode(layerManager, "altitude");
@@ -538,7 +610,7 @@ describe("LayerManager drawing", () => {
 
     it("brings the other paths back when share mode ends", () => {
       addSecondPath();
-      mockApp.selectedPathIds.add(1);
+      mockApp.selectedPathIds = new Set([...mockApp.selectedPathIds, 1]);
       mockApp.isolateSelection = true;
       drawMode(layerManager, "altitude");
 
@@ -556,7 +628,7 @@ describe("LayerManager drawing", () => {
       expect(paint(ALTITUDE_SELECTED)["line-width"]).toBe(6);
       expect(drawn("altitude").map((entry) => entry.pathId)).toEqual([2, 1]);
 
-      mockApp.selectedPathIds.clear();
+      mockApp.selectedPathIds = new Set();
       drawMode(layerManager, "altitude");
 
       expect(selectionFilter(ALTITUDE)).toBeNull();
@@ -568,7 +640,7 @@ describe("LayerManager drawing", () => {
       drawMode(layerManager, "altitude");
       expect(mockApp.map!.setFilter).not.toHaveBeenCalled();
 
-      mockApp.selectedPathIds.add(1);
+      mockApp.selectedPathIds = new Set([...mockApp.selectedPathIds, 1]);
       drawMode(layerManager, "altitude");
       drawMode(layerManager, "altitude");
       // Once for the lines and once for the ribbons of the same source
@@ -576,7 +648,7 @@ describe("LayerManager drawing", () => {
     });
 
     it("falls back to the full range when selected segments are empty", () => {
-      mockApp.selectedPathIds.add(999);
+      mockApp.selectedPathIds = new Set([...mockApp.selectedPathIds, 999]);
 
       drawMode(layerManager, "altitude");
 
@@ -601,7 +673,7 @@ describe("LayerManager drawing", () => {
           ],
         }),
       );
-      mockApp.selectedPathIds.add(1);
+      mockApp.selectedPathIds = new Set([...mockApp.selectedPathIds, 1]);
 
       drawMode(layerManager, "altitude");
 
@@ -633,7 +705,7 @@ describe("LayerManager drawing", () => {
     });
 
     it("uses selected paths' airspeed range when paths are selected", () => {
-      mockApp.selectedPathIds.add(1);
+      mockApp.selectedPathIds = new Set([...mockApp.selectedPathIds, 1]);
 
       drawMode(layerManager, "airspeed");
 
@@ -644,7 +716,7 @@ describe("LayerManager drawing", () => {
 
     it("skips segments with zero groundspeed", () => {
       mockApp.currentData!.path_segments[0]!.groundspeed_knots = 0;
-      mockApp.selectedPathIds.add(1);
+      mockApp.selectedPathIds = new Set([...mockApp.selectedPathIds, 1]);
 
       drawMode(layerManager, "airspeed");
 
@@ -653,7 +725,7 @@ describe("LayerManager drawing", () => {
     });
 
     it("falls back to the full airspeed range when selection has no speed data", () => {
-      mockApp.selectedPathIds.add(999);
+      mockApp.selectedPathIds = new Set([...mockApp.selectedPathIds, 999]);
 
       drawMode(layerManager, "airspeed");
 
@@ -749,7 +821,7 @@ describe("LayerManager drawing", () => {
 
   describe("clearLayer", () => {
     it("empties both sources of the mode", () => {
-      mockApp.selectedPathIds.add(1);
+      mockApp.selectedPathIds = new Set([...mockApp.selectedPathIds, 1]);
       drawMode(layerManager, "altitude");
       drawMode(layerManager, "airspeed");
       expect(features(ALTITUDE_SELECTED)).toHaveLength(1);
@@ -781,7 +853,7 @@ describe("LayerManager drawing", () => {
       drawMode(layerManager, "altitude");
       const before = features(ALTITUDE);
 
-      mockApp.selectedPathIds.add(1);
+      mockApp.selectedPathIds = new Set([...mockApp.selectedPathIds, 1]);
       layerManager.updateSelectionStyles();
 
       // The main source keeps the data and the generation it had
@@ -852,7 +924,7 @@ describe("LayerManager drawing", () => {
       drawMode(layerManager, "altitude");
       expect(features(ALTITUDE)).toHaveLength(1);
 
-      mockApp.selectedPathIds.add(1);
+      mockApp.selectedPathIds = new Set([...mockApp.selectedPathIds, 1]);
       layerManager.updateSelectionStyles();
 
       expect(
@@ -865,10 +937,10 @@ describe("LayerManager drawing", () => {
 
     it("returns a path to the main layer when it is deselected", () => {
       mockApp.altitudeVisible = true;
-      mockApp.selectedPathIds.add(1);
+      mockApp.selectedPathIds = new Set([...mockApp.selectedPathIds, 1]);
       drawMode(layerManager, "altitude");
 
-      mockApp.selectedPathIds.clear();
+      mockApp.selectedPathIds = new Set();
       layerManager.updateSelectionStyles();
 
       expect(setDataCalls(ALTITUDE)).toBe(1);
@@ -896,9 +968,9 @@ describe("LayerManager drawing", () => {
       mockApp.altitudeVisible = true;
       drawMode(layerManager, "altitude");
 
-      mockApp.selectedPathIds.add(1);
+      mockApp.selectedPathIds = new Set([...mockApp.selectedPathIds, 1]);
       layerManager.updateSelectionStyles();
-      mockApp.selectedPathIds.add(2);
+      mockApp.selectedPathIds = new Set([...mockApp.selectedPathIds, 2]);
       layerManager.updateSelectionStyles();
 
       expect(features(ALTITUDE_SELECTED).map((f) => f.properties.g)).toEqual([
@@ -911,7 +983,7 @@ describe("LayerManager drawing", () => {
       mockApp.altitudeVisible = false;
       drawMode(layerManager, "altitude");
 
-      mockApp.selectedPathIds.add(1);
+      mockApp.selectedPathIds = new Set([...mockApp.selectedPathIds, 1]);
       layerManager.updateSelectionStyles();
 
       expect(setDataCalls(ALTITUDE_SELECTED)).toBe(0);
@@ -920,7 +992,7 @@ describe("LayerManager drawing", () => {
 
     it("does nothing for a visible layer that was never drawn", () => {
       mockApp.altitudeVisible = true;
-      mockApp.selectedPathIds.add(1);
+      mockApp.selectedPathIds = new Set([...mockApp.selectedPathIds, 1]);
 
       layerManager.updateSelectionStyles();
 
@@ -933,7 +1005,7 @@ describe("LayerManager drawing", () => {
       drawMode(layerManager, "altitude");
       layerManager.clearLayer("altitude");
 
-      mockApp.selectedPathIds.add(1);
+      mockApp.selectedPathIds = new Set([...mockApp.selectedPathIds, 1]);
       layerManager.updateSelectionStyles();
 
       expect(features(ALTITUDE_SELECTED)).toEqual([]);
@@ -943,7 +1015,7 @@ describe("LayerManager drawing", () => {
       mockApp.airspeedVisible = true;
       drawMode(layerManager, "airspeed");
 
-      mockApp.selectedPathIds.add(2);
+      mockApp.selectedPathIds = new Set([...mockApp.selectedPathIds, 2]);
       layerManager.updateSelectionStyles();
 
       expect(setDataCalls(ALTITUDE_SELECTED)).toBe(0);
@@ -1014,7 +1086,7 @@ describe("LayerManager drawing", () => {
 
     it("sets the filters again, whatever the map came back with", () => {
       mockApp.altitudeLayer.setVisible(true);
-      mockApp.selectedPathIds.add(1);
+      mockApp.selectedPathIds = new Set([...mockApp.selectedPathIds, 1]);
       drawMode(layerManager, "altitude");
       const restore = loseContext();
       mockApp.map!.setFilter.mockClear();

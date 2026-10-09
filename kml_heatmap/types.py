@@ -74,6 +74,10 @@ class PathMetadata(TypedDict):
     # path's, when several paths share one TimeSpan (1 when absent)
     span_share: NotRequired[float]
     filename: NotRequired[str | None]
+    # The input file as the run was given it, folders and all, which the
+    # file name alone is not: two folders may hold files of one name. Set
+    # by the run (renderer), never cached or exported.
+    source: NotRequired[str]
 
 
 class PathInfo(TypedDict):

@@ -98,6 +98,39 @@ describe("layers feature", () => {
         rankValues(sorted, sorted[0]!, sorted.at(-1)!),
       );
     });
+
+    it("are worked out once read, and the range once per array and paths", () => {
+      const segments = mockSegments.map((segment) => ({ ...segment }));
+      let reads = 0;
+      const altitudes = segments.map((segment) => segment.altitude_ft);
+      segments.forEach((segment, i) =>
+        Object.defineProperty(segment, "altitude_ft", {
+          get: () => (reads++, altitudes[i]),
+        }),
+      );
+
+      const range = calculateAltitudeRange(
+        segments,
+        DEFAULT_ALTITUDE_RANGE,
+        mockPaths,
+      );
+
+      // The ends come from the paths; the altitudes wait for the ranks
+      expect(range).toMatchObject({ min: 3000, max: 9000 });
+      expect(reads).toBe(0);
+      expect(range.ranks).toHaveLength(RANK_STEPS + 1);
+      expect(range.ranks).toBe(range.ranks);
+      expect(reads).toBe(segments.length);
+      expect(
+        calculateAltitudeRange(segments, DEFAULT_ALTITUDE_RANGE, mockPaths),
+      ).toBe(range);
+      // Other paths for the same segments are another range
+      expect(
+        calculateAltitudeRange(segments, DEFAULT_ALTITUDE_RANGE, [
+          ...mockPaths,
+        ]),
+      ).not.toBe(range);
+    });
   });
 
   describe("calculateAltitudeRange with exact path ranges", () => {

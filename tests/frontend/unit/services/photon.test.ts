@@ -112,6 +112,16 @@ describe("parsePlaces", () => {
     expect(stop).toMatchObject({ detail: "Bus stop", zoom: 13 });
   });
 
+  it("zooms by its own kinds of place only, not by what every object has", () => {
+    const places = parsePlaces({
+      features: ["city", "constructor", "toString", "__proto__"].map((type) =>
+        feature({ name: "Somewhere", type }),
+      ),
+    });
+
+    expect(places.map((place) => place.zoom)).toEqual([11, 13, 13, 13]);
+  });
+
   it("leaves out a part of the region that repeats the name or another part", () => {
     const [city] = parsePlaces({
       features: [

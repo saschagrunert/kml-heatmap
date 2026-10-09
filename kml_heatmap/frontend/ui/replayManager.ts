@@ -29,6 +29,7 @@ import {
   toBounds,
   toLngLat,
   toLngLatAfter,
+  unwrapLng,
   whenContextRestored,
   type LngLatTuple,
 } from "../utils/mapHelpers";
@@ -1170,7 +1171,8 @@ export class ReplayManager {
    * several as the airplane goes on to it, rather than the follow jump
    * there, auto-zoom zooming out as it found the airplane off the map:
    * with auto-zoom on, at its zoom, and without at the map's, only where
-   * that start is out of view. Not while the
+   * that start is out of view (on the copy of the world the map shows,
+   * which across the antimeridian is the other side of it). Not while the
    * chase flies over on its own, nor under the user's hand on the map,
    * nor where the last of them has landed in the same frame: the end has
    * said so and shows them all.
@@ -1178,13 +1180,15 @@ export class ReplayManager {
   private movesToLeg(leg: number): boolean {
     const state = this.state;
     const map = this.app.map;
-    const start = state.segments[state.smoothed!.legs[leg]!.first]!.coords[0];
+    const [lat, lng] =
+      state.segments[state.smoothed!.legs[leg]!.first]!.coords[0];
     return (
       !!map &&
       state.playing &&
       !state.chase &&
       !this.renderer.camera.userMoving() &&
-      (state.autoZoom || !map.getBounds().contains(toLngLat(start)))
+      (state.autoZoom ||
+        !map.getBounds().contains([unwrapLng(lng, map.getCenter().lng), lat]))
     );
   }
 

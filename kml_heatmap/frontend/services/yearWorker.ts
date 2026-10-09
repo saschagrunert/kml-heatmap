@@ -1,6 +1,7 @@
 /**
  * The year worker: parses and decodes year files off the main thread, and
- * writes the content of the heat sources (services/heatSource.ts).
+ * writes the content of the heat sources (services/heatSource.ts) and of
+ * the lines along the flights (services/flightLines.ts).
  *
  * An entry point of its own (yearWorker.bundle.js, see build.js), run as a
  * module worker of the site's own origin, which the page's CSP allows with
@@ -15,12 +16,16 @@
 import { DATA_FORMAT_VERSION, decodeYearBytes } from "./yearDecode";
 import { transferablesOf } from "./yearDataset";
 import { createYearDecoder } from "./yearDecoder";
+import { drawHeat, type DrawnHeat } from "./heatSource";
 import {
-  drawHeat,
-  linesSource,
-  type DrawnHeat,
-  type FlatLines,
-} from "./heatSource";
+  flightsOf,
+  heatLinesSource,
+  runsSource,
+  type FlatRuns,
+  type FlightColumns,
+  type Flights,
+  type HeatLinesAsk,
+} from "./flightLines";
 import type { DecodedYear } from "./yearDataset";
 
 // What the page uses of this file (services/dataLoader.ts)
@@ -28,12 +33,24 @@ export { createYearDecoder };
 
 /**
  * What the page sends, under a number of its choice: the body of a year
- * file, the heat of a heat source (see drawHeat) or the lines of the heat
- * line source (see linesSource)
+ * file, the heat of a heat source (see drawHeat), or which lines to draw
+ * along the flights (see LinesRequest)
  */
 export type YearRequest = { id: number } & (
-  { bytes: ArrayBuffer } | { heat: Float64Array } | { lines: FlatLines }
+  { bytes: ArrayBuffer } | { heat: Float64Array } | LinesRequest
 );
+
+/**
+ * The heat lines of a heat (see heatLinesSource) or the lines of a colour
+ * layer's runs (see runsSource), along the flights the worker was handed
+ * last: with `flights` these, which it keeps for the lines asked next
+ */
+export type LinesRequest = { flights?: FlightColumns } & (
+  { heatLines: HeatLinesAsk } | { runs: FlatRuns }
+);
+
+/** The flights handed with the last LinesRequest that had them */
+let flights: Flights | null = null;
 
 /**
  * What the worker answers with, under the number of the request. An error
@@ -63,11 +80,19 @@ export function handleRequest(request: YearRequest): {
     if ("heat" in request) {
       return { response: { id, drawn: drawHeat(request.heat) }, transfer: [] };
     }
-    if ("lines" in request) {
-      return {
-        response: { id, source: linesSource(request.lines) },
-        transfer: [],
-      };
+    if ("heatLines" in request || "runs" in request) {
+      // Flights that fail to arrive leave none behind: lines along the
+      // ones of before would not be those of the page
+      if (request.flights) {
+        flights = null;
+        flights = flightsOf(request.flights);
+      }
+      if (!flights) throw new Error("no flights to draw lines along");
+      const source =
+        "runs" in request
+          ? runsSource(flights, request.runs)
+          : heatLinesSource(flights, request.heatLines);
+      return { response: { id, source }, transfer: [] };
     }
     const decoded = decodeYearBytes(request.bytes);
     return { response: { id, decoded }, transfer: transferablesOf(decoded) };

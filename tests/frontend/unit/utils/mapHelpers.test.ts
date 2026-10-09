@@ -17,6 +17,7 @@ import {
   MAP_STILL_TIMEOUT_MS,
   mapSize,
   mapZoomToState,
+  onMapReady,
   panPopupIntoView,
   slideMapBesideRail,
   stateZoomToMap,
@@ -24,6 +25,7 @@ import {
   toLngLat,
   toLngLatAfter,
   unwrapLng,
+  whenContextRestored,
   whenMapComplete,
   whenStyleReady,
   withMapStill,
@@ -37,6 +39,12 @@ import {
 } from "../../../mocks/maplibre-gl";
 import { measureSafeArea, setDevicePixelRatio } from "../../testHelpers";
 import { resetSafeArea } from "../../../../kml_heatmap/frontend/utils/safeArea";
+import { logError } from "../../../../kml_heatmap/frontend/utils/logger";
+
+vi.mock("../../../../kml_heatmap/frontend/utils/logger", () => ({
+  logDebug: vi.fn(),
+  logError: vi.fn(),
+}));
 
 /** A mock map, typed the way the helpers take it */
 function mapStub(options: Record<string, unknown> = {}): MapLibreMap & MockMap {
@@ -173,6 +181,67 @@ describe("mapHelpers", () => {
       map.finishStyleLoad();
       await Promise.resolve();
       expect(ready).toHaveBeenCalledWith(map);
+    });
+  });
+
+  describe("onMapReady", () => {
+    it("runs with the map once it is ready, unless the app is gone by then", async () => {
+      const map = mapStub();
+      const lifetime = new AbortController();
+      const ready = vi.fn();
+      const app = { mapReady: Promise.resolve(map), signal: lifetime.signal };
+      onMapReady(app, "Test", ready);
+      await Promise.resolve();
+      expect(ready).toHaveBeenCalledWith(map);
+
+      lifetime.abort();
+      const late = vi.fn();
+      onMapReady(app, "Test", late);
+      await Promise.resolve();
+      expect(late).not.toHaveBeenCalled();
+    });
+
+    it("logs what it throws, and leaves a map that never got ready alone", async () => {
+      const failure = new Error("no source");
+      onMapReady({ mapReady: Promise.resolve(mapStub()) }, "Test", () => {
+        throw failure;
+      });
+      const never = vi.fn();
+      onMapReady(
+        { mapReady: Promise.reject(new Error("gone")) },
+        "Test",
+        never,
+      );
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(logError).toHaveBeenCalledWith(
+        "Test: the map got ready, but not for them",
+        failure,
+      );
+      expect(never).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("whenContextRestored", () => {
+    it("calls back once the style is back after a lost context, until the signal aborts", () => {
+      const map = mapStub();
+      const lifetime = new AbortController();
+      const restored = vi.fn();
+      whenContextRestored(map, restored, lifetime.signal);
+
+      map.emit("webglcontextrestored");
+      expect(restored).not.toHaveBeenCalled();
+      map.emit("style.load");
+      expect(restored).toHaveBeenCalledTimes(1);
+
+      // A style on its way as the app goes is not followed either
+      map.emit("webglcontextrestored");
+      lifetime.abort();
+      map.emit("style.load");
+      map.emit("webglcontextrestored");
+      map.emit("style.load");
+      expect(restored).toHaveBeenCalledTimes(1);
+      expect(map.listenerCount("webglcontextrestored")).toBe(0);
     });
   });
 

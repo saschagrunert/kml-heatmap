@@ -12,12 +12,14 @@
  * app fetches as a few are first selected, the cross-section, which its
  * control fetches, the hotspot tour with the camera moves it shares
  * with Wrapped's intro, and the intro of a link to shared flights, which
- * the app fetches as such a link opens.
+ * the app fetches as such a link opens, and the camera that frames the
+ * flights of share mode and a flight picked from a list as the map is
+ * tilted.
  * Wrapped has a bundle of its own (wrapped.ts) and fetches this one only
  * for its intro's camera moves and heat cloud.
  *
  * The app is imported for the bundler's sake. esbuild puts every module in
- * a chunk by the set of entry points that reach it, so with four of them a
+ * a chunk by the set of entry points that reach it, so with five of them a
  * module the app shares with replay and not with Wrapped or the search
  * would get a chunk of its own, and each such chunk would be one more file
  * on the first visit under the same fixed name. Reaching the app from every
@@ -56,6 +58,7 @@ export {
 } from "./ui/cameraScript";
 export { toggleHotspotTour } from "./ui/hotspotTour";
 export { playShareIntro } from "./ui/shareIntro";
+export { frameFlights } from "./ui/frameFlights";
 
 /**
  * The build this bundle belongs to, which the app compares with its own

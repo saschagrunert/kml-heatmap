@@ -616,7 +616,7 @@ describe("AirportManager", () => {
       // airports showed all the same
       mockApp.selectedYear = "2025";
       // Path 3 flew in 2024, to EDDK
-      mockApp.selectedPathIds.add(3);
+      mockApp.selectedPathIds = new Set([...mockApp.selectedPathIds, 3]);
 
       airportManager.showAirports();
 
@@ -624,7 +624,7 @@ describe("AirportManager", () => {
     });
 
     it("keeps every airport for a selection without a filter (regression)", () => {
-      mockApp.selectedPathIds.add(3);
+      mockApp.selectedPathIds = new Set([...mockApp.selectedPathIds, 3]);
 
       airportManager.showAirports();
 
@@ -632,7 +632,7 @@ describe("AirportManager", () => {
     });
 
     it("only shows airports of selected paths in share mode", () => {
-      mockApp.selectedPathIds.add(3);
+      mockApp.selectedPathIds = new Set([...mockApp.selectedPathIds, 3]);
       mockApp.isolateSelection = true;
 
       expect(hidden()).toEqual(["EDDM", "LOWW"]);
@@ -1078,16 +1078,15 @@ describe("AirportManager", () => {
   describe("store subscriptions", () => {
     it("refreshes once, and writes the labels once, for an update that changes several keys (regression)", () => {
       const labels = mockApp.map!.source(MAP_SOURCES.airportLabels).setData;
+      mockApp.selectedPathIds = new Set([1]);
       labels.mockClear();
 
       // What a year switch publishes
-      mockApp.selectedPathIds.add(1);
       mockApp.store.batch(() => {
         mockApp.selectedYear = "2024";
         mockApp.currentData = createDataset(pathInfo.slice(2));
         mockApp.selectedAircraft = "D-ABCD";
-        mockApp.selectedPathIds.clear();
-        mockApp.store.notifyMutation("selectedPathIds");
+        mockApp.selectedPathIds = new Set();
       });
 
       expect(labels).toHaveBeenCalledTimes(1);
@@ -1128,8 +1127,7 @@ describe("AirportManager", () => {
       labels.mockClear();
 
       // Without a filter every airport shows, the selected flight's too
-      mockApp.selectedPathIds.add(3);
-      mockApp.store.notifyMutation("selectedPathIds");
+      mockApp.selectedPathIds = new Set([...mockApp.selectedPathIds, 3]);
 
       expect(labels).not.toHaveBeenCalled();
       expect(markers["EDDM"]!.getElement().hidden).toBe(false);

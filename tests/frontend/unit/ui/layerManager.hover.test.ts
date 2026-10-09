@@ -196,8 +196,7 @@ describe("LayerManager pointer", () => {
       expect(action()!.textContent).toBe("Select flight");
 
       // Ticked in a list meanwhile: "Select flight" took it out
-      mockApp.selectedPathIds.add(1);
-      mockApp.store.notifyMutation("selectedPathIds");
+      mockApp.selectedPathIds = new Set([...mockApp.selectedPathIds, 1]);
       expect(action()!.textContent).toBe("Remove flight");
 
       // A replay holds the selection, and the button did nothing

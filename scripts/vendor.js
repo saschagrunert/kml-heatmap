@@ -71,7 +71,7 @@ export const VENDOR_FILES = {
  * bundled into that one file.
  *
  * The app loads html-to-image with import(), on the first export (see
- * build.js and ui/uiToggles.ts). The package ships its ES module as a dozen
+ * build.js and ui/mapExport.ts). The package ships its ES module as a dozen
  * files and its single file as UMD, which import() cannot take exports from,
  * so the module is bundled here: nothing but the package's own code, under
  * a banner that names it, its version and its licence.
@@ -222,10 +222,12 @@ export const VENDOR_PATCHES = {
       // by the main thread for a worker (the "GR" message), so that a
       // protocol added with addProtocol there can answer it. A blob: URL
       // has no such protocol, and a worker can fetch it itself. The heat
-      // sources are given one of the GeoJSON the year worker wrote
-      // (services/heatSource.ts) to keep their 135,000 features for all
-      // years off the main thread; fetched there, the 16 MB of text would
-      // be parsed on it and the objects sent on to the worker after all.
+      // sources, the heat lines and the colour layers' lines of every
+      // flight are given one of the GeoJSON the year worker wrote
+      // (services/heatSource.ts, services/flightLines.ts) to keep their
+      // 135,000 features for all years off the main thread; fetched there,
+      // the 16 MB of text would be parsed on it and the objects sent on to
+      // the worker after all.
       name: "blob: URLs fetched by the main thread for a worker",
       find: /(\w+)\.url\.includes\(`:\/\/`\)&&!\/\^https\?:\|\^file:\/\.test\(\1\.url\)/,
       replace: "$1.url.includes(`://`)&&!/^https?:|^file:|^blob:/.test($1.url)",
@@ -235,13 +237,14 @@ export const VENDOR_PATCHES = {
     {
       // GeoJSONWorkerSource.loadData: GeoJSON loaded from a URL is sent
       // back to the main thread whole, so that getData() can answer with
-      // it, which the app never asks of a heat source. For all years that
-      // is 135,000 features cloned onto the main thread and copied there
-      // once more by MapLibre, which is what the heat sources are given a
-      // URL to spare it. Not for a blob: URL, which only the app's heat
-      // sources are given: getData() of such a source (and getBounds(),
-      // which asks it) waits for its next load and then fails, and nothing
-      // in the app asks either.
+      // it, which the app never asks of a source it gives a URL. For all
+      // years that is 135,000 features cloned onto the main thread and
+      // copied there once more by MapLibre, which is what those sources
+      // are given a URL to spare it. Not for a blob: URL, which only the
+      // app's sources written by the year worker are given (the heat, the
+      // heat lines, the colour layers' lines of every flight): getData() of
+      // such a source (and getBounds(), which asks it) waits for its next
+      // load and then fails, so the app must call neither on any of them.
       name: "GeoJSON of a blob: URL sent back to the main thread",
       find: /(\w+)\.request&&\((\w+)\.data=\1\.data\)/,
       replace:

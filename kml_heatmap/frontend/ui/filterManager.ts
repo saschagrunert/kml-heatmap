@@ -274,7 +274,7 @@ export class FilterManager {
       // mirrors the dropdown, not the store, and the store did not change,
       // so it is told to read the dropdown again.
       this.showLoadedYear(yearSelect);
-      this.app.mobileBar?.sheet.refresh();
+      this.app.mobileBar?.refreshSheet();
       // An aircraft picked meanwhile was one of the year still shown
       if (aircraft !== null) this.applyAircraft(aircraft);
       this.onLoadChange?.();
@@ -396,11 +396,10 @@ function sayDeselected(count: number, why: string): void {
  * many went.
  */
 function deselect(app: MapApp, drop: (pathId: number) => boolean): number {
-  const selected = app.selectedPathIds;
-  const dropped = [...selected].filter(drop);
-  for (const pathId of dropped) selected.delete(pathId);
-  if (dropped.length > 0) app.store.notifyMutation("selectedPathIds");
-  return dropped.length;
+  const selected = [...app.selectedPathIds];
+  const kept = selected.filter((pathId) => !drop(pathId));
+  if (kept.length < selected.length) app.selectedPathIds = new Set(kept);
+  return selected.length - kept.length;
 }
 
 /**

@@ -21,8 +21,9 @@
  * coordinates of the heat points to 5 decimals (about 1.1 m, drawn up to
  * zoom 12.75), those of the heat lines to 7 (about 1 cm, drawn up to the
  * map's last zoom) and the heat of the points to 4 significant digits. The
- * heat lines the heatmap hands over to take the same way, packed by
- * flatLines.
+ * heat lines the heatmap hands over to are written the same way, by the
+ * worker along the flights it holds (see services/flightLines.ts), as are
+ * the lines of the colour layers.
  *
  * Like everything else in yearWorker.bundle.js this is no part of what a
  * first visit downloads. The packing runs on the page, from the same bundle
@@ -48,7 +49,7 @@ export type HeatLines = GeoJSON.FeatureCollection<
   { heat: number }
 >;
 
-/** The lines of HeatLines as columns, which are handed over as a copy */
+/** The lines of HeatLines as columns, see linesSource */
 export interface FlatLines {
   /** `[lng, lat]` of every position of every line, one line after another */
   coordinates: Float64Array;
@@ -88,7 +89,7 @@ export function flatLines(lines: HeatLines): FlatLines {
 const FEATURES_PER_PART = 1024;
 
 /** A number as JSON.stringify writes it: null for one that is not finite */
-function json(value: number): string {
+export function json(value: number): string {
   return Number.isFinite(value) ? String(value) : "null";
 }
 
@@ -100,14 +101,17 @@ function json(value: number): string {
  * is several pixels and 1.1 m would kink a traffic pattern or a taxi line,
  * so they get 7, about 1 cm.
  */
-const degrees = (value: number, scale = 1e5): string =>
+export const degrees = (value: number, scale = 1e5): string =>
   json(Math.round(value * scale) / scale);
 
 /** A heat to 4 significant digits, finer than the heatmap can draw */
 const weight = (value: number): string => json(+value.toPrecision(4));
 
 /** A Blob of the text of a FeatureCollection of `count` features */
-function collection(count: number, feature: (index: number) => string): Blob {
+export function collection(
+  count: number,
+  feature: (index: number) => string,
+): Blob {
   const parts = ['{"type":"FeatureCollection","features":['];
   for (let start = 0; start < count; start += FEATURES_PER_PART) {
     const end = Math.min(start + FEATURES_PER_PART, count);

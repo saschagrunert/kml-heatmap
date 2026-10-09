@@ -24,6 +24,7 @@ import {
 import { TOGGLES } from "../../kml_heatmap/frontend/state/toggles";
 import { TouchClock } from "../../kml_heatmap/frontend/utils/device";
 import { segmentsForPathIds } from "../../kml_heatmap/frontend/calculations/statistics";
+import { runLines } from "../../kml_heatmap/frontend/ui/pathRuns";
 import { DAY_MAX_FLIGHTS } from "../../kml_heatmap/frontend/utils/constants";
 import {
   REPLAY_PRECONDITION_MESSAGE,
@@ -115,6 +116,8 @@ interface MockManagers {
     failureNote: ((message: string) => void) | null;
     onMetadata: ((metadata: Metadata) => void) | null;
     heatRequests: number;
+    writeSource: Mock;
+    askWorker: Mock;
   };
   layerManager: {
     clearLayer: Mock;
@@ -192,7 +195,6 @@ interface MockManagers {
   loadStats: Mock;
   replayManager: {
     state: ReplayState;
-    updateReplayButtonState: Mock;
     toggleReplay: Mock;
     playReplay: Mock;
     pauseReplay: Mock;
@@ -282,12 +284,28 @@ export interface MockAppOverrides extends Partial<StoreState> {
   mapReady?: Promise<unknown>;
 }
 
+/**
+ * The part of the year decoder the mock app's DataManager.askWorker hands
+ * its questions: the content of a colour layer's source as the
+ * FeatureCollection the worker's text stands for (see runsSource in
+ * services/flightLines.ts, whose own tests hold the two to each other)
+ */
+const syncDecoder = {
+  runsSource: (
+    segments: readonly PathSegment[],
+    runs: Parameters<typeof runLines>[1],
+    g: number,
+  ): GeoJSON.FeatureCollection => ({
+    type: "FeatureCollection",
+    features: runLines(segments, runs, g),
+  }),
+};
+
 function createMockManagers(): MockManagers {
   // The app owns the replay state and the manager works on the same object
   const replayState = new ReplayState();
   const replayManager = {
     state: replayState,
-    updateReplayButtonState: vi.fn(),
     toggleReplay: vi.fn(),
     playReplay: vi.fn(),
     pauseReplay: vi.fn(),
@@ -323,6 +341,17 @@ function createMockManagers(): MockManagers {
       failureNote: null,
       onMetadata: null,
       heatRequests: 0,
+      writeSource: vi.fn((source: { setData(data: unknown): unknown }, data) =>
+        source.setData(data),
+      ),
+      // The year worker's answer at once, and the lines of the runs of a
+      // colour layer as the objects they stand for, which the tests read
+      askWorker: vi.fn(
+        (
+          ask: (decoder: typeof syncDecoder) => unknown,
+          take: (answer: unknown) => void,
+        ) => take(ask(syncDecoder)),
+      ),
     },
     layerManager: {
       clearLayer: vi.fn(),

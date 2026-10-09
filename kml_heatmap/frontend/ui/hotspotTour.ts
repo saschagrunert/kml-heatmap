@@ -70,6 +70,7 @@ import { crossSectionOpen, toggleCrossSection } from "./crossSection";
 import { nameButton } from "./crossSectionElements";
 import { restingPitch } from "./replayState";
 import { followPanelHeight } from "./replayManager";
+import { featurePart } from "./lazyBundles";
 
 /** How long the camera flies from one place to the next, in ms */
 export const TOUR_FLY_MS = 4000;
@@ -701,15 +702,7 @@ export function createHotspotTour(app: MapApp): HotspotTour {
   return tour;
 }
 
-/** The tour of each app, made the first time it is started */
-const tours = new WeakMap<MapApp, HotspotTour>();
-
-/** Start or stop the hotspot tour of `app` */
+/** Start or stop the hotspot tour of `app`, made the first time */
 export function toggleHotspotTour(app: MapApp): void {
-  let tour = tours.get(app);
-  if (!tour) {
-    tour = createHotspotTour(app);
-    tours.set(app, tour);
-  }
-  tour.toggle();
+  featurePart(app, "hotspotTour", () => createHotspotTour(app)).toggle();
 }

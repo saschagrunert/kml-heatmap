@@ -1324,17 +1324,20 @@ main > #map .maplibregl-ctrl-bottom-right {
   pointer-events: none;
 }
 /* Select or Remove under the values of a tapped flight: looking at one no
-   longer changes the selection (ui/pathHover.ts) */
+   longer changes the selection (ui/pathHover.ts). As small as the values
+   above it, at the end of the popup, and still the 24 px of a target (WCAG
+   2.5.8): across its width at a control's height, it outweighed what it is
+   about. */
 .segment-action {
   display: block;
-  width: 100%;
-  min-height: var(--btn-min-height);
-  margin-top: var(--space-sm);
+  margin: var(--space-sm) 0 0 auto;
+  padding: 5px var(--space-sm);
   border: 1px solid var(--color-accent-blue);
   border-radius: var(--radius-control);
   background: rgba(var(--color-accent-blue-rgb), 0.15);
   color: var(--color-accent-blue);
   font: inherit;
+  font-size: var(--text-xs);
   cursor: pointer;
 }
 
@@ -2307,6 +2310,7 @@ main > #map .maplibregl-ctrl-bottom-right {
 .kh-popup-flights > * {
   display: flex;
   align-items: center;
+  min-height: 24px;
 }
 /* A rule in the gap between two rows (the list holds nothing else): bare
    lines of text did not read as something to pick. A shadow, so the rows
@@ -2315,13 +2319,15 @@ main > #map .maplibregl-ctrl-bottom-right {
   box-shadow: 0 -1px var(--color-divider);
 }
 /* The checkbox of a flight in a list, in the colour of a selection; the
-   flight list of the statistics rail has them too (ui/flightList.ts). At
-   the 24 px a target needs (WCAG 2.5.8): the rows are closer than that. */
+   flight list of the statistics rail has them too (ui/flightList.ts). In
+   proportion to the text of the row: at 24 px it dwarfed it. A target of
+   16 px meets WCAG 2.5.8 by its spacing: 5 px either side and rows 24 px
+   apart (28 px in the flight list) leave a 24 px circle around it clear. */
 .kh-pick {
   flex: none;
-  width: 24px;
-  height: 24px;
-  margin: 0 var(--space-xs);
+  width: 16px;
+  height: 16px;
+  margin: 0 5px;
   vertical-align: middle;
   accent-color: var(--color-accent-blue);
   cursor: pointer;

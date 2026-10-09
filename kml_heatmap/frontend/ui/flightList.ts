@@ -241,7 +241,7 @@ function rowsHtml(rows: FlightRow[]): string {
       html +=
         i === 0
           ? '<th scope="row">' +
-            pickBox(id, escapeHtml(flightLabel(row.path))) +
+            pickBox(id, escapeHtml(flightLabel(row.path, row.totals?.km))) +
             '<button type="button" class="kh-flight" data-path-id="' +
             id +
             '" aria-pressed="false">' +
@@ -431,6 +431,11 @@ export class FlightList {
       : null;
     if (view === this.view && this.view !== null) return;
     this.view = view;
+    // No Year column while one year is shown (see wrapped.css)
+    this.body.parentElement!.classList.toggle(
+      "kh-one-year",
+      app.selectedYear !== "all",
+    );
     this.rows = data && view ? flightRows(view.paths, flightTotals(data)) : [];
     this.writeRows();
   }

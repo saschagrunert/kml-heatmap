@@ -317,10 +317,13 @@ describe("ReplayManager with several flights", () => {
      * of the first, where the follow leaves it, and with `shown` the
      * bounds of the map
      */
-    const across = (shown: [number, number, number, number]): void => {
+    const across = (
+      shown: [number, number, number, number],
+      world = 0,
+    ): void => {
       replayManager.pauseReplay();
       replayManager.seekReplay(String(legs()[1]!.start - 1e-3));
-      map.jumpTo({ center: [15.3, 48.3], zoom: 9 });
+      map.jumpTo({ center: [15.3 + world, 48.3], zoom: 9 });
       map.getBounds.mockReturnValue(
         new LngLatBounds([shown[0], shown[1]], [shown[2], shown[3]]),
       );
@@ -336,6 +339,10 @@ describe("ReplayManager with several flights", () => {
     expect(liveRegionText()).toBe("Flight 2 of 2, EDTF → EDDS");
     expect(map.easeTo).not.toHaveBeenCalled();
     expect(hold).not.toHaveBeenCalled();
+    // Nor on another copy of the world, as a view across the antimeridian
+    // has its bounds past 180: the start is on the map all the same
+    across([375, 47, 377, 49], 360);
+    expect(map.easeTo).not.toHaveBeenCalled();
 
     // Off the map: over to it at the map's zoom, the follow held meanwhile
     vi.spyOn(motion, "prefersReducedMotion").mockReturnValue(false);

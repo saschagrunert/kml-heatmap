@@ -12,6 +12,11 @@ replays, a 3D view and a year-in-review summary. The
 [live demo](https://saschagrunert.github.io/kml-heatmap) shows the flights of
 this repository.
 
+To publish your own flights the same way, fork this repository and follow
+[Your own site on GitHub Pages](doc/hosting.md#your-own-site-on-github-pages);
+[Adding flights](#adding-flights) takes each new flight from the export to the
+site.
+
 ## Contents
 
 - [Features](#features)
@@ -96,8 +101,9 @@ Your KML files are read and left alone, and nothing has to be stripped from them
 first (see [Privacy](#privacy)). To scrub the files themselves as well, pass
 `--obfuscate-inputs` or run `make obfuscate`; that rewrites them in place and
 cannot be undone, so keep a copy of the originals. `make obfuscate` runs on the
-host, not in the container: it needs Python 3.14, but nothing beyond its
-standard library, so nothing has to be installed for it.
+host when `python` is Python 3.14: it needs nothing beyond its standard library,
+so nothing has to be installed for it. Without it, the target runs in the
+container image instead.
 
 Without podman or docker, build the frontend and run the generator from the
 checkout (see [Python usage](doc/usage.md#python-usage)). The Makefile

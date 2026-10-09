@@ -66,6 +66,27 @@ function introFrames(page: Page): Promise<number> {
   return introSeen(page).then((seen) => seen.introFrames);
 }
 
+/**
+ * Whether the intro started. The app decides on it as the feature bundle
+ * comes in, which the profile of the shared flights showing says, and an
+ * intro that plays puts its layer on the map in that same task (see
+ * playShareIntro); asked two frames later, so the decision has been made
+ * whatever order the two waits on the bundle ran in.
+ */
+function introStarted(page: Page): Promise<boolean> {
+  return page.evaluate(
+    (layer) =>
+      new Promise<boolean>((resolve) =>
+        requestAnimationFrame(() =>
+          requestAnimationFrame(() =>
+            resolve(!!window.mapApp!.map!.getLayer(layer)),
+          ),
+        ),
+      ),
+    LAYER,
+  );
+}
+
 /** Whether every fix of the shared flights is on the map */
 function sharedFlightsFramed(page: Page): Promise<boolean> {
   return page.evaluate(() => {
@@ -94,10 +115,10 @@ async function copyShareLink(page: Page, threeD = false): Promise<string> {
   await page.evaluate((threeD) => {
     const app = window.mapApp!;
     app.store.batch(() => {
-      for (const path of app.fullPathInfo!.slice(0, 2)) {
-        app.selectedPathIds.add(path.id);
-      }
-      app.store.notifyMutation("selectedPathIds");
+      app.selectedPathIds = new Set([
+        ...app.selectedPathIds,
+        ...app.fullPathInfo!.slice(0, 2).map((path) => path.id),
+      ]);
       app.isolateSelection = true;
       app.threeDVisible = threeD;
     });
@@ -183,7 +204,7 @@ test.describe("The intro of a link to shared flights", () => {
     await expect(page.locator("#flight-profile")).toBeVisible({
       timeout: 15000,
     });
-    await page.waitForTimeout(1000);
+    expect(await introStarted(page)).toBe(false);
     expect(await introFrames(page)).toBe(0);
     expect(new URL(page.url()).searchParams.has("i")).toBe(false);
   });
@@ -286,7 +307,7 @@ test.describe("The intro of a link to shared flights", () => {
     await expect(page.locator("#flight-profile")).toBeVisible({
       timeout: 15000,
     });
-    await page.waitForTimeout(1000);
+    expect(await introStarted(page)).toBe(false);
     expect(await introFrames(page)).toBe(0);
     expect(await camera(page)).toEqual(view);
   });

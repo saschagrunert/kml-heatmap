@@ -14,8 +14,8 @@
  * some three hundred times the knee, while everything up to the knee, a
  * lone flight or a route flown a few times, is drawn as before. The flat
  * heatmap, its heat lines and the cloud of the 3D view roll their heat off
- * alike (see exposedHeat in calculations/heatExposure.ts, heatLineTone in
- * ui/heatmapPaint.ts and markStretches in calculations/cloudCells.ts), and
+ * alike (see exposedHeat in calculations/heatExposure.ts, heatLineTone
+ * below and markStretches in calculations/cloudCells.ts), and
  * the heat legend reads its colours back through heatUntone.
  */
 
@@ -34,4 +34,24 @@ export function heatTone(heat: number): number {
 /** The flights' worth drawn in the colour of `tone`: heatTone backwards */
 export function heatUntone(tone: number): number {
   return tone > HEAT_KNEE ? HEAT_KNEE * Math.exp(tone / HEAT_KNEE - 1) : tone;
+}
+
+/**
+ * The seconds around a stretch (see calculations/heatLines.ts) a lone pass
+ * is drawn with: the time between two fixes, about 5 s, which the lines
+ * round to a power of two. The heat lines' flight's worth, as
+ * HEAT_FLIGHT_DENSITY is the heatmap's (see ui/heatmapPaint.ts).
+ */
+export const HEAT_LINE_FLIGHT_SECONDS = 4;
+
+/**
+ * The seconds around a stretch of the heat lines, as drawn, rolled off as
+ * the heatmap rolls off its heat (see heatTone): counted in flights' worth
+ * of HEAT_LINE_FLIGHT_SECONDS each, so the busiest circuits and taxiways
+ * keep the colours the heatmap gave them across the hand-over
+ */
+export function heatLineTone(seconds: number): number {
+  return (
+    HEAT_LINE_FLIGHT_SECONDS * heatTone(seconds / HEAT_LINE_FLIGHT_SECONDS)
+  );
 }

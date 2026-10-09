@@ -35,9 +35,11 @@ __all__ = [
     "parse_worker_count",
 ]
 
-# Peak memory of a parse worker per byte of its KML file (a 121 MB gx:Track
-# file took 1.68 GB), and what the interpreter and its modules take anyway
-PARSE_BYTES_PER_FILE_BYTE = 15
+# Peak memory of a parse worker per byte of its KML file, with the landings
+# and the cache entry of the parse (an 88 MB LineString file took 1.8 GB, a
+# 93 MB gx:Track file 1.6 GB: a line packs more points into a byte), and
+# what the interpreter and its modules take anyway
+PARSE_BYTES_PER_FILE_BYTE = 22
 WORKER_BASE_BYTES = 100 * 1024 * 1024
 
 # The most workers any pool of the run gets (--jobs), None for every CPU

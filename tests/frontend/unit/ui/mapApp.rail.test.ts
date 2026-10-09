@@ -54,112 +54,48 @@ import type { KMLDataset } from "../../../../kml_heatmap/frontend/types";
 // module, which is loaded before the mocks are registered
 const m = await vi.hoisted(() => import("./mapAppTestSetup"));
 
-vi.mock("../../../../kml_heatmap/frontend/utils/logger", () => ({
-  logError: vi.fn(),
-  logDebug: vi.fn(),
-  initLogger: vi.fn(),
-}));
-vi.mock("../../../../kml_heatmap/frontend/utils/domCache", () => ({
-  domCache: {
-    get: vi.fn((id: string, ctor?: new () => HTMLElement) => {
-      const element = document.getElementById(id);
-      if (!element || !ctor) return element;
-      return element instanceof ctor ? element : null;
-    }),
-    clear: vi.fn(),
-  },
-}));
-vi.mock("../../../../kml_heatmap/frontend/utils/toast", () => ({
-  showToast: vi.fn(),
-  announceStatus: vi.fn(),
-  dismissToast: vi.fn(),
-  TOAST_DURATION_MS: 4000,
-}));
-const mobileBarMock = vi.hoisted(() => ({ mountFor: vi.fn() }));
-vi.mock("../../../../kml_heatmap/frontend/ui/mobileBar", () => ({
-  MobileBar: mobileBarMock,
-}));
-vi.mock("../../../../kml_heatmap/frontend/ui/dataManager", () => ({
-  DataManager: vi.fn(function () {
-    return m.mockDataManagerInstance;
-  }),
-}));
-vi.mock("../../../../kml_heatmap/frontend/ui/filterManager", () => ({
-  FilterManager: vi.fn(function () {
-    return m.mockFilterManagerInstance;
-  }),
-}));
-vi.mock("../../../../kml_heatmap/frontend/ui/airportManager", () => ({
-  AirportManager: vi.fn(function () {
-    return m.mockAirportManagerInstance;
-  }),
-}));
-vi.mock("../../../../kml_heatmap/frontend/ui/replayManager", () => ({
-  ReplayManager: vi.fn(function () {
-    return m.mockReplayManagerInstance;
-  }),
-}));
-vi.mock("../../../../kml_heatmap/frontend/ui/layerManager", () => ({
-  LayerManager: vi.fn(function () {
-    return m.mockLayerManagerInstance;
-  }),
-}));
-vi.mock("../../../../kml_heatmap/frontend/ui/stateManager", () => ({
-  StateManager: vi.fn(function () {
-    return m.mockStateManagerInstance;
-  }),
-}));
-vi.mock("../../../../kml_heatmap/frontend/ui/wrappedManager", () => ({
-  WrappedManager: vi.fn(function () {
-    return m.mockWrappedManagerInstance;
-  }),
-}));
-vi.mock("../../../../kml_heatmap/frontend/services/featureLoader", () => ({
-  loadedFeatures: () => null,
-  // Replay and Wrapped come from lazily loaded bundles of their own; here
-  // they are the doubles the module mocks above return
-  loadFeatures: vi.fn(() =>
-    Promise.resolve({
-      ReplayManager: vi.fn(function () {
-        return m.mockReplayManagerInstance;
-      }),
-      // The satellite switch hands itself over to the bundle
-      followSatellite: vi.fn(),
-      toggleReplayAll: m.toggleReplayAll,
-      toggleCrossSection: m.toggleCrossSection,
-      toggleHotspotTour: m.toggleHotspotTour,
-      // And the selected flights to their profile
-      followFlightProfile: vi.fn(),
-    }),
-  ),
-  loadWrapped: vi.fn(() =>
-    Promise.resolve({
-      WrappedManager: vi.fn(function () {
-        return m.mockWrappedManagerInstance;
-      }),
-      // The statistics panel rides in the Wrapped bundle
-      StatsManager: vi.fn(function () {
-        return m.mockStatsManagerInstance;
-      }),
-    }),
-  ),
-  loadSearch: vi.fn(() => Promise.resolve({ toggleSearch: m.toggleSearch })),
-  wasSiteUpdated: vi.fn(() => false),
-  noticeSiteUpdate: vi.fn(() => null),
-}));
-vi.mock("../../../../kml_heatmap/frontend/ui/uiToggles", () => ({
-  UIToggles: vi.fn(function () {
-    return m.mockUITogglesInstance;
-  }),
-}));
-vi.mock("../../../../kml_heatmap/frontend/ui/pathSelection", () => ({
-  PathSelection: vi.fn(function () {
-    return m.mockPathSelectionInstance;
-  }),
-  // The start view keeps 48 pixels off every edge where no panel is
-  mapChromePadding: vi.fn(() => ({ top: 48, right: 48, bottom: 48, left: 48 })),
-  CONTROL_COLUMNS: "#left-buttons, #right-buttons",
-}));
+vi.mock("../../../../kml_heatmap/frontend/utils/logger", () =>
+  m.modules.logger(),
+);
+vi.mock("../../../../kml_heatmap/frontend/utils/domCache", () =>
+  m.modules.domCache(),
+);
+vi.mock("../../../../kml_heatmap/frontend/utils/toast", () =>
+  m.modules.toast(),
+);
+vi.mock("../../../../kml_heatmap/frontend/ui/mobileBar", () =>
+  m.modules.mobileBar(),
+);
+vi.mock("../../../../kml_heatmap/frontend/ui/dataManager", () =>
+  m.modules.dataManager(),
+);
+vi.mock("../../../../kml_heatmap/frontend/ui/filterManager", () =>
+  m.modules.filterManager(),
+);
+vi.mock("../../../../kml_heatmap/frontend/ui/airportManager", () =>
+  m.modules.airportManager(),
+);
+vi.mock("../../../../kml_heatmap/frontend/ui/replayManager", () =>
+  m.modules.replayManager(),
+);
+vi.mock("../../../../kml_heatmap/frontend/ui/layerManager", () =>
+  m.modules.layerManager(),
+);
+vi.mock("../../../../kml_heatmap/frontend/ui/stateManager", () =>
+  m.modules.stateManager(),
+);
+vi.mock("../../../../kml_heatmap/frontend/ui/wrappedManager", () =>
+  m.modules.wrappedManager(),
+);
+vi.mock("../../../../kml_heatmap/frontend/services/featureLoader", () =>
+  m.modules.featureLoader(),
+);
+vi.mock("../../../../kml_heatmap/frontend/ui/uiToggles", () =>
+  m.modules.uiToggles(),
+);
+vi.mock("../../../../kml_heatmap/frontend/ui/pathSelection", () =>
+  m.modules.pathSelection(),
+);
 
 const {
   createApp,
@@ -259,7 +195,7 @@ describe("MapApp controls and map", () => {
 
   beforeEach(() => {
     resetManagerMocks();
-    mobileBarMock.mountFor.mockReturnValue(null);
+    m.mobileBar.mountFor.mockReturnValue(null);
     setupDOM();
     app = createApp(MapApp);
   });
@@ -283,8 +219,7 @@ describe("MapApp controls and map", () => {
         "Pick flights with timing data to replay, under Statistics, Flights",
       );
 
-      app.selectedPathIds.add(1);
-      app.store.notifyMutation("selectedPathIds");
+      app.selectedPathIds = new Set([...app.selectedPathIds, 1]);
 
       expect(btn.getAttribute("aria-disabled")).toBe("false");
       expect(btn.title).toBe("Replay selected flights");
@@ -297,8 +232,7 @@ describe("MapApp controls and map", () => {
       const chip = document.getElementById("selection-replay-btn")!;
       expect(chip.hidden).toBe(true);
 
-      app.selectedPathIds.add(1);
-      app.store.notifyMutation("selectedPathIds");
+      app.selectedPathIds = new Set([...app.selectedPathIds, 1]);
       expect(chip.hidden).toBe(false);
 
       // It presses the Replay control, which a mode may hold
@@ -317,8 +251,7 @@ describe("MapApp controls and map", () => {
 
     it("follows the timing data of the loaded metadata", async () => {
       await initializeApp(app);
-      app.selectedPathIds.add(1);
-      app.store.notifyMutation("selectedPathIds");
+      app.selectedPathIds = new Set([...app.selectedPathIds, 1]);
       const btn = document.getElementById("replay-btn") as HTMLButtonElement;
       expect(btn.getAttribute("aria-disabled")).toBe("false");
 
@@ -504,7 +437,7 @@ describe("MapApp controls and map", () => {
       const bar = app.mobileBar;
       app.mobileBar = {
         isVisible: () => true,
-        sheet: { isOpen: () => false },
+        sheetOpen: () => false,
         destroy: () => {},
       } as unknown as MapApp["mobileBar"];
       // Not under Wrapped, whose dialog takes it
@@ -524,7 +457,7 @@ describe("MapApp controls and map", () => {
       const bar = app.mobileBar;
       app.mobileBar = {
         isVisible: () => true,
-        sheet: { isOpen: () => true },
+        sheetOpen: () => true,
         destroy: () => {},
       } as unknown as MapApp["mobileBar"];
       app.store.set("statsPanelVisible", true);
@@ -546,7 +479,7 @@ describe("MapApp controls and map", () => {
       const bar = app.mobileBar;
       app.mobileBar = {
         isVisible: () => true,
-        sheet: { isOpen: () => false },
+        sheetOpen: () => false,
         destroy: () => {},
       } as unknown as MapApp["mobileBar"];
       app.store.set("statsPanelVisible", true);
@@ -656,7 +589,7 @@ describe("MapApp controls and map", () => {
       title.id = "stats-rail-title";
       title.innerHTML = '<span class="kh-stats-title-text">Statistics</span>';
       document.body.appendChild(title);
-      app.selectedPathIds.add(1);
+      app.selectedPathIds = new Set([...app.selectedPathIds, 1]);
 
       app.store.set("statsPanelVisible", true);
 
@@ -882,8 +815,7 @@ describe("MapApp controls and map", () => {
         path_segments: [segmentOf({ path_id: 1, altitude_ft: 5000, time: 0 })],
       });
 
-      app.selectedPathIds.add(1);
-      app.store.notifyMutation("selectedPathIds");
+      app.selectedPathIds = new Set([...app.selectedPathIds, 1]);
 
       // It would finish the moment it started, with nothing drawn
       expect(app.canReplay()).toBe(false);
@@ -901,17 +833,15 @@ describe("MapApp controls and map", () => {
       );
       const chip = document.getElementById("selection-replay-btn")!;
       // One timed flight among eight
-      app.selectedPathIds.add(1);
+      app.selectedPathIds = new Set([...app.selectedPathIds, 1]);
       for (let id = 100; app.selectedPathIds.size < DAY_MAX_FLIGHTS; id++) {
-        app.selectedPathIds.add(id);
+        app.selectedPathIds = new Set([...app.selectedPathIds, id]);
       }
-      app.store.notifyMutation("selectedPathIds");
       expect(app.canReplay()).toBe(true);
       expect(app.replayHint()).toBeNull();
 
       // All of a home airport's, say: Replay all is the one for those
-      app.selectedPathIds.add(200);
-      app.store.notifyMutation("selectedPathIds");
+      app.selectedPathIds = new Set([...app.selectedPathIds, 200]);
       expect(app.canReplay()).toBe(false);
       expect(app.replayHint()).toBe(REPLAY_TOO_MANY_MESSAGE);
       expect(replayButton().getAttribute("aria-disabled")).toBe("true");
@@ -929,9 +859,8 @@ describe("MapApp controls and map", () => {
         withFlights(range(100, 109)),
       );
       for (let id = 100; app.selectedPathIds.size <= DAY_MAX_FLIGHTS; id++) {
-        app.selectedPathIds.add(id);
+        app.selectedPathIds = new Set([...app.selectedPathIds, id]);
       }
-      app.store.notifyMutation("selectedPathIds");
 
       expect(app.replayHint()).toBe(REPLAY_PRECONDITION_MESSAGE);
       expect(replayButton().title).toBe(REPLAY_PRECONDITION_MESSAGE);
@@ -946,8 +875,7 @@ describe("MapApp controls and map", () => {
       );
       // Share mode keeps the flights a filter hides
       app.store.batch(() => {
-        app.selectedPathIds.add(1).add(2);
-        app.store.notifyMutation("selectedPathIds");
+        app.selectedPathIds = new Set([...app.selectedPathIds, 1, 2]);
         app.isolateSelection = true;
       });
       expect(app.canReplay()).toBe(true);
@@ -959,8 +887,9 @@ describe("MapApp controls and map", () => {
 
       // None shown: no flight the map does not draw is replayed
       app.store.batch(() => {
-        app.selectedPathIds.delete(1);
-        app.store.notifyMutation("selectedPathIds");
+        app.selectedPathIds = new Set(
+          [...app.selectedPathIds].filter((id) => id !== 1),
+        );
       });
       expect(app.canReplay()).toBe(false);
       expect(replayButton().getAttribute("aria-disabled")).toBe("true");
@@ -971,13 +900,11 @@ describe("MapApp controls and map", () => {
 
     it("leaves the button to a running replay", async () => {
       await initializeApp(app);
-      app.selectedPathIds.add(1);
-      app.store.notifyMutation("selectedPathIds");
+      app.selectedPathIds = new Set([...app.selectedPathIds, 1]);
       replayButton().title = "Replay running";
       app.replayActive = true;
 
-      app.selectedPathIds.clear();
-      app.store.notifyMutation("selectedPathIds");
+      app.selectedPathIds = new Set();
 
       expect(replayButton().getAttribute("aria-disabled")).toBe("false");
       expect(replayButton().title).toBe("Replay running");
@@ -986,8 +913,7 @@ describe("MapApp controls and map", () => {
     it("takes the button back in step as the replay closes", async () => {
       await initializeApp(app);
       app.replayActive = true;
-      app.selectedPathIds.clear();
-      app.store.notifyMutation("selectedPathIds");
+      app.selectedPathIds = new Set();
       replayButton().setAttribute("aria-disabled", "false");
 
       app.replayActive = false;
@@ -999,9 +925,7 @@ describe("MapApp controls and map", () => {
   describe("the flight profile", () => {
     /** Select `ids` alone, and let the bundle arrive */
     async function select(...ids: number[]): Promise<void> {
-      app.selectedPathIds.clear();
-      for (const id of ids) app.selectedPathIds.add(id);
-      app.store.notifyMutation("selectedPathIds");
+      app.selectedPathIds = new Set(ids);
       await Promise.resolve();
       await Promise.resolve();
     }
@@ -1085,9 +1009,7 @@ describe("MapApp controls and map", () => {
       const { bundle, deliver } = await holdNextLoad(loadFeatures);
       vi.mocked(loadFeatures).mockClear();
 
-      app.selectedPathIds.add(1);
-      app.store.notifyMutation("selectedPathIds");
-      app.store.notifyMutation("selectedPathIds");
+      app.selectedPathIds = new Set([...app.selectedPathIds, 1]);
       app.destroy();
       deliver();
       await Promise.resolve();
@@ -1211,8 +1133,8 @@ describe("MapApp controls and map", () => {
         withFlights([100]),
       );
       m.mockReplayManagerInstance.toggleReplay.mockClear();
-      app.selectedPathIds.add(1);
-      app.selectedPathIds.add(100);
+      app.selectedPathIds = new Set([...app.selectedPathIds, 1]);
+      app.selectedPathIds = new Set([...app.selectedPathIds, 100]);
 
       app.toggleReplay();
 
@@ -1237,12 +1159,12 @@ describe("MapApp controls and map", () => {
       );
       const { deliver } = await holdNextLoad(loadFeatures);
       m.mockReplayManagerInstance.toggleReplay.mockClear();
-      app.selectedPathIds.add(1);
+      app.selectedPathIds = new Set([...app.selectedPathIds, 1]);
 
       app.toggleReplay();
       // A second one picked before the bundle came: the manager decides
       // once it is there, and plays both
-      app.selectedPathIds.add(100);
+      app.selectedPathIds = new Set([...app.selectedPathIds, 100]);
       deliver();
 
       await vi.waitFor(() =>
@@ -1695,7 +1617,7 @@ describe("MapApp controls and map", () => {
       // heat cloud, threw away the flights someone had put together, and
       // ended share mode with them
       await initializeApp(app);
-      app.selectedPathIds.add(1);
+      app.selectedPathIds = new Set([...app.selectedPathIds, 1]);
       app.altitudeVisible = true;
 
       mockMap(app).emit("click", click);
@@ -1717,7 +1639,7 @@ describe("MapApp controls and map", () => {
 
     it("keeps the selection on a click over the heat alone, where no flight can be clicked", async () => {
       await initializeApp(app);
-      app.selectedPathIds.add(1);
+      app.selectedPathIds = new Set([...app.selectedPathIds, 1]);
 
       mockMap(app).emit("click", click);
 
@@ -1729,7 +1651,7 @@ describe("MapApp controls and map", () => {
 
     it("hands a click on an airport's label to its airport, as on the marker", async () => {
       await initializeApp(app);
-      app.selectedPathIds.add(1);
+      app.selectedPathIds = new Set([...app.selectedPathIds, 1]);
       mockAirportManagerInstance.airportLabelAt.mockReturnValue("Leipzig EDDP");
 
       mockMap(app).emit("click", {
@@ -1789,7 +1711,7 @@ describe("MapApp controls and map", () => {
 
     it("leaves the popup of an airport a double tap carried off its marker", async () => {
       await initializeApp(app);
-      app.selectedPathIds.add(1);
+      app.selectedPathIds = new Set([...app.selectedPathIds, 1]);
       app.altitudeVisible = true;
       const marker = document.createElement("div");
       marker.className = "maplibregl-marker";
@@ -1825,7 +1747,7 @@ describe("MapApp controls and map", () => {
 
     it("hands a click on a flight to the layer manager instead of clearing", async () => {
       await initializeApp(app);
-      app.selectedPathIds.add(1);
+      app.selectedPathIds = new Set([...app.selectedPathIds, 1]);
       const hit = { pathId: 2, segment: { path_id: 2 } };
       mockLayerManagerInstance.hitTest.mockReturnValue(hit);
 
@@ -1892,7 +1814,7 @@ describe("MapApp controls and map", () => {
 
     it("leaves the selection alone while the tiles cannot tell what was clicked", async () => {
       await initializeApp(app);
-      app.selectedPathIds.add(1);
+      app.selectedPathIds = new Set([...app.selectedPathIds, 1]);
       mockLayerManagerInstance.hitTest.mockReturnValue("stale");
 
       mockMap(app).emit("click", click);
@@ -1909,7 +1831,7 @@ describe("MapApp controls and map", () => {
       // The dialog shows this map and leaves its gestures on, so the
       // overview can be moved; a click there must not act behind the modal
       await initializeApp(app);
-      app.selectedPathIds.add(1);
+      app.selectedPathIds = new Set([...app.selectedPathIds, 1]);
       mockLayerManagerInstance.hitTest.mockReturnValue({
         pathId: 2,
         segment: { path_id: 2 },
@@ -1932,7 +1854,7 @@ describe("MapApp controls and map", () => {
       // No marker stops its click, so every one of them arrives here, the
       // one that has just opened a popup included
       await initializeApp(app);
-      app.selectedPathIds.add(1);
+      app.selectedPathIds = new Set([...app.selectedPathIds, 1]);
       const closePopup = vi.fn();
       app.replayState.airplaneMarker = {
         isPopupOpen: () => true,
@@ -1956,7 +1878,7 @@ describe("MapApp controls and map", () => {
 
     it("closes the airplane popup during replay instead of clearing", async () => {
       await initializeApp(app);
-      app.selectedPathIds.add(1);
+      app.selectedPathIds = new Set([...app.selectedPathIds, 1]);
       const closePopup = vi.fn();
       app.replayActive = true;
       app.replayState.airplaneMarker = {

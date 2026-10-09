@@ -71,6 +71,31 @@ const MAP_RESTORE_DELAY_MS = 100;
  */
 const MAP_REVEAL_TIMEOUT_MS = 1200;
 
+/** Where a session notes the years whose intro has played (see firstIntro) */
+export const INTRO_SEEN_KEY = "kml-heatmap-wrapped-intro";
+
+/**
+ * The years whose intro has played in this session: ten seconds at every
+ * opening was a wait for anyone who went back to the cards. Where the
+ * storage is out of reach, none, and it plays every time, as it did.
+ */
+function introsSeen(): string[] {
+  try {
+    return (sessionStorage.getItem(INTRO_SEEN_KEY) ?? "").split(",");
+  } catch {
+    return [];
+  }
+}
+
+/** Note that the intro of the year `year` has played (see introsSeen) */
+function introSeen(year: string): void {
+  try {
+    sessionStorage.setItem(INTRO_SEEN_KEY, [...introsSeen(), year].join(","));
+  } catch {
+    // Blocked storage
+  }
+}
+
 /**
  * The user's map view: app-shaped center, zoom in the map's own unit, and
  * the globe and 3D switches, put back as the dialog closes: the intro
@@ -320,7 +345,8 @@ export class WrappedManager {
 
   /**
    * Open the dialog, with the intro when `intro` asks for it (its button
-   * does, a restored state does not) and motion is welcome
+   * does, a restored state does not), motion is welcome and the year's
+   * intro has not played in this session yet
    */
   showWrapped(intro = false): void {
     if (!this.app.map || this.app.wrappedVisible) return;
@@ -370,10 +396,16 @@ export class WrappedManager {
       bounds: overviewBounds(this.app),
       options: this.fitOptions(),
     });
-    const home = intro && !prefersReducedMotion() ? this.homeBase() : null;
+    const year = this.app.selectedYear;
+    const home =
+      intro && !prefersReducedMotion() && !introsSeen().includes(year)
+        ? this.homeBase()
+        : null;
     // The map shows at once in an opening with the intro (wrapped.css)
     domCache.get("wrapped-modal")?.classList.toggle("has-intro", !!home);
     if (home) {
+      // Seen once it plays: a year without a home base yet has not
+      introSeen(year);
       this.intro = startWrappedIntro(this.app, home, overview, () => {
         this.intro = null;
       });

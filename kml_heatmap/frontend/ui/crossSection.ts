@@ -71,6 +71,7 @@ import {
 } from "./crossSectionCorridor";
 import { button, element, select } from "./crossSectionElements";
 import { focusModeControl } from "./heldControls";
+import { featurePart } from "./lazyBundles";
 import { sectionSummary, widthLabel } from "./crossSectionText";
 
 /** The control in the View group that opens and closes the tool */
@@ -90,19 +91,17 @@ const KEY_STEP_FAST_PX = 50;
 const ANNOUNCE_DELAY_MS = 600;
 
 /** The tool of an app */
-interface Tool {
+export interface CrossSectionTool {
   toggle(): void;
   isOpen(): boolean;
 }
-
-const tools = new WeakMap<MapApp, Tool>();
 
 /** Who wants to hear the tool of each app open and close */
 const followers = new WeakMap<MapApp, Set<() => void>>();
 
 /** Whether the cross-section of `app` is open */
 export function crossSectionOpen(app: MapApp): boolean {
-  return tools.get(app)?.isOpen() ?? false;
+  return featurePart(app, "crossSection")?.isOpen() ?? false;
 }
 
 /**
@@ -128,13 +127,8 @@ export function toggleCrossSection(app: MapApp): void {
   toolOf(app).toggle();
 }
 
-function toolOf(app: MapApp): Tool {
-  let tool = tools.get(app);
-  if (!tool) {
-    tool = createTool(app);
-    tools.set(app, tool);
-  }
-  return tool;
+function toolOf(app: MapApp): CrossSectionTool {
+  return featurePart(app, "crossSection", () => createTool(app));
 }
 
 /** Where the drawing of a line is */
@@ -149,7 +143,7 @@ interface Press {
   dragging: boolean;
 }
 
-function createTool(app: MapApp): Tool {
+function createTool(app: MapApp): CrossSectionTool {
   let phase: Phase = "closed";
   /** The line shown, [lat, lon] at each end */
   let line: [Coordinate, Coordinate] | null = null;
@@ -788,7 +782,6 @@ function createTool(app: MapApp): Tool {
       hide();
       resized?.disconnect();
       root.remove();
-      tools.delete(app);
     },
     { once: true },
   );

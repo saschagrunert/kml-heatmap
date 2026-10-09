@@ -42,12 +42,10 @@ whitespace fixers and the checks for merge conflict markers and for valid TOML
 and YAML on every commit. When a commit touches `data/`, they also check that
 the KML files are obfuscated. Apart from gitleaks and the hooks of
 `pre-commit-hooks`, the hooks run the tools from your own environment rather
-than from a pinned mirror, so no hook revision can drift on its own. ruff and
-the obfuscation check are resolved off `$PATH` and prettier out of
+than from a pinned mirror, so no hook revision can drift on its own. ruff, typos
+and the obfuscation check are resolved off `$PATH` and prettier out of
 `node_modules`, so commit with the virtual environment active and after `npm ci`
-to get the versions CI installs. typos is in none of the lock files; the hook
-and `make lint` skip it with a warning when it is not installed, and the CI job
-is the one that has to pass.
+to get the versions CI installs.
 
 npm 11 skips the install scripts of dependencies that `allowScripts` in
 `package.json` does not list. esbuild's is listed, so `npm ci` runs it. The only
@@ -86,7 +84,7 @@ container is involved:
 ```bash
 make lint            # lock files and version pins, ruff (check and format), mypy, zizmor, TypeScript 7 (npm run typecheck and typecheck:tests), eslint, knip, prettier, the obfuscation of data/ and the visual fixtures, typos
 make format          # ruff format, prettier
-make test            # npm run build, then vitest and pytest with coverage; pytest flags are in doc/development/testing.md
+make test            # npm run build and the site in docs/, then vitest (shuffled) and pytest with coverage; pytest flags are in doc/development/testing.md
 npm run test:e2e     # Playwright: desktop, mobile and WebKit (see doc/development/testing.md)
 make obfuscate       # after adding flights to data/ (see doc/adding-flights.md); rewrites them in place, irreversibly
 make check-obfuscation
@@ -111,13 +109,14 @@ here, not an oversight: adding the parentheses back is undone on the next
 - **The generated site is not tracked.** `docs/` is only the default output
   directory of a local `make build`. On every push to `main` the `test` workflow
   builds the site from the sources and `data/` and publishes it to GitHub Pages,
-  in its `site` and `deploy` jobs, which only start once every test job has
-  passed and only while the commit is still the head of `main` (a re-run of an
-  older run does not publish). The `unit` job builds its own copy, and the
-  `e2e-sites` job the two the e2e jobs test: one with a dummy tile API key and,
-  for the specs that depend on it, one without. The repository's Pages source
-  has to be "GitHub Actions" (Settings > Pages). Set it by hand: the workflow
-  token is not allowed to change it.
+  in its `site` and `deploy` jobs. The site is built alongside the tests, and
+  `deploy` publishes it only once every test job has passed and only while the
+  commit is still the head of `main` (a re-run of an older run does not
+  publish). The `unit` job builds its own copy, and the `e2e-sites` job the two
+  the e2e jobs test: one with a dummy tile API key and, for the specs that
+  depend on it, one without. The repository's Pages source has to be "GitHub
+  Actions" (Settings > Pages). Set it by hand: the workflow token is not allowed
+  to change it.
 - **The other settings made by hand.** A ruleset on `main` (Settings > Rules)
   requires the `checks` status, the last job of the `test` workflow, which
   passes only when every test job a pull request runs did; it blocks force

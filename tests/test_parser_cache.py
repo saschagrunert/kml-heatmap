@@ -91,6 +91,63 @@ class TestGetCacheKey:
     def test_default_cache_dir_is_below_the_cache_directory(self):
         assert KML_CACHE_DIR.name == "kml"
 
+    def test_the_cache_is_this_users_alone(self, tmp_path):
+        """The entries hold the raw flights, real dates and times among them."""
+        previous = os.umask(0o022)
+        try:
+            kml = tmp_path / "test.kml"
+            kml.write_bytes(b"<kml/>")
+            cache_dir = tmp_path / "cache" / "kml"
+            cache_path, _ = get_cache_key(str(kml), cache_dir=cache_dir)
+            assert cache_path is not None
+            save_to_cache(cache_path, [], [], [])
+        finally:
+            os.umask(previous)
+        assert cache_dir.stat().st_mode & 0o777 == 0o700
+        assert cache_dir.parent.stat().st_mode & 0o777 == 0o700
+        assert cache_path.stat().st_mode & 0o777 == 0o600
+
+    @pytest.mark.parametrize("mode", [0o755, 0o775, 0o777])
+    def test_a_cache_others_may_enter_is_made_private(self, tmp_path, mode):
+        """As an older version or a umask of 022 left it."""
+        kml = tmp_path / "test.kml"
+        kml.write_bytes(b"<kml/>")
+        cache_dir = tmp_path / "kml"
+        cache_dir.mkdir()
+        cache_dir.chmod(mode)
+        cache_path, _ = get_cache_key(str(kml), cache_dir=cache_dir)
+        assert cache_path is not None
+        assert cache_dir.stat().st_mode & 0o777 == 0o700
+
+    def test_a_cache_that_cannot_be_made_private_is_not_used(
+        self, tmp_path, monkeypatch
+    ):
+        kml = tmp_path / "test.kml"
+        kml.write_bytes(b"<kml/>")
+        cache_dir = tmp_path / "kml"
+        cache_dir.mkdir()
+        cache_dir.chmod(0o755)
+
+        def refuse(self, mode):
+            raise PermissionError("no")
+
+        monkeypatch.setattr(Path, "chmod", refuse)
+        assert get_cache_key(str(kml), cache_dir=cache_dir) == (None, False)
+
+    def test_a_symlinked_cache_is_not_used(self, tmp_path):
+        kml = tmp_path / "test.kml"
+        kml.write_bytes(b"<kml/>")
+        target = tmp_path / "elsewhere"
+        target.mkdir()
+        (tmp_path / "kml").symlink_to(target)
+        assert get_cache_key(str(kml), cache_dir=tmp_path / "kml") == (None, False)
+
+    def test_a_cache_of_another_user_is_not_used(self, tmp_path, monkeypatch):
+        kml = tmp_path / "test.kml"
+        kml.write_bytes(b"<kml/>")
+        monkeypatch.setattr(os, "getuid", lambda: os.geteuid() + 4242)
+        assert get_cache_key(str(kml), cache_dir=tmp_path / "kml") == (None, False)
+
     def test_unwritable_cache_dir_disables_cache(self, tmp_path):
         kml = tmp_path / "test.kml"
         kml.write_bytes(b"<kml/>")

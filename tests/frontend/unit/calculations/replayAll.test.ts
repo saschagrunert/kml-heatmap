@@ -376,6 +376,28 @@ describe("fixPoints", () => {
     });
     expect(fixPoints([]).count).toBe(0);
   });
+
+  it("keeps a flight across the antimeridian on one copy of the world", () => {
+    // From Fiji, east across 180 degrees
+    const segments: PathSegment[] = [178.5, 179.5, -179.5].map((lng, i) => ({
+      path_id: 1,
+      coords: [
+        [-17.5, lng],
+        [-17.5, i === 2 ? -178.5 : lng + 1],
+      ],
+      altitude_ft: 3000,
+      groundspeed_knots: 100,
+    }));
+    const { points, count } = fixPoints(segments);
+
+    const xs = Array.from(
+      { length: count },
+      (_, n) => points[n * REPLAY_ALL_POINT_FLOATS]!,
+    );
+    // Three degrees east of the first fix at most, never a world west
+    expect(Math.min(...xs)).toBeCloseTo(0, 9);
+    expect(Math.max(...xs)).toBeCloseTo(3 / 360, 6);
+  });
 });
 
 describe("the fit of the flights on a tilted map", () => {
@@ -533,6 +555,43 @@ describe("the fit of the flights on a tilted map", () => {
     expect([left, top, right, bottom].every(Number.isFinite)).toBe(true);
     expect(top).toBeGreaterThanOrEqual(24 - 2);
     expect(bottom).toBeLessThanOrEqual(900 - 110 + 2);
+  });
+
+  it("fits a flight across the antimeridian there, not on the far side of the world", () => {
+    // From Fiji, east across 180 degrees, as share mode fits them: from the
+    // centre of their bounds, which comes wrapped to the west of it
+    const fiji: PathSegment[] = [178.5, 179.5, -179.5].map((lng, i) => ({
+      path_id: 1,
+      coords: [
+        [-17.5 + i * 0.1, lng],
+        [-17.4 + i * 0.1, i === 2 ? -178.5 : lng + 1],
+      ],
+      altitude_ft: 3000,
+      groundspeed_knots: 100,
+    }));
+
+    const camera = fitTilted(
+      fixPoints(fiji),
+      { center: [-180, -17.35], zoom: 6 },
+      MAP,
+      22,
+    );
+
+    // Nearly the zoom of the same flight a world away from 180
+    const shifted = fiji.map((segment) => ({
+      ...segment,
+      coords: segment.coords.map(([lat, lng]) => [lat, lng - 170]),
+    })) as PathSegment[];
+    const away = fitTilted(
+      fixPoints(shifted),
+      { center: [10, -17.35], zoom: 6 },
+      MAP,
+      22,
+    );
+    expect(camera.zoom).toBeCloseTo(away.zoom, 1);
+    expect(camera.zoom).toBeGreaterThan(6);
+    // Where 180 is on the copy of the world the fixes lie on
+    expect(Math.abs(camera.center[0]) - 180).toBeCloseTo(0, 0);
   });
 
   it("stays at the camera it is given without flights or room, and no closer than the limit", () => {

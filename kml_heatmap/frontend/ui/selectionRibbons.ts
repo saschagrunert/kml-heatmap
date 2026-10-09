@@ -31,7 +31,11 @@ import {
 import type { SmoothedFlights } from "../calculations/smoothing";
 import { shownSelection } from "../calculations/datasetIndex";
 import { MAP_SOURCES } from "../utils/constants";
-import { isReplayCameraMove, whenContextRestored } from "../utils/mapHelpers";
+import {
+  isReplayCameraMove,
+  onMapReady,
+  whenContextRestored,
+} from "../utils/mapHelpers";
 import {
   CULL_FROM_ZOOM,
   leavesBox,
@@ -241,9 +245,8 @@ export function followSelectionRibbons(app: MapApp): void {
     write();
   };
 
-  void app.mapReady.then(() => {
+  onMapReady(app, "The ribbons of the selection", () => {
     const signal = app.signal;
-    if (signal.aborted) return;
     const unsubscribe = [
       app.store.subscribeKeys(CUT_KEYS, () => {
         stale = true;
@@ -263,7 +266,7 @@ export function followSelectionRibbons(app: MapApp): void {
       update();
     });
     // The source comes back with the data of the moment of the loss
-    whenContextRestored(map, write);
+    whenContextRestored(map, write, signal);
     signal.addEventListener("abort", () => {
       for (const stop of unsubscribe) stop();
       zoomed.unsubscribe();

@@ -1782,7 +1782,17 @@ body:has(.mobile-bar) .kh-flights-scroll {
   white-space: nowrap;
 }
 body:has(.mobile-bar) .kh-flights {
-  font-size: inherit;
+  font-size: var(--text-base);
+}
+/* A finger's sort buttons: the height of the text alone was 14 px */
+body:has(.mobile-bar) .kh-flights thead button {
+  min-width: 24px;
+  min-height: 44px;
+}
+/* One year leaves its column the same on every row, and the rail too
+   narrow for the landings (ui/flightList.ts) */
+.kh-one-year :is(th, td):nth-child(3) {
+  display: none;
 }
 .kh-flights th,
 .kh-flights td {

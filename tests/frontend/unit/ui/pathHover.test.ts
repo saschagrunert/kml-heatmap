@@ -300,7 +300,7 @@ describe("PathHover through the LayerManager", () => {
         path_info: [...data.path_info, { id: 2, year: 2025 }],
       };
       const slices = vi.spyOn(statistics, "segmentsForPathIds");
-      mockApp.selectedPathIds.add(1);
+      mockApp.selectedPathIds = new Set([...mockApp.selectedPathIds, 1]);
       layerManager.updateSelectionStyles();
       // The altitude range, which the selection's runs are cut on
       expect(slices).toHaveBeenCalledOnce();
@@ -312,8 +312,10 @@ describe("PathHover through the LayerManager", () => {
       expect(slices).toHaveBeenCalledTimes(2);
 
       // Another selection has ranges of its own
-      mockApp.selectedPathIds.delete(1);
-      mockApp.selectedPathIds.add(2);
+      mockApp.selectedPathIds = new Set(
+        [...mockApp.selectedPathIds].filter((id) => id !== 1),
+      );
+      mockApp.selectedPathIds = new Set([...mockApp.selectedPathIds, 2]);
       layerManager.updateSelectionStyles();
       expect(slices).toHaveBeenCalledTimes(3);
     });
@@ -326,7 +328,7 @@ describe("PathHover through the LayerManager", () => {
         path_info: [...data.path_info, { id: 2, year: 2024 }],
       };
       mockApp.selectedYear = "2025";
-      mockApp.selectedPathIds.add(2);
+      mockApp.selectedPathIds = new Set([...mockApp.selectedPathIds, 2]);
       const slices = vi.spyOn(statistics, "segmentsForPathIds");
 
       layerManager.updateSelectionStyles();
@@ -392,25 +394,28 @@ describe("PathHover through the LayerManager", () => {
     });
 
     it("colours the tooltip chips on the range the runs use", () => {
-      // Path 2 is selected: its range, not the full one, colours the map
-      mockApp.currentData!.path_info.push({
-        id: 2,
-        year: 2025,
-        min_altitude_ft: 1000,
-        max_altitude_ft: 1000,
-      });
-      mockApp.currentData!.path_segments.push(
-        createSegment({
-          path_id: 2,
-          altitude_ft: 1000,
-          groundspeed_knots: 50,
-          coords: [
-            [47, 15],
-            [47.5, 15.5],
-          ],
-        }),
+      // Path 2 is selected: its range, not the full one, colours the map.
+      // A dataset of its own: one is never changed once drawn
+      const { path_info, path_segments } = mockApp.currentData!;
+      mockApp.currentData = createDataset(
+        [
+          ...path_info,
+          { id: 2, year: 2025, min_altitude_ft: 1000, max_altitude_ft: 1000 },
+        ],
+        [
+          ...path_segments,
+          createSegment({
+            path_id: 2,
+            altitude_ft: 1000,
+            groundspeed_knots: 50,
+            coords: [
+              [47, 15],
+              [47.5, 15.5],
+            ],
+          }),
+        ],
       );
-      mockApp.selectedPathIds.add(2);
+      mockApp.selectedPathIds = new Set([...mockApp.selectedPathIds, 2]);
       drawMode(layerManager, "altitude");
       mockApp.map!.renderedFeatures = [rendered(ALTITUDE, { r: 0, g: 2 })];
 
@@ -445,7 +450,7 @@ describe("PathHover through the LayerManager", () => {
       // the old ones until the map has drawn the new data
       mockApp.pathSelection.togglePathSelection.mockImplementation(
         (id: number) => {
-          mockApp.selectedPathIds.add(id);
+          mockApp.selectedPathIds = new Set([...mockApp.selectedPathIds, id]);
           layerManager.updateSelectionStyles();
         },
       );
@@ -473,7 +478,7 @@ describe("PathHover through the LayerManager", () => {
     });
 
     it("does not wait for idle without a pointer on the map", () => {
-      mockApp.selectedPathIds.add(1);
+      mockApp.selectedPathIds = new Set([...mockApp.selectedPathIds, 1]);
       layerManager.updateSelectionStyles();
 
       expect(mockApp.map!.listenerCount("idle")).toBe(0);

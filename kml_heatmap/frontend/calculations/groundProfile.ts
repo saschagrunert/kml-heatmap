@@ -383,6 +383,18 @@ export function heldGroundedFlights(): readonly PathSegment[] | null {
   return curves?.segments ?? null;
 }
 
+/** What else lets go with the flights (see onReleaseGrounded) */
+const alsoReleased: (() => void)[] = [];
+
+/**
+ * Let go of what `release` holds whenever the flights smoothed by
+ * groundedFlights go (releaseGroundedFlights): the few flights of
+ * keptGrounded, smoothed on their own
+ */
+export function onReleaseGrounded(release: () => void): void {
+  alsoReleased.push(release);
+}
+
 /**
  * Let go of the flights smoothed by groundedFlights, and of their curves
  * (smoothedCurves)
@@ -390,6 +402,7 @@ export function heldGroundedFlights(): readonly PathSegment[] | null {
 export function releaseGroundedFlights(): void {
   grounded = null;
   curves = null;
+  for (const release of alsoReleased) release();
 }
 
 /** Metres flown to the end of each of the segments `indices` of a flight */

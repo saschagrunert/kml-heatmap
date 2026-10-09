@@ -15,8 +15,9 @@ the flights is in [Rendering](rendering.md) and [Heat](heat.md), the tests in
     lives beside it: the base style and its fallback (`baseStyle.ts`), the saved
     state put back at start (`ui/stateRestore.ts`), the controls that follow the
     store (`ui/appChrome.ts`) and what the app says when a lazy bundle cannot be
-    fetched (`ui/lazyBundles.ts`). `features.ts`, `wrapped.ts` and `search.ts`
-    are the entry points of the three lazy bundles
+    fetched (`ui/lazyBundles.ts`), with the parts of the lazy features each app
+    keeps once made (`featurePart`). `features.ts`, `wrapped.ts`, `search.ts`
+    and `extras.ts` are the entry points of the four lazy bundles
   - `calculations/` - Statistics and data processing
   - `features/` - Airports, layers, replay, wrapped
   - `services/` - Data loading and caching
@@ -34,15 +35,16 @@ the flights is in [Rendering](rendering.md) and [Heat](heat.md), the tests in
     Every mark in the interface is an inline SVG: an icon font is out (the
     page's CSP allows no external font), and emoji render at a different weight,
     colour and baseline on every platform. The shapes come from Lucide, imported
-    by name so the bundler keeps only the ones the page draws; the GitHub mark
-    and the top-down aircraft are drawn in `utils/icons.ts` because Lucide
-    carries neither
+    by name so the bundler keeps only the ones the page draws, and the build
+    writes each icon's plain paths as one (`lucidePathsPlugin` in `build.js`);
+    the GitHub mark and the top-down aircraft are drawn in `utils/icons.ts`
+    because Lucide carries neither
 - **Stylesheets** in `kml_heatmap/static/` (`styles.css`, `features.css`,
   `wrapped.css` and `search.css`, see [Stylesheets](#stylesheets))
 - **Build output** in `kml_heatmap/static/` (`mapApp.bundle.js`,
   `features.bundle.js`, `wrapped.bundle.js`, `search.bundle.js`,
-  `shared.bundle.js`, `yearWorker.bundle.js`, their source maps, `vendor/` and
-  `flags/`)
+  `extras.bundle.js`, `shared.bundle.js`, `yearWorker.bundle.js`, their source
+  maps, `vendor/` and `flags/`)
 - **Build scripts** `build.js` and `scripts/*.js`, plain JavaScript with JSDoc
   types that `tsconfig.node.json` checks (`npm run typecheck`). The type checks
   run TypeScript 7 (the `typescript7` alias of `package.json`, called by path
@@ -73,7 +75,7 @@ the tool writes and opens on as the page does).
 
 ## Bundles
 
-`npm run build` produces six bundles. `mapApp.bundle.js` starts the map,
+`npm run build` produces seven bundles. `mapApp.bundle.js` starts the map,
 `features.bundle.js` holds Replay, the relief, the heat cloud and the ribbons of
 the 3D view (of every flight and of a selection: the 3D view cuts the flights
 once it has arrived, and draws them flat when it cannot be loaded), the
@@ -93,10 +95,16 @@ reduced motion. `search.bundle.js` holds the search of airports and places
 `calculations/airportSearch.ts` and the client of Photon in
 `services/photon.ts`); the first visit carries only its button, its row in the
 phone's More sheet and the `/` key (`followSearchKey` in `ui/lazyBundles.ts`),
-and the page imports it the first time the search opens. `shared.bundle.js` is
-the app itself and everything the lazy bundles use of it. `yearWorker.bundle.js`
-is a build of its own, which decodes the year files and writes the heat sources
-off the main thread (see [The year worker](data.md#the-year-worker)).
+and the page imports it the first time the search opens. `extras.bundle.js`
+holds what only a tap on a control needs: the sheet of the phone's bar
+(`ui/mobileSheet.ts`), which a phone fetches as soon as its page has a moment
+after the bar is mounted (a tap on a sheet tab before it has arrived opens the
+sheet once it has), and the export of the map as an image (`ui/mapExport.ts`),
+which the first export fetches; the bar and the Export control's busy state stay
+in the app. `shared.bundle.js` is the app itself and everything the lazy bundles
+use of it. `yearWorker.bundle.js` is a build of its own, which decodes the year
+files and writes the heat sources off the main thread (see
+[The year worker](data.md#the-year-worker)).
 
 ### Shared chunk
 

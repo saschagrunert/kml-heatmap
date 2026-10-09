@@ -1267,6 +1267,18 @@ typing-extensions==4.16.0 \
     --hash=sha256:481caa481374e813c1b176ada14e97f1f67a4539ce9cfeb3f350d78d6370c2e8 \
     --hash=sha256:dc983d19a509c94dba722ee6abd33940f7c05a89e243c47e907eb4db6f1a43e5
     # via mypy
+typos==1.50.3 \
+    --hash=sha256:113b1c9f9fb2b6af7824157341bbbe266e8ff1c15c402b3ba166dd357a0e8d84 \
+    --hash=sha256:3d7ca2b926cfd554b2f82a8ed59574d0867db2feab3716f4f5fd9d4e7a45e2bc \
+    --hash=sha256:696fa3cbff5f5e2f6e4a71cbb02ab6c21cd4fc708df6cae2523f9e1ebc7e0f59 \
+    --hash=sha256:7520f3b86984c7c1385fc84c2cb82fea2b43dd4fde126ce8881f13a4e31b31cf \
+    --hash=sha256:75368d9e68dd86856f7306e3eae949ac54cb1a6ea49a38fe94ffe16dbd0a7276 \
+    --hash=sha256:7873bf6f5deac401d7bc13c79868a6a56ba6fca38a33a92d07eebba2e6564fbd \
+    --hash=sha256:82b9e4d3062ae2a41f6f9c7f98205dc7d8ad30f6d14e99f74ccb0cca3e7c97ac \
+    --hash=sha256:c26ab14bad1464c9c8931db5e4ca4d1864c00f47362e4ce5ce1f8627074eb524 \
+    --hash=sha256:f3737a285d179bd21397938e691e9b58e90ee905f296d26e022d8ec1f86ca423 \
+    --hash=sha256:fd9bc34e79f9c1fffa80dec8e266417cc1f60b7e29f4c24710d855c2aa797287
+    # via kml-heatmap (pyproject.toml)
 urllib3==2.8.0 \
     --hash=sha256:0cf3cae568d36aa9576b28dfb35f11328f1cb974ca7647d9475ebb86c75ac6e3 \
     --hash=sha256:63bf2ead4c879426ebf22ef2a781eeb4aa3b4ae798a0435506f8687fd5bb9b63

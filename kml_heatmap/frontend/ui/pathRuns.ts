@@ -19,13 +19,20 @@
 import type { Map as MapLibreMap } from "maplibre-gl";
 import type { MapApp } from "../mapApp";
 import type { Range } from "../state/store";
-import type { KMLDataset, PathInfo, PathSegment } from "../types";
+import type {
+  KMLDataset,
+  PathInfo,
+  PathRunProperties,
+  PathSegment,
+} from "../types";
 import {
   airspeedColorAt,
   altitudeColorAt,
   scalePosition,
 } from "../utils/colors";
 import { MAP_LAYERS, MAP_SOURCES } from "../utils/constants";
+import { toLngLat, type LngLatTuple } from "../utils/mapHelpers";
+import { appendCurve, flightCurves } from "../calculations/curves";
 import { datasetIndex } from "../calculations/datasetIndex";
 import { segmentRangesFor } from "../calculations/statistics";
 import {
@@ -155,6 +162,11 @@ interface RunTable {
    */
   g: number;
   /**
+   * Counts the writes of the runs to a source: the year worker's lines for
+   * one that another write followed are dropped (see LayerManager.setRuns)
+   */
+  writes: number;
+  /**
    * The source that holds the runs' features, null while none does, which
    * is how they are created: the lines' source, or in the 3D view the
    * ribbons' source
@@ -185,7 +197,7 @@ interface RunTable {
 
 /** The selection a mode's layers were last styled for */
 export interface ShownSelection {
-  selected: Set<number>;
+  selected: ReadonlySet<number>;
   isolate: boolean;
 }
 
@@ -203,7 +215,7 @@ export interface ModeState {
   selectionRange: {
     data: KMLDataset;
     full: Range;
-    selected: Set<number>;
+    selected: ReadonlySet<number>;
     range: Range;
   } | null;
   /**
@@ -217,6 +229,7 @@ export function emptyModeState(): ModeState {
   const table = (): RunTable => ({
     runs: [],
     g: 0,
+    writes: 0,
     written: null,
     landing: null,
     widthZoom: null,
@@ -254,7 +267,7 @@ export function cutRuns(
   config: LayerConfig,
   data: KMLDataset,
   range: Range,
-  only?: Set<number>,
+  only?: ReadonlySet<number>,
 ): Run[] {
   const segments = data.path_segments;
   // Resolve the filter once over the path info instead of re-deriving it per
@@ -371,4 +384,29 @@ export function isolatedOut(state: ModeState, set: RunSet): boolean {
 export function readyMap(app: MapApp): MapLibreMap | null {
   const map = app.map;
   return map?.getSource(MAP_SOURCES.pathsAltitude) ? map : null;
+}
+
+/**
+ * The runs of `segments` as lines along the curve through their fixes
+ * (see calculations/curves.ts), each of the curve of its own flight alone
+ */
+export function runLines(
+  segments: readonly PathSegment[],
+  runs: readonly Pick<Run, "start" | "end" | "pathId" | "color">[],
+  g: number,
+): GeoJSON.Feature<GeoJSON.LineString, PathRunProperties>[] {
+  return runs.map((run, r) => {
+    const { curves, from } = flightCurves(segments, run.pathId);
+    const coordinates: LngLatTuple[] = [
+      toLngLat(segments[run.start]!.coords[0]),
+    ];
+    for (let i = run.start; i < run.end; i++) {
+      appendCurve(coordinates, curves, i - from);
+    }
+    return {
+      type: "Feature",
+      properties: { r, g, pathId: run.pathId, color: run.color },
+      geometry: { type: "LineString", coordinates },
+    };
+  });
 }

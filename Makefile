@@ -117,26 +117,59 @@ serve: require-runtime ## Serve OUTPUT_DIR on http://HOST_BIND:PORT (run 'make b
 serve-build: build ## Run build, then serve
 	$(MAKE) serve
 
+# The obfuscation needs nothing but the Python the project requires. Without
+# it as `python` on the host, it runs in the container image, which has it,
+# with INPUT_DIR mounted where `make build` mounts it (and writable): the
+# names it reports are those in the container then.
+HOST_PYTHON_OK = python -c 'import sys; sys.exit(sys.version_info < (3, 14))' 2>/dev/null
+VISUAL_MOUNT := /data/visual
+# Runs the shell command $(1) in the container image, with the mounts $(2)
+define in_image
+( test -n "$(CONTAINER_RUNTIME)" || { \
+    echo "error: needs Python 3.14 as 'python', or podman or docker to run it in the image"; \
+    exit 1; }; \
+  echo "No Python 3.14 as 'python': running it in the container image"; \
+  $(CONTAINER_RUNTIME) build -q -t $(IMAGE_NAME) . >/dev/null && set -x && \
+  $(CONTAINER_RUNTIME) run --rm $(RUN_AS_USER) -e HOME=/tmp $(2) \
+    --entrypoint sh $(IMAGE_NAME) -c '$(1)' )
+endef
+
 # The generated site never carries a flight date finer than the year, so this
 # is about the KML files themselves: this repository commits the ones in
 # data/, and they must not carry real dates. Run it after adding new flights;
 # the pre-commit hook, `make check-obfuscation` and the CI lint job fail if
 # you forget.
 obfuscate: ## Rewrite the KML files in INPUT_DIR in place so they carry no real dates (IRREVERSIBLE)
-	python -m kml_heatmap.obfuscate "$(INPUT_DIR)"
+	@test -d "$(INPUT_DIR)" || { \
+	  echo "error: input directory '$(INPUT_DIR)' not found; run 'make $@ INPUT_DIR=path'"; \
+	  exit 1; }
+	@if $(HOST_PYTHON_OK); then \
+	  set -x; python -m kml_heatmap.obfuscate "$(INPUT_DIR)"; \
+	else \
+	  $(call in_image,python -m kml_heatmap.obfuscate "$(INPUT_MOUNT)",-v "$(abspath $(INPUT_DIR)):$(INPUT_MOUNT)"); \
+	fi
 
 # The flights of the visual snapshots are committed copies of real ones, so
 # they are checked along with INPUT_DIR. `make obfuscate` leaves them alone:
 # rewriting them would change the snapshots.
 check-obfuscation: ## Check that the KML files in INPUT_DIR and the fixture flights of the visual snapshots are obfuscated
-	python -m kml_heatmap.obfuscate "$(INPUT_DIR)" --check
-	python -m kml_heatmap.obfuscate tests/fixtures/visual --check
+	@test -d "$(INPUT_DIR)" || { \
+	  echo "error: input directory '$(INPUT_DIR)' not found; run 'make $@ INPUT_DIR=path'"; \
+	  exit 1; }
+	@if $(HOST_PYTHON_OK); then \
+	  set -x; \
+	  python -m kml_heatmap.obfuscate "$(INPUT_DIR)" --check && \
+	  python -m kml_heatmap.obfuscate tests/fixtures/visual --check; \
+	else \
+	  $(call in_image,python -m kml_heatmap.obfuscate "$(INPUT_MOUNT)" --check && \
+	    python -m kml_heatmap.obfuscate "$(VISUAL_MOUNT)" --check,-v "$(abspath $(INPUT_DIR)):$(INPUT_MOUNT):ro" \
+	    -v "$(CURDIR)/tests/fixtures/visual:$(VISUAL_MOUNT):ro"); \
+	fi
 
 # The obfuscation check of CI only sees a real date once it is public; the hook
 # refuses the push before. Copied from scripts/pre-push-hook (see there).
 # The pre-commit hooks of .pre-commit-config.yaml go in along with it where
-# pre-commit is installed; like typos in `lint`, a missing one is said, not
-# failed on.
+# pre-commit is installed; a missing pre-commit is said, not failed on.
 hooks: ## Install the pre-push hook that refuses to push KML files with real dates, and the pre-commit hooks
 	@hook="$$(git rev-parse --git-path hooks/pre-push)" && \
 	  wrapper="$(CURDIR)/scripts/pre-push-hook" && \
@@ -166,18 +199,20 @@ lint: ## Run the linters, formatters (check only), type checkers and typos of th
 	zizmor --min-severity medium .github
 	python -m kml_heatmap.obfuscate data --check
 	python -m kml_heatmap.obfuscate tests/fixtures/visual --check
-	@if command -v typos >/dev/null 2>&1; then typos; else \
-	  echo "warning: typos is not installed, skipping the spell check (CI runs it; see CONTRIBUTING.md)" >&2; fi
+	typos
 
 format: ## Run formatters
 	ruff format .
 	npm run format
 
 # The Python tests build whole sites, which carry the frontend bundles, so
-# they are built first
-test: ## Build the frontend bundles, then run the JavaScript and Python test suites with coverage
+# they are built first. The export contract tests read the data files of a
+# real build in docs/, as in the CI unit job, and skip without one (a stale
+# one fails them). Vitest runs in an order of its own each time, as in CI.
+test: ## Build the frontend bundles and the site in docs/, then run the JavaScript and Python test suites with coverage
 	npm run build
-	npm run test:coverage
+	python -m kml_heatmap data --output-dir docs
+	npm run test:coverage -- --sequence.shuffle
 	pytest -n auto --cov --cov-branch --cov-report=xml:coverage/coverage.xml --cov-report=term
 
 # The dependencies are declared once, in pyproject.toml: the runtime

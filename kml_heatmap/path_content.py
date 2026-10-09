@@ -29,7 +29,6 @@ __all__ = [
     "drop_duplicate_paths",
     "exported_contents",
     "is_exportable_path",
-    "path_content_id",
     "without_paths",
 ]
 
@@ -69,19 +68,15 @@ def _path_content(path: FlightPath) -> bytes:
 
 
 def _content_id(content: bytes) -> int:
-    digest = hashlib.blake2b(content, digest_size=8).digest()
-    return int.from_bytes(digest, "big") >> (64 - PATH_ID_BITS)
-
-
-def path_content_id(path: FlightPath) -> int:
-    """The id a path gets unless an earlier path already holds it.
+    """The id a path of ``content`` gets unless an earlier path holds it.
 
     A hash of the coordinates, rounded the way they are exported, and of the
-    altitudes. It survives a re-export, flights added or removed around it
-    and the renaming of Charterware files, none of which a position in the
-    input or a file name would.
+    altitudes (see ``_path_content``). It survives a re-export, flights
+    added or removed around it and the renaming of Charterware files, none
+    of which a position in the input or a file name would.
     """
-    return _content_id(_path_content(path))
+    digest = hashlib.blake2b(content, digest_size=8).digest()
+    return int.from_bytes(digest, "big") >> (64 - PATH_ID_BITS)
 
 
 def exported_contents(
